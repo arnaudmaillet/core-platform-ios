@@ -7,7 +7,7 @@ import UIKit
 /// Feed so every surface that draws a voice post reaches it.
 ///
 /// - **`.full`:** play / pause, the waveform (tap and drag to seek), the
-///   timer, the speed chip while under way.
+///   slot at the trailing end — the timer, or the speed chip while it plays.
 /// - **`.compact`:** the same, but a tap seeks and a drag is NOT the
 ///   waveform's — a horizontal shelf scrolls under it.
 /// - **The ink follows its ground** (`inks`), set by the host.
@@ -18,10 +18,10 @@ import UIKit
 ///
 /// ```
 ///  ╭──────────────────────────────────────────────╮
-///  │  (▶)   ▂▅▇▅▃▂▅▇▆▃▂▁▃▅▇▅▃▂▁▂▃▅▇▅▃▂▁▂▃   0:02 • │
+///  │  ▶   ▂▅▇▅▃▂▅▇▆▃▂▁▃▅▇▅▃▂▁▂▃▅▇▅▃▂▁▂▃  [0:02] • │
 ///  ╰──────────────────────────────────────────────╯
-///   filled   waveform across the panel's width   timer, unplayed dot
-///   play
+///   bare   waveform across the panel's width    slot  unplayed dot
+///   glyph                                       (timer or speed)
 /// ```
 ///
 /// - **The panel fills its container** (`maxPanelWidth` caps it in a
@@ -32,16 +32,24 @@ import UIKit
 /// - **Its ground is the host's ink at a low opacity** (`Inks.panel`), never
 ///   the brand's colour: it reads on a plain row, a card, a dark page and
 ///   glass alike.
-/// - **The play button is a filled disc,** black in the light and white in
-///   the dark, its glyph knocked out of it — the same `AppIconButton`, so
-///   the same Replace morph and press as before.
+/// - **Its line is centred in the panel (#2274):** a host that ever gives it
+///   less than its height shrinks the air above and below evenly, never on
+///   one side.
+/// - **The play button is a bare glyph (#2274, the owner 2026-11-10: no
+///   disc),** in the played bars' ink, where the disc was — the same
+///   `AppIconButton`, so the same 44 pt target, press swell, Replace morph
+///   and loader.
 /// - **The waveform is the message's face:** 2 pt bars 2 pt apart across
-///   the whole width between the button and the timer, re-binned from the
+///   the whole width between the glyph and the slot, re-binned from the
 ///   voice's 100 levels to however many fit, and drawn with the voice's own
 ///   contrast (`drawnShares`) so a flat-sounding take still has a shape.
-/// - **While it plays or is paused mid-way the speed chip stands right of
-///   the timer, inside the panel,** coming in with a bounce (the owner's
-///   device checks, 2026-11-06 and 11-07); the timer counts the time played.
+/// - **One slot at the trailing end (#2274):** the total length at rest, the
+///   speed chip while it plays, the time reached when paused mid-way, the
+///   total again at the end. One size for all of them (`slotSize`), so the
+///   waveform is binned once and never moves; a change cross-fades in place.
+/// - **Under a finger on the waveform the whole panel swells (#2274),** as
+///   the app's buttons do (`PressFeedback.swelledScale`): a transform, never
+///   a layout, and the seek is read on the panel at rest.
 /// - **Its drags are its own:** one that starts on the play button or the
 ///   waveform goes before the list's scroll and the screen's swipes.
 /// - **It draws; the screen plays** (`VoicePlayer`, one for the app): every
@@ -117,12 +125,23 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
         case post(author: String?)
     }
 
+    /// What the trailing slot shows (#2274).
+    public enum SlotContent: Equatable, Sendable {
+        /// The total length at rest and at the end, the time reached when
+        /// paused mid-way.
+        case timer
+        /// The speed chip, while it plays — and from the tap, while its
+        /// audio loads: the glyph and the slot change together.
+        case speed
+    }
+
     /// Its colours, from its ground (#2205): a text face's ink, a glass
     /// bubble's vibrancy. `.standard` is the conversation's.
     ///
     /// Neutral by rule (#2241): every colour here is the host's ink or one
     /// derived from it — the panel's ground included — never the brand's.
     public struct Inks: Equatable, Sendable {
+        /// The played bars and the play glyph (#2274).
         public var played: UIColor
         public var unplayed: UIColor
         public var timer: UIColor
@@ -176,18 +195,23 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
     public var inks: Inks = .standard {
         didSet { applyInks() }
     }
+    /// Whether motion is kept to a minimum — the app's Reduce Motion
+    /// (`MotionPreference`); a test sets its own. Under it the panel never
+    /// swells and the slot cuts (#2274).
+    public var reducesMotion: @MainActor () -> Bool = { MotionPreference.reducesMotion }
 
     // MARK: - Geometry
 
-    /// The play disc's side (#2241): 40 pt in full, 32 pt compact — the
-    /// HIG's 44 pt hit region round both (`AppControl.hitRegion`).
+    /// The play glyph's frame (#2274): where the disc was — 40 pt in full,
+    /// 32 pt compact — with the HIG's 44 pt hit region round both
+    /// (`AppControl.hitRegion`).
     public static func buttonSide(for size: Size) -> CGFloat {
         size == .full ? 40 : 32
     }
 
-    /// The glyph knocked out of the disc.
+    /// The bare play glyph (#2274): 20 pt in full, 16 pt compact.
     public static func glyphPointSize(for size: Size) -> CGFloat {
-        size == .full ? 16 : 13
+        size == .full ? 20 : 16
     }
 
     /// The bars' full height (#2241: up from 20, so a short voice still
@@ -196,23 +220,23 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
         size == .full ? 32 : 24
     }
 
-    /// The panel's air round the disc — above, below and before it.
+    /// The panel's air round the glyph's frame — above, below and before it.
     public static func panelPadding(for size: Size) -> CGFloat {
         size == .full ? Spacing.sm : 6
     }
 
-    /// The panel's air after the timer, its trailing end.
+    /// The panel's air after the slot (or the dot), its trailing end.
     public static let panelTrailingPadding: CGFloat = Spacing.md
 
-    /// The panel's height at the default text size: the disc and its air.
-    /// A larger timer makes it taller; playing never does.
+    /// The panel's height at the default text size: the glyph's frame and
+    /// its air. A larger timer makes it taller; playing never does.
     public static func panelHeight(for size: Size) -> CGFloat {
         buttonSide(for: size) + 2 * panelPadding(for: size)
     }
 
-    /// The panel's corner: concentric with the disc (its radius plus the
-    /// air round it), the HIG's rule for a shape nested in another — at the
-    /// default text size, a capsule.
+    /// The panel's corner: concentric with the glyph's frame (its radius
+    /// plus the air round it), the HIG's rule for a shape nested in another —
+    /// at the default text size, a capsule.
     public static func panelCornerRadius(for size: Size) -> CGFloat {
         buttonSide(for: size) / 2 + panelPadding(for: size)
     }
@@ -223,6 +247,29 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
 
     /// The unplayed dot's side.
     public static let dotSide: CGFloat = 6
+
+    /// The widest speed the chip says (#2274): the slot holds it.
+    public static let widestSpeedLabel = "1.5×"
+    /// The slot's cross-fade between the timer and the speed chip (#2274):
+    /// no spring, no change of size.
+    public static let slotFadeDuration: TimeInterval = 0.2
+
+    /// What the slot shows for `playback` (#2274): the speed chip while it
+    /// plays (and loads, from the tap), the timer otherwise.
+    public static func slotContent(for playback: State.Playback) -> SlotContent {
+        switch playback {
+        case .playing, .loading: .speed
+        case .rest, .paused, .failed: .timer
+        }
+    }
+
+    /// The scale the panel swells to under a finger on its waveform (#2274):
+    /// the app's press swell (`PressFeedback.swelledScale`) on the panel's
+    /// size — about 9 pt across and 5 pt up and down on a full panel.
+    public static func swelledScale(for panelSize: CGSize) -> CGAffineTransform {
+        let scale = PressFeedback.swelledScale(for: panelSize)
+        return CGAffineTransform(scaleX: scale.x, y: scale.y)
+    }
 
     /// The bars' ink and the mark's — the played bars: a dark grey, not the
     /// brand's colour nor black (the owner, 2026-11-07).
@@ -339,46 +386,60 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
     // MARK: - Parts
 
     /// The panel (#2241): its neutral ground, its concentric corner, and
-    /// everything the voice draws inside it.
+    /// everything the voice draws inside it. It is what swells under a
+    /// finger on the waveform (#2274) — its transform, never its frame.
     private let frameView = UIView()
-    /// The panel's line: the disc's height, or the timer's when larger text
-    /// makes it taller.
+    /// The panel's line: the glyph's frame's height, or the timer's (or the
+    /// chip's) when larger text makes it taller — centred in the panel.
     private let line = UILayoutGuide()
-    /// The app's icon button as a filled disc (#2241): the monochrome bubble
-    /// — black in the light, white in the dark, its glyph in the other —
-    /// with the app's swell under the finger and a 44 pt target. The same
-    /// button as before, so the same Replace morph.
-    private let playButton = AppIconButton(style: .bubble(.monochrome), content: .symbol("play.fill"), dims: false)
+    /// The app's icon button as a bare glyph (#2274: the disc is gone), in
+    /// the played bars' ink, with the app's swell under the finger and a
+    /// 44 pt target. The same button as before, so the same Replace morph.
+    private let playButton = AppIconButton(style: .glyph, content: .symbol("play.fill"), dims: false)
     private let loader = AppLoaderView(size: .medium)
-    /// The waveform's box: the line's whole height, between the disc and the
-    /// timer; the bars fill it.
+    /// The waveform's box: the line's whole height, between the glyph and
+    /// the slot; the bars fill it.
     private let scrubber = UIView()
-    /// The panel's content ends at the timer (a post at rest), the unplayed
-    /// dot's place (a message at rest) or the speed chip (under way).
-    private var endsAtTimer: NSLayoutConstraint?
+    /// The trailing slot (#2274): one size for the timer and the speed chip,
+    /// whatever the state — the waveform ends at its leading edge.
+    private let slot = UILayoutGuide()
+    private var slotWidth: NSLayoutConstraint?
+    private var slotHeight: NSLayoutConstraint?
+    /// What the slot was last sized for: the voice's length, the text size.
+    private var slotSizedFor: (duration: TimeInterval, category: UIContentSizeCategory)?
+    /// The speed chip's size for the widest speed, per text size.
+    private var widestChip: (category: UIContentSizeCategory, size: CGSize)?
+    /// The panel's content ends at the slot (a post) or at the unplayed
+    /// dot's place after it (a message), whatever the state.
+    private var endsAtSlot: NSLayoutConstraint?
     private var endsAtDot: NSLayoutConstraint?
-    private var endsAtChip: NSLayoutConstraint?
     /// The panel closes the view, or the "Not sent" line under it does.
     private var panelEndsView: NSLayoutConstraint?
     public let waveform = WaveformBars()
     private let timerLabel = UILabel()
     /// The app's pill (the owner's device check, 2026-11-07): its ground,
     /// its swell under the finger, its morph when the speed changes, a 44 pt
-    /// target.
+    /// target. It fills the slot (#2274).
     private let speedChip = AppButton(aspect: .pill(.quiet), size: .row, content: .title("1×"))
     private let dot = UIView()
     private let failedLabel = UILabel()
+    /// VoiceOver's voice while the speed chip shows (#2274): the panel then
+    /// reads as this element, and the chip as its own beside it.
+    private lazy var playElement = VoicePlayElement(owner: self)
     public private(set) var state = State()
     private var shownGlyph = ""
     private var scrubSteps = -1
     private var pendingLoader: DispatchWorkItem?
     private let sideHold = UIPanGestureRecognizer()
-    /// Whether the message shows as under way; nil until first shown.
-    private var shownUnderway: Bool?
-    /// Whether the speed chip stands over the bars; nil until first shown.
-    private var chipShown: Bool?
-    /// A finger is scrubbing the bars.
+    /// What the slot shows; nil until first shown.
+    private var shownSlot: SlotContent?
+    /// A finger is down on the waveform — a tap or a drag, until it lifts
+    /// or is cancelled.
+    private var fingerOnWaveform = false
+    /// A finger is scrubbing the bars (the waveform's drag).
     private var isScrubbing = false
+    /// The panel stands swollen.
+    private var isSwollen = false
     /// A glyph set without its transition.
     private var glyphStill = false
 
@@ -406,7 +467,10 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
         // Sized here (`buttonSide`): no spring after a swap holding the new
         // glyph back.
         playButton.followsContentSize = false
-        playButton.reducesMotion = { [weak self] in MotionPreference.reducesMotion || self?.glyphStill == true }
+        playButton.reducesMotion = { [weak self] in
+            guard let self else { return MotionPreference.reducesMotion }
+            return reducesMotion() || glyphStill
+        }
         playButton.isAccessibilityElement = false
         playButton.addAction(UIAction { [weak self] _ in self?.onPlayTap?() }, for: .primaryActionTriggered)
         // A drag that starts on the button is the button's: neither the
@@ -439,11 +503,10 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
             ofSize: UIFont.defaultPointSize(for: .caption1), relativeTo: .caption1
         )
         timerLabel.adjustsFontForContentSizeCategory = true
-        timerLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
-        timerLabel.setContentHuggingPriority(.required, for: .horizontal)
+        timerLabel.textAlignment = .center
 
-        speedChip.isAccessibilityElement = false
         speedChip.isHidden = true
+        speedChip.alpha = 0
         speedChip.addAction(UIAction { [weak self] _ in self?.onSpeedTap?() }, for: .primaryActionTriggered)
 
         dot.layer.cornerRadius = Self.dotSide / 2
@@ -458,6 +521,14 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
         failedLabel.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(retryTapped)))
 
         waveform.onSeek = { [weak self] fraction, scrubbing in self?.seek(fraction, scrubbing: scrubbing) }
+        waveform.onFinger = { [weak self] down in self?.fingerChanged(down) }
+        // ⚠️ THE FINGER IS READ ON THE PANEL AT REST (#2274): swollen, the
+        // bar under a still finger would be another, and the playhead would
+        // jump with the swell.
+        waveform.fractionReader = { [weak self] gesture in
+            guard let self else { return nil }
+            return restingFraction(at: gesture.location(in: self))
+        }
 
         for part in [playButton, loader, scrubber, waveform, timerLabel, speedChip, dot, failedLabel] as [UIView] {
             part.translatesAutoresizingMaskIntoConstraints = false
@@ -471,10 +542,11 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
         frameView.addSubview(speedChip)
         // Under the panel, outside its ground.
         addSubview(failedLabel)
-        // The panel's line: the disc's height, or the timer's when larger
-        // text makes it taller — the same in every state, so playing never
-        // re-lays the list.
+        // The panel's line: the glyph's frame's height, or the timer's when
+        // larger text makes it taller — the same in every state, so playing
+        // never re-lays the list.
         frameView.addLayoutGuide(line)
+        frameView.addLayoutGuide(slot)
 
         let side = Self.buttonSide(for: size)
         let padding = Self.panelPadding(for: size)
@@ -487,15 +559,26 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
         within.priority = .required - 1
         let hug = line.heightAnchor.constraint(equalToConstant: side)
         hug.priority = .defaultLow
+        // ⚠️ CENTRED, ITS AIR GIVING WAY EVENLY (#2274): the air above the
+        // line is the panel's own just under required, so a host that holds
+        // the panel shorter takes it from both sides at once — pinned under
+        // the top, a squeezed panel lost its air below only (a shelf's card,
+        // the owner's recording: 6 pt above, 1 pt below).
+        let air = line.topAnchor.constraint(equalTo: frameView.topAnchor, constant: padding)
+        air.priority = .required - 1
+        let slotWidth = slot.widthAnchor.constraint(equalToConstant: 0)
+        let slotHeight = slot.heightAnchor.constraint(equalToConstant: 0)
+        self.slotWidth = slotWidth
+        self.slotHeight = slotHeight
         var constraints: [NSLayoutConstraint] = [
             frameView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: leadingInset),
             frameView.topAnchor.constraint(equalTo: topAnchor),
             fills, within,
 
-            line.topAnchor.constraint(equalTo: frameView.topAnchor, constant: padding),
+            line.centerYAnchor.constraint(equalTo: frameView.centerYAnchor),
+            air,
             line.leadingAnchor.constraint(equalTo: frameView.leadingAnchor, constant: padding),
             line.trailingAnchor.constraint(equalTo: frameView.trailingAnchor, constant: -Self.panelTrailingPadding),
-            frameView.bottomAnchor.constraint(equalTo: line.bottomAnchor, constant: padding),
             line.heightAnchor.constraint(greaterThanOrEqualToConstant: side),
             hug,
 
@@ -506,9 +589,10 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
             loader.centerXAnchor.constraint(equalTo: playButton.centerXAnchor),
             loader.centerYAnchor.constraint(equalTo: playButton.centerYAnchor),
 
-            // The waveform runs from the disc to the timer, whatever the length.
+            // The waveform runs from the glyph to the slot, whatever the
+            // length and whatever the slot shows.
             scrubber.leadingAnchor.constraint(equalTo: playButton.trailingAnchor, constant: Spacing.sm),
-            scrubber.trailingAnchor.constraint(equalTo: timerLabel.leadingAnchor, constant: -Spacing.sm),
+            scrubber.trailingAnchor.constraint(equalTo: slot.leadingAnchor, constant: -Spacing.sm),
             scrubber.topAnchor.constraint(equalTo: line.topAnchor),
             scrubber.bottomAnchor.constraint(equalTo: line.bottomAnchor),
             waveform.leadingAnchor.constraint(equalTo: scrubber.leadingAnchor),
@@ -516,15 +600,23 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
             waveform.centerYAnchor.constraint(equalTo: scrubber.centerYAnchor),
             waveform.heightAnchor.constraint(equalToConstant: Self.waveformHeight(for: size)),
 
+            // The slot: one size (`refreshSlotSize`), level with the line.
+            slot.centerYAnchor.constraint(equalTo: line.centerYAnchor),
+            slotWidth, slotHeight,
+            line.heightAnchor.constraint(greaterThanOrEqualTo: slot.heightAnchor),
+            // The timer centred in it; the chip's pill fills it.
+            timerLabel.centerXAnchor.constraint(equalTo: slot.centerXAnchor),
             timerLabel.centerYAnchor.constraint(equalTo: line.centerYAnchor),
             line.heightAnchor.constraint(greaterThanOrEqualTo: timerLabel.heightAnchor),
-            // The dot or the chip, right of the timer.
-            dot.leadingAnchor.constraint(equalTo: timerLabel.trailingAnchor, constant: Spacing.xs),
+            speedChip.leadingAnchor.constraint(equalTo: slot.leadingAnchor),
+            speedChip.trailingAnchor.constraint(equalTo: slot.trailingAnchor),
+            speedChip.topAnchor.constraint(equalTo: slot.topAnchor),
+            speedChip.bottomAnchor.constraint(equalTo: slot.bottomAnchor),
+            // The dot keeps its own place after the slot.
+            dot.leadingAnchor.constraint(equalTo: slot.trailingAnchor, constant: Spacing.xs),
             dot.centerYAnchor.constraint(equalTo: line.centerYAnchor),
             dot.widthAnchor.constraint(equalToConstant: Self.dotSide),
             dot.heightAnchor.constraint(equalToConstant: Self.dotSide),
-            speedChip.leadingAnchor.constraint(equalTo: timerLabel.trailingAnchor, constant: Spacing.xs),
-            speedChip.centerYAnchor.constraint(equalTo: line.centerYAnchor),
 
             failedLabel.leadingAnchor.constraint(equalTo: frameView.leadingAnchor),
             failedLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
@@ -534,14 +626,20 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
             constraints.append(frameView.widthAnchor.constraint(lessThanOrEqualToConstant: maxPanelWidth))
         }
         NSLayoutConstraint.activate(constraints)
-        endsAtTimer = timerLabel.trailingAnchor.constraint(equalTo: line.trailingAnchor)
+        endsAtSlot = slot.trailingAnchor.constraint(equalTo: line.trailingAnchor)
         endsAtDot = dot.trailingAnchor.constraint(equalTo: line.trailingAnchor)
-        endsAtChip = speedChip.trailingAnchor.constraint(equalTo: line.trailingAnchor)
         panelEndsView = frameView.bottomAnchor.constraint(equalTo: bottomAnchor)
         panelEndsView?.isActive = true
         failedBottom = failedLabel.bottomAnchor.constraint(equalTo: bottomAnchor)
         updateTrailingEnd()
+        refreshSlotSize()
+        showSlot(.timer, animated: false)
         applyInks()
+        // A new text size re-measures the slot, once the timer's font has
+        // followed it.
+        _ = registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (view: VoiceView, _: UITraitCollection) in
+            view.setNeedsUpdateConstraints()
+        }
 
         isAccessibilityElement = true
         accessibilityTraits = .adjustable
@@ -555,18 +653,31 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
     /// Who sent it, for VoiceOver: "Ava", or nil for the viewer's own.
     private var senderName: String?
 
+    public override func updateConstraints() {
+        refreshSlotSize()
+        super.updateConstraints()
+    }
+
+    public override func layoutSubviews() {
+        super.layoutSubviews()
+        playElement.accessibilityFrameInContainerSpace = frameView.frame
+    }
+
     // MARK: - Showing
 
     /// Shows `state` — nil hides the bubble (a message that is not a voice
     /// message). Nothing of a previous message survives.
     public func configure(_ state: State?, senderName: String? = nil) {
         guard let state else {
-            setScrubbing(false, animated: false)
+            fingerOnWaveform = false
+            isScrubbing = false
+            syncSwell(animated: false)
             pendingLoader?.cancel()
             pendingLoader = nil
             isHidden = true
             self.state = State()
             waveform.configure(levels: nil, progress: 0)
+            showSlot(.timer, animated: false)
             return
         }
         isHidden = false
@@ -577,12 +688,12 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
         apply(state, animated: false)
     }
 
-    /// Updates what changes while it plays — progress, the glyph, the chip —
+    /// Updates what changes while it plays — progress, the glyph, the slot —
     /// without re-laying the bars.
     public func update(_ state: State) {
         guard !isHidden else { return }
         waveform.setProgress(state.progress)
-        apply(state, animated: window != nil && !MotionPreference.reducesMotion)
+        apply(state, animated: window != nil && !reducesMotion())
     }
 
     private func apply(_ state: State, animated: Bool) {
@@ -625,6 +736,11 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
         }
         playButton.isEnabled = !sending && !failedSend
 
+        // The slot holds the widest timer this voice can show: its total
+        // length's format (#2274).
+        if state.duration != previous.duration { refreshSlotSize() }
+        // The total at rest and at the end; the time reached mid-way — the
+        // one a pause resumes from (the owner, 2026-11-10).
         timerLabel.text = state.isUnderway
             ? Self.clock(state.duration * state.progress)
             : Self.clock(state.duration)
@@ -633,12 +749,13 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
         if speedChip.content.title != state.speedLabel {
             speedChip.setContent(.title(state.speedLabel), animated: animated && previous.speedLabel != state.speedLabel)
         }
-        setUnderway(state.isUnderway, animated: animated && previous.isUnderway != state.isUnderway)
+        speedChip.accessibilityLabel = "Speed \(state.speedLabel)"
+        showSlot(Self.slotContent(for: state.playback), animated: animated)
 
         // The unplayed dot fades once playback starts.
         let showsDot = state.unplayed && !state.isUnderway && state.playback != .loading
         if showsDot != !dot.isHidden {
-            if showsDot || window == nil || MotionPreference.reducesMotion {
+            if showsDot || window == nil || reducesMotion() {
                 dot.isHidden = !showsDot
                 dot.alpha = 1
             } else {
@@ -675,7 +792,7 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
     /// swapped by the symbol's own Replace.
     private func setGlyph(_ name: String) {
         guard name != shownGlyph else { return }
-        let animated = window != nil && !shownGlyph.isEmpty && !name.isEmpty && !MotionPreference.reducesMotion
+        let animated = window != nil && !shownGlyph.isEmpty && !name.isEmpty && !reducesMotion()
         shownGlyph = name
         // Unanimated (a dequeued row), the glyph lands with no transition.
         glyphStill = !animated
@@ -683,120 +800,154 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
         glyphStill = false
     }
 
-    private func setUnderway(_ underway: Bool, animated: Bool) {
-        guard underway != shownUnderway else { return }
-        shownUnderway = underway
-        showChip(underway, animated: animated)
+    // MARK: - The slot (#2274)
+
+    /// The slot's one size: as wide as the wider of the widest timer this
+    /// voice can show — its total length's format, the digits monospaced —
+    /// and the chip at its widest speed; as tall as that chip. Re-measured
+    /// for a new voice or a new text size, never for a state.
+    private func refreshSlotSize() {
+        let category = traitCollection.preferredContentSizeCategory
+        if let sized = slotSizedFor, sized.duration == state.duration, sized.category == category { return }
+        slotSizedFor = (state.duration, category)
+        let chip = widestChipSize(for: category)
+        let font = timerLabel.font ?? .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
+        let timer = (Self.clock(state.duration) as NSString).size(withAttributes: [.font: font])
+        slotWidth?.constant = ceil(max(chip.width, timer.width))
+        slotHeight?.constant = ceil(chip.height)
     }
 
-    /// The speed chip comes in right of the timer, springing up from smaller
-    /// as it fades in, and fades going: it stands there while the message is
-    /// under way.
+    private func widestChipSize(for category: UIContentSizeCategory) -> CGSize {
+        if let cached = widestChip, cached.category == category { return cached.size }
+        let measured = speedChip.fittingSize(for: .title(Self.widestSpeedLabel))
+        widestChip = (category, measured)
+        return measured
+    }
+
+    /// The timer or the speed chip, cross-faded in place in a fifth of a
+    /// second — no spring, no change of size — or cut under Reduce Motion
+    /// and off screen.
     ///
     /// ⚠️ NOTHING IS LAID OUT HERE. A spring around `layoutIfNeeded` held
-    /// the play button's new glyph back until it settled (filmed, 2026-11-06).
-    private func showChip(_ underway: Bool, animated: Bool) {
-        guard underway != chipShown else { return }
-        chipShown = underway
-        // The panel's content ends at what stands after the timer. Its width
-        // stays (#2241): the waveform gives the chip its room, re-binned to
-        // what is left.
-        updateTrailingEnd()
-        guard animated else {
-            speedChip.layer.removeAllAnimations()
-            speedChip.isHidden = !underway
-            speedChip.alpha = 1
-            speedChip.transform = .identity
+    /// the play button's new glyph back until it settled (filmed, 2026-11-06);
+    /// the chip used to re-bin the waveform narrower and push the timer
+    /// aside (the owner's recording, 2026-11-10: the bars' end moved 43 pt).
+    private func showSlot(_ content: SlotContent, animated: Bool) {
+        guard content != shownSlot else { return }
+        shownSlot = content
+        let speed = content == .speed
+        if speed { speedChip.isHidden = false }
+        let fadeIn = animated && window != nil && !reducesMotion()
+        guard fadeIn else {
+            speedChip.alpha = speed ? 1 : 0
+            speedChip.isHidden = !speed
+            timerLabel.alpha = speed ? 0 : 1
+            refreshAccessibilityElements()
             return
         }
-        if underway {
-            speedChip.isHidden = false
-            speedChip.alpha = 0
-            speedChip.transform = CGAffineTransform(scaleX: 0.6, y: 0.6)
-        }
         UIView.animate(
-            withDuration: 0.45, delay: 0, usingSpringWithDamping: underway ? 0.6 : 1, initialSpringVelocity: 0,
-            options: [.beginFromCurrentState, .allowUserInteraction]
+            withDuration: Self.slotFadeDuration, delay: 0,
+            options: [.curveEaseInOut, .beginFromCurrentState, .allowUserInteraction]
         ) {
-            self.speedChip.alpha = underway ? 1 : 0
-            self.speedChip.transform = underway ? .identity : CGAffineTransform(scaleX: 0.8, y: 0.8)
+            self.speedChip.alpha = speed ? 1 : 0
+            self.timerLabel.alpha = speed ? 0 : 1
         } completion: { _ in
-            guard self.chipShown == false else { return }
-            self.speedChip.isHidden = true
-            self.speedChip.alpha = 1
-            self.speedChip.transform = .identity
+            guard self.shownSlot == content else { return }
+            self.speedChip.isHidden = !speed
         }
+        refreshAccessibilityElements()
     }
 
-    /// What the panel's content ends at: the speed chip under way; at rest
-    /// the unplayed dot's place for a message — kept whether the dot shows or
-    /// not, so playing a message never moves its timer — and the timer for a
-    /// post, which has no dot.
+    /// What the panel's content ends at: the unplayed dot's place for a
+    /// message — kept whether the dot shows or not, so playing a message
+    /// never moves its slot — and the slot for a post, which has no dot.
     private func updateTrailingEnd() {
-        let underway = chipShown == true
         let message = role == .message
         // Off first: two ends at once would conflict.
-        if underway || !message { endsAtDot?.isActive = false }
-        if underway || message { endsAtTimer?.isActive = false }
-        if !underway { endsAtChip?.isActive = false }
-        if underway {
-            endsAtChip?.isActive = true
-        } else if message {
-            endsAtDot?.isActive = true
-        } else {
-            endsAtTimer?.isActive = true
-        }
+        if message { endsAtSlot?.isActive = false } else { endsAtDot?.isActive = false }
+        if message { endsAtDot?.isActive = true } else { endsAtSlot?.isActive = true }
     }
 
-    /// The host's inks on every part (#2241): the bars and the timer, the
-    /// panel's ground derived from the played ink, and the unplayed dot in
-    /// the label's ink — never the brand's colour. The disc is the monochrome
-    /// bubble's own black and white.
+    /// The host's inks on every part (#2241): the bars, the play glyph and
+    /// the timer, the panel's ground derived from the played ink, and the
+    /// unplayed dot in the label's ink — never the brand's colour.
     private func applyInks() {
         timerLabel.textColor = inks.timer
         waveform.playedInk = inks.played
         waveform.unplayedInk = inks.unplayed
+        // The bare glyph in the played bars' ink (#2274).
+        playButton.inkColor = inks.played
         frameView.backgroundColor = inks.panel
         dot.backgroundColor = Self.dotInk
     }
 
-    /// The unplayed dot's ink (#2241): the label's black or white, as the
-    /// disc — neutral, where it was the brand's tint.
+    /// The unplayed dot's ink (#2241): the label's black or white — neutral,
+    /// where it was the brand's tint.
     public static let dotInk: UIColor = .label
 
-    // MARK: - Scrubbing
+    // MARK: - The swell (#2274)
 
-    /// A finger on the bars: the whole waveform grows a little, and settles
-    /// back when it lifts.
-    private func setScrubbing(_ scrubbing: Bool, animated: Bool) {
-        guard scrubbing != isScrubbing else { return }
-        isScrubbing = scrubbing
-        waveform.setSwollen(scrubbing, animated: animated)
-        // The grown waveform pushes the timer and what follows it aside by
-        // what it gains on its trailing side, in the same spring: never over
-        // them. A full-width waveform grows by a few points a side, not by a
-        // share of its width, so the timer stays inside the panel (#2241).
-        let gain: CGFloat = scrubbing ? WaveformBars.swellGrowth : 0
-        let aside = CGAffineTransform(translationX: gain, y: 0)
+    /// A finger landed on the waveform (true), or lifted or was cancelled.
+    private func fingerChanged(_ down: Bool) {
+        fingerOnWaveform = down
+        syncSwell(animated: window != nil)
+    }
+
+    /// Under a finger on the waveform — from its landing, through a scrub,
+    /// to its lift — the whole panel swells as one, with everything in it:
+    /// the app's press swell on the panel's size, with its springs
+    /// (`PressFeedback.Metrics.swellIn` / `swellOut`). A transform: it goes
+    /// over what surrounds the panel and moves nothing in the list. Never
+    /// under Reduce Motion, as for the app's buttons; never on a message
+    /// still on its way.
+    private func syncSwell(animated: Bool) {
+        let swollen = (fingerOnWaveform || isScrubbing) && state.delivery == .sent && !isHidden && !reducesMotion()
+        guard swollen != isSwollen else { return }
+        isSwollen = swollen
+        let target: CGAffineTransform = swollen ? Self.swelledScale(for: frameView.bounds.size) : .identity
         guard animated else {
-            timerLabel.transform = aside
-            dot.transform = aside
-            speedChip.transform = aside
+            frameView.transform = target
             return
         }
+        let curve = swollen ? PressFeedback.Metrics.swellIn : PressFeedback.Metrics.swellOut
         UIView.animate(
-            springDuration: scrubbing ? WaveformBars.swellTravel : WaveformBars.settleDuration,
-            bounce: scrubbing ? 0.15 : 0, options: [.allowUserInteraction, .beginFromCurrentState]
+            springDuration: curve.response, bounce: 1 - curve.dampingRatio,
+            options: [.allowUserInteraction, .beginFromCurrentState]
         ) {
-            self.timerLabel.transform = aside
-            self.dot.transform = aside
-            self.speedChip.transform = aside
+            self.frameView.transform = target
         }
     }
 
+    /// The share of the waveform at `point` (own coordinates), read on the
+    /// panel AT REST: the frames laid out, not the swollen ones — so a still
+    /// finger keeps its bar while the panel swells round it (#2274).
+    func restingFraction(at point: CGPoint) -> Double {
+        let bars = restingWaveformFrame
+        let reach = min(waveform.barsWidth, bars.width)
+        guard reach > 0 else { return 0 }
+        return Double(min(1, max(0, (point.x - bars.minX) / reach)))
+    }
+
+    /// The waveform's frame in this view with the panel at rest: its centre
+    /// and bounds, which a transform never changes.
+    private var restingWaveformFrame: CGRect {
+        let panelOrigin = CGPoint(
+            x: frameView.center.x - frameView.bounds.width / 2,
+            y: frameView.center.y - frameView.bounds.height / 2
+        )
+        return CGRect(
+            x: panelOrigin.x + scrubber.frame.minX + waveform.frame.minX,
+            y: panelOrigin.y + scrubber.frame.minY + waveform.frame.minY,
+            width: waveform.bounds.width, height: waveform.bounds.height
+        )
+    }
+
+    // MARK: - Scrubbing
+
     private func seek(_ fraction: Double, scrubbing: Bool) {
         guard state.delivery == .sent else { return }
-        setScrubbing(scrubbing, animated: window != nil && !MotionPreference.reducesMotion)
+        isScrubbing = scrubbing
+        syncSwell(animated: window != nil)
         // A tick every 10 %, under the finger.
         let step = Int(fraction * 10)
         if scrubbing, step != scrubSteps {
@@ -863,22 +1014,47 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
 
     // MARK: - Accessibility
 
+    /// The panel reads as one element — its label, its time and speed, its
+    /// ±5 s adjustment, play on a double tap — and, while the speed chip
+    /// shows, the chip as its own element beside it (#2274).
     private func updateAccessibility() {
-        accessibilityLabel = Self.accessibilityLabel(
+        let label = Self.accessibilityLabel(
             role: role, senderName: senderName, duration: state.duration, unplayed: state.unplayed
         )
-        accessibilityValue = state.isUnderway ? Self.clock(state.duration * state.progress) : nil
+        // The play button's value: the time the slot's timer says, and the
+        // speed (#2274).
+        let time = state.isUnderway ? Self.clock(state.duration * state.progress) : Self.clock(state.duration)
+        let value = "\(time), speed \(state.speedLabel)"
         let playing: Bool = if case .playing = state.playback { true } else { false }
-        accessibilityCustomActions = [
+        var actions = [
             UIAccessibilityCustomAction(name: playing ? "Pause" : "Play") { [weak self] _ in
                 self?.onPlayTap?()
                 return true
             },
-            UIAccessibilityCustomAction(name: "Speed \(state.speedLabel)") { [weak self] _ in
+        ]
+        // The speed changes only while it plays (#2274), as on WhatsApp.
+        if shownSlot == .speed {
+            actions.append(UIAccessibilityCustomAction(name: "Speed \(state.speedLabel)") { [weak self] _ in
                 self?.onSpeedTap?()
                 return true
-            },
-        ]
+            })
+        }
+        accessibilityLabel = label
+        accessibilityValue = value
+        accessibilityCustomActions = actions
+        playElement.accessibilityLabel = label
+        playElement.accessibilityValue = value
+        playElement.accessibilityTraits = .adjustable
+        playElement.accessibilityCustomActions = actions
+    }
+
+    /// One element, or the voice and the chip while the chip shows.
+    private func refreshAccessibilityElements() {
+        let chipShows = shownSlot == .speed
+        isAccessibilityElement = !chipShows
+        let elements: [Any] = [playElement, speedChip]
+        accessibilityElements = chipShows ? elements : nil
+        updateAccessibility()
     }
 
     /// What VoiceOver reads (#2104, #2205): "Voice message from Ava, 12
@@ -902,6 +1078,13 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
     public override func accessibilityIncrement() { nudge(by: 5) }
     public override func accessibilityDecrement() { nudge(by: -5) }
 
+    /// A double tap plays or pauses: the panel is the play button's element.
+    public override func accessibilityActivate() -> Bool {
+        guard playButton.isEnabled else { return false }
+        onPlayTap?()
+        return true
+    }
+
     private func nudge(by seconds: TimeInterval) {
         guard state.duration > 0 else { return }
         let fraction = min(1, max(0, state.progress + seconds / state.duration))
@@ -913,15 +1096,30 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
     public var debugSideHoldEnabled: Bool { sideHold.isEnabled }
     public var debugPlayHoldEnabled: Bool { debugPlayButtonHold?.isEnabled ?? false }
     public var debugTimerText: String? { timerLabel.text }
-    public var debugShowsChip: Bool { !speedChip.isHidden }
+    /// The speed chip shows in the slot (#2274).
+    public var debugShowsChip: Bool { shownSlot == .speed && !speedChip.isHidden }
+    /// The timer shows in the slot (#2274).
+    public var debugShowsTimer: Bool { shownSlot == .timer }
+    public var debugSlotContent: SlotContent? { shownSlot }
+    /// The timer's and the chip's opacity now (their model values).
+    public var debugTimerAlpha: CGFloat { timerLabel.alpha }
+    public var debugChipAlpha: CGFloat { speedChip.alpha }
+    /// Whether the slot is cross-fading now (an opacity animation on the
+    /// timer or the chip).
+    public var debugSlotIsFading: Bool {
+        [timerLabel.layer, speedChip.layer].contains { $0.animationKeys()?.contains("opacity") == true }
+    }
     public var debugChipTitle: String? { speedChip.content.title }
     public var debugShowsDot: Bool { !dot.isHidden }
     public var debugWaveformRising: Bool { waveform.debugRising }
     public var debugPlayEnabled: Bool { playButton.isEnabled }
     public var debugShowsLoader: Bool { !loader.isHidden }
     public var debugChipFrame: CGRect { speedChip.convert(speedChip.bounds, to: self) }
-    public var debugWaveformGrown: Bool { waveform.debugSwollen }
     public var debugTimerFrame: CGRect { timerLabel.convert(timerLabel.bounds, to: self) }
+    /// The slot (#2274), in this view.
+    public var debugSlotFrame: CGRect { frameView.convert(slot.layoutFrame, to: self) }
+    /// The panel's line, in this view.
+    public var debugLineFrame: CGRect { frameView.convert(line.layoutFrame, to: self) }
     /// The speed chip is the app's pill.
     public var debugChipIsTheAppsPill: Bool { speedChip.aspect == .pill(.quiet) }
     public var debugWaveformFrame: CGRect { waveform.convert(waveform.bounds, to: self) }
@@ -948,22 +1146,53 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
     public var debugGlyph: String { shownGlyph }
     public var debugButtonImage: UIImage? { playButton.configuration?.image }
     public var debugButtonSize: CGSize { playButton.bounds.size }
-    /// The play button is the app's icon button as a filled disc — the
-    /// monochrome bubble (#2241) — not a system one nor a bare glyph.
-    public var debugPlayButtonIsAFilledDisc: Bool { playButton.style == .bubble(.monochrome) }
-    /// The disc's fill and its glyph's ink, as the button draws them now.
-    public var debugDiscFill: UIColor? { playButton.configuration?.baseBackgroundColor }
+    /// The play button is the app's icon button as a bare glyph (#2274) —
+    /// no disc, no ground — not a system one.
+    public var debugPlayButtonIsABareGlyph: Bool { playButton.style == .glyph && playButton.currentGround == nil }
+    /// The glyph's ink and its point size, as the button draws them now.
     public var debugGlyphInk: UIColor? { playButton.configuration?.baseForegroundColor }
+    public var debugGlyphPointSize: CGFloat? { playButton.symbolPointSize }
     /// The panel (#2241), in this view: its frame, its ground, its corner.
     public var debugPanelFrame: CGRect { frameView.frame }
+    /// The panel's size at rest — its bounds, which the swell never changes.
+    public var debugPanelRestingSize: CGSize { frameView.bounds.size }
+    /// The panel's transform: the swell (#2274).
+    public var debugPanelTransform: CGAffineTransform { frameView.transform }
+    /// The transforms of what the panel holds — none of them swells alone.
+    public var debugPartTransforms: [CGAffineTransform] {
+        [playButton.transform, waveform.transform, scrubber.transform, timerLabel.transform, speedChip.transform, dot.transform]
+    }
     public var debugPanelFill: UIColor? { frameView.backgroundColor }
     public var debugPanelCornerRadius: CGFloat { frameView.layer.cornerRadius }
     public var debugDotFill: UIColor? { dot.backgroundColor }
     public var debugTimerInk: UIColor? { timerLabel.textColor }
+    /// The seek fraction a finger at `point` (own coordinates) reads (#2274).
+    public func debugSeekFraction(at point: CGPoint) -> Double { restingFraction(at: point) }
+    /// VoiceOver's elements while the chip shows; nil while the panel is one.
+    public var debugAccessibilityElements: [Any]? { accessibilityElements }
+    public var debugPlayElementValue: String? { playElement.accessibilityValue }
     public func debugTapPlay() { onPlayTap?() }
     public func debugTapSpeed() { onSpeedTap?() }
     #endif
 }
+
+/// VoiceOver's voice while the speed chip shows beside it (#2274): what the
+/// panel reads as one element otherwise — its label, its time and speed, its
+/// ±5 s adjustment, play on a double tap.
+@MainActor
+private final class VoicePlayElement: UIAccessibilityElement {
+    private weak var owner: VoiceView?
+
+    init(owner: VoiceView) {
+        self.owner = owner
+        super.init(accessibilityContainer: owner)
+    }
+
+    override func accessibilityIncrement() { owner?.accessibilityIncrement() }
+    override func accessibilityDecrement() { owner?.accessibilityDecrement() }
+    override func accessibilityActivate() -> Bool { owner?.accessibilityActivate() ?? false }
+}
+
 
 /// The voice message's waveform: 2 pt round-capped bars, the played ones in
 /// a dark grey (`ink`). A tap seeks; a horizontal drag scrubs (a vertical
@@ -971,8 +1200,10 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
 /// bars are the only mark of the finger: no playhead (the owner's device
 /// check, 2026-11-06).
 ///
-/// Under a scrubbing finger the whole waveform grows a little, and settles
-/// when it lifts (the owner, same day).
+/// Under a finger the voice panel swells as one, the bars with it
+/// (`VoiceView`, #2274): the waveform has no swell of its own; it says when
+/// a finger is down (`onFinger`), and a host that swells it reads the finger
+/// on its resting geometry (`fractionReader`).
 ///
 /// **Filling its width (#2241, `fillsWidth`):** the voice panel's waveform
 /// re-bins the voice to however many bars its own width holds, as it is
@@ -1010,6 +1241,13 @@ public final class WaveformBars: UIView, UIGestureRecognizerDelegate {
         }
     }
     private weak var scrub: UIPanGestureRecognizer?
+    /// Told when a finger lands on the bars (true) and when it lifts or is
+    /// cancelled (false) — a tap's and a drag's alike (#2274).
+    public var onFinger: ((_ down: Bool) -> Void)?
+    /// Where a tap or a drag lands, 0…1, as its host reads it — on the
+    /// geometry at rest, for a host that swells the bars (#2274). Nil, or
+    /// nil back: the bars' own bounds.
+    public var fractionReader: ((UIGestureRecognizer) -> Double?)?
 
     /// The voice's levels as given, before re-binning.
     private var levels: [UInt8] = []
@@ -1028,17 +1266,9 @@ public final class WaveformBars: UIView, UIGestureRecognizerDelegate {
     private var waiting = true
     private var rise: CGFloat = 1
 
-    // MARK: The swell
-
-    /// How much the whole waveform grows under a scrubbing finger — width
-    /// and height — and how long it takes to grow and to settle.
-    public static let swellScale: CGFloat = 1.1
-    /// What a waveform that fills its width gains on each side under the
-    /// finger, in points (#2241): a tenth of a panel's width pushed the timer
-    /// out of the panel.
-    public static let swellGrowth: CGFloat = 6
-    public static let swellTravel: CFTimeInterval = 0.45
-    public static let settleDuration: CFTimeInterval = 0.35
+    /// How much finer than the screen the bars are drawn, so they stay
+    /// sharp in a swollen panel (#2274): the app's swell at its tallest.
+    public static let drawnFiner: CGFloat = 1 + 2 * PressFeedback.Metrics.swellDown
 
     public override init(frame: CGRect) {
         super.init(frame: frame)
@@ -1167,11 +1397,11 @@ public final class WaveformBars: UIView, UIGestureRecognizerDelegate {
         link.add(to: .main, forMode: .common)
     }
 
-    /// Drawn finer than the screen, so the bars stay sharp grown.
+    /// Drawn finer than the screen, so the bars stay sharp swollen.
     public override func didMoveToWindow() {
         super.didMoveToWindow()
         let screen = traitCollection.displayScale > 0 ? traitCollection.displayScale : 3
-        contentScaleFactor = screen * Self.swellScale
+        contentScaleFactor = screen * Self.drawnFiner
     }
 
     public override func draw(_ rect: CGRect) {
@@ -1210,29 +1440,21 @@ public final class WaveformBars: UIView, UIGestureRecognizerDelegate {
         )
     }
 
-    // MARK: - The swell
+    // MARK: - The finger (#2274)
 
-    /// The finger landed (true): the whole waveform grows. It lifted
-    /// (false): it settles back.
-    public func setSwollen(_ swollen: Bool, animated: Bool) {
-        let size: CGAffineTransform = swollen ? CGAffineTransform(scaleX: swellWidthScale, y: Self.swellScale) : .identity
-        guard animated else {
-            transform = size
-            return
-        }
-        UIView.animate(
-            springDuration: swollen ? Self.swellTravel : Self.settleDuration, bounce: swollen ? 0.15 : 0,
-            options: [.allowUserInteraction, .beginFromCurrentState]
-        ) {
-            self.transform = size
-        }
+    public override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        super.touchesBegan(touches, with: event)
+        onFinger?(true)
     }
 
-    /// How much wider it grows under the finger: a tenth, or — filling its
-    /// width — `swellGrowth` on each side (#2241).
-    private var swellWidthScale: CGFloat {
-        guard fillsWidth, bounds.width > 0 else { return Self.swellScale }
-        return (bounds.width + 2 * Self.swellGrowth) / bounds.width
+    public override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        super.touchesEnded(touches, with: event)
+        onFinger?(false)
+    }
+
+    public override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        super.touchesCancelled(touches, with: event)
+        onFinger?(false)
     }
 
     // MARK: - Seeking
@@ -1241,17 +1463,22 @@ public final class WaveformBars: UIView, UIGestureRecognizerDelegate {
         Double(min(1, max(0, point.x / max(1, min(barsWidth, bounds.width)))))
     }
 
+    /// Where `gesture` lands: as the host reads it, or on the bars' bounds.
+    private func fraction(of gesture: UIGestureRecognizer) -> Double {
+        fractionReader?(gesture) ?? fraction(at: gesture.location(in: self))
+    }
+
     @objc private func tapped(_ tap: UITapGestureRecognizer) {
-        onSeek?(fraction(at: tap.location(in: self)), false)
+        onSeek?(fraction(of: tap), false)
     }
 
     @objc private func panned(_ pan: UIPanGestureRecognizer) {
-        let fraction = fraction(at: pan.location(in: self))
+        let share = fraction(of: pan)
         switch pan.state {
         case .began, .changed:
-            onSeek?(fraction, true)
+            onSeek?(share, true)
         default:
-            onSeek?(fraction, false)
+            onSeek?(share, false)
         }
     }
 
@@ -1289,6 +1516,8 @@ public final class WaveformBars: UIView, UIGestureRecognizerDelegate {
 
     #if DEBUG
     public var debugWaiting: Bool { waiting }
-    public var debugSwollen: Bool { transform != .identity }
+    /// A finger landing on the bars (true) or lifting (false), as a touch
+    /// would say it.
+    public func debugFinger(_ down: Bool) { onFinger?(down) }
     #endif
 }

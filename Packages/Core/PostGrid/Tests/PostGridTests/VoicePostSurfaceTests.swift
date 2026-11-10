@@ -100,6 +100,34 @@ struct VoicePostSurfaceTests {
         #expect(cell.debugCaptionText?.isEmpty ?? true, "a compact voice keeps no words")
     }
 
+    /// A shelf's lane is tall enough for a voice post (#2274): its fixed
+    /// card holds the compact panel at its full 44 pt, the line centred in
+    /// it, above the closing line — the panel is never squeezed.
+    @Test func aShelfsFixedCardHoldsTheCompactPanelWhole() throws {
+        let width: CGFloat = 322
+        let textOnly = PostGridListRowCell.fixedTextCardHeight(width: width, captionLines: 2, showsVoice: false)
+        let height = PostGridListRowCell.fixedTextCardHeight(width: width, captionLines: 2, showsVoice: true)
+        #expect(height >= textOnly)
+        let cell = PostGridListRowCell(frame: CGRect(x: 0, y: 0, width: width, height: height))
+        cell.debugVoicePart.hub = VoicePlaybackHub.silentForTests()
+        let words = String(repeating: "A long post that goes on and on about nothing much. ", count: 10)
+        cell.configure(with: post(caption: words), imagePipeline: pipeline, captionLines: 2, showsVoice: true)
+        cell.onRepostTapped = {}
+        cell.onBookmarkTapped = {}
+        cell.onStake = { _ in }
+        cell.layoutIfNeeded()
+        let player = try #require(cell.debugVoiceCaption?.voiceView)
+        player.layoutIfNeeded()
+        let panel = player.debugPanelFrame
+        #expect(panel.height == VoiceView.panelHeight(for: .compact), "the shelf squeezed the panel: \(panel)")
+        let line = player.debugLineFrame
+        #expect(abs((line.minY - panel.minY) - (panel.maxY - line.maxY)) < 0.5, "\(line) off centre in \(panel)")
+        let drawn = player.convert(panel, to: cell)
+        let closing = cell.debugClosingLineFrame
+        #expect(!closing.isNull)
+        #expect(drawn.maxY <= closing.minY + 0.5, "\(drawn) runs into the closing line \(closing)")
+    }
+
     @Test func theSwitchOffShowsTodaysCard() {
         let cell = listCard(post(), showsVoice: false)
         #expect(cell.debugVoiceCaption == nil)

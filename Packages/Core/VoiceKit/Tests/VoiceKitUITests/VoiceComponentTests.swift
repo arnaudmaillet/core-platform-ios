@@ -90,7 +90,7 @@ struct VoiceComponentTests {
         #expect(mark.subviews.allSatisfy { !($0 is UIControl) })
     }
 
-    /// The play button keeps a 44 pt target round its 32 pt compact disc.
+    /// The bare play glyph keeps a 44 pt target round its 32 pt compact frame.
     @Test func thePlayButtonKeepsA44PointTarget() {
         let voice = VoiceView(size: .compact)
         voice.configure(VoiceView.State(levels: nil, duration: 5))

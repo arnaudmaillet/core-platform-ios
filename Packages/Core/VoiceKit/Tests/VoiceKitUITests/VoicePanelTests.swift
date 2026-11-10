@@ -15,11 +15,11 @@ func rgba(_ color: UIColor?, _ style: UIUserInterfaceStyle) -> [CGFloat] {
     return [red, green, blue, alpha].map { ($0 * 1000).rounded() / 1000 }
 }
 
-/// The voice component as a neutral panel (#2241): a filled disc, the
-/// waveform across the whole width, the timer at the end; the panel fills
-/// its container at each size — capped in a conversation — and is one width
-/// whatever the length; its ground and inks are the host's, never the
-/// brand's.
+/// The voice component as a neutral panel (#2241): a bare play glyph
+/// (#2274), the waveform across the whole width, one slot at the end for the
+/// timer or the speed; the panel fills its container at each size — capped
+/// in a conversation — and is one width whatever the length; its ground and
+/// inks are the host's, never the brand's.
 @MainActor
 struct VoicePanelTests {
     /// A voice `width` wide at its own height, laid out.
@@ -51,10 +51,13 @@ struct VoicePanelTests {
         #expect(view.debugPanelCornerRadius == VoiceView.panelCornerRadius(for: size))
     }
 
-    /// Compact is a little shorter than full: a smaller disc, shorter bars.
+    /// Compact is a little shorter than full: a smaller glyph, shorter bars;
+    /// the panel's height stays 56 / 44 pt (#2274).
     @Test func compactIsALittleShorter() {
         #expect(VoiceView.panelHeight(for: .compact) < VoiceView.panelHeight(for: .full))
+        #expect(VoiceView.panelHeight(for: .full) == 56 && VoiceView.panelHeight(for: .compact) == 44)
         #expect(VoiceView.buttonSide(for: .full) == 40 && VoiceView.buttonSide(for: .compact) == 32)
+        #expect(VoiceView.glyphPointSize(for: .full) == 20 && VoiceView.glyphPointSize(for: .compact) == 16)
         #expect(VoiceView.waveformHeight(for: .full) >= 30 && VoiceView.waveformHeight(for: .full) <= 36)
         #expect(VoiceView.waveformHeight(for: .compact) < VoiceView.waveformHeight(for: .full))
     }
@@ -83,16 +86,16 @@ struct VoicePanelTests {
 
     // MARK: - The waveform across the width
 
-    /// The bars run from the disc to the timer, as many as the width holds
-    /// (2 pt bars, 2 pt apart), spread edge to edge.
+    /// The bars run from the glyph to the slot (#2274), as many as the width
+    /// holds (2 pt bars, 2 pt apart), spread edge to edge.
     @Test(arguments: [VoiceView.Size.full, .compact])
-    func theWaveformRunsFromTheDiscToTheTimer(_ size: VoiceView.Size) {
+    func theWaveformRunsFromTheGlyphToTheSlot(_ size: VoiceView.Size) {
         let view = laidOut(size, width: 360)
         let button = view.debugPlayButton.convert(view.debugPlayButton.bounds, to: view)
         let bars = view.debugWaveformFrame
-        let timer = view.debugTimerFrame
+        let slot = view.debugSlotFrame
         #expect(abs(bars.minX - (button.maxX + Spacing.sm)) < 0.5, "\(bars) after \(button)")
-        #expect(abs(bars.maxX - (timer.minX - Spacing.sm)) < 0.5, "\(bars) before \(timer)")
+        #expect(abs(bars.maxX - (slot.minX - Spacing.sm)) < 0.5, "\(bars) before \(slot)")
         #expect(bars.height == VoiceView.waveformHeight(for: size))
         #expect(view.waveform.bars.count == VoiceView.barCount(forWidth: bars.width))
         let drawn = view.waveform.barStep * CGFloat(view.waveform.bars.count - 1) + VoiceView.barWidth
@@ -163,21 +166,50 @@ struct VoicePanelTests {
         #expect(!mark.fillsWidth && !mark.spreadsLevels)
     }
 
-    // MARK: - The filled play button
+    // MARK: - The bare play glyph (#2274)
 
-    /// A disc — black in the light, white in the dark — with its glyph
-    /// knocked out in the other; the app's icon button, at 40 pt in full.
+    /// No disc: the app's icon button as a bare glyph, in the played bars'
+    /// ink, 20 pt in full and 16 pt compact, centred where the disc was —
+    /// its frame the disc's, the panel's air even round it.
     @Test(arguments: [VoiceView.Size.full, .compact])
-    func thePlayButtonIsAFilledDisc(_ size: VoiceView.Size) {
+    func thePlayButtonHasNoDisc(_ size: VoiceView.Size) {
         let view = laidOut(size, width: 320)
-        #expect(view.debugPlayButtonIsAFilledDisc)
+        #expect(view.debugPlayButtonIsABareGlyph, "the play button still draws a ground")
         let side = VoiceView.buttonSide(for: size)
         #expect(view.debugButtonSize == CGSize(width: side, height: side))
-        #expect(rgba(view.debugDiscFill, .light) == [0, 0, 0, 1])
-        #expect(rgba(view.debugDiscFill, .dark) == [1, 1, 1, 1])
-        #expect(rgba(view.debugGlyphInk, .light) == [1, 1, 1, 1])
-        #expect(rgba(view.debugGlyphInk, .dark) == [0, 0, 0, 1])
+        #expect(view.debugGlyphPointSize == VoiceView.glyphPointSize(for: size))
+        for style in [UIUserInterfaceStyle.light, .dark] {
+            #expect(rgba(view.debugGlyphInk, style) == rgba(view.inks.played, style), "the glyph isn't the played bars' ink")
+        }
         #expect(view.debugGlyph == "play.fill")
+        let button = view.debugPlayButton.convert(view.debugPlayButton.bounds, to: view)
+        let panel = view.debugPanelFrame
+        #expect(abs((button.minY - panel.minY) - (panel.maxY - button.maxY)) < 0.5, "\(button) in \(panel)")
+        // A host's ink reaches the glyph.
+        view.inks = VoiceView.Inks(played: .white, unplayed: .gray, timer: .lightGray)
+        #expect(rgba(view.debugGlyphInk, .light) == [1, 1, 1, 1])
+    }
+
+    // MARK: - The line, centred (#2274)
+
+    /// The line stands in the middle of the panel: at the panel's own height
+    /// the panel's air above and below; held shorter by a host, the air
+    /// shrinks evenly — never on one side only.
+    @Test(arguments: [VoiceView.Size.full, .compact])
+    func theLineIsCentredEvenWhenTheHostIsShorter(_ size: VoiceView.Size) {
+        let view = laidOut(size, width: 320)
+        let padding = VoiceView.panelPadding(for: size)
+        func air() -> (above: CGFloat, below: CGFloat) {
+            let line = view.debugLineFrame, panel = view.debugPanelFrame
+            return (line.minY - panel.minY, panel.maxY - line.maxY)
+        }
+        let natural = air()
+        #expect(abs(natural.above - padding) < 0.5 && abs(natural.below - padding) < 0.5, "\(natural)")
+        view.frame.size.height = VoiceView.panelHeight(for: size) - 5
+        view.layoutIfNeeded()
+        let squeezed = air()
+        #expect(abs(squeezed.above - squeezed.below) < 0.5, "\(squeezed): the air went on one side")
+        #expect(view.debugLineFrame.height == VoiceView.buttonSide(for: size), "the line itself gave way")
     }
 
     // MARK: - Neutral inks
@@ -234,17 +266,172 @@ struct VoicePanelTests {
         #expect(waiting.debugPanelFrame.height == frames[0].height)
     }
 
-    /// Under way, the speed chip comes into the panel after the timer; the
-    /// panel keeps its width, the waveform gives the chip its room.
-    @Test func theChipStandsInsideThePanel() {
-        let view = laidOut(.full, width: 340, playback: .playing(progress: 0.3))
-        let panel = view.debugPanelFrame
-        let chip = view.debugChipFrame
+    // MARK: - One slot (#2274)
+
+    /// What the slot shows: the total at rest, the chip while it plays (and
+    /// from the tap, while it loads), the time reached when paused mid-way,
+    /// the total again at the end.
+    @Test(arguments: [VoiceView.Role.message, .post(author: "Ava")])
+    func theSlotFollowsThePlayback(_ role: VoiceView.Role) {
+        var state = VoiceView.State(levels: VoiceView.genericLevels, duration: 12)
+        let view = laidOut(.full, width: 340, duration: 12, role: role)
+        #expect(view.debugShowsTimer && !view.debugShowsChip && view.debugTimerText == "0:12")
+        #expect(view.debugTimerAlpha == 1 && view.debugChipAlpha == 0)
+
+        state.playback = .loading
+        view.update(state)
+        #expect(view.debugShowsChip, "the glyph and the slot change together, on the tap")
+
+        state.playback = .playing(progress: 0.5)
+        state.speedLabel = "1.5×"
+        view.update(state)
+        #expect(view.debugShowsChip && !view.debugShowsTimer)
+        #expect(view.debugChipTitle == "1.5×")
+        #expect(view.debugTimerAlpha == 0 && view.debugChipAlpha == 1)
+
+        state.playback = .paused(progress: 7.0 / 12)
+        view.update(state)
+        #expect(view.debugShowsTimer && !view.debugShowsChip)
+        #expect(view.debugTimerText == "0:07", "paused, the time it resumes from")
+
+        state.playback = .rest
+        view.update(state)
+        #expect(view.debugShowsTimer && view.debugTimerText == "0:12", "the end shows the total again")
+        #expect(VoiceView.slotContent(for: .failed) == .timer)
+    }
+
+    /// One slot, one size, whatever it shows: the waveform's frame and its
+    /// bars never change between states — binned once — and the chip's pill
+    /// fills the slot, the timer centred in it.
+    @Test(arguments: [VoiceView.Size.full, .compact], [VoiceView.Role.message, .post(author: nil)])
+    func theSlotAndTheWaveformNeverMove(_ size: VoiceView.Size, role: VoiceView.Role) {
+        var state = VoiceView.State(levels: VoiceView.genericLevels, duration: 12, unplayed: role == .message)
+        let view = laidOut(size, width: 340, duration: 12, role: role)
+        view.configure(state)
+        view.layoutIfNeeded()
+        let slot = view.debugSlotFrame
+        let bars = view.debugWaveformFrame
+        let count = view.waveform.bars.count
+        #expect(slot.width > 0 && slot.height > 0)
+        #expect(abs(view.debugTimerFrame.midX - slot.midX) < 0.5, "the timer isn't centred in the slot")
+        let playbacks: [VoiceView.State.Playback] = [.loading, .playing(progress: 0.3), .paused(progress: 0.6), .rest, .failed]
+        for (index, playback) in playbacks.enumerated() {
+            state.playback = playback
+            state.speedLabel = ["1×", "1.5×", "2×"][index % 3]
+            view.update(state)
+            view.layoutIfNeeded()
+            #expect(view.debugSlotFrame == slot, "\(playback): the slot moved")
+            #expect(view.debugWaveformFrame == bars, "\(playback): the waveform moved")
+            #expect(view.waveform.bars.count == count, "\(playback): the bars were re-binned")
+            if view.debugShowsChip {
+                #expect(view.debugChipFrame == slot, "the chip's pill doesn't fill the slot")
+            }
+        }
+        // A message's unplayed dot keeps its own place after the slot.
+        if role == .message {
+            #expect(slot.maxX < view.debugPanelFrame.maxX - VoiceView.panelTrailingPadding - VoiceView.dotSide)
+        } else {
+            #expect(abs(slot.maxX - (view.debugPanelFrame.maxX - VoiceView.panelTrailingPadding)) < 0.5)
+        }
+    }
+
+    /// The slot holds the widest timer the voice can show — its total
+    /// length's format — and the widest speed: never narrower than either.
+    @Test(arguments: [TimeInterval(12), 65, 760])
+    func theSlotHoldsTheWidestTimerAndSpeed(_ duration: TimeInterval) {
+        var state = VoiceView.State(levels: VoiceView.genericLevels, duration: duration)
+        let view = laidOut(.full, width: 340, duration: duration)
+        let slot = view.debugSlotFrame
+        #expect(view.debugTimerFrame.width <= slot.width + 0.5)
+        state.playback = .playing(progress: 0.5)
+        state.speedLabel = VoiceView.widestSpeedLabel
+        view.update(state)
+        view.debugSetSpeedLabel(VoiceView.widestSpeedLabel)
+        #expect(view.debugSlotFrame == slot)
+        #expect(view.debugChipFrame == slot)
+    }
+
+    /// The change is a cross-fade in place on screen; under Reduce Motion, a
+    /// cut.
+    @Test(arguments: [false, true])
+    func theSlotCrossFadesOrCuts(_ reduced: Bool) {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 400, height: 200))
+        window.isHidden = false
+        defer { window.isHidden = true }
+        var state = VoiceView.State(levels: VoiceView.genericLevels, duration: 12)
+        let view = laidOut(.full, width: 340, duration: 12)
+        view.reducesMotion = { reduced }
+        window.addSubview(view)
+        state.playback = .playing(progress: 0.2)
+        view.update(state)
         #expect(view.debugShowsChip)
-        #expect(abs(panel.width - 340) < 0.5)
-        #expect(chip.maxX <= panel.maxX && chip.minX >= view.debugTimerFrame.maxX, "\(chip) in \(panel)")
-        #expect(view.debugWaveformFrame.maxX < view.debugTimerFrame.minX)
-        #expect(view.waveform.bars.count == VoiceView.barCount(forWidth: view.debugWaveformFrame.width))
+        #expect(view.debugTimerAlpha == 0 && view.debugChipAlpha == 1)
+        #expect(view.debugSlotIsFading == !reduced, reduced ? "Reduce Motion faded the slot" : "the slot cut")
+        view.removeFromSuperview()
+    }
+
+    // MARK: - The whole panel swells (#2274)
+
+    /// A finger on the waveform swells the whole panel by the app's press
+    /// swell on its size — and nothing inside it on its own; it settles when
+    /// the finger lifts, and when it is cancelled.
+    @Test(arguments: [VoiceView.Size.full, .compact])
+    func aFingerOnTheWaveformSwellsTheWholePanel(_ size: VoiceView.Size) {
+        let view = laidOut(size, width: 320, playback: .playing(progress: 0.3))
+        view.reducesMotion = { false }
+        let resting = view.debugPanelRestingSize
+        let scale = PressFeedback.swelledScale(for: resting)
+        #expect(scale.x > 1 && scale.y > 1)
+        view.waveform.debugFinger(true)
+        #expect(view.debugPanelTransform == CGAffineTransform(scaleX: scale.x, y: scale.y))
+        #expect(view.debugPartTransforms.allSatisfy { $0 == .identity }, "a part swelled on its own")
+        #expect(view.debugPanelRestingSize == resting, "the swell re-laid the panel")
+        // Lifted: it settles.
+        view.waveform.debugFinger(false)
+        #expect(view.debugPanelTransform == .identity)
+        // A scrub keeps it swollen past the touch's cancel (the drag took
+        // the touch), until the drag ends.
+        view.waveform.debugFinger(true)
+        view.waveform.onSeek?(0.5, true)
+        view.waveform.debugFinger(false)
+        #expect(view.debugPanelTransform != .identity, "the scrub's own cancel settled it")
+        view.waveform.onSeek?(0.6, false)
+        #expect(view.debugPanelTransform == .identity)
+    }
+
+    /// The play glyph keeps its own press: the panel swells only for the
+    /// waveform.
+    @Test func thePlayButtonDoesNotSwellThePanel() {
+        let view = laidOut(.full, width: 320)
+        view.reducesMotion = { false }
+        view.debugTapPlay()
+        #expect(view.debugPanelTransform == .identity)
+    }
+
+    /// The point under the finger doesn't jump: the seek is read on the
+    /// panel at rest, so the swell never moves the playhead.
+    @Test func theSwellNeverMovesThePlayhead() {
+        let view = laidOut(.full, width: 320)
+        view.reducesMotion = { false }
+        let bars = view.debugWaveformFrame
+        let point = CGPoint(x: bars.minX + bars.width * 0.3, y: bars.midY)
+        let before = view.debugSeekFraction(at: point)
+        #expect(abs(before - 0.3) < 0.01)
+        view.waveform.debugFinger(true)
+        #expect(view.debugWaveformFrame != bars, "guard: the bars didn't swell with the panel")
+        #expect(view.debugSeekFraction(at: point) == before, "the swell moved the playhead")
+        view.waveform.debugFinger(false)
+    }
+
+    /// Under Reduce Motion the panel never swells, as for the app's buttons.
+    @Test func reduceMotionSwellsNothing() {
+        let view = laidOut(.full, width: 320)
+        view.reducesMotion = { true }
+        view.waveform.debugFinger(true)
+        view.waveform.onSeek?(0.4, true)
+        #expect(view.debugPanelTransform == .identity)
+        view.waveform.onSeek?(0.4, false)
+        view.waveform.debugFinger(false)
     }
 
     // MARK: - No brand colour, no length's width
@@ -295,15 +482,36 @@ struct VoicePanelTests {
 
     // MARK: - VoiceOver
 
-    /// The panel reads as one element — its parts are not elements — with
-    /// its label, its ±5 s adjustment and its play and speed actions.
+    /// At rest the panel reads as one element — its parts are not elements —
+    /// with its label, its time and speed as its value, its ±5 s adjustment
+    /// and its play action; the speed changes only while it plays (#2274).
     @Test func voiceOverReadsThePanelAsOne() {
         let view = laidOut(.full, width: 320, duration: 12, role: .message)
         #expect(view.isAccessibilityElement)
+        #expect(view.debugAccessibilityElements == nil)
         #expect(!view.debugPlayButton.isAccessibilityElement)
         #expect(view.accessibilityLabel == "Your voice message, 12 seconds, played")
+        #expect(view.accessibilityValue == "0:12, speed 1×")
         #expect(view.accessibilityTraits.contains(.adjustable))
         let actions = view.accessibilityCustomActions?.map(\.name) ?? []
-        #expect(actions.contains("Play") && actions.contains("Speed 1×"))
+        #expect(actions.contains("Play") && !actions.contains { $0.hasPrefix("Speed") })
+    }
+
+    /// While it plays, the voice says its time and speed, and the speed chip
+    /// stands as its own element beside it (#2274).
+    @Test func voiceOverReadsTheChipAsItsOwnWhileItShows() {
+        var state = VoiceView.State(levels: VoiceView.genericLevels, duration: 12)
+        let view = laidOut(.full, width: 320, duration: 12, role: .post(author: "Ava"))
+        state.playback = .playing(progress: 0.5)
+        state.speedLabel = "1.5×"
+        view.update(state)
+        #expect(!view.isAccessibilityElement)
+        #expect(view.debugAccessibilityElements?.count == 2)
+        #expect(view.debugPlayElementValue == "0:06, speed 1.5×")
+        #expect(view.accessibilityCustomActions?.map(\.name).contains("Speed 1.5×") == true)
+        state.playback = .paused(progress: 0.5)
+        view.update(state)
+        #expect(view.isAccessibilityElement && view.debugAccessibilityElements == nil)
+        #expect(view.accessibilityValue == "0:06, speed 1.5×")
     }
 }
