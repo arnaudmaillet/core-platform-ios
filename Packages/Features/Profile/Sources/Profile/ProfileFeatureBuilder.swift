@@ -494,7 +494,6 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
             trayPlacement: trayPlacement
         )
         controller.feedHero = openFeedHero
-        controller.makePersonBarItem = makePersonBarItem
         controller.staking = makeCardStaking?() ?? wallet.map(PostCardStaking.init)
         return controller
     }
@@ -517,10 +516,6 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
     /// For You's grid page, built by the composition root (#1273): the pages
     /// the profile's posts are drawn on. `savesPosts` offers the save control.
     public var makePostGridPage: ((_ style: PostGridPageStyle, _ savesPosts: Bool) -> any PostGridPage)?
-    /// The post page's person pill (#1451), built by the composition root:
-    /// the profile's bar wears it once the tray has scrolled away. Nil: the
-    /// bar carries no identity.
-    public var makePersonBarItem: (@MainActor () -> any PersonBarItem)?
 
     /// `makePostGridPage`, which the composition root always wires: the
     /// profile has no grid of its own any more.
@@ -651,7 +646,6 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
             identityStub: known
         )
         controller.feedHero = openFeedHero
-        controller.makePersonBarItem = makePersonBarItem
         controller.staking = makeCardStaking?() ?? wallet.map(PostCardStaking.init)
         return controller
     }
