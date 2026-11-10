@@ -111,6 +111,12 @@ public enum ProposedChat {
         case setVisibility(viewer: String, conversationID: String, visibility: Visibility)
         case subscribe(viewer: String, conversationID: String)
         case unsubscribe(viewer: String, conversationID: String)
+        /// The channels `owner` owns that `viewer` may see, each read for
+        /// the viewer (#2232, #995's "a profile's channels"): for a profile's
+        /// Channels tab. Someone else's private channels never answer — a
+        /// private conversation can't be probed — and a channel `owner` only
+        /// admins is not theirs.
+        case ownedChannels(viewer: String, owner: String)
     }
 
     /// What a call answers; `error` is a refusal ("CHT-…: …").
