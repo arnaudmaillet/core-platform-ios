@@ -20,6 +20,36 @@ public protocol TextPostPublishing: Sendable {
     /// `text` (possibly empty) under it. The voice is uploaded, then the post
     /// is created with it — never as an attachment, never as its sound.
     func publishTextPost(_ text: String, voice: TextPostVoice?, as author: AuthorSummary?) async throws -> FeedEntry
+    /// A showcase (#2216): a text post whose caption's place is `embed`'s
+    /// card — a channel's — with `text` above it, standing at `place` on the
+    /// map when the author gave one. The embed rides the create request
+    /// (`PostEmbedWire`), never as an attachment: the post stays a text post.
+    func publishTextPost(
+        _ text: String, embed: PostEmbed, place: TextPostPlace?, as author: AuthorSummary?
+    ) async throws -> FeedEntry
+}
+
+/// Where a showcase stands on the map (#2216): a place the author picked in
+/// the text composer — "the Bercy skatepark's channel". Its name is the
+/// composer's, the point is what the create request carries
+/// (`CreatePostRequest.location`).
+public struct TextPostPlace: Sendable, Equatable, Hashable {
+    /// What the author picked, as the composer shows it: "Skatepark de Bercy".
+    public let name: String
+    public let latitude: Double
+    public let longitude: Double
+
+    public init(name: String, latitude: Double, longitude: Double) {
+        self.name = name
+        self.latitude = latitude
+        self.longitude = longitude
+    }
+}
+
+/// A publisher that sends no embed (fakes, previews): it refuses a showcase
+/// rather than posting its words alone.
+public struct TextPostEmbedUnsupported: Error, Equatable {
+    public init() {}
 }
 
 /// A take the text composer records as a post's caption (#2209).
@@ -50,6 +80,12 @@ public extension TextPostPublishing {
         guard voice == nil else { throw TextPostVoiceUnsupported() }
         return try await publishTextPost(text, as: author)
     }
+
+    func publishTextPost(
+        _ text: String, embed: PostEmbed, place: TextPostPlace?, as author: AuthorSummary?
+    ) async throws -> FeedEntry {
+        throw TextPostEmbedUnsupported()
+    }
 }
 
 /// Builds the "+" menu's Text Post screen: a text post's own page with no post
@@ -59,4 +95,15 @@ public protocol TextPostScreenBuilding {
     /// The screen, in its own navigation controller, ready to be presented full
     /// screen. `publisher` is retained for the screen's lifetime.
     func makeTextPostScreen(publisher: any TextPostPublishing) -> UIViewController
+    /// The same screen opened on a showcase (#2216): `embed`'s card attached
+    /// under the words — the author may remove it, which publishes a plain
+    /// text post — and an optional place.
+    func makeTextPostScreen(publisher: any TextPostPublishing, attaching embed: PostEmbed) -> UIViewController
+}
+
+public extension TextPostScreenBuilding {
+    /// Builders that attach nothing (fakes): the plain screen.
+    func makeTextPostScreen(publisher: any TextPostPublishing, attaching embed: PostEmbed) -> UIViewController {
+        makeTextPostScreen(publisher: publisher)
+    }
 }

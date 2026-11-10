@@ -45,6 +45,10 @@ final class RouteResolver: Router {
     /// A place's page from a link (#985) — built by Maps, which owns the
     /// atlas and the flags; nil for a place it cannot name.
     private let makePlacePage: (PlaceLink) -> UIViewController?
+    /// The Text Post screen with a showcase's card attached (#2216) —
+    /// Upload's composer over Feed's screen, which Chat, the route's origin,
+    /// can reach neither of. Nil: the route is dropped.
+    private let makeShowcaseComposer: (PostEmbed) -> UIViewController?
     private let logger = Logger(subsystem: "cn.wynn.core-platform-ios", category: "navigation")
     /// The profile the router pushed last — what turns a second tap on the
     /// same author into nothing while that profile is the top screen, or
@@ -59,8 +63,10 @@ final class RouteResolver: Router {
         chatFeature: @escaping () -> any ChatFeatureBuilding,
         attachBalance: @escaping (UIViewController) -> Void,
         lookupProfile: @escaping ProfileLookingUp = { _ in .unavailable },
-        makePlacePage: @escaping (PlaceLink) -> UIViewController? = { _ in nil }
+        makePlacePage: @escaping (PlaceLink) -> UIViewController? = { _ in nil },
+        makeShowcaseComposer: @escaping (PostEmbed) -> UIViewController? = { _ in nil }
     ) {
+        self.makeShowcaseComposer = makeShowcaseComposer
         self.lookupProfile = lookupProfile
         self.makePlacePage = makePlacePage
         self.searchFeature = searchFeature
@@ -367,6 +373,16 @@ final class RouteResolver: Router {
             )
             push(thread, using: navigator)
 
+        case .composeShowcase(let embed):
+            // "Share as a Post" (#2216): PRESENTED, as the "+" menu's Text
+            // Post is — making a post belongs to no stack — over whatever is
+            // on top, once it is at rest (the creation sheet closing, the
+            // channel's thread landing).
+            guard let composer = makeShowcaseComposer(embed) else {
+                logger.debug("No showcase composer; dropping the route")
+                return
+            }
+            presentWhenAtRest(composer, using: navigator)
         }
     }
 }
@@ -417,6 +433,40 @@ extension RouteResolver {
         presenter.present(card, animated: true)
     }
 
+    /// Presents `screen` over the top of the active presentation chain, once
+    /// nothing is moving: a presentation asked for during a push or a
+    /// dismissal is dropped by UIKit, and the showcase's route follows the
+    /// creation sheet's close and the thread's push (#2216).
+    private func presentWhenAtRest(_ screen: UIViewController, using navigator: AppNavigating, attempts: Int = 0) {
+        guard let navigation = navigator.activeNavigationController else { return }
+        // A push or a pop on the stack: once it lands.
+        guard navigation.transitionCoordinator == nil else {
+            navigation.whenAtRest { [weak self, weak navigator] in
+                guard let self, let navigator else { return }
+                presentWhenAtRest(screen, using: navigator, attempts: attempts)
+            }
+            return
+        }
+        var presenter: UIViewController = navigation
+        while let presented = presenter.presentedViewController, !presented.isBeingDismissed {
+            presenter = presented
+        }
+        // A sheet still closing above: asked again shortly, a bounded number
+        // of times — a presentation that never settles drops the route.
+        guard presenter.presentedViewController == nil else {
+            guard attempts < 20 else {
+                logger.info("route .composeShowcase: the presentation never settled")
+                return
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self, weak navigator] in
+                guard let self, let navigator else { return }
+                presentWhenAtRest(screen, using: navigator, attempts: attempts + 1)
+            }
+            return
+        }
+        presenter.present(screen, animated: true)
+    }
+
     /// The screen a route would push, for a caller that pushes it itself —
     /// a swipe's interactive push (#1525). A profile only, for now: what a
     /// leftward swipe hangs on the feed and the conversation. Profile routes
@@ -458,6 +508,9 @@ private extension AppRoute {
         // Linking a family account needs one.
         case .supervisionInvite, .supervision:
             .supervision
+        // Posting needs an account, as the "+" menu's does.
+        case .composeShowcase:
+            .create
         default:
             nil
         }

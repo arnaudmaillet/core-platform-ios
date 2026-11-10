@@ -480,6 +480,7 @@ public final class PostDetailViewModel {
         setComposing(true)
         let commentsProvider = commentsProvider
         let shown = shownIdentity?.author
+        let showcase = draftShowcase
         Task { [weak self] in
             // The face on screen; asked for only when none has been shown yet.
             // And NEVER nil: an author-less publish goes out as the account's
@@ -495,7 +496,14 @@ public final class PostDetailViewModel {
                 return
             }
             do {
-                let entry = try await draft.publish(body, author)
+                let entry: FeedEntry
+                // A showcase's words go with its card and its place (#2216);
+                // with the card removed, they are a plain text post.
+                if let showcase, let publishShowcase = draft.publishShowcase {
+                    entry = try await publishShowcase(body, showcase.embed, showcase.place, author)
+                } else {
+                    entry = try await draft.publish(body, author)
+                }
                 self?.adoptPublished(entry)
                 self?.setComposing(false)
             } catch {
@@ -508,6 +516,15 @@ public final class PostDetailViewModel {
 
     /// Whether the draft's first message can be a voice (#2209).
     var acceptsVoice: Bool { draft?.publishVoice != nil }
+
+    /// Whether the draft can publish a showcase (#2216): a card to attach.
+    var acceptsShowcase: Bool { draft?.publishShowcase != nil }
+
+    /// The card and the place the draft's first message is published with
+    /// (#2216) — set by the Text Post screen opened from a channel's "Share
+    /// as a Post", cleared when the author removes the card. Nil: a plain
+    /// text post. Ignored by a draft that publishes no embed.
+    var draftShowcase: DraftShowcase?
 
     /// A voice post's first message (#2209): the take, with `text` (possibly
     /// empty) under it, published as the post. A failure gives the take back

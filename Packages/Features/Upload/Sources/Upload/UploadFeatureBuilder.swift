@@ -1,3 +1,4 @@
+import CoreModels
 import FeedInterface
 import MediaPlayback
 import UIKit
@@ -207,6 +208,15 @@ public struct UploadFeatureBuilder {
     /// "Text Post" — a post with no media, written on its own page.
     public func makeTextPostViewController() -> UIViewController {
         textPostScreens().makeTextPostScreen(publisher: ComposerTextPostPublisher(composer: composer))
+    }
+
+    /// "Share as a Post" on a channel (#2216): the same Text Post screen,
+    /// opened with the channel's card attached, publishing through the same
+    /// pipeline — the card and an optional place ride the create request.
+    public func makeShowcaseComposer(attaching embed: PostEmbed) -> UIViewController {
+        textPostScreens().makeTextPostScreen(
+            publisher: ComposerTextPostPublisher(composer: composer), attaching: embed
+        )
     }
 
     private static func pendingMessage(for chosen: [MediaLibraryItem]) -> String {

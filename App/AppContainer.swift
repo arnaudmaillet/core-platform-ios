@@ -1918,7 +1918,10 @@ final class AppContainer {
         // code and a `core-platform.click/s/<token>` link (#412).
         lookupProfile: { [weak self] reference in await self?.profileID(for: reference) ?? .unavailable },
         // A shared place link (#985).
-        makePlacePage: { [unowned self] link in MapsFeatureBuilder.placePage(for: link, feed: self.feedFeature) }
+        makePlacePage: { [unowned self] link in MapsFeatureBuilder.placePage(for: link, feed: self.feedFeature) },
+        // A channel's "Share as a Post" (#2216): the Text Post screen with
+        // its card, publishing through the one pipeline.
+        makeShowcaseComposer: { [unowned self] embed in self.uploadFeature.makeShowcaseComposer(attaching: embed) }
     )
 
     var router: any Router { routeResolver }

@@ -1671,6 +1671,12 @@ final class CommentsInputBar: UIView {
     /// stake bubble floats in, and which rides the keyboard with the row).
     var inputRowTopAnchor: NSLayoutYAxisAnchor { field.topAnchor }
 
+    /// The stake station's top — the heart, or the Text Post page's globe,
+    /// floating over the input row's trailing end while the keyboard is
+    /// down. For a host that stacks something above the row and must clear
+    /// it too (a showcase's card, #2216). Valid while the station shows.
+    var stakeStationTopAnchor: NSLayoutYAxisAnchor { boostButton.topAnchor }
+
     /// The view whose top is `inputRowTopAnchor`: what a toast stands on over
     /// the composer (`Feedback`'s `above:`, #729).
     var inputRowView: UIView { field }

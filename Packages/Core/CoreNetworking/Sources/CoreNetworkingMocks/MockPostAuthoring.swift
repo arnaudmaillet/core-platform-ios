@@ -18,6 +18,13 @@ public final class MockPostStore: @unchecked Sendable {
         var published: Bool
         /// The caption's voice (#2206), from the create request.
         var voice: PostVoice?
+        /// A showcase's embed (#2216), from the create request: the
+        /// conversation it points to, re-read for the viewer at every read
+        /// (`MockSocialServices.setEmbedHydration`).
+        var embed: PostEmbed? = nil
+        /// Where the author placed the post (#2216, `location` on the create
+        /// request): served back on the post, and its pin on the map.
+        var location: (latitude: Double, longitude: Double)? = nil
     }
 
     /// The viewer's own profile, so hydration of their authored posts resolves.
@@ -80,7 +87,8 @@ public final class MockPostStore: @unchecked Sendable {
     /// in flight has no window here: a mock call is answered whole.)
     func create(
         profileID: String, caption: String, media: (url: String, width: Int, height: Int)?,
-        voice: PostVoice? = nil, idempotencyKey: String = ""
+        voice: PostVoice? = nil, embed: PostEmbed? = nil, location: (latitude: Double, longitude: Double)? = nil,
+        idempotencyKey: String = ""
     ) -> String {
         lock.withLock {
             let nowMS = Int64(Date().timeIntervalSince1970 * 1000)
@@ -91,7 +99,8 @@ public final class MockPostStore: @unchecked Sendable {
             let postID = "post-authored-\(UUID().uuidString.prefix(8))"
             drafts[postID] = DraftRecord(
                 postID: postID, profileID: profileID, caption: caption,
-                media: media, createdAtMS: nowMS, published: false, voice: voice
+                media: media, createdAtMS: nowMS, published: false, voice: voice,
+                embed: embed, location: location
             )
             if !idempotencyKey.isEmpty { keyed[scope] = (postID, nowMS) }
             return postID
@@ -172,6 +181,10 @@ public final class MockPostAuthoringService: @unchecked Sendable {
             profileID: request.profileID, caption: request.caption, media: media,
             // A voice post keeps its voice (#2206): a text post, no attachment.
             voice: PostVoiceWire.voice(in: request),
+            // A showcase keeps its embed (#2216), never as an attachment, and
+            // the place its author gave it, if any.
+            embed: PostEmbedWire.embed(in: request),
+            location: request.hasLocation ? (request.location.lat, request.location.lng) : nil,
             idempotencyKey: request.idempotencyKey
         )
 

@@ -52,6 +52,9 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
     /// off, or a repository with no channels — and Messages has none of it,
     /// as it was.
     private let channels: (any GroupChatServicing)?
+    /// "Share as a Post" on a channel's creation and info screens (#2216):
+    /// with the channels (`-channels`), which draw showcases.
+    private let sharesShowcases: Bool
     /// What this session did to groups that the server doesn't say yet.
     private let groupNotes = GroupSessionNotes()
 
@@ -74,6 +77,7 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
     ) {
         groups = showsGroups ? repository as? any GroupChatServicing : nil
         channels = showsChannels ? repository as? any GroupChatServicing : nil
+        sharesShowcases = showsChannels
         self.threadScreens = threadScreens
         self.relations = relations
         self.mediaPicker = mediaPicker
@@ -275,20 +279,32 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
     /// not muted (#2230): they are the one posting.
     func makeChannelCreationSheet(landing: ChannelLanding) -> UINavigationController? {
         guard let channels else { return nil }
-        let creation = ChannelCreationViewModel(service: channels)
+        let creation = ChannelCreationViewModel(service: channels, sharesShowcases: sharesShowcases)
         let screen = ChannelCreationViewController(viewModel: creation)
         let sheet = UINavigationController(rootViewController: screen)
         screen.onCancel = { [weak sheet] in _ = sheet?.closePresentation() }
-        creation.onCreated = { [weak sheet, catalog, groupNotes, router] id in
+        // Closes the sheet, then routes: a route fired under a sheet on its
+        // way out would land behind it.
+        let leave: @MainActor ([AppRoute]) -> Void = { [weak sheet, router] routes in
+            guard let sheet else {
+                routes.forEach { router?.route(to: $0) }
+                return
+            }
+            _ = sheet.closePresentation { routes.forEach { router?.route(to: $0) } }
+        }
+        creation.onCreated = { [catalog, groupNotes, sharesShowcases] id in
             groupNotes.created[id] = Date()
             // Chats, behind the thread, lists it.
             catalog.refresh()
-            let routes = Self.landingRoutes(for: id, landing: landing)
-            if let sheet {
-                _ = sheet.closePresentation { for route in routes { router?.route(to: route) } }
-            } else {
-                for route in routes { router?.route(to: route) }
-            }
+            // Without the showcases, straight into the thread, as before;
+            // with them, the last step's buttons choose (#2216).
+            if !sharesShowcases { leave(Self.landingRoutes(for: id, landing: landing)) }
+        }
+        screen.onOpen = { id in leave(Self.landingRoutes(for: id, landing: landing)) }
+        // "Share as a Post" lands in the thread, then opens the Text Post
+        // screen over it with the channel's card (#2216).
+        screen.onShareAsPost = { id, embed in
+            leave(Self.landingRoutes(for: id, landing: landing) + [.composeShowcase(embed)])
         }
         return sheet
     }
@@ -326,7 +342,8 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         let model = ChannelInfoViewModel(
             conversationID: id, service: channels,
             isMuted: { [catalog] in catalog.isMuted(id) },
-            setMuted: { [catalog] muted, done in catalog.setMute(id, muted: muted, until: nil, completion: done) }
+            setMuted: { [catalog] muted, done in catalog.setMute(id, muted: muted, until: nil, completion: done) },
+            sharesShowcases: sharesShowcases
         )
         model.onChange = { [catalog] in
             onChange()
@@ -336,6 +353,9 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         screen.onOpenProfile = { [router] profileID, name in
             router?.route(to: .profile(profileID, stub: ProfileIdentityStub(handle: nil, displayName: name)))
         }
+        // "Share as a Post" (#2216): the Text Post screen over the info
+        // screen, the channel's card attached.
+        screen.onShareAsPost = { [router] embed in router?.route(to: .composeShowcase(embed)) }
         screen.onOpenRequests = { [self, weak model] presenter, changed in
             let name = model?.state.name ?? ""
             let run = RunChannel(id: id, name: name, photoURL: model?.state.photoURL)

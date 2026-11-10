@@ -44,6 +44,9 @@ final class ChannelInfoViewController: UIViewController {
     var onOpenRequests: ((_ presenter: UIViewController, _ changed: @escaping @MainActor () -> Void) -> Void)?
     /// The viewer left: the host takes them back.
     var onLeft: (() -> Void)?
+    /// "Share as a Post" (#2216): the host opens the Text Post screen with
+    /// the channel's card (`AppRoute.composeShowcase`).
+    var onShareAsPost: ((PostEmbed) -> Void)?
 
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
@@ -138,8 +141,8 @@ final class ChannelInfoViewController: UIViewController {
         cell.accessories = []
         switch item {
         case .shareAsPost:
-            content.text = "Share as a Post"
-            content.image = UIImage(systemName: "square.and.pencil")
+            content.text = ChannelShowcase.shareTitle
+            content.image = UIImage(systemName: ChannelShowcase.shareSymbol)
             content.textProperties.color = .tintColor
         case .invite:
             content.text = "Invite People"
@@ -231,9 +234,9 @@ final class ChannelInfoViewController: UIViewController {
         snapshot.appendSections([.channel, .actions])
         snapshot.appendItems([.identity], toSection: .channel)
         var actions: [Item] = []
-        // TODO(#2216): "Share as a Post" publishes the channel's showcase — a
-        // text post with the channel's embed. Here it only says so.
-        if next.canEdit { actions += [.shareAsPost] }
+        // "Share as a Post" (#2216): owner and admins of a public or
+        // on-request channel — a private one can't be shown.
+        if next.canShareAsPost { actions += [.shareAsPost] }
         actions += [.invite]
         if next.canEdit { actions += [.visibility, .requests] }
         if next.isIn { actions += [.mute] }
@@ -382,8 +385,9 @@ extension ChannelInfoViewController: UICollectionViewDelegate {
             guard let row = (state.admins + state.subscribers).first(where: { $0.id == id }), !row.isViewer else { return }
             onOpenProfile?(id, row.name)
         case .shareAsPost:
-            // TODO(#2216): publish the channel's showcase post.
-            presentNotice("Coming soon", "Sharing a channel as a post arrives with channels in the feed and on the map.")
+            // The Text Post screen, the channel's card attached (#2216).
+            guard let embed = viewModel.showcaseEmbed else { return }
+            onShareAsPost?(embed)
         case .invite:
             presentInvite(from: source)
         case .requests:
@@ -412,6 +416,18 @@ extension ChannelInfoViewController: UICollectionViewDelegate {
         })
     }
 }
+
+#if DEBUG
+extension ChannelInfoViewController {
+    /// Whether the list offers "Share as a Post" now (#2216).
+    var debugOffersShareAsPost: Bool { dataSource?.snapshot().itemIdentifiers.contains(.shareAsPost) == true }
+    /// A tap on "Share as a Post", as the row's selection does.
+    func debugShareAsPost() {
+        guard let embed = viewModel.showcaseEmbed else { return }
+        onShareAsPost?(embed)
+    }
+}
+#endif
 
 // MARK: - How it is left (#1144)
 
