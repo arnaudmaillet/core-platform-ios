@@ -98,11 +98,13 @@ struct SnapPageScrimTests {
         #expect(scrimTop(chrome) == before)
     }
 
-    /// A taller caption block takes the scrim up with it.
-    @Test func aLongerCaptionMovesIt() {
+    /// ⚠️ A LONGER CAPTION NO LONGER MOVES IT (#2252): the caption takes one
+    /// seat, two lines tall, on every post — so its top, and the scrim led
+    /// from it, stand where they stood, whatever the words.
+    @Test func aLongerCaptionLeavesItWhereItIs() {
         let short = makeChrome(caption: "Pier.")
         let long = makeChrome(caption: String(repeating: "Golden hour at the pier, the light going amber. ", count: 4))
-        #expect(scrimTop(long) < scrimTop(short))
+        #expect(abs(scrimTop(long) - scrimTop(short)) < 0.5)
         let caption = frame(of: long.debugCaptionLabel, in: long)
         #expect(abs(scrimTop(long) - (caption.minY - SnapChromeView.scrimLead)) < 0.5)
     }
