@@ -17,7 +17,12 @@ import UIKit
 /// Which channels a profile OWNS — not the ones it admins, and one handed
 /// over moving to its new owner — is the server's answer, pinned on the
 /// mock in Chat's `ProfileChannelsTests`.
+/// Serialized: a channel's standing is remembered and announced app-wide
+/// (`ChannelEmbedLocalState`, the card's notification), so two tests
+/// running side by side on one channel turned each other's rows (seen
+/// running the suite).
 @MainActor
+@Suite(.serialized)
 struct ProfileChannelsTests {
     // MARK: - Fakes
 
@@ -330,13 +335,13 @@ struct ProfileChannelsTests {
         let actions = Actions()
         let announcements = Announcements()
         let model = await loaded(
-            model(Provider([owner: [channel("harbour")]]), actions: actions, announcements: announcements), owner: owner
+            model(Provider([owner: [channel("harbour-join")]]), actions: actions, announcements: announcements), owner: owner
         )
-        let id = ConversationID("harbour")
+        let id = ConversationID("harbour-join")
         model.performAction(on: id)
         #expect(model.pending.contains(id), "the button doesn't load")
         await settle { !model.pending.contains(id) }
-        #expect(actions.calls == ["join harbour"])
+        #expect(actions.calls == ["join harbour-join"])
         #expect(model.action(for: id) == .open)
         #expect(model.channel(id)?.channel.subscriberCount == 11)
         #expect(announcements.changes.count == 1)
