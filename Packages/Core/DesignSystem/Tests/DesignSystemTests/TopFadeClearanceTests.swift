@@ -39,8 +39,10 @@ struct TopFadeClearanceTests {
         list.dataSource = source
         // On screen: the clearance is measured only there.
         let window = UIWindow(frame: list.frame)
+        // Hidden: attached is enough (`window` is set), and a visible
+        // window kept for the suite's life would take the key window from
+        // the suites that present (ToastFullMessageTests failed).
         window.addSubview(list)
-        window.isHidden = false
         Self.windows.append(window)
         return (list, source)
     }
@@ -127,7 +129,6 @@ struct TopFadeClearanceTests {
         scroll.contentSize = CGSize(width: 402, height: 912)
         let window = UIWindow(frame: scroll.frame)
         window.addSubview(scroll)
-        window.isHidden = false
         Self.windows.append(window)
         scroll.applyTopEdge(for: .titled)
         #expect(scroll.topFadeClearance == Self.fade - 12)
@@ -157,7 +158,6 @@ struct HorizontalPagerTopFadeClearanceTests {
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
         view.frame = window.bounds
         window.addSubview(view)
-        window.isHidden = false
         view.layoutIfNeeded()
         Self.windows.append(window)
     }
