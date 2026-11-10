@@ -109,8 +109,15 @@ struct ChannelsTests {
         #expect(ChannelsViewModel.items(channels: ids, requestCount: 3) == [.joinRequests, .create, .channel(daily), .channel(botanic)])
         #expect(ChannelsViewModel.items(channels: ids, requestCount: 0) == [.create, .channel(daily), .channel(botanic)])
         #expect(ChannelsViewModel.items(channels: [], requestCount: 2).isEmpty, "no channel: the empty state")
-        #expect(ChannelCopy.joinRequests(3) == "3 requests to join")
-        #expect(ChannelCopy.joinRequests(1) == "1 request to join")
+    }
+
+    /// The row says which channel the requests are for (the owner,
+    /// 2026-11-10: "3 requests to join" — to join what?).
+    @Test func theRequestsRowNamesItsChannel() {
+        #expect(ChannelCopy.joinRequests(3, channels: ["Studio drops"]) == "3 requests to join Studio drops")
+        #expect(ChannelCopy.joinRequests(1, channels: ["Studio drops"]) == "1 request to join Studio drops")
+        #expect(ChannelCopy.joinRequests(5, channels: ["Studio drops", "Daily light"]) == "5 requests to join 2 channels")
+        #expect(ChannelCopy.joinRequests(2, channels: []) == "2 requests to join", "no name known: the count alone")
     }
 
     @Test func theTabCountsTheRequestsOfTheChannelsTheViewerRuns() async throws {
@@ -121,6 +128,7 @@ struct ChannelsTests {
         catalog.reload()
         await settle { model.requestCount == 3 }
         #expect(model.requestCount == 3, "ch-studio-requests' three")
+        #expect(model.requestingChannelNames == ["Studio drops"], "only the channel with requests is named")
         #expect(Set(model.runChannels.map(\.id)) == [daily, studio])
         guard case .content(let items) = model.phase else { Issue.record("\(model.phase)"); return }
         #expect(items.first == .joinRequests)

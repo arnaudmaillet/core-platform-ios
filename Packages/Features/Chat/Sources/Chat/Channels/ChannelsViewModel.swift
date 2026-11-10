@@ -45,7 +45,14 @@ final class ChannelsViewModel {
     /// The rows, by id, as the list draws them.
     private(set) var rows: [ConversationID: ConversationDisplayModel] = [:]
     /// Pending requests across the channels the viewer runs.
-    private(set) var requestCount = 0
+    var requestCount: Int { requestCounts.values.reduce(0, +) }
+    /// Pending requests per channel the viewer runs, as last counted.
+    private(set) var requestCounts: [ConversationID: Int] = [:]
+    /// The names of the channels with a request waiting, in the list's
+    /// order — what the requests row names (#2215 follow-up).
+    var requestingChannelNames: [String] {
+        runChannels.filter { (requestCounts[$0.id] ?? 0) > 0 }.map(\.name)
+    }
     /// The channels the viewer runs, in the list's order.
     private(set) var runChannels: [RunChannel] = []
     private(set) var hasMore = false
@@ -140,27 +147,31 @@ final class ChannelsViewModel {
     func refreshRequests() {
         countLoad?.cancel()
         guard let service, !countedFor.isEmpty else {
-            requestCount = 0
+            requestCounts = [:]
             render()
             return
         }
         let ids = countedFor
         countLoad = Task { [weak self] in
-            let total = await Self.countRequests(on: ids, service: service)
+            let counts = await Self.countRequests(on: ids, service: service)
             guard let self, !Task.isCancelled else { return }
-            self.requestCount = total
+            self.requestCounts = counts
             self.render()
         }
     }
 
-    /// The pending requests on `ids`, asked concurrently; a channel whose
-    /// answer failed counts none.
-    nonisolated private static func countRequests(on ids: [ConversationID], service: any ConversationManaging) async -> Int {
-        await withTaskGroup(of: Int.self) { group in
+    /// The pending requests on each of `ids`, asked concurrently; a channel
+    /// whose answer failed counts none.
+    nonisolated private static func countRequests(
+        on ids: [ConversationID], service: any ConversationManaging
+    ) async -> [ConversationID: Int] {
+        await withTaskGroup(of: (ConversationID, Int).self) { group in
             for id in ids {
-                group.addTask { (try? await service.joinRequests(to: id).count) ?? 0 }
+                group.addTask { (id, (try? await service.joinRequests(to: id).count) ?? 0) }
             }
-            return await group.reduce(0, +)
+            var counts: [ConversationID: Int] = [:]
+            for await (id, count) in group { counts[id] = count }
+            return counts
         }
     }
 

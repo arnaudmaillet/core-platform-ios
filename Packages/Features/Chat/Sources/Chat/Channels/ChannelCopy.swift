@@ -11,9 +11,18 @@ enum ChannelCopy {
         return clamped == 1 ? "1 subscriber" : "\(CountFormatter.compactString(for: Int64(clamped))) subscribers"
     }
 
-    /// The pending requests row at the top of the Channels tab.
-    static func joinRequests(_ count: Int) -> String {
-        count == 1 ? "1 request to join" : "\(count) requests to join"
+    /// The pending requests row at the top of the Channels tab, saying
+    /// WHICH channel they are for (the owner, 2026-11-10: "3 requests to
+    /// join" left them asking "to join what?"): "3 requests to join Studio
+    /// drops" for one channel, "5 requests to join 2 channels" for several.
+    /// `channels` are the names of the channels with a request waiting.
+    static func joinRequests(_ count: Int, channels: [String]) -> String {
+        let requests = count == 1 ? "1 request to join" : "\(count) requests to join"
+        switch channels.count {
+        case 0: return requests
+        case 1: return "\(requests) \(channels[0])"
+        default: return "\(requests) \(channels.count) channels"
+        }
     }
 
     /// A visibility's name, on the info screen and the creation step.
