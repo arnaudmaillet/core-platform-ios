@@ -1079,6 +1079,56 @@ final class SnapMediaPageBarView: UIView {
         }
     }
 
+    // MARK: - A drag from the caption (#2269)
+
+    /// Whether a slide that starts elsewhere — the caption above the strip —
+    /// can drive it: only where there is a strip to drive.
+    var acceptsRelativeDrag: Bool { hasStrip && !isHidden && alpha > 0.01 }
+
+    /// Where the caption's slide starts on the strip.
+    private var relativeDragOrigin: CGFloat = 0
+
+    /// A horizontal slide that began on the caption (#2269, the owner
+    /// 2026-11-10: the 2 pt strip is hard to hit), fed through the strip's
+    /// OWN scrub — one path, so the seek, the browse, the haptics, the hold
+    /// after release and the cancel are the strip's.
+    ///
+    /// ⚠️ ALWAYS RELATIVE, AND NEVER A TAP. The slide starts where the strip
+    /// already is — the playhead's x on a clip's bar, the current page's slot
+    /// on a photograph — so nothing jumps under the thumb, and the scrub
+    /// preview stands at the playhead, not under a finger that is on the
+    /// caption. It only begins once it has travelled, so a release never
+    /// selects or seeks: a tap on the caption opens the comments.
+    ///
+    /// - Parameter travel: the finger's horizontal travel since it went down.
+    func relativeDrag(_ state: UIGestureRecognizer.State, travel: CGFloat) {
+        switch state {
+        case .began:
+            guard acceptsRelativeDrag else { return }
+            relativeDragOrigin = relativeDragAnchorX
+            handleScrub(.began, atX: relativeDragOrigin)
+            // It has travelled already: the pan began past its slop.
+            travelled = true
+            handleScrub(.changed, atX: relativeDragOrigin + travel)
+        case .changed:
+            handleScrub(.changed, atX: relativeDragOrigin + travel)
+        case .ended, .cancelled, .failed:
+            handleScrub(state, atX: relativeDragOrigin + travel)
+        default:
+            break
+        }
+    }
+
+    /// The x the strip's state stands at: the playhead along a clip's bar,
+    /// or the middle of the current page's browsing slot.
+    private var relativeDragAnchorX: CGFloat {
+        let page = Int(position.rounded())
+        if isScrubbingAClip, let frame = segmentFrame(page), let playhead = drawnPlayhead {
+            return frame.minX + frame.width * CGFloat(min(max(playhead, 0), 1))
+        }
+        return browseSlotCenter(page)
+    }
+
     // MARK: - Browsing (#1734)
 
     /// Whether the finger is sliding through the pages.

@@ -1812,9 +1812,15 @@ final class SnapFeedViewController: UIViewController {
                 //
                 // `require(toFail:)` and not a delegate: a delegate would let
                 // both run and the dismissal would still move the screen.
+                // The same for the caption's slide (#2269): on a post with a
+                // strip, a horizontal slide on the caption is the strip's.
+                // Without one the slide never begins, so it fails at once
+                // and the screen's pans go on as before.
                 for pan in self.view.gestureRecognizers ?? []
-                where pan is UIPanGestureRecognizer && pan !== cell.mediaScrubGesture {
+                where pan is UIPanGestureRecognizer && pan !== cell.mediaScrubGesture
+                    && pan !== cell.captionSlideGesture {
                     pan.require(toFail: cell.mediaScrubGesture)
+                    pan.require(toFail: cell.captionSlideGesture)
                 }
                 // The post's interaction zone is bounded by the SCREEN's
                 // header/footer thresholds (nav bar bottom, toolbar top),
