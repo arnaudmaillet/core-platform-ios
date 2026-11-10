@@ -390,14 +390,74 @@ final class VoiceComposer {
 
     /// Slid away, released past 55 %, or 🗑: the take goes, with the bin.
     private func cancel() {
+        discard()
+        Haptics.play(.warning)
+    }
+
+    /// The take and its files go, with no feedback: the bar is idle again.
+    private func discard() {
         stopClock()
         VoicePlayer.shared.stop()
         recorder.cancel()
         recorder.reset()
         for part in [draft, earlier].compactMap({ $0 }) { try? FileManager.default.removeItem(at: part.fileURL) }
-        Haptics.play(.warning)
         // Slid away: the bubble goes straight back to its place and face.
         reset()
+    }
+
+    // MARK: - A post's draft (#2209)
+
+    /// Whether the bar holds a take a draft could keep: locked or paused.
+    var hasTake: Bool {
+        switch phase {
+        case .locked, .paused: true
+        case .idle, .holding: false
+        }
+    }
+
+    /// The closed take on the bar, when it is one: a take put back by
+    /// `restore(_:)` keeps its file until something is recorded on.
+    var closedTakeURL: URL? { draft?.fileURL }
+
+    /// The take on the bar, closed, for a post's draft to keep — and the bar
+    /// idle again. Nil when there is no take, or one under a second. A take
+    /// still under the finger goes, as it does on leaving.
+    func takeForDraft(_ done: @escaping (VoiceDraft?) -> Void) {
+        switch phase {
+        case .locked, .paused:
+            guard !isJoining else { return done(nil) }
+            VoicePlayer.shared.stop()
+            stopClock()
+            closeTake { [weak self] outcome in
+                // The file is the draft's now: nothing here removes it.
+                self?.draft = nil
+                self?.earlier = nil
+                self?.recorder.reset()
+                self?.reset()
+                if case .draft(let kept) = outcome { done(kept) } else { done(nil) }
+            }
+        case .holding:
+            discard()
+            done(nil)
+        case .idle:
+            done(nil)
+        }
+    }
+
+    /// A post's draft reopened with its voice: the take on the paused bar,
+    /// as a conversation's kept take comes back (`attach`). Whatever was on
+    /// the bar goes.
+    func restore(_ take: VoiceDraft) {
+        guard bar != nil else { return }
+        if phase != .idle { discard() }
+        draft = take
+        showPaused(resumable: false)
+    }
+
+    /// The take goes without a word: another draft takes the composer.
+    func clearTake() {
+        guard phase != .idle else { return }
+        discard()
     }
 
     /// An interruption or the limit: the take stops into the paused bar —

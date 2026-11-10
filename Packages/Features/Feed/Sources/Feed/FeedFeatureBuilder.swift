@@ -1771,10 +1771,12 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     }
 
     /// The same, over `bookmarks` — the app's one pile outside tests.
-    /// `showsEmbeds`: whether a card can be attached (`-channels`).
+    /// `showsEmbeds`: whether a card can be attached (`-channels`);
+    /// `recordsVoice`: whether the first message can be a voice
+    /// (`-voice-posts`).
     func makeTextPostScreen(
         publisher: any TextPostPublishing, bookmarks: PostBookmarkStore, attaching embed: PostEmbed? = nil,
-        showsEmbeds: Bool = PostEmbeds.areDrawn
+        showsEmbeds: Bool = PostEmbeds.areDrawn, recordsVoice: Bool = VoicePosts.areDrawn
     ) -> UIViewController {
         let repository = repository
         let commentsProvider = commentsProvider
@@ -1795,7 +1797,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         // A voice post (#2209): the same priming as a text post's; none
         // without `-voice-posts`.
         let publishVoice: (@Sendable (String, TextPostVoice, AuthorSummary?) async throws -> FeedEntry)?
-        if VoicePosts.areDrawn {
+        if recordsVoice {
             publishVoice = { text, voice, author in
                 let entry = try await publisher.publishTextPost(text, voice: voice, as: author)
                 await repository.remember(entry)

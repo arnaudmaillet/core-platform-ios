@@ -20,6 +20,15 @@ final class TextPostDraftsViewController: UIViewController {
         return formatter
     }()
 
+    /// "Saved 2 hours ago", and the voice's length when the draft has one
+    /// (#2209): "Voice 0:12 · Saved 2 hours ago".
+    static func secondLine(for draft: PostDraft, saved: Date, now: Date = Date()) -> String {
+        let age = "Saved " + ageFormatter.localizedString(for: saved, relativeTo: now)
+        guard let voice = draft.voice else { return age }
+        let seconds = Int(voice.duration.rounded())
+        return String(format: "Voice %d:%02d", seconds / 60, seconds % 60) + " \u{00B7} " + age
+    }
+
     init(store: PostDraftStore) {
         self.store = store
         super.init(nibName: nil, bundle: nil)
@@ -80,10 +89,10 @@ final class TextPostDraftsViewController: UIViewController {
         let row = UICollectionView.CellRegistration<UICollectionViewListCell, String> { cell, _, id in
             guard let draft = store.draft(id) else { return }
             var content = cell.defaultContentConfiguration()
-            content.text = draft.text
+            content.text = draft.text.isEmpty ? "Voice post" : draft.text
             content.textProperties.numberOfLines = 3
             let saved = Date(timeIntervalSince1970: TimeInterval(draft.updatedAtMS) / 1000)
-            content.secondaryText = "Saved " + Self.ageFormatter.localizedString(for: saved, relativeTo: Date())
+            content.secondaryText = Self.secondLine(for: draft, saved: saved)
             content.secondaryTextProperties.color = .secondaryLabel
             cell.contentConfiguration = content
             cell.accessories = [.disclosureIndicator()]

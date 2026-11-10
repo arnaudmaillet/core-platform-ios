@@ -121,7 +121,8 @@ struct TextPostComposePageTests {
         size: CGSize = CGSize(width: 390, height: 844),
         contentSize: UIContentSizeCategory = .large,
         entities: EntityStore? = nil,
-        bookmarks: PostBookmarkStore? = nil
+        bookmarks: PostBookmarkStore? = nil,
+        recordsVoice: Bool = false
     ) async throws -> Page {
         let posts = RememberingFeed()
         let comments = ViewerComments()
@@ -141,7 +142,7 @@ struct TextPostComposePageTests {
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             postDrafts: drafts,
             entities: entities
-        ).makeTextPostScreen(publisher: publisher, bookmarks: pile)
+        ).makeTextPostScreen(publisher: publisher, bookmarks: pile, recordsVoice: recordsVoice)
         let navigation = try #require(screen as? UINavigationController)
         #expect(navigation.modalPresentationStyle == .pageSheet, "a sheet, not a full screen")
         let composer = try #require(navigation.viewControllers.first as? TextPostComposerViewController)
@@ -526,6 +527,101 @@ struct TextPostComposePageTests {
         page.composer.saveDraftAndClose()
 
         #expect(page.drafts.drafts.map(\.text) == ["For later"])
+    }
+
+    // MARK: - A draft's voice (#2209)
+
+    /// A take of the test's own, in the temporary folder, as a recording leaves one.
+    private func take(_ seconds: TimeInterval = 4) throws -> PostDraftVoiceTake {
+        let url = FileManager.default.temporaryDirectory.appending(path: "draft-take-\(UUID().uuidString).m4a")
+        try Data([1, 2, 3]).write(to: url)
+        return PostDraftVoiceTake(fileURL: url, duration: seconds, waveform: [1, 5, 9])
+    }
+
+    /// A draft saved with a voice reopens on the paused bar, from a copy: the
+    /// draft's own file stays the store's.
+    @Test func aDraftWithAVoiceReopensOnThePausedBar() async throws {
+        let page = try await openPage(recordsVoice: true)
+        let voiceComposer = try #require(page.composer.voiceComposer, "-voice-posts on, the composer records")
+        let draft = try #require(page.drafts.save("Listen", voice: try take()))
+
+        page.composer.open(draft)
+
+        #expect(page.panel.composerText == "Listen")
+        #expect(voiceComposer.phase == .paused(resumable: false), "the voice did not come back")
+        let stored = try #require(draft.voice.map(page.drafts.voiceURL))
+        #expect(voiceComposer.closedTakeURL != stored, "the bar plays the store's own file")
+        #expect(!page.composer.hasUnsavedChanges, "unchanged from its saved draft")
+        #expect(page.navigation.isModalInPresentation == false)
+        defer { page.drafts.delete(draft.id) }
+    }
+
+    /// A take recorded and kept: saving the draft keeps the voice, file and all.
+    @Test func savingKeepsTheVoiceAndThrowingItAwayIsAChange() async throws {
+        let page = try await openPage(recordsVoice: true)
+        let voiceComposer = try #require(page.composer.voiceComposer)
+        let draft = try #require(page.drafts.save("", voice: try take(7)))
+        page.composer.open(draft)
+        #expect(voiceComposer.hasTake)
+        #expect(!page.composer.hasUnsavedChanges)
+
+        page.composer.saveDraftAndClose()
+
+        let saved = try #require(page.drafts.draft(draft.id))
+        let voice = try #require(saved.voice, "saving dropped the voice")
+        #expect(voice.duration == 7)
+        #expect(voice.waveform == [1, 5, 9])
+        #expect(FileManager.default.fileExists(atPath: page.drafts.voiceURL(voice).path))
+        #expect(!voiceComposer.hasTake, "the bar was not handed back")
+        page.drafts.delete(draft.id)
+        #expect(!FileManager.default.fileExists(atPath: page.drafts.voiceURL(voice).path), "a deleted draft left its voice")
+    }
+
+    /// Opening another draft keeps the voice on screen as a draft of its own.
+    @Test func openingAnotherDraftKeepsTheVoiceOnScreen() async throws {
+        let page = try await openPage(recordsVoice: true)
+        let voiceComposer = try #require(page.composer.voiceComposer)
+        let withVoice = try #require(page.drafts.save("First", voice: try take(3)))
+        let plain = try #require(page.drafts.save("Second"))
+        page.composer.open(withVoice)
+        page.panel.composerText = "First, edited"
+        #expect(page.composer.hasUnsavedChanges)
+
+        page.composer.open(plain)
+
+        #expect(page.panel.composerText == "Second")
+        #expect(!voiceComposer.hasTake, "the other draft has no voice")
+        let kept = try #require(page.drafts.draft(withVoice.id))
+        #expect(kept.text == "First, edited")
+        #expect(kept.voice?.duration == 3, "the voice on screen was lost")
+        page.drafts.delete(withVoice.id)
+    }
+
+    /// Without `-voice-posts` the composer has no bar to record on, and a
+    /// draft saved over keeps the voice it had.
+    @Test func withoutVoicePostsADraftKeepsItsVoice() async throws {
+        let page = try await openPage()
+        #expect(page.composer.voiceComposer == nil)
+        let draft = try #require(page.drafts.save("Words", voice: try take(5)))
+        page.composer.open(draft)
+        page.panel.composerText = "Words, more"
+
+        page.composer.saveDraftAndClose()
+
+        let saved = try #require(page.drafts.draft(draft.id))
+        #expect(saved.text == "Words, more")
+        #expect(saved.voice?.duration == 5)
+        page.drafts.delete(draft.id)
+    }
+
+    /// The list says a draft speaks, and for how long.
+    @Test func theDraftsListSaysAVoiceAndItsLength() {
+        let saved = Date(timeIntervalSince1970: 0)
+        let voice = PostDraft(text: "", updatedAtMS: 0, voice: .init(fileName: "x.m4a", duration: 72, waveform: []))
+        let line = TextPostDraftsViewController.secondLine(for: voice, saved: saved, now: saved)
+        #expect(line.hasPrefix("Voice 1:12 \u{00B7} Saved "), "\(line)")
+        let words = PostDraft(text: "Hi", updatedAtMS: 0)
+        #expect(TextPostDraftsViewController.secondLine(for: words, saved: saved, now: saved).hasPrefix("Saved "))
     }
 
     /// A draft opens in the composer, and publishing it removes it from the list.
