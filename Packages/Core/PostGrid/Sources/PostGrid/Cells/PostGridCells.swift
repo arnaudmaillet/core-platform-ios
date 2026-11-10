@@ -1835,6 +1835,9 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// A voice post's caption (#2208, behind `-voice-posts`): the shared
     /// voice component where the caption starts — full on a list card, compact
     /// on a shelf's fixed card — the caption's words under it on full size.
+    /// Pinned to the caption's insets, the neutral panel spans the card's
+    /// content width whatever the voice's length (#2241): a short voice no
+    /// longer leaves the card bare.
     private let voiceCaption = VoicePostCaptionView()
     /// The voice hangs off the band as the caption does; the caption then
     /// hangs off the voice.
