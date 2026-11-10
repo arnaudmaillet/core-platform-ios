@@ -215,11 +215,13 @@ extension ChannelCreationViewController {
 
     /// The channel exists: the form steps aside for its two ways on. No
     /// Cancel — there is nothing left to cancel; a swipe down leaves it on
-    /// the Channels tab, which lists it.
+    /// Chats, which lists it. The intro goes too (#2230): it says what a
+    /// channel is to someone about to make one, and this one exists.
     private func showCreated() {
         view.endEditing(true)
         createButton.setPhase(.content, animated: false)
-        for part in [nameField, descriptionField, visibilityControl, visibilityNote, errorLabel, createButton] as [UIView] {
+        let form: [UIView] = [introLabel, nameField, descriptionField, visibilityControl, visibilityNote, errorLabel, createButton]
+        for part in form {
             part.isHidden = true
         }
         createdTitle.text = "\(viewModel.draft.name) is ready"
