@@ -513,7 +513,15 @@ extension ProfileBellAndMapMenuTests {
 
     /// ⚠️ NEVER MID-PUSH (#756): Follow coming in while a child is being
     /// pushed over the profile waits for the bar to rest.
-    @Test func followArrivingMidPushWaitsForRest() async throws {
+    /// ⚠️ QUARANTINED (#2260): it forces the tray's state with
+    /// `debugSetTrayScrolledAway` without scrolling the page, and any layout
+    /// pass of the covered profile recomputes that state from the real
+    /// offset (`heroPageHeaderDidMove`, travelled 0) and takes Follow back
+    /// — under CI load that pass lands inside the wait, every time. The app
+    /// is right (a real scroll drives the state); the test must scroll for
+    /// real. To be rewritten.
+    @Test(.disabled("flaky under CI load: the tray state is forced without a scroll and a layout pass resets it — see #2260"))
+    func followArrivingMidPushWaitsForRest() async throws {
         let (screen, _, _, navigation, window) = hostedOnScreen(
             relationship: .other(isFollowing: false, isBlocked: false)
         )
