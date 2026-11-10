@@ -5,7 +5,7 @@ import UIKit
 
 /// The join requests list (#2215): who asked to join the channels the
 /// viewer runs, and when, each with Approve and Decline; the bar's menu
-/// answers them all. One section per channel when there are several.
+/// answers them all. One section per channel, each titled with its name.
 final class ChannelJoinRequestsViewController: UIViewController {
     private let viewModel: ChannelJoinRequestsViewModel
     private let imagePipeline: ImagePipeline?
@@ -77,8 +77,10 @@ final class ChannelJoinRequestsViewController: UIViewController {
     private func configureList() {
         let layout = UICollectionViewCompositionalLayout { [weak self] _, environment in
             var section = UICollectionLayoutListConfiguration(appearance: .insetGrouped)
-            // Channels named only when there are several.
-            section.headerMode = (self?.state.groups.count ?? 0) > 1 ? .supplementary : .none
+            // Every section names its channel, a lone one too (the owner,
+            // 2026-11-10): without it nothing on the screen said which
+            // channel the requests were for.
+            section.headerMode = (self?.state.groups.isEmpty ?? true) ? .none : .supplementary
             return NSCollectionLayoutSection.list(using: section, layoutEnvironment: environment)
         }
         collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)

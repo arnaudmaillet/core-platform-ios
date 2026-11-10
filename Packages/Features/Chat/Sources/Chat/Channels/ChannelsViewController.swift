@@ -117,7 +117,9 @@ final class ChannelsViewController: UIViewController {
             switch item {
             case .joinRequests:
                 row.configure(
-                    symbol: "person.crop.circle.badge.questionmark", title: ChannelCopy.joinRequests(self.viewModel.requestCount),
+                    symbol: "person.crop.circle.badge.questionmark", title: ChannelCopy.joinRequests(
+                        self.viewModel.requestCount, channels: self.viewModel.requestingChannelNames
+                    ),
                     message: "Approve or decline who asked to join", emphasised: true
                 )
             default:
