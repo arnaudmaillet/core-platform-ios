@@ -104,6 +104,12 @@ public final class PostEmbedView: UIView {
         super.init(frame: frame)
         build()
         isHidden = true
+        // Another card's answer (#2216, part 2): the same channel drawn
+        // elsewhere on screen — the post's tile beside its bubble, a card
+        // and its lift — shows it at once, not on its next redraw.
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(otherCardChanged(_:)), name: Self.channelStateDidChange, object: nil
+        )
     }
 
     public convenience init() { self.init(frame: .zero) }
@@ -153,6 +159,14 @@ public final class PostEmbedView: UIView {
     /// surface's action (#2216).
     public static func keepsTouch(_ touch: UITouch) -> Bool {
         ownsTouch(in: touch.view)
+    }
+
+    /// The same for a point already hit-tested — a host that decides from a
+    /// location, not a touch (a context menu's configuration, a view's
+    /// `hitTest`): whether `view`, what the point landed on, is a card's
+    /// action button.
+    public static func keepsTouch(on view: UIView?) -> Bool {
+        ownsTouch(in: view)
     }
 
     /// Whether a touch landing on `view` is a card's own: on its action
@@ -343,10 +357,43 @@ public final class PostEmbedView: UIView {
     }
 
     private func finish(_ channel: ChannelEmbed, with state: ChannelEmbed.ViewerState, generation: Int) {
+        // Every card on screen showing this channel follows, this one's
+        // host included through `onEmbedChange` below.
+        NotificationCenter.default.post(
+            name: Self.channelStateDidChange, object: self,
+            userInfo: [Self.conversationKey: channel.conversationID, Self.stateKey: state]
+        )
         // Reused for another channel meanwhile: the answer is remembered,
         // and drawn by whichever card shows it next.
         guard generation == actionGeneration, let size else { return }
         pendingAction = nil
+        let changed = channel.with(viewerState: state)
+        present(changed, size: size)
+        onEmbedChange?(.channel(changed))
+    }
+
+    // MARK: - The same channel elsewhere on screen (#2216, part 2)
+
+    /// Posted by the card whose tap changed a channel's standing; every
+    /// other card showing that channel draws the answer.
+    ///
+    /// `ChannelEmbedLocalState` covers a card drawn AFTER the tap (a
+    /// recycled cell, the page the tile opens); this covers one already on
+    /// screen — a map pin's mark under its bubble, a list card under its
+    /// lift. Deliberately not through `ChannelEmbedLocalState.applied`,
+    /// which forgets a change when it meets a read that already shows it.
+    static let channelStateDidChange = Notification.Name("PostEmbedView.channelStateDidChange")
+    private static let conversationKey = "conversationID"
+    private static let stateKey = "viewerState"
+
+    @objc private func otherCardChanged(_ note: Notification) {
+        guard note.object as? PostEmbedView !== self,
+              let id = note.userInfo?[Self.conversationKey] as? ConversationID,
+              let state = note.userInfo?[Self.stateKey] as? ChannelEmbed.ViewerState,
+              case .channel(let channel)? = embed, channel.conversationID == id,
+              channel.viewerState != state, let size else { return }
+        // Its own write in flight answers to no one now: the standing moved.
+        forgetPendingAction()
         let changed = channel.with(viewerState: state)
         present(changed, size: size)
         onEmbedChange?(.channel(changed))
@@ -501,6 +548,9 @@ extension PostEmbedView {
     public var debugActionButton: UIView { actionButton }
     /// Awaits the write a tap started.
     public func debugSettle() async { await pendingAction?.value }
+    /// A tap on the action button, as `primaryActionTriggered` makes it —
+    /// for a surface's own tests (#2216, part 2).
+    public func debugTapAction() { performAction() }
 }
 #endif
 
