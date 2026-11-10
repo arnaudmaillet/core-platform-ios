@@ -7,9 +7,9 @@ import VoiceKitUI
 @testable import Maps
 
 /// A voice post on the map (#2208): a voice pin is a text pin with the mic;
-/// the text bubble draws the full voice in the words' place, its taps its
-/// own, the rest of the bubble its marker's; and none of it with the switch
-/// off.
+/// the text bubble draws the voice — the compact neutral panel across its
+/// column (#2241) — in the words' place, its taps its own, the rest of the
+/// bubble its marker's; and none of it with the switch off.
 @MainActor
 struct MapVoicePostTests {
     private let voice = PostVoice(assetID: "voice-post-hike", url: URL(fileURLWithPath: "/tmp/hike.m4a"),
@@ -67,7 +67,7 @@ struct MapVoicePostTests {
         #expect(MapTextBubbleView.Content.of(post(caption: ""), showsVoice: false).voice == nil)
         let alone = bubble(caption: "")
         let shown = try #require(alone.debugVoice)
-        #expect(shown.voiceView?.size == .full)
+        #expect(shown.voiceView?.size == .compact, "the bubble's voice is compact (#2241's table)")
         #expect(alone.label.isHidden, "an empty line under a voice alone")
         #expect(shown.voiceView?.inks == MapTextBubbleView.voiceInks, "the voice didn't take the glass's ink")
 
@@ -75,6 +75,28 @@ struct MapVoicePostTests {
         let voiceFrame = try #require(worded.debugVoice).frame
         #expect(!worded.label.isHidden)
         #expect(worded.label.frame.minY >= voiceFrame.maxY, "the words aren't under the voice")
+    }
+
+    /// The panel takes the bubble's whole column whatever the voice's
+    /// length (#2241), its ground the glass's ink at the panel's opacity.
+    @Test func thePanelTakesTheColumn() throws {
+        let worded = bubble(caption: "From the ridge")
+        let caption = try #require(worded.debugVoice)
+        #expect(caption.frame.width == MapTextBubbleView.textWidth)
+        #expect(worded.debugColumnFrame.width == MapTextBubbleView.textWidth)
+        let player = try #require(caption.voiceView)
+        player.layoutIfNeeded()
+        #expect(abs(player.debugPanelFrame.width - MapTextBubbleView.textWidth) < 0.5, "\(player.debugPanelFrame)")
+        #expect(caption.frame.height >= VoiceView.panelHeight(for: .compact))
+
+        let light = UITraitCollection(userInterfaceStyle: .light)
+        let ground = try #require(player.debugPanelFill).resolvedColor(with: light)
+        let ink = UIColor.label.resolvedColor(with: light)
+        var groundWhite: CGFloat = 0, groundAlpha: CGFloat = 0, inkWhite: CGFloat = 0
+        ground.getWhite(&groundWhite, alpha: &groundAlpha)
+        ink.getWhite(&inkWhite, alpha: nil)
+        #expect(abs(groundWhite - inkWhite) < 0.01, "the panel isn't the glass's ink")
+        #expect(abs(groundAlpha - VoiceView.Inks.panelOpacityLight) < 0.01)
     }
 
     @Test func onlyTheVoiceTakesATouch() throws {
