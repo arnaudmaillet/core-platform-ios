@@ -55,6 +55,21 @@ struct HeroPagePagerTests {
         #expect(pages[0].verticalOffset == 160, "a docked arrival sat above its first row")
     }
 
+    /// The bar's blur (#2268): the pager spans the bar, so its own edge
+    /// effect is the one drawn there — clear by default, UIKit's soft edge
+    /// once the screen says its bar is titled, clear again after.
+    @Test func thePagersTopEdgeIsClearUntilAskedSoft() throws {
+        let (pager, _) = makePager()
+        let paging = try #require(pager.subviews.compactMap { $0 as? UIScrollView }.first)
+        #expect(!pager.hasSoftTopEdge)
+        #expect(paging.topEdgeEffect.isHidden)
+        pager.setSoftTopEdge(true)
+        #expect(pager.hasSoftTopEdge)
+        #expect(!paging.topEdgeEffect.isHidden && paging.topEdgeEffect.style == .soft)
+        pager.setSoftTopEdge(false)
+        #expect(paging.topEdgeEffect.isHidden)
+    }
+
     /// Only the page being read reports its scroll and its pull.
     @Test func onlyTheActivePageDrivesTheHeader() {
         let (pager, pages) = makePager()

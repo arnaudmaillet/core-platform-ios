@@ -1413,15 +1413,14 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     /// private profile and its withdrawal on Requested. One path, so the bar
     /// and the tray can never disagree on what a tap did.
     ///
-    /// Plain by default; `-profile-follow-prominent` wears the bar's
-    /// `.prominent` style (the brand's tint) — the two the owner picks from
-    /// (#2248).
+    /// Follow wears the bar's `.prominent` style, in the brand's primary;
+    /// Requested stays plain (#2268, the owner 2026-11-10 — the colour only
+    /// while it reads "Follow").
     private func makeRelationshipBarItem(requested: Bool) -> UIBarButtonItem {
-        let prominent = !requested && DebugFlags.isOn("-profile-follow-prominent")
         let item = BarItems.title(
             id: requested ? Self.requestedItemID : Self.followItemID,
             title: requested ? "Requested" : "Follow",
-            prominent: prominent
+            prominent: !requested
         ) { [weak self] in self?.headerView.onFollowTapped?() }
         if requested { item.accessibilityHint = "Withdraws your follow request." }
         return item
@@ -1435,6 +1434,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     func debugSetTrayScrolledAway(_ away: Bool) {
         isTrayScrolledAway = away
         updateActionBarItem(followButtonState)
+        applyBarTitle()
     }
     /// The bar's Follow or Requested, if it shows one (#2248).
     var debugBarRelationshipItem: UIBarButtonItem? {
@@ -1969,7 +1969,13 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     /// page for no one (#800, #1406). A stub that knew only the name (#1858)
     /// waits for the handle rather than titling the bar with a name that
     /// would then be replaced: a native title changes without a fade.
+    ///
+    /// ⚠️ **ONLY ONCE THE TRAY HAS SCROLLED AWAY (#2268).** At rest the
+    /// header shows the name and the handle itself; the bar's handle comes
+    /// with Follow (or the bell) and the soft blur under the bar, on the same
+    /// trigger (`isTrayScrolledAway`), and goes with them on the way down.
     private var barTitle: String? {
+        guard isTrayScrolledAway else { return nil }
         guard !dayLeads, !viewModel.namesNoOne, let handle = currentHandle, handle.hasPrefix("@") else { return nil }
         return handle
     }
@@ -1978,9 +1984,8 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     /// Instagram's arrangement): `navigationItem.title` with the `.browser`
     /// style, which draws the title LEADING, next to the back button, with
     /// no custom view — the wallet's History and Stakes screens wear it.
-    /// Shown at all times on a pushed profile: a native title does not fade
-    /// in and out (`bar-contract`), and the handle complements the name the
-    /// header shows. UIKit truncates it at the tail when room runs out.
+    /// Shown once the header's tray has gone under the bar (`barTitle`,
+    /// #2268); UIKit truncates it at the tail when room runs out.
     ///
     /// ⚠️ **NO LEADING ITEM BESIDE IT.** Until #2248 this bar drew no title,
     /// and crowding was why: with an item in the leading group the title was
@@ -2001,6 +2006,11 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         // The tab root keeps the stock style: it has no title to lead with.
         let style: UINavigationItem.ItemStyle = dayLeads ? .navigator : .browser
         if navigationItem.style != style { navigationItem.style = style }
+        // ⚠️ THE BLUR RIDES THE TITLE (#2268): a titled bar wears UIKit's
+        // soft top edge down to its foot (`applyTopEdge(for: .titled)`, the
+        // app's rule since #1591), an untitled one stays clear. Read off the
+        // same `barTitle`, the handle and the blur cannot come apart.
+        heroPager.setSoftTopEdge(title != nil)
     }
 
     /// Whether the bar wears the bell right now.
@@ -2600,7 +2610,9 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         let trayGone = isActionRowUnderBar(travelled: travelled)
         guard trayGone != isTrayScrolledAway else { return }
         isTrayScrolledAway = trayGone
+        // The corner item, the handle and the blur, on the same frame (#2268).
         updateActionBarItem(followButtonState, animated: view.window != nil && transitionCoordinator == nil)
+        applyBarTitle()
     }
 
     #if DEBUG
