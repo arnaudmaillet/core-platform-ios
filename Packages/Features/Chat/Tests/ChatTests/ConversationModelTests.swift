@@ -49,10 +49,10 @@ struct ConversationModelTests {
         #expect(hike.identity?.memberCount == 5)
         #expect(hike.directPeerID == nil, "a group passed for a DM")
         #expect(inbox.contains { $0.kind == .direct }, "the DMs went")
-        #expect(!inbox.contains { $0.kind == .channel }, "a channel is in All")
 
-        let channels = try await repository.loadInbox(.channels, after: nil).conversations
-        #expect(channels.allSatisfy { $0.kind == .channel })
+        // Channels sit in Chats with the rest (#2230).
+        let channels = inbox.filter { $0.kind == .channel }
+        #expect(!channels.isEmpty, "no channel in Chats")
         let daily = try #require(channels.first { $0.id == ConversationID("ch-daily") })
         #expect(daily.title == "Daily light")
         #expect(daily.identity?.subscriberCount == 12_400)
@@ -106,8 +106,8 @@ struct ConversationModelTests {
         )
         let channelDetails = try await repository.details(of: channel)
         #expect(channelDetails.visibility == .listedOnRequest && channelDetails.viewerState == .owner)
-        let channels = try await repository.loadInbox(.channels, after: nil).conversations
-        #expect(channels.contains { $0.id == channel })
+        let chats = try await repository.loadInbox(.inbox, after: nil).conversations
+        #expect(chats.contains { $0.id == channel }, "a new channel is in Chats (#2230)")
     }
 
     @Test func aGroupHoldsFiveHundredAtMost() async throws {
@@ -191,7 +191,6 @@ struct ConversationModelTests {
         let repository = make(groups: false, channels: false)
         let inbox = try await repository.loadInbox(.inbox, after: nil).conversations
         #expect(!inbox.isEmpty && inbox.allSatisfy { $0.kind == .direct })
-        #expect(try await repository.loadInbox(.channels, after: nil).conversations.isEmpty)
         // And a mock not asked to seed them lists none.
         let unseeded = make(seeds: false)
         #expect(try await unseeded.loadInbox(.inbox, after: nil).conversations.allSatisfy { $0.kind == .direct })
