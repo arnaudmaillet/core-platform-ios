@@ -135,22 +135,25 @@ public final class PostDraftStore {
     ) -> PostDraft? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty || voice != nil else { return nil }
-        let previous = id.flatMap { draft($0) }?.voice
+        // `self.` and a local named `saved`, not `draft`: Xcode 26 resolves
+        // a bare `draft(…)` to a same-scope local and reports a circular
+        // reference (Xcode 27 accepts it).
+        let previous = id.flatMap { self.draft($0) }?.voice
         let kept = voice.flatMap { keep($0, previous: previous) }
         // A voice that couldn't be kept leaves only the words — and nothing,
         // if there were none.
         guard !trimmed.isEmpty || kept != nil else { return nil }
         if let previous, previous.fileName != kept?.fileName { removeVoice(previous) }
-        let draft = PostDraft(
+        let saved = PostDraft(
             id: id ?? UUID().uuidString,
             text: trimmed,
             updatedAtMS: Int64(now.timeIntervalSince1970 * 1000),
             voice: kept
         )
-        drafts.removeAll { $0.id == draft.id }
-        drafts.insert(draft, at: 0)
+        drafts.removeAll { $0.id == saved.id }
+        drafts.insert(saved, at: 0)
         persist()
-        return draft
+        return saved
     }
 
     public func delete(_ id: String) {
