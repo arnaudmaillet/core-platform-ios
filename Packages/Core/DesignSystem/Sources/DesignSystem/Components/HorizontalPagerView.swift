@@ -161,6 +161,7 @@ public final class HorizontalPagerView: UIView {
         // touches back to decide whether they're a page drag, and every tap
         // inside the inbox feels a frame late.
         scrollView.delaysContentTouches = false
+        scrollView.onForwardsTopFadeClearance = { [weak self] in self?.forwardTopFadeClearance() }
         scrollView.pin(to: self)
 
         NSLayoutConstraint.activate([
@@ -207,6 +208,23 @@ public final class HorizontalPagerView: UIView {
         makers[index] = nil
         let page = make()
         page.pin(to: pages[index])
+        if scrollView.forwardsTopFadeClearance { forwardTopFadeClearance(to: index) }
+    }
+
+    /// ⚠️ THE TITLED BLUR'S CLEARANCE REACHES THE PAGES (#2240). The blur is
+    /// drawn by this pager's scroll view — UIKit draws none for a list
+    /// nested in it (#1628) — but this content never scrolls under the bar:
+    /// each page's list does, and its first row is what sat in the fade at
+    /// rest (Relationships, the owner's report). So every page made gets
+    /// the clearance on its own vertical list; a lazy page, when it is made.
+    private func forwardTopFadeClearance() {
+        pages.indices.forEach(forwardTopFadeClearance(to:))
+    }
+
+    private func forwardTopFadeClearance(to index: Int) {
+        // A lazy page not made yet gets it from `installPageIfNeeded`.
+        if makers.indices.contains(index), makers[index] != nil { return }
+        OnScreenScroller.vertical(in: pages[index])?.installTopFadeClearance()
     }
 
     /// The pages a fractional progress touches: both neighbours of a
@@ -455,6 +473,14 @@ public final class HorizontalPagerScrollView: UIScrollView {
     public var pullsPastLeadingEdge = false
     /// See `HorizontalPagerView.reservesLeadingEdge`.
     public var reservesLeadingEdge = true
+    /// Set by the titled contract (`prefersSoftTopEdge`, #2240): this scroll
+    /// view carries the header's soft blur, and the pages' own lists are
+    /// what scroll under it — so they, not this one, keep their first row
+    /// below the fade. `HorizontalPagerView` hands them the space.
+    var forwardsTopFadeClearance = false {
+        didSet { if forwardsTopFadeClearance, !oldValue { onForwardsTopFadeClearance?() } }
+    }
+    var onForwardsTopFadeClearance: (() -> Void)?
 
     /// Matches the system's edge-gesture strip — see
     /// `PagedScreenDismissalPolicy.edgeZone`, which is the one definition. This

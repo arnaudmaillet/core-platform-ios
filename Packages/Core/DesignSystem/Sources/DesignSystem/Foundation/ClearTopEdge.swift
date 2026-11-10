@@ -50,7 +50,8 @@ public extension UIScrollView {
     /// `NotificationsViewController`. The grid the sound sheet's "View all"
     /// pushes wears the same soft blur under its title (asked for on
     /// 2026-09-29, lighter than the automatic one it had) — see
-    /// `SoundSheetGalleryViewController`.
+    /// `SoundSheetGalleryViewController`. Both state it through
+    /// `applyTopEdge(for: .titled)` since #2240, like every titled screen.
     ///
     /// Only the TOP edge. The bottom edge — above the tab bar, a toolbar, a
     /// composer — stays `.automatic`; nobody has asked for it to change.
@@ -86,9 +87,31 @@ public extension UIScrollView {
     /// rows meeting the bar's pills with nothing between them read as
     /// clutter). Native, not a hand-built frost: the 2026-09-22 lesson was
     /// that a masked material reads as non-native, UIKit's effect does not.
-    func prefersSoftTopEdge() {
+    ///
+    /// ⚠️ AND THE CONTENT STARTS BELOW ITS FADE (#2240): the effect reaches
+    /// past the bar, and at rest a plain list's first row sat in it,
+    /// softened before anything had scrolled. This call adds to the top
+    /// inset what the first content lacks to clear it — see
+    /// `SoftTopEdge` / `topFadeClearance`. A horizontal pager carrying the
+    /// blur hands that space to the lists it hosts instead
+    /// (`HorizontalPagerView`), since its own content does not scroll under
+    /// the bar.
+    ///
+    /// - Parameter keepsContentBelowFade: false only for a scroll view that
+    ///   owns its top inset frame by frame (the comments sheet's stream,
+    ///   whose shapes anchor a short stream to the composer and re-assert
+    ///   their own inset): a clearance topped up under it would be undone and
+    ///   re-added on every pass. Such a caller argues the case on
+    ///   `TitledHeaderTopEdgeGuardTests.fadeClearanceOptOuts`.
+    func prefersSoftTopEdge(keepsContentBelowFade: Bool = true) {
         topEdgeEffect.isHidden = false
         topEdgeEffect.style = .soft
+        guard keepsContentBelowFade else { return }
+        if let pager = self as? HorizontalPagerScrollView {
+            pager.forwardsTopFadeClearance = true
+        } else {
+            installTopFadeClearance()
+        }
     }
 
     /// ⚠️ THE ONE RULE FOR A SCREEN'S TOP EDGE (#1591, the owner 2026-10-22):
@@ -104,7 +127,9 @@ public extension UIScrollView {
     /// states it where the list is configured.
     ///
     /// `TitledHeaderTopEdgeGuardTests` fails on a file that sets a title and
-    /// clears its top edge without a reason on its list.
+    /// clears its top edge without a reason on its list — and, since #2240,
+    /// on a file that sets the soft style by hand, which would skip the
+    /// clearance that keeps the first row out of the fade.
     func applyTopEdge(for header: HeaderTopEdge) {
         switch header {
         case .titled: prefersSoftTopEdge()
@@ -115,7 +140,8 @@ public extension UIScrollView {
 
 /// What a screen's header shows — what decides its top edge (#1591).
 public enum HeaderTopEdge: Sendable {
-    /// A title in the bar: the soft blur covers the bar.
+    /// A title in the bar: the soft blur covers the bar, and the content
+    /// rests below its fade (#2240).
     case titled
     /// No title (pills only, or a root whose content is its own header):
     /// clear.
