@@ -213,10 +213,23 @@ final class TextPostComposerViewController: UIViewController {
         // squeeze the card.
         let top = attachment.topAnchor.constraint(greaterThanOrEqualTo: view.safeAreaLayoutGuide.topAnchor, constant: Spacing.sm)
         top.priority = .defaultHigh
+        // ⚠️ AND OVER THE GLOBE. While the keyboard is down the page's
+        // visibility globe floats over the input row's trailing end, and a
+        // card resting on the row sat under it (seen on the simulator: the
+        // globe over the card's corner and its place). The card rests on the
+        // row when it can, and stands clear of the globe always; with the
+        // keyboard up the row rises past the globe and the card rides it.
+        let restsOnRow = attachment.bottomAnchor.constraint(equalTo: panel.composeBar.inputRowTopAnchor, constant: -Spacing.md)
+        // Low, so it never lifts the row itself: the row's own resting place
+        // outranks it, and so does clearing the globe.
+        restsOnRow.priority = .defaultLow
+        let composeBar = panel.composeBar
         NSLayoutConstraint.activate([
             attachment.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: Spacing.lg),
             attachment.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -Spacing.lg),
-            attachment.bottomAnchor.constraint(equalTo: panel.composeBar.inputRowTopAnchor, constant: -Spacing.md),
+            attachment.bottomAnchor.constraint(lessThanOrEqualTo: composeBar.inputRowTopAnchor, constant: -Spacing.md),
+            attachment.bottomAnchor.constraint(lessThanOrEqualTo: composeBar.stakeStationTopAnchor, constant: -Spacing.sm),
+            restsOnRow,
             top,
         ])
         panel.viewModel.draftShowcase = DraftShowcase(embed: openingEmbed, place: nil)
