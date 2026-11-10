@@ -160,23 +160,29 @@ public struct ConversationThreadPerson: Equatable, Sendable {
 }
 
 /// Where a viewer who doesn't post stands in a channel (#2215) or a public
-/// group (#2217): what the bar in the composer's place offers.
+/// group (#2217): what the bar in the composer's place offers, and the way
+/// out the footer's ⋯ menu offers.
+///
+/// The bar shows only what takes the viewer IN; what takes them out — Leave,
+/// Unfollow, Cancel Request — is the ⋯ menu's, confirmed (#2236). The mute
+/// is the top bar's bell, for everyone.
 public enum ConversationThreadReaderStanding: Equatable, Sendable {
-    /// Subscribed: Mute / Unmute and Leave.
+    /// Subscribed: no bar (#2236) — the ⋯ menu's Leave Channel.
     case subscribed
     /// Not in a public channel: Join, at once.
     case canJoin
     /// Not in a channel on request: Request to Join.
     case canRequest
-    /// Asked, waiting for an admin: Requested — a tap withdraws it.
+    /// Asked, waiting for an admin: Requested — a tap withdraws it, as the
+    /// ⋯ menu's Cancel Request does.
     case requested
     /// Banned: nothing to offer but saying so.
     case unavailable
     /// Not in a public group (#2217): Join, to write, or Follow, to read
     /// along — Join only while it has room (`isFull`: "This group is full").
     case canJoinOrFollow(isFull: Bool)
-    /// Following a public group (#2217): Join while it has room, and
-    /// Following — a tap unfollows.
+    /// Following a public group (#2217): Join while it has room (#2236:
+    /// Join alone); the ⋯ menu's Unfollow.
     case following(isFull: Bool)
     /// The group turned private while the viewer read it from outside
     /// (#2217): nothing left to offer — the thread says so in a line, and
@@ -343,16 +349,19 @@ public protocol ConversationThreadDriving: AnyObject {
     /// subscribes at once, one on request waits for an admin. The answer
     /// arrives as a new `onGroupChange`.
     func join()
-    /// The reader bar's Requested, confirmed: the request withdrawn (#2215).
+    /// The reader bar's Requested, or the ⋯ menu's Cancel Request,
+    /// confirmed: the request withdrawn (#2215, #2236).
     func cancelJoinRequest()
-    /// The reader bar's Leave, confirmed (#2215): the viewer leaves the
-    /// channel and is taken back from `presenter`.
+    /// The ⋯ menu's Leave Channel, confirmed (#2215, #2236): the viewer
+    /// leaves the channel. A channel they can still read stays on screen
+    /// with its new standing (Join, Request to Join); one they can't is
+    /// closed from `presenter`.
     func leave(from presenter: UIViewController)
     /// The reader bar's Follow (#2217): the viewer subscribes to a public
     /// group — reads along, the group in their inbox, muted. The answer
     /// arrives as a new `onGroupChange`.
     func follow()
-    /// The reader bar's Following, confirmed (#2217): the viewer stops
+    /// The ⋯ menu's Unfollow, confirmed (#2217, #2236): the viewer stops
     /// following; the group leaves their inbox, and they read it as anyone.
     func unfollow()
 }

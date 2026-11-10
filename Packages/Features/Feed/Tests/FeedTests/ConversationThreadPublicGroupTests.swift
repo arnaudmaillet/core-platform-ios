@@ -6,9 +6,10 @@ import UIKit
 @testable import Feed
 
 /// A public group's thread (#2217): an outsider reads with Join and Follow
-/// in the composer's place, a follower with Join and Following, a full
-/// group offers Follow only, a member writes — and a group turned private
-/// under its reader drops the bar and the composer alike.
+/// in the composer's place, a follower with Join alone — their Unfollow is
+/// the ⋯ menu's, confirmed (#2236) — a full group offers Follow only, a
+/// member writes, and a group turned private under its reader drops the bar
+/// and the composer alike.
 @MainActor
 struct ConversationThreadPublicGroupTests {
     private final class GroupDriver: ConversationThreadDriving {
@@ -47,6 +48,7 @@ struct ConversationThreadPublicGroupTests {
         func delete(_ messageID: String) {}
         func didTapIdentity() {}
         func togglePinned() {}
+        func didTapGroupInfo(from presenter: UIViewController) {}
         func join() { joins += 1 }
         func follow() { follows += 1 }
         func unfollow() { unfollows += 1 }
@@ -86,34 +88,36 @@ struct ConversationThreadPublicGroupTests {
     // MARK: - The bar's words
 
     @Test func anOutsiderIsOfferedJoinAndFollow() {
-        let spec = ConversationReaderBar.spec(for: .canJoinOrFollow(isFull: false), isMuted: false)
+        let spec = ConversationReaderBar.spec(for: .canJoinOrFollow(isFull: false))
         #expect(spec.primary?.title == "Join" && spec.primary?.action == .join)
         #expect(spec.secondary?.title == "Follow" && spec.secondary?.action == .follow)
         #expect(spec.note == nil)
-        #expect(!spec.showsLeave)
     }
 
     @Test func aFullGroupOffersFollowOnly() {
-        let outsider = ConversationReaderBar.spec(for: .canJoinOrFollow(isFull: true), isMuted: false)
+        let outsider = ConversationReaderBar.spec(for: .canJoinOrFollow(isFull: true))
         #expect(outsider.primary == nil, "Join offered past the cap")
         #expect(outsider.note == "This group is full")
         #expect(outsider.secondary?.action == .follow)
-        let follower = ConversationReaderBar.spec(for: .following(isFull: true), isMuted: false)
+        // A full group's follower: the line alone (#2236), Unfollow is the menu's.
+        let follower = ConversationReaderBar.spec(for: .following(isFull: true))
         #expect(follower.primary == nil)
         #expect(follower.note == "This group is full")
-        #expect(follower.secondary?.action == .unfollow)
+        #expect(follower.secondary == nil, "Following is still on the bar")
+        #expect(!follower.isEmpty)
     }
 
-    @Test func aFollowerIsOfferedJoinAndFollowing() {
-        let spec = ConversationReaderBar.spec(for: .following(isFull: false), isMuted: false)
-        #expect(spec.primary?.action == .join)
-        #expect(spec.secondary?.title == "Following" && spec.secondary?.action == .unfollow)
+    /// #2236: a follower's bar is the way further in alone.
+    @Test func aFollowerIsOfferedJoinOnly() {
+        let spec = ConversationReaderBar.spec(for: .following(isFull: false))
+        #expect(spec.primary?.title == "Join" && spec.primary?.action == .join)
+        #expect(spec.secondary == nil, "Following is still on the bar")
+        #expect(spec.note == nil)
     }
 
     @Test func aClosedGroupOffersNothing() {
-        #expect(ConversationReaderBar.spec(for: .closed, isMuted: false).isEmpty)
-        #expect(!ConversationReaderBar.spec(for: .subscribed, isMuted: false).isEmpty)
-        #expect(ConversationReaderBar.spec(for: .subscribed, isMuted: false).showsLeave, "a channel's Leave went")
+        #expect(ConversationReaderBar.spec(for: .closed).isEmpty)
+        #expect(ConversationReaderBar.spec(for: .subscribed).isEmpty, "a channel's subscriber got a bar again")
     }
 
     // MARK: - The screen
@@ -134,8 +138,52 @@ struct ConversationThreadPublicGroupTests {
         #expect(driver.follows == 1)
         driver.change(to: Self.group(.following(isFull: false)))
         #expect(screen.debugReaderStanding == .following(isFull: false))
+        #expect(screen.debugShowsReaderBar, "a follower keeps Join")
         screen.debugReaderAction(.join)
         #expect(driver.joins == 1)
+    }
+
+    // MARK: - The ⋯ menu (#2236)
+
+    @Test func anOutsidersMenuIsTheGroupInfoAlone() async {
+        let (screen, _, window) = makeScreen(Self.group(.canJoinOrFollow(isFull: false)))
+        defer { window.isHidden = true }
+        await settle { screen.debugReaderStanding != nil }
+        #expect(screen.debugOverflowMenuTitles == ["Group Info"])
+    }
+
+    @Test func aFollowersMenuEndsWithUnfollow() async throws {
+        let (screen, _, window) = makeScreen(Self.group(.following(isFull: false)))
+        defer { window.isHidden = true }
+        await settle { screen.debugReaderStanding != nil }
+        #expect(screen.debugOverflowMenuTitles == ["Group Info", "Unfollow"])
+        let menu = try #require(screen.debugOverflowMenu)
+        let unfollow = try #require((menu.children.last as? UIMenu)?.children.first as? UIAction)
+        #expect(unfollow.attributes.contains(.destructive))
+    }
+
+    @Test func aMembersMenuHasNoWayOut() async {
+        let (screen, _, window) = makeScreen(Self.group(nil))
+        defer { window.isHidden = true }
+        await settle { screen.debugPillName == "Coastal cleanup" }
+        #expect(screen.debugOverflowMenuTitles == ["Group Info"], "a member leaves from the info screen")
+    }
+
+    @Test func unfollowAsksFirst() async {
+        let (screen, driver, window) = makeScreen(Self.group(.following(isFull: false)))
+        defer { window.isHidden = true }
+        await settle { screen.debugReaderStanding != nil }
+        var asked: [ConversationThreadViewController.ReaderConfirmation] = []
+        screen.debugConfirmReader = { asked.append($0) }
+        screen.debugReaderExit(.unfollow)
+        #expect(asked.map(\.title) == ["Unfollow Coastal cleanup?"])
+        #expect(asked.first?.button == "Unfollow")
+        #expect(driver.unfollows == 0, "unfollowed before the confirmation")
+        asked.first?.confirm()
+        #expect(driver.unfollows == 1)
+        // Unfollowed: the outsider's menu, with no way out.
+        driver.change(to: Self.group(.canJoinOrFollow(isFull: false)))
+        #expect(screen.debugOverflowMenuTitles == ["Group Info"])
     }
 
     @Test func aMemberWritesAndAFollowerWhoJoinsGetsTheComposer() async {

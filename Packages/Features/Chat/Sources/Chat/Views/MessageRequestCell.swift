@@ -43,8 +43,9 @@ final class MessageRequestCell: UITableViewCell {
     private let previewLabel = EmoteLabel()
     private let timeLabel = UILabel()
     /// The app's button, shared with every person row (#932), with its one
-    /// press (#866).
-    private let acceptButton = AppButton(aspect: .pill(.prominent), size: .row, content: .title("Accept"))
+    /// press (#866): the row action (#2231), repeated on every request, so
+    /// on the tinted ground rather than a solid capsule.
+    private let acceptButton = AppButton(aspect: .rowAction, size: .row, content: .title("Accept"))
     /// A bare glyph, the Suggestions row's ✕ (#2088): quiet enough that the
     /// eye lands on Accept. Its hit region stays 44×44
     /// (`AppControl.hitRegion`).

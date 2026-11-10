@@ -21,10 +21,11 @@ final class SuggestionCell: UITableViewCell {
     private let nameLabel = UILabel()
     private let handleLabel = UILabel()
     private let reasonLabel = UILabel()
-    /// The app's button, shared with every person row (#932): Follow ⇄
-    /// Following blurs over to the quiet ground, with the one press (#866).
+    /// The app's button, shared with every person row (#932): the row
+    /// action (#2231), Follow on the tinted ground ⇄ Following blurring
+    /// over to the quiet one, with the one press (#866).
     private let followButton: AppButton = {
-        let button = AppButton(aspect: .pill(.prominent), size: .row, content: .title("Follow"))
+        let button = AppButton(aspect: .rowAction, size: .row, content: .title("Follow"))
         button.isToggle = true
         return button
     }()
@@ -88,8 +89,9 @@ final class SuggestionCell: UITableViewCell {
         }
     }
 
-    /// Prominent while it invites, selected (quiet) once it states a fact —
-    /// the same two looks as the relationship lists' rows.
+    /// The row action's invitation while it invites, selected (quiet) once
+    /// it states a fact — the same two looks as the relationship lists'
+    /// rows (#2231).
     private func applyFollowState(_ state: FollowState, name: String, animated: Bool) {
         let title = switch state {
         case .follow: "Follow"
