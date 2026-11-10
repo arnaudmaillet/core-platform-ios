@@ -76,10 +76,14 @@ struct PersonListsTests {
     }
 
     @Test func anEmptyTabIsEmptyNotAHeaderOverNothing() async {
-        let feed = PersonListFeed(tab: "requests", source: Source(counts: [:]))
+        // The feed holds its source weakly: kept here, or it is gone before
+        // the first read and the tab never leaves `.loading`.
+        let source = Source(counts: [:])
+        let feed = PersonListFeed(tab: "requests", source: source)
         feed.start()
         await settle { feed.phase != .loading }
         #expect(feed.phase == .empty)
+        withExtendedLifetime(source) {}
     }
 
     @Test func aListShorterThanItsTotalIsReported() async {

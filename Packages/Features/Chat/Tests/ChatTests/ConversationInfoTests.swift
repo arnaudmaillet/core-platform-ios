@@ -201,6 +201,10 @@ struct ConversationInfoTests {
         let screen = ChannelInfoViewController(viewModel: model, imagePipeline: nil)
         try await hosting(screen) { screen, stack in
             await settle { model.state.phase == .loaded }
+            // Pushes without animation for the loop: UIKit drops a push made
+            // while the last transition still runs.
+            UIView.setAnimationsEnabled(false)
+            defer { UIView.setAnimationsEnabled(true) }
             for (index, list) in screen.captions.enumerated() {
                 // ⚠️ Each push lands before the next tap: UIKit drops a push
                 // made while the last transition still runs, which left the
