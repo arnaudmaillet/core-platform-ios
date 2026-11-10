@@ -1,6 +1,7 @@
 import CoreModels
 import CoreNetworking
 import Foundation
+import MediaCore
 
 /// Who may find and join a group or a channel (#2213): its members only, anyone,
 /// or shown on its showcases while joining waits for an admin.
@@ -115,8 +116,9 @@ public struct ConversationIdentity: Equatable, Sendable {
         }
     }
 
-    /// The faces a nameless, photoless group shows, stacked: up to three.
-    public static let stackedFaces = 3
+    /// The faces a photoless group's picture stacks (#2233): up to four of
+    /// its other members' — `GroupAvatarLayout.maximumFaces`, the one cap.
+    public static let stackedFaces = GroupAvatarLayout.maximumFaces
 
     /// A group with no room left (#2217): chat.v1's cap reached, so an
     /// outsider or a follower is offered Follow only.
@@ -150,6 +152,40 @@ public struct ConversationMemberPage: Equatable, Sendable {
         self.members = members
         self.nextPageToken = nextPageToken
         self.total = total
+    }
+}
+
+extension ConversationMember {
+    /// The members a group's picture shows (#2233), in a STABLE order: the
+    /// owner first (when it isn't the viewer), then by join date — never by
+    /// last message, or the picture would change with every message. The
+    /// viewer is left out, as Messages and WhatsApp draw a group, and so are
+    /// a group's followers and guests (#2217), who are not its members. The
+    /// ONE order, shared by the inbox row and the thread's pill, so the two
+    /// always show the same faces.
+    public static func faceOrder(_ members: [ConversationMember], viewer: ProfileID?) -> [ProfileID] {
+        let shown: [ConversationMember] = members.filter { $0.role.talks && $0.profileID != viewer }
+        let ordered: [ConversationMember] = shown.sorted { (lhs: ConversationMember, rhs: ConversationMember) -> Bool in
+            let lhsOwns: Bool = lhs.role == .owner
+            let rhsOwns: Bool = rhs.role == .owner
+            if lhsOwns != rhsOwns { return lhsOwns }
+            if lhs.joinedAt != rhs.joinedAt { return lhs.joinedAt < rhs.joinedAt }
+            return lhs.profileID.rawValue < rhs.profileID.rawValue
+        }
+        return ordered.map(\.profileID)
+    }
+
+    /// The faces a group's picture draws (#2233): the first members of
+    /// `faceOrder`, up to `stackedFaces`, each with the name and picture
+    /// `profile` knows — a member with no picture shows their initials.
+    public static func groupFaces(
+        _ members: [ConversationMember], viewer: ProfileID?,
+        profile: (ProfileID) -> (name: String, avatarURL: URL?)
+    ) -> [GroupAvatarFace] {
+        faceOrder(members, viewer: viewer).prefix(ConversationIdentity.stackedFaces).map { id in
+            let known = profile(id)
+            return GroupAvatarFace(name: known.name, avatarURL: known.avatarURL)
+        }
     }
 }
 

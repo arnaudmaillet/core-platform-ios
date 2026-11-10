@@ -1,4 +1,5 @@
 import CoreModels
+import MediaCore
 import UIKit
 
 // MARK: - The conversation, drawn by Feed and driven by Chat
@@ -216,10 +217,18 @@ public struct ConversationThreadGroup: Equatable, Sendable {
     /// and admins); otherwise where they stand, and the bar that shows in
     /// the composer's place (#2215).
     public let readerStanding: ConversationThreadReaderStanding?
+    /// The group's faces (#2233): up to four of its other members, owner
+    /// first then by join date, and its size for the "+N" — filled by Chat
+    /// from the same source as the inbox row, so the pill and the row show
+    /// the same faces. Empty: the photo, or the initials.
+    public let faces: [GroupAvatarFace]
+    /// Everyone in the group, the viewer included; 0 when not known.
+    public let memberCount: Int
 
     public init(
         name: String, photoURL: URL?, subtitle: String, members: [ProfileID: ConversationThreadPerson],
-        isChannel: Bool = false, readerStanding: ConversationThreadReaderStanding? = nil
+        isChannel: Bool = false, readerStanding: ConversationThreadReaderStanding? = nil,
+        faces: [GroupAvatarFace] = [], memberCount: Int = 0
     ) {
         self.name = name
         self.photoURL = photoURL
@@ -227,6 +236,15 @@ public struct ConversationThreadGroup: Equatable, Sendable {
         self.members = members
         self.isChannel = isChannel
         self.readerStanding = readerStanding
+        self.faces = faces
+        self.memberCount = memberCount
+    }
+
+    /// What the header pill draws for a group (#2233): its photo, else its
+    /// faces, else its initials — the inbox row's picture. Nil for a
+    /// channel, which keeps its photo or initials on the person's face.
+    public var avatar: GroupAvatarContent? {
+        isChannel ? nil : GroupAvatarContent(name: name, photoURL: photoURL, faces: faces, memberCount: memberCount)
     }
 
     /// Whether the viewer gets the composer (#2215).

@@ -19,7 +19,6 @@ struct HandMadeAvatarGuardTests {
     /// File name → why it may build an avatar's parts itself.
     static let allowed: [String: String] = [
         "AvatarView.swift": "the app's avatar itself",
-        "GroupNameViewController.swift": "a new group's initials disc before it has a photo, not a person's face (#2214)",
         "ChannelCreationViewController.swift": "a new channel's initials disc before it has a photo, not a person's face (#2215)",
         "MonogramAccessoryHost.swift": "DesignSystem's row disc: a symbol row's glyph disc, and the slot AvatarView is installed in",
         "SnapMediaAttributionView.swift": "a sound's cover in an avatar-shaped slot, not a person's face",

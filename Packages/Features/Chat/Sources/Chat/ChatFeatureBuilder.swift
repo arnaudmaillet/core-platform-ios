@@ -388,7 +388,7 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         let picker = makeMemberPicker(purpose: .create, excluded: [], title: "New Group", nextTitle: "Next")
         let sheet = UINavigationController(rootViewController: picker)
         picker.onCancel = { [weak sheet] in _ = sheet?.closePresentation() }
-        picker.onNext = { [weak sheet, catalog, groupNotes, router] people in
+        picker.onNext = { [weak sheet, catalog, groupNotes, router, imagePipeline] people in
             let creation = GroupCreationViewModel(members: people, service: groups)
             creation.onCreated = { [weak sheet] id in
                 groupNotes.created[id] = Date()
@@ -400,7 +400,9 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
                     router?.route(to: .conversation(id))
                 }
             }
-            sheet?.pushViewController(GroupNameViewController(viewModel: creation), animated: true)
+            sheet?.pushViewController(
+                GroupNameViewController(viewModel: creation, imagePipeline: imagePipeline, profiles: groups), animated: true
+            )
         }
         presenter.present(sheet, animated: true)
     }
@@ -476,6 +478,11 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         // A channel's row (#2215), and a followed public group's (#2217):
         // drawn as such from the push's first frame.
         context.knownIdentity = { [directory] id in directory.summary(for: id)?.identity }
+        // A group's row (#2233): the thread's pill wears its picture at once.
+        context.knownGroupRow = { [directory] id in
+            guard let row = directory.summary(for: id), row.kind == .group else { return nil }
+            return (title: row.title, faces: row.memberFaces)
+        }
         // Joined, followed or left — a channel (#2215), a public group
         // (#2217): the inbox reads its rows again.
         context.onMembershipChange = { [catalog] id, left in

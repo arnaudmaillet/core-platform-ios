@@ -2,6 +2,7 @@ import CoreModels
 import DesignSystem
 import FeedInterface
 import Foundation
+import MediaCore
 import UIKit
 import CoreNavigation
 import CoreNetworking
@@ -39,6 +40,10 @@ struct GroupThreadContext {
     /// and the viewer's place — so its thread is drawn as one from the
     /// push's first frame: a subscriber never sees the composer come and go.
     var knownIdentity: @MainActor (_ id: ConversationID) -> ConversationIdentity? = { _ in nil }
+    /// What the inbox's row draws of a group (#2233) — its title and its
+    /// faces — so the thread's pill shows the group's picture from the
+    /// push's first frame, never the initials of a name made of its members.
+    var knownGroupRow: @MainActor (_ id: ConversationID) -> (title: String, faces: [GroupAvatarFace])? = { _ in nil }
     /// A channel's info screen (#2215), as `makeInfo` is a group's.
     var makeChannelInfo: (@MainActor (_ id: ConversationID, _ onChange: @escaping @MainActor () -> Void) -> UIViewController)?
     /// The viewer joined (`left` false) or left a channel from its thread
@@ -184,10 +189,17 @@ final class ConversationThreadDriver: ConversationThreadDriving {
         }
         // A group the viewer follows, from its inbox row (#2217): its bar
         // from the push's first frame — never the composer coming and going.
-        if known == .group, group == nil, let identity = context.knownIdentity(id), identity.kind == .group,
-           Self.groupReaderStanding(for: identity) != nil {
-            groupIdentity = identity
-            adoptGroup(Self.group(identity: identity, members: [], profiles: [:], viewer: nil))
+        // Any group the inbox listed: its picture from the row's (#2233),
+        // the pill never a person's face meanwhile.
+        if known == .group, group == nil, let identity = context.knownIdentity(id), identity.kind == .group {
+            let isReader = Self.groupReaderStanding(for: identity) != nil
+            if let row = context.knownGroupRow(id) {
+                if isReader { groupIdentity = identity }
+                adoptGroup(Self.group(identity: identity, rowTitle: row.title, faces: row.faces))
+            } else if isReader {
+                groupIdentity = identity
+                adoptGroup(Self.group(identity: identity, members: [], profiles: [:], viewer: nil))
+            }
         }
         groupLoad?.cancel()
         let service = context.service
@@ -222,7 +234,8 @@ final class ConversationThreadDriver: ConversationThreadDriving {
 
     /// The group as the screen draws it (#2214): its name — or its other
     /// members', for a nameless one — its photo, "N members", and every
-    /// member the profiles named.
+    /// member the profiles named; and its faces for the header pill (#2233),
+    /// in the inbox row's order (`ConversationMember.groupFaces`).
     ///
     /// A public group's header counts its followers apart, "40 members ·
     /// 2.3K followers", and a viewer who isn't a member gets the reader bar
@@ -244,10 +257,30 @@ final class ConversationThreadDriver: ConversationThreadDriving {
         let name = identity.name.isEmpty
             ? ConversationIdentity.memberName(others, total: max(0, count - 1))
             : identity.name
+        let faces = ConversationMember.groupFaces(members, viewer: viewer) { id in
+            let profile = profiles[id]
+            let displayName = profile?.name ?? ""
+            return (name: displayName.isEmpty ? profile?.handle ?? "" : displayName, avatarURL: profile?.avatarURL)
+        }
         return ConversationThreadGroup(
             name: name, photoURL: identity.photoURL,
             subtitle: GroupCopy.header(memberCount: count, followerCount: identity.subscriberCount, visibility: identity.visibility),
-            members: people, readerStanding: groupReaderStanding(for: identity)
+            members: people, readerStanding: groupReaderStanding(for: identity),
+            faces: faces, memberCount: count
+        )
+    }
+
+    /// A group as its inbox row knows it (#2233), while its details are on
+    /// their way: the row's title and faces, its photo and its counts — no
+    /// members yet to sign the rows.
+    static func group(identity: ConversationIdentity, rowTitle: String, faces: [GroupAvatarFace]) -> ConversationThreadGroup {
+        ConversationThreadGroup(
+            name: identity.name.isEmpty ? rowTitle : identity.name, photoURL: identity.photoURL,
+            subtitle: GroupCopy.header(
+                memberCount: identity.memberCount, followerCount: identity.subscriberCount, visibility: identity.visibility
+            ),
+            members: [:], readerStanding: groupReaderStanding(for: identity),
+            faces: faces, memberCount: identity.memberCount
         )
     }
 
@@ -342,7 +375,7 @@ final class ConversationThreadDriver: ConversationThreadDriving {
         groupLoad?.cancel()
         adoptGroup(ConversationThreadGroup(
             name: shown.name, photoURL: shown.photoURL, subtitle: shown.subtitle, members: shown.members,
-            readerStanding: .closed
+            readerStanding: .closed, faces: shown.faces, memberCount: shown.memberCount
         ))
         if identity.viewerState == .subscriber { groupContext?.onMembershipChange(id, true) }
     }

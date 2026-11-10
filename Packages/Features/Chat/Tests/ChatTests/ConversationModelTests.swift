@@ -67,7 +67,7 @@ struct ConversationModelTests {
         let studio = try #require(inbox.first { $0.id == ConversationID("grp-studio") })
         #expect(studio.identity?.name.isEmpty == true)
         #expect(studio.title.contains(" and "), "\(studio.title)")
-        #expect(!studio.memberAvatarURLs.isEmpty && studio.memberAvatarURLs.count <= ConversationIdentity.stackedFaces)
+        #expect(!studio.memberFaces.isEmpty && studio.memberFaces.count <= ConversationIdentity.stackedFaces)
 
         #expect(ConversationIdentity.memberName(["Alice"]) == "Alice")
         #expect(ConversationIdentity.memberName(["Alice", "Bob"]) == "Alice and Bob")
