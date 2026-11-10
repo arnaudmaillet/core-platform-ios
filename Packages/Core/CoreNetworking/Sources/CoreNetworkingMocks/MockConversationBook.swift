@@ -17,17 +17,66 @@ final class MockConversationBook: @unchecked Sendable {
         var joinedAtMs: [String: Int64]
         var joinRequests: [ProposedChat.JoinRequest]
         var banned: Set<String> = []
-        /// Members the mock counts but doesn't name (#2217): a big group's
-        /// rest, so "40 members" and a full group of 500 need no 500 profiles.
-        var unnamedMembers = 0
+        /// The rest of its people (#2237): as many records as its counters
+        /// say — a big group's members, its followers, a channel's
+        /// subscribers — made up (`crowdAuthor`) rather than named in the
+        /// seed. Kept apart from `members` so chat.v1's unpaged `ListMembers`,
+        /// which the inbox reads per row, never carries 12 400 of them: only
+        /// the paged read (`membersPage`) reaches the crowd, as a real
+        /// audience is only ever read page by page (#995).
+        var crowd: [Crowd] = []
+        /// Crowd people who left, were removed, or were named by a write
+        /// (`materialize`): no longer the crowd's.
+        var crowdGone: Set<String> = []
         /// Since when a public conversation is readable by anyone (#2217,
         /// chat.v1's public-since watermark): what an outsider or a follower
         /// reads starts here; members read everything.
         var publicSinceMs: Int64?
     }
 
+    /// A run of made-up people with one role (#2237): `prof-crowd-<n>`
+    /// for each n in `ids`.
+    struct Crowd {
+        var role: ProposedChat.Role
+        var ids: Range<Int>
+
+        var profileIDs: [String] { ids.map(MockConversationBook.crowdID) }
+    }
+
+    /// The made-up people's ids (#2237).
+    static let crowdPrefix = "prof-crowd-"
+    static func crowdID(_ index: Int) -> String { "\(crowdPrefix)\(index)" }
+
+    /// A made-up person of the crowd (#2237), named and faced the way the
+    /// mock's authors are, so a subscribers list of 64 reads as 64 people:
+    /// a first and a last name from two short lists, a handle from them, and
+    /// one of the authors' faces — or none, every third, for the initials.
+    /// Nil for an id that isn't the crowd's.
+    static func crowdAuthor(for profileID: String, faces: [MockSocialDataset.Author]) -> MockSocialDataset.Author? {
+        guard profileID.hasPrefix(crowdPrefix), let index = Int(profileID.dropFirst(crowdPrefix.count)), index >= 0
+        else { return nil }
+        let first = crowdFirstNames[index % crowdFirstNames.count]
+        let last = crowdLastNames[(index / crowdFirstNames.count) % crowdLastNames.count]
+        let face = faces.isEmpty || index % 3 == 2 ? "" : faces[index % faces.count].avatarURL
+        return MockSocialDataset.Author(
+            profileID: profileID, handle: "\(first.lowercased()).\(last.lowercased())\(index)",
+            displayName: "\(first) \(last)", avatarURL: face, bannerURL: "", bio: "", websiteURL: ""
+        )
+    }
+
+    private static let crowdFirstNames = [
+        "Alba", "Bram", "Cleo", "Dev", "Elio", "Fern", "Gus", "Hana", "Ines", "Jude", "Kai", "Lior", "Mina",
+        "Noor", "Otto", "Pia", "Quinn", "Rosa", "Sami", "Tove", "Uma", "Vito", "Wim", "Xia", "Yusuf", "Zora"
+    ]
+    private static let crowdLastNames = [
+        "Abbott", "Brandt", "Costa", "Duval", "Eriksen", "Ferro", "Gallo", "Hale", "Ito", "Janssen", "Kovac",
+        "Lund", "Moretti", "Novak", "Okafor", "Price", "Quist", "Rossi", "Sato", "Toth", "Ueda", "Varga"
+    ]
+
     private let lock = NSLock()
     private var records: [String: Record] = [:]
+    /// The next made-up person's index: every crowd is its own people.
+    private var nextCrowd = 0
     private var order: [String] = []
     private var created = 0
     let viewer: String
@@ -174,16 +223,73 @@ final class MockConversationBook: @unchecked Sendable {
         }
     }
 
+    /// `unnamedMembers`: a group's members past the named ones. The
+    /// followers or subscribers past the named ones come from the details'
+    /// `subscriberCount`: every counter is as many records (#2237).
     private func add(
         _ details: ProposedChat.Details, members: [String: ProposedChat.Role], since: Int64,
         requests: [ProposedChat.JoinRequest] = [], unnamedMembers: Int = 0, publicSince: Int64? = nil
     ) {
         var record = Record(details: details, members: members, joinedAtMs: [:], joinRequests: requests)
-        record.unnamedMembers = unnamedMembers
+        let namedAudience = members.values.filter { $0 == .subscriber || $0 == .guest }.count
+        let audience = max(0, details.subscriberCount - namedAudience)
+        if unnamedMembers > 0 { record.crowd.append(makeCrowd(.member, count: unnamedMembers)) }
+        if audience > 0 { record.crowd.append(makeCrowd(.subscriber, count: audience)) }
         record.publicSinceMs = publicSince
         for (offset, member) in members.keys.sorted().enumerated() { record.joinedAtMs[member] = since + Int64(offset) * 60_000 }
         records[details.conversationID] = record
         order.append(details.conversationID)
+    }
+
+    private func makeCrowd(_ role: ProposedChat.Role, count: Int) -> Crowd {
+        defer { nextCrowd += count }
+        return Crowd(role: role, ids: nextCrowd..<(nextCrowd + count))
+    }
+
+    /// How many of record's crowd hold one of `roles`, the gone left out.
+    private static func crowdCount(_ record: Record, roles: Set<ProposedChat.Role>) -> Int {
+        let gone: [Int] = record.crowdGone.compactMap(crowdIndex)
+        var total = 0
+        for crowd in record.crowd where roles.contains(crowd.role) {
+            let left: Int = gone.filter { crowd.ids.contains($0) }.count
+            total += crowd.ids.count - left
+        }
+        return total
+    }
+
+    /// A crowd id's index; nil for anyone else.
+    private static func crowdIndex(_ profile: String) -> Int? {
+        guard profile.hasPrefix(crowdPrefix) else { return nil }
+        return Int(profile.dropFirst(crowdPrefix.count))
+    }
+
+    /// A crowd person's role in record, if they are still the crowd's.
+    private static func crowdRole(of profile: String, in record: Record) -> ProposedChat.Role? {
+        guard !record.crowdGone.contains(profile), let index = crowdIndex(profile) else { return nil }
+        return record.crowd.first { $0.ids.contains(index) }?.role
+    }
+
+    /// A crowd person a write names (#2237): made a member record, as the
+    /// seed's named people are, so every write reads one dictionary.
+    private func materialize(_ profile: String, in id: String) {
+        guard let record = records[id], record.members[profile] == nil,
+              let role = Self.crowdRole(of: profile, in: record) else { return }
+        records[id]?.crowdGone.insert(profile)
+        records[id]?.members[profile] = role
+        records[id]?.joinedAtMs[profile] = record.joinedAtMs.values.min() ?? 0
+    }
+
+    /// The people of `roles` in record, in the lists' order (#2237): by role
+    /// (owner, admins, members, subscribers), the named first within each,
+    /// by id, then the crowd.
+    private static func people(of record: Record, roles: Set<ProposedChat.Role>) -> [(String, ProposedChat.Role)] {
+        let order: [ProposedChat.Role] = [.owner, .admin, .member, .subscriber, .guest]
+        return order.filter(roles.contains).flatMap { role -> [(String, ProposedChat.Role)] in
+            let named = record.members.filter { $0.value == role }.keys.sorted().map { ($0, role) }
+            let crowd = record.crowd.filter { $0.role == role }.flatMap(\.profileIDs)
+                .filter { !record.crowdGone.contains($0) }.map { ($0, role) }
+            return named + crowd
+        }
     }
 
     // MARK: - Reads for the inbox
@@ -358,8 +464,12 @@ final class MockConversationBook: @unchecked Sendable {
         }
         let talkers = record.members.values.filter { $0 == .owner || $0 == .admin || $0 == .member }.count
         // A group's followers are its audience, counted apart (#2217): its
-        // members are the ones who talk, named or not.
-        record.details.memberCount = talkers + (record.details.kind == .group ? record.unnamedMembers : 0)
+        // members are the ones who talk, named or not. Each counter is the
+        // records it counts, the crowd's included (#2237), so a list and
+        // its counter never disagree.
+        record.details.memberCount = talkers + Self.crowdCount(record, roles: [.owner, .admin, .member])
+        let audience = record.members.values.filter { $0 == .subscriber || $0 == .guest }.count
+        record.details.subscriberCount = audience + Self.crowdCount(record, roles: [.subscriber, .guest])
         return record.details
     }
 
@@ -367,7 +477,7 @@ final class MockConversationBook: @unchecked Sendable {
     private func isFull(_ id: String) -> Bool {
         guard let record = records[id], record.details.kind == .group else { return false }
         let talkers = record.members.values.filter { $0 == .owner || $0 == .admin || $0 == .member }.count
-        return talkers + record.unnamedMembers >= ProposedChat.groupCap
+        return talkers + Self.crowdCount(record, roles: [.owner, .admin, .member]) >= ProposedChat.groupCap
     }
 
     private func manages(_ viewer: String, _ id: String) -> Bool {
@@ -391,6 +501,20 @@ final class MockConversationBook: @unchecked Sendable {
             return ProposedChat.Reply(members: record.members.keys.sorted().map {
                 ProposedChat.Member(profileID: $0, role: record.members[$0]!, joinedAtMs: record.joinedAtMs[$0] ?? 0)
             })
+        case let .membersPage(viewer, id, roles, token, limit):
+            guard let record = records[id], record.members[viewer] != nil || record.details.visibility != .private else {
+                return refused("CHT-1004: conversation not found")
+            }
+            let all = Self.people(of: record, roles: Set(roles))
+            let start = min(max(0, Int(token) ?? 0), all.count)
+            let end = min(start + max(1, limit), all.count)
+            let earliest = record.joinedAtMs.values.min() ?? 0
+            return ProposedChat.Reply(
+                members: all[start..<end].map { profile, role in
+                    ProposedChat.Member(profileID: profile, role: role, joinedAtMs: record.joinedAtMs[profile] ?? earliest)
+                },
+                nextPageToken: end < all.count ? String(end) : "", total: all.count
+            )
         case let .create(viewer, kind, name, photoURL, description, visibility, memberIDs):
             created += 1
             let id = "\(kind == .channel ? "ch" : "grp")-new-\(created)"
@@ -470,6 +594,7 @@ final class MockConversationBook: @unchecked Sendable {
             }
             return ProposedChat.Reply(joinRequests: records[id]?.joinRequests ?? [])
         case let .setRole(viewer, id, member, role):
+            materialize(member, in: id)
             guard manages(viewer, id), records[id]?.members[member] != nil else {
                 return refused("CHT-1030: only an owner or an admin changes roles")
             }
@@ -479,6 +604,7 @@ final class MockConversationBook: @unchecked Sendable {
             records[id]?.members[member] = role
             return ProposedChat.Reply()
         case let .remove(viewer, id, member, ban):
+            materialize(member, in: id)
             guard manages(viewer, id), member != viewer else { return refused("CHT-1030: only an owner or an admin removes") }
             guard records[id]?.members[member] != .owner else { return refused("CHT-1033: the owner can't be removed") }
             let wasSubscriber = records[id]?.members[member] == .subscriber
@@ -487,6 +613,7 @@ final class MockConversationBook: @unchecked Sendable {
             if wasSubscriber { records[id]?.details.subscriberCount -= 1 }
             return ProposedChat.Reply()
         case let .transferOwnership(viewer, id, to):
+            materialize(to, in: id)
             guard records[id]?.members[viewer] == .owner, records[id]?.members[to] != nil else {
                 return refused("CHT-1030: only the owner transfers, to a member")
             }
@@ -513,6 +640,7 @@ final class MockConversationBook: @unchecked Sendable {
                 // longer in it, and every read of theirs answers not found.
                 let kept = records[id]?.members.filter { $0.value != .subscriber && $0.value != .guest } ?? [:]
                 records[id]?.members = kept
+                records[id]?.crowd.removeAll { $0.role == .subscriber || $0.role == .guest }
                 records[id]?.details.subscriberCount = 0
                 records[id]?.publicSinceMs = nil
             }

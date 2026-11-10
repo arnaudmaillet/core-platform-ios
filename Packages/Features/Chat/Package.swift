@@ -32,7 +32,13 @@ let package = Package(
         // The conversation is drawn by Feed's text-post screen. The INTERFACE
         // only — features never import each other — the same edge Maps and
         // Profile already have.
-        .package(path: "../../FeatureInterfaces/FeedInterface")
+        .package(path: "../../FeatureInterfaces/FeedInterface"),
+        // A group's and a channel's info screens are the profile's and the
+        // place's page (#2237): the hero header, the lists behind its
+        // counters, the page under it — a Core package, no feature.
+        .package(path: "../../Core/HeroPage"),
+        // The Posts page's types (`GalleryPost`, `PostCardStaking`).
+        .package(path: "../../Core/PostGrid")
     ],
     targets: [
         .target(
@@ -52,7 +58,9 @@ let package = Package(
                 "FeedInterface",
                 "MediaCore",
                 "EntityStore",
-                "VoiceKit"
+                "VoiceKit",
+                "HeroPage",
+                "PostGrid"
             ]
         ),
         .testTarget(
@@ -71,6 +79,8 @@ let package = Package(
                 "LocalStore",
                 // `ChatMediaTests` keeps a sent take in a voice cache (#2103).
                 "VoiceKit",
+                // The info screens' header and lists (#2237).
+                "HeroPage",
                 .product(name: "CoreNetworkingMocks", package: "CoreNetworking")
             ]
         )

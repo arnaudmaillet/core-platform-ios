@@ -57,6 +57,10 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
     private let sharesShowcases: Bool
     /// What this session did to groups that the server doesn't say yet.
     private let groupNotes = GroupSessionNotes()
+    /// The Posts page under a group's or a channel's info header (#2237):
+    /// Feed's own grid page, the factory the profile and the place use,
+    /// handed by the app. Nil (a test) draws the page's status alone.
+    private let postsPage: (() -> any PostGridPage)?
 
     /// `localStore`: the inbox opens on its last rows and a conversation on
     /// its last 200 messages, offline and at a cold start (#897). Nil keeps
@@ -73,8 +77,10 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         relations: InboxRelations? = nil,
         showsGroups: Bool = DebugFlags.isOn("-group-chats"),
         showsChannels: Bool = DebugFlags.isOn("-channels"),
+        postsPage: (() -> any PostGridPage)? = nil,
         threadScreens: @escaping () -> any ConversationThreadScreenBuilding
     ) {
+        self.postsPage = postsPage
         groups = showsGroups ? repository as? any GroupChatServicing : nil
         channels = showsChannels ? repository as? any GroupChatServicing : nil
         sharesShowcases = showsChannels
@@ -350,26 +356,20 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         let model = ChannelInfoViewModel(
             conversationID: id, service: channels,
             isMuted: { [catalog] in catalog.isMuted(id) },
-            setMuted: { [catalog] muted, done in catalog.setMute(id, muted: muted, until: nil, completion: done) },
+            setMuted: { [catalog] muted, until, done in catalog.setMute(id, muted: muted, until: until, completion: done) },
             sharesShowcases: sharesShowcases
         )
         model.onChange = { [catalog] in
             onChange()
             catalog.refresh()
         }
-        let screen = ChannelInfoViewController(viewModel: model, imagePipeline: imagePipeline)
+        let screen = ChannelInfoViewController(viewModel: model, imagePipeline: imagePipeline, postsPage: postsPage?())
         screen.onOpenProfile = { [router] profileID, name in
             router?.route(to: .profile(profileID, stub: ProfileIdentityStub(handle: nil, displayName: name)))
         }
         // "Share as a Post" (#2216): the Text Post screen over the info
         // screen, the channel's card attached.
         screen.onShareAsPost = { [router] embed in router?.route(to: .composeShowcase(embed)) }
-        screen.onOpenRequests = { [self, weak model] presenter, changed in
-            let name = model?.state.name ?? ""
-            let run = RunChannel(id: id, name: name, photoURL: model?.state.photoURL)
-            let list = makeJoinRequests([run], onChange: changed)
-            presenter.navigationController?.pushViewController(list, animated: true)
-        }
         // Left: the row goes, and the viewer is back in the inbox.
         screen.onLeft = { [weak screen, catalog] in
             catalog.delete([id])
@@ -431,10 +431,10 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         let model = GroupInfoViewModel(
             conversationID: id, service: groups,
             isMuted: { [catalog] in catalog.isMuted(id) },
-            setMuted: { [catalog] muted, done in catalog.setMute(id, muted: muted, until: nil, completion: done) }
+            setMuted: { [catalog] muted, until, done in catalog.setMute(id, muted: muted, until: until, completion: done) }
         )
         model.onChange = onChange
-        let screen = GroupInfoViewController(viewModel: model, imagePipeline: imagePipeline)
+        let screen = GroupInfoViewController(viewModel: model, imagePipeline: imagePipeline, postsPage: postsPage?())
         screen.onOpenProfile = { [router] profileID, name in
             router?.route(to: .profile(profileID, stub: ProfileIdentityStub(handle: nil, displayName: name)))
         }

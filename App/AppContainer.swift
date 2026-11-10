@@ -1894,6 +1894,10 @@ final class AppContainer {
         // The inbox and the last 50 conversations × 200 messages (#897).
         localStore: localStore,
         relations: inboxRelations,
+        // The Posts page under a group's or a channel's info header (#2237):
+        // For You's own grid, as the profile's and the place's pages — the
+        // text posts that showcase it, laid out as a profile's Posts.
+        postsPage: { [unowned self] in self.feedFeature.makePostGridPage(style: .list, savesPosts: false) },
         // A conversation is drawn by the feed's text-post screen. Lazy, like
         // every feature here: the feed builder reaches the router, and the
         // router reaches this.

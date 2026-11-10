@@ -95,6 +95,11 @@ public enum ProposedChat {
     public enum Call: Codable, Sendable, Equatable {
         case details(viewer: String, conversationIDs: [String])
         case members(viewer: String, conversationID: String)
+        /// One page of `roles`' members, `limit` at most, after `pageToken`
+        /// (empty: the first) — #995's paged `ListMembers` (#2237). The
+        /// reply's `nextPageToken` (empty: the end) and `total`, every
+        /// member of those roles, which is what a counter says.
+        case membersPage(viewer: String, conversationID: String, roles: [Role], pageToken: String, limit: Int)
         case create(viewer: String, kind: Kind, name: String, photoURL: String, description: String,
                     visibility: Visibility, memberIDs: [String])
         case editIdentity(viewer: String, conversationID: String, name: String, photoURL: String, description: String)
@@ -126,16 +131,22 @@ public enum ProposedChat {
         public var joinRequests: [JoinRequest]
         public var conversationID: String
         public var error: String
+        /// A `membersPage`'s next page; nil or empty: none (#2237).
+        public var nextPageToken: String?
+        /// A `membersPage`'s total for its roles (#2237).
+        public var total: Int?
 
         public init(
             details: [Details] = [], members: [Member] = [], joinRequests: [JoinRequest] = [],
-            conversationID: String = "", error: String = ""
+            conversationID: String = "", error: String = "", nextPageToken: String? = nil, total: Int? = nil
         ) {
             self.details = details
             self.members = members
             self.joinRequests = joinRequests
             self.conversationID = conversationID
             self.error = error
+            self.nextPageToken = nextPageToken
+            self.total = total
         }
     }
 

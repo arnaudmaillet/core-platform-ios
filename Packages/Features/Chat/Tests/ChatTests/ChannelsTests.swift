@@ -575,7 +575,8 @@ struct ChannelsTests {
         followed.load()
         await settle { followed.state.phase == .loaded }
         #expect(!followed.state.canEdit)
-        #expect(followed.state.subscribers.isEmpty, "a subscriber sees no subscribers")
+        #expect(!ChannelInfoViewModel.listTabs(for: followed.state).contains { $0.id == "subscribers" }, "a subscriber sees no subscribers")
+        #expect(try await followed.page(of: .subscribers, after: nil).rows.isEmpty)
         var left = false
         followed.onLeft = { left = true }
         followed.leave()
