@@ -130,6 +130,15 @@ public final class PersonPill: UIView {
 
     /// The face: the initials, the picture dissolved in over them (#943).
     public let avatar: AvatarView
+    /// The face's place in the row (#2233): the person's avatar, or a
+    /// group's picture over it (`setGroupAvatar`). A slot, so the avatar can
+    /// hide under a group without the row collapsing its place — and hidden,
+    /// never faded: a platter flattens a partial alpha.
+    private let faceSlot = UIView()
+    /// A group's picture, made the first time the pill shows a group.
+    private var groupAvatar: GroupAvatarView?
+    /// The bucket the face is decoded at, a group's faces included.
+    private let faceSize: ImageBucket
     private let nameLabel = UILabel()
     private let handleLabel = UILabel()
     /// The relation's mark, centred on the face's edge — nil when the pill
@@ -165,6 +174,7 @@ public final class PersonPill: UIView {
     ) {
         self.ceiling = ceiling
         self.coldWidth = coldWidth
+        self.faceSize = faceSize
         avatar = AvatarView(diameter: AvatarImageView.bubbleDiameter, size: faceSize)
         statusBadge = carriesBadge ? RelationBadgeView(metrics: Self.markMetrics) : nil
         super.init(frame: .zero)
@@ -192,7 +202,8 @@ public final class PersonPill: UIView {
         labelsStack.setContentHuggingPriority(.defaultLow, for: .horizontal)
         labelsStack.setContentCompressionResistancePriority(UILayoutPriority(749), for: .horizontal)
 
-        let row = UIStackView(arrangedSubviews: [avatar, labelsStack])
+        avatar.pin(to: faceSlot)
+        let row = UIStackView(arrangedSubviews: [faceSlot, labelsStack])
         faceRow = row
         row.axis = .horizontal
         row.alignment = .center
@@ -201,7 +212,7 @@ public final class PersonPill: UIView {
         // #1277): the name starts clear of it, whatever the relation — a
         // constant, so a badge arriving never moves the pill's width.
         if statusBadge != nil {
-            row.setCustomSpacing(Self.markMetrics.overhang + Spacing.xs, after: avatar)
+            row.setCustomSpacing(Self.markMetrics.overhang + Spacing.xs, after: faceSlot)
         }
         // The face's leading inset matches its breathing in the wrapper, so it
         // sits evenly in the glass on three sides; the labels end the pill.
@@ -342,6 +353,47 @@ public final class PersonPill: UIView {
     private func applyWidthFloor() {
         guard let coldWidth else { return }
         minWidthConstraint?.isActive = isRedacted && widthCap >= coldWidth
+    }
+
+    // MARK: - A group (#2233)
+
+    /// Draws a group's picture in the face's place (#2233) — its photo, its
+    /// members' faces cut apart, or its initials (`GroupAvatarView`), the
+    /// same component as its inbox row, so the two always agree. Nil gives
+    /// the face back to the person's avatar. A group wears no badge.
+    ///
+    /// The same content again changes nothing; new faces or a photo update
+    /// the picture in place, the faces already drawn kept — no flash.
+    public func setGroupAvatar(_ content: GroupAvatarContent?, pipeline: ImagePipeline?) {
+        guard let content else {
+            groupAvatar?.setContent(nil, pipeline: nil)
+            groupAvatar?.isHidden = true
+            avatar.isHidden = false
+            return
+        }
+        let view = groupAvatar ?? makeGroupAvatar()
+        view.isHidden = false
+        view.setContent(content, pipeline: pipeline)
+        avatar.isHidden = true
+    }
+
+    /// The group drawn in the face's place, nil for a person.
+    public var groupAvatarContent: GroupAvatarContent? {
+        guard let groupAvatar, !groupAvatar.isHidden else { return nil }
+        return groupAvatar.content
+    }
+
+    /// The group's picture view, nil before the pill first showed a group.
+    /// Tests.
+    public var debugGroupAvatar: GroupAvatarView? { groupAvatar }
+
+    private func makeGroupAvatar() -> GroupAvatarView {
+        let view = GroupAvatarView(diameter: AvatarImageView.bubbleDiameter, size: faceSize)
+        // The pill is the one element: it says the group's name.
+        view.isAccessibilityElement = false
+        view.pin(to: faceSlot)
+        groupAvatar = view
+        return view
     }
 
     // MARK: - Badge
