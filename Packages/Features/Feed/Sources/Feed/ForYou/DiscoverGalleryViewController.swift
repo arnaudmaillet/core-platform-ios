@@ -132,7 +132,9 @@ final class DiscoverGalleryViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = Surface.page
+        // The page's ground in the launch's style (#2243): its tiles of words
+        // take the flat page's card tone, which stands apart only on white.
+        view.backgroundColor = page.pageGround
         page.pin(to: view)
         page.onItemTapped = { [weak self] index in self?.openTile(at: index) }
         page.onNearEnd = { [weak self] in self?.onNearEnd?() }

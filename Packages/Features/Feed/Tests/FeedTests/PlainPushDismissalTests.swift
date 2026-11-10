@@ -251,6 +251,37 @@ struct PlainPushDismissalTests {
         #expect(slide.closesByPull, "a plain push's vertical close still slides")
     }
 
+    // MARK: - Flat rows (#2243)
+
+    /// ⚠️ A FLAT ROW OF WORDS OPENS WITH THE NATIVE PUSH (#2243), though it
+    /// hands over a window: no reveal, and the native push's close — never a
+    /// flight for a photograph paged onto, never a window, its vertical
+    /// closes pulls.
+    @Test func aFlatTextRowOpensWithTheNativePushAndClosesWithItsPop() throws {
+        let stack = Stack()
+        stack.builder.presentSnapFeedHero(
+            postIDs: [PostID("t1")], from: stack.presenter,
+            origin: origin(hasHero: false, textReveal: rowWindow(), opensWithNativePush: true)
+        )
+        let slide = try #require(stack.nav.leasedDelegate as? InteractiveSlideDismissal)
+        #expect(!slide.revealPresents, "a flat row opened as a window")
+        #expect(slide.revealGeometry == nil, "a flat row's push closes as a window")
+        #expect(slide.heroLandingAcceptsHero?() == false, "a photograph paged onto could take the close")
+        #expect(slide.closesByPull)
+    }
+
+    /// The control: the same row in the cards style keeps today's window.
+    @Test func aCardsTextRowStillOpensAsTheWindow() throws {
+        let stack = Stack()
+        stack.builder.presentSnapFeedHero(
+            postIDs: [PostID("t1")], from: stack.presenter,
+            origin: origin(hasHero: false, textReveal: rowWindow(), opensWithNativePush: false)
+        )
+        let slide = try #require(stack.nav.leasedDelegate as? InteractiveSlideDismissal)
+        #expect(slide.revealPresents == TextRevealInstaller.isEnabled)
+        #expect((slide.revealGeometry != nil) == TextRevealInstaller.isEnabled)
+    }
+
     /// The pull lifts only the page — the bar stays — and a release short of
     /// the threshold settles it back where it rested (#2045, #2046).
     @Test func thePullLiftsThePageAndSettlesItBack() throws {
@@ -416,7 +447,9 @@ struct PlainPushDismissalTests {
 
     private func origin(
         hasHero: Bool,
-        stream: [GalleryPost]? = nil
+        stream: [GalleryPost]? = nil,
+        textReveal: TextRevealOrigin? = nil,
+        opensWithNativePush: Bool = false
     ) -> SnapFeedHeroOrigin {
         let post = GalleryPost(
             id: PostID(hasHero ? "m1" : "t1"),
@@ -437,8 +470,15 @@ struct PlainPushDismissalTests {
             // "still on screen?" question rather than the permanent one.
             frame: { _ in CGRect(x: 0, y: 0, width: 100, height: 100) },
             isOnScreen: { true },
-            setConcealed: { _ in }
+            setConcealed: { _ in },
+            textReveal: textReveal,
+            opensWithNativePush: opensWithNativePush
         )
+    }
+
+    /// A text row's window, as a list hands one over.
+    private func rowWindow() -> TextRevealOrigin {
+        TextRevealOrigin(rowFrame: { _ in CGRect(x: 16, y: 300, width: 370, height: 120) }, captionEnd: nil)
     }
 }
 

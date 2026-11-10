@@ -180,7 +180,8 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = Surface.page
+        // The grey page under cards, the white one under flat rows (#2243).
+        view.backgroundColor = page.pageGround
         page.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(page)
         NSLayoutConstraint.activate([

@@ -169,7 +169,8 @@ final class ForYouPostListViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = Surface.page
+        // The grey page under cards, the white one under flat rows (#2243).
+        view.backgroundColor = page.pageGround
         page.pin(to: view)
         page.onItemTapped = { [weak self] index in self?.openRow(at: index) }
         page.onItemCommentsTapped = { [weak self] index in self?.openRow(at: index, showingComments: true) }
