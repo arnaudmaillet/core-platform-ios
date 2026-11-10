@@ -119,7 +119,8 @@ public struct PostGridAuthorMenuContext {
 ///
 /// A page hosted under a floating header (`setHostedInsets`) scrolls under
 /// it, reports its offset (`onVerticalScroll`) and leaves pull-to-refresh to
-/// the host (`handPullToHost`, `onPullReleased`).
+/// the host (`handPullToHost`), which reads the pull from that offset with
+/// the app's one rule (`PullRefreshRule`, #2235).
 @MainActor
 public protocol PostGridPage: UIView {
     // MARK: Content
@@ -165,7 +166,6 @@ public protocol PostGridPage: UIView {
     // MARK: Hosted under a floating header
 
     var onVerticalScroll: ((CGFloat) -> Void)? { get set }
-    var onPullReleased: ((CGFloat) -> Void)? { get set }
     var verticalOffset: CGFloat { get }
     var scrollView: UIScrollView { get }
     func setVerticalOffset(_ offset: CGFloat, animated: Bool)

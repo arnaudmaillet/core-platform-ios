@@ -91,7 +91,7 @@ final class SuggestionsViewController: UIViewController {
         viewModel.onPhaseChange = { [weak self] phase in self?.render(phase) }
         // Pull to refresh, with the app's loader (#1901, the owner 2026-10-30):
         // the pull came back when search moved into the stacked field.
-        refreshControl.addAction(UIAction { [weak self] _ in self?.pullToRefresh() }, for: .valueChanged)
+        refreshControl.onRefresh = { [weak self] in self?.pullToRefresh() }
         tableView.refreshControl = refreshControl
         // The row has already flipped back; the toast says why (#802).
         viewModel.onFollowFailure = { [weak self] message in

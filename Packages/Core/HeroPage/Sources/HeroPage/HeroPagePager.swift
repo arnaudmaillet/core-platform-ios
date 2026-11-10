@@ -86,11 +86,10 @@ open class HeroPagePager<Tab: Equatable>: UIView {
     public var onProgress: ((CGFloat) -> Void)?
     /// The active page's vertical offset, every tick. The header rides this.
     public var onVerticalScroll: ((CGFloat) -> Void)?
-    /// The active page bounced past its top and let go — the hero page's
-    /// pull-to-refresh.
+    /// A page asked for a refresh — its failed state's "Try Again". A
+    /// finger's pull is the header's indicator's to decide, from
+    /// `onVerticalScroll` (`HeroPullToRefreshView`, #2235).
     public var onPullToRefresh: (() -> Void)?
-    /// A drag on the active page ended, with its overscroll distance.
-    public var onPullReleased: ((CGFloat) -> Void)?
 
     /// The section the page in front has scrolled into, once its title has
     /// gone under the bar — the profile's History days (#1344); nil on every
@@ -263,10 +262,6 @@ open class HeroPagePager<Tab: Equatable>: UIView {
         }
         page.onRefresh = { [weak self] in self?.onPullToRefresh?() }
         page.onPinnedSectionChanged = { [weak self] _ in self?.publishPinnedSection() }
-        page.onPullReleased = { [weak self] distance in
-            guard let self, isActive(page) else { return }
-            onPullReleased?(distance)
-        }
         didBuildPage(page, for: tab)
     }
 
