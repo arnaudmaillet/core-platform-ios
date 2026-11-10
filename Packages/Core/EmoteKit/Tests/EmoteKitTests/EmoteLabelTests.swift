@@ -222,6 +222,32 @@ struct EmoteLabelTests {
         #expect(label.coveredMarkIndices == [0, 1])
     }
 
+    /// ⚠️ A ONE-LINE LABEL LEFT ON ITS DEFAULT MODE ENDS IN "…" (#2197): the
+    /// inbox preview stopped mid-sentence at large sizes, because the
+    /// attributed text's word wrapping reached the text container as the
+    /// last line's mode. Nobody sets `lineBreakMode` here, as the inbox row
+    /// doesn't.
+    @Test func aCutLastLineEndsInAnEllipsis() throws {
+        let engine = try warmEngine(["noto:1f389"])
+        let (label, window) = hostedLabel(
+            "Nice — ping me when it's live 🎉", engine: engine, width: 180, lines: 1
+        )
+        defer { window.isHidden = true }
+        #expect(label.hasEmotes)
+        #expect(label.lastLineBreakMode == .byTruncatingTail)
+        #expect(label.drawsEllipsis, "the cut line stopped at a word, with no ellipsis")
+
+        // A clip asked for is kept: no ellipsis.
+        label.lineBreakMode = .byClipping
+        #expect(label.lastLineBreakMode == .byClipping)
+        #expect(!label.drawsEllipsis)
+
+        // Text that fits draws none either.
+        label.lineBreakMode = .byTruncatingTail
+        label.setEmoteText("live 🎉")
+        #expect(!label.drawsEllipsis)
+    }
+
     @Test func nothingHappensOffScreen() throws {
         let engine = EmoteEngine(diskCache: nil)
         let label = EmoteLabel(frame: CGRect(x: 0, y: 0, width: 300, height: 40))

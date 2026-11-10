@@ -830,6 +830,24 @@ final class ForYouGridPage: UIView {
     }
     let style: Style
 
+    /// How this page draws its posts' rows (#2243): cards on the grey page,
+    /// or flat rows on the white one — taken at init (the launch's style by
+    /// default, `PostListStyle.current`) and handed to the layout and every
+    /// row, so nothing below asks the launch arguments.
+    let listStyle: PostListStyle
+
+    /// The style the ROWS draw in: flat only on the vertical lists (the list
+    /// and Discover). A grid's tiles and History's rows have no card to drop.
+    var rowListStyle: PostListStyle {
+        style == .list || style == .discover ? listStyle : .cards
+    }
+
+    /// What this page lies on — the host paints it (#2243): the grouped grey
+    /// under cards, the plain white under flat rows. Every style follows the
+    /// launch's: a grid's tiles of words take the flat page's card tone
+    /// (`PostGridTileCell.fillColor`), which only stands apart on white.
+    var pageGround: UIColor { listStyle.pageGround }
+
     /// Internal (not private) only for the +QA hooks.
     let collectionView: UICollectionView
 
@@ -964,9 +982,11 @@ final class ForYouGridPage: UIView {
 
     init(
         imagePipeline: ImagePipeline, style: Style, videoPlayback: VideoPlaybackController? = nil,
-        bookmarks: PostBookmarkStore? = .shared
+        bookmarks: PostBookmarkStore? = .shared, listStyle: PostListStyle = .current
     ) {
         self.imagePipeline = imagePipeline
+        self.listStyle = listStyle
+        let rowStyle: PostListStyle = style == .list || style == .discover ? listStyle : .cards
         self.bookmarks = bookmarks
         videoPool = videoPlayback
         chunkPlanner.chunksLeavePairableMedia = !ForYouPairedVertical.chunksTakeVerticals
@@ -986,9 +1006,12 @@ final class ForYouGridPage: UIView {
         case .grid:
             ChaoticSliceLayout()
         case .list:
-            PostGridListLayout.layout(hasHeader: { [headerHost] index in
-                headerHost.page?.hasHeader(inSection: index) ?? false
-            })
+            PostGridListLayout.layout(
+                hasHeader: { [headerHost] index in
+                    headerHost.page?.hasHeader(inSection: index) ?? false
+                },
+                listStyle: rowStyle
+            )
         case .discover:
             // Same box, other questions: which sections are chunks, and which
             // are blocks of paired cards.
@@ -1009,7 +1032,8 @@ final class ForYouGridPage: UIView {
                 // corpus to browse: no chunk offers "View all" there.
                 showsViewAll: { [headerHost] in
                     headerHost.page?.offersViewAll ?? false
-                }
+                },
+                listStyle: rowStyle
             )
         case .rows:
             PostGridRowsLayout.layout(
@@ -1183,11 +1207,87 @@ final class ForYouGridPage: UIView {
         let wasAtTop = collectionView.contentOffset.y <= top + 1
         leadHeight = height
         DiscoverListLayout.setLeadHeight(height, on: layout)
+        // The first row's hairline under the shelf comes and goes with it.
+        refreshFlatSeparators()
         guard wasAtTop else { return }
         collectionView.layoutIfNeeded()
         collectionView.setContentOffset(
             CGPoint(x: collectionView.contentOffset.x, y: -collectionView.adjustedContentInset.top), animated: false
         )
+    }
+
+    // MARK: - Flat rows (#2243)
+
+    /// The hairlines the row at `indexPath` draws, decided from what lies
+    /// above and below it (`FlatListSeparators`): an inset line between two
+    /// rows, a full one where the list meets tiles, paired cards or the
+    /// shelf, none at the ends nor next to a section's title. None at all
+    /// under cards.
+    ///
+    /// Read off the MODEL (the data source's own counts), never the
+    /// collection view's: a row is configured in the middle of an update,
+    /// when the view's counts are the old ones.
+    func flatSeparators(at indexPath: IndexPath) -> FlatRowSeparators {
+        guard rowListStyle == .flat, !showsSkeleton else { return .none }
+        let section = indexPath.section
+        let count = self.collectionView(self.collectionView, numberOfItemsInSection: section)
+        let sectionCount = numberOfSections(in: self.collectionView)
+        let above: FlatListSeparators.Neighbour
+        if indexPath.item > 0 {
+            above = .row
+        } else if isHeadedSection(section) {
+            above = .sectionHeader
+        } else if section == 0 {
+            // The shelf above the list (For You's Friends and Following).
+            above = leadHeight > 0 ? .other : .none
+        } else {
+            above = isRunOfRows(section - 1) ? .row : .other
+        }
+        let below: FlatListSeparators.Neighbour
+        if indexPath.item + 1 < count {
+            below = .row
+        } else if section + 1 < sectionCount {
+            if isHeadedSection(section + 1) {
+                below = .sectionHeader
+            } else {
+                below = isRunOfRows(section + 1) ? .row : .other
+            }
+        } else {
+            below = .none
+        }
+        return FlatListSeparators.separators(above: above, below: below)
+    }
+
+    /// Whether `section` is drawn as rows (cards, or flat rows) rather than
+    /// as a chunk's tiles or a block of paired cards.
+    private func isRunOfRows(_ section: Int) -> Bool {
+        style == .list || (chunk(inSection: section) == nil && !isPairs(inSection: section))
+    }
+
+    /// Whether `section` wears a title over its first row.
+    private func isHeadedSection(_ section: Int) -> Bool {
+        style == .list ? hasHeader(inSection: section) : isTitled(inSection: section)
+    }
+
+    /// Re-decides the visible rows' hairlines — after a delivery or a lead
+    /// change has moved their neighbours. Rows realized later decide theirs
+    /// as they are configured and displayed.
+    private func refreshFlatSeparators() {
+        guard rowListStyle == .flat else { return }
+        for case let row as PostGridListRowCell in collectionView.visibleCells {
+            guard let path = collectionView.indexPath(for: row) else { continue }
+            row.flatSeparators = flatSeparators(at: path)
+        }
+    }
+
+    /// Whether `postID` opens with the stack's own push, and closes with its
+    /// own pop (#2243): a FLAT row of words — it has no card for the window
+    /// to grow from. A picture keeps its flight, a tile of words its window,
+    /// and the cards style today's window (`PostListOpening`).
+    func opensWithNativePush(_ postID: PostID) -> Bool {
+        guard style == .list || style == .discover, let post = post(for: postID) else { return false }
+        let item: PostListOpening.Item = drawsAsTile(postID) ? .tile : .listRow
+        return PostListOpening.opening(for: item, hasMedia: post.kind != .text, style: rowListStyle) == .push
     }
 
     /// The reconcile ran — every scroll tick (throttled), every visibility
@@ -3223,8 +3323,12 @@ final class ForYouGridPage: UIView {
     }
 
     private func renderNow(_ state: ForYouViewModel.PageState) {
-        // The sections or the new run's count may have moved under the bar.
-        defer { schedulePinnedSectionCheck() }
+        // The sections or the new run's count may have moved under the bar —
+        // and a row's neighbours with them, so its hairlines (#2243).
+        defer {
+            schedulePinnedSectionCheck()
+            refreshFlatSeparators()
+        }
         switch state {
         case .loading:
             emptyState.isHidden = true
@@ -3892,7 +3996,7 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
                 let cell = collectionView.dequeueReusableCell(
                     withReuseIdentifier: PostGridSkeletonListCell.reuseID, for: indexPath
                 ) as! PostGridSkeletonListCell
-                cell.configure(variant: indexPath.item)
+                cell.configure(variant: indexPath.item, listStyle: rowListStyle)
                 return cell
             // A row's bones: the square, two bars, the author's circle (#2170).
             case .rows:
@@ -3941,6 +4045,10 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
             let cell = collectionView.dequeueReusableCell(
                 withReuseIdentifier: PostGridListRowCell.reuseID, for: indexPath
             ) as! PostGridListRowCell
+            // A card or a flat row, and its hairlines (#2243) — before the
+            // configure, which measures the row.
+            cell.listStyle = rowListStyle
+            cell.flatSeparators = flatSeparators(at: indexPath)
             cell.configure(
                 with: post,
                 imagePipeline: imagePipeline,
@@ -4521,6 +4629,8 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
     func collectionView(
         _ collectionView: UICollectionView, willDisplay cell: UICollectionViewCell, forItemAt indexPath: IndexPath
     ) {
+        // Its neighbours may have changed since it was configured (#2243).
+        (cell as? PostGridListRowCell)?.flatSeparators = flatSeparators(at: indexPath)
         askNextPageIfNearEnd(force: true)
         guard !showsSkeleton, let onWillDisplayPost else { return }
         let index = flatIndex(for: indexPath)

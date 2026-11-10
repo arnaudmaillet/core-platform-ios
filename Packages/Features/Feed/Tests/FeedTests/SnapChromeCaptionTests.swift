@@ -2,10 +2,11 @@ import Testing
 import UIKit
 @testable import Feed
 
-/// The main-feed caption's two-line contract with the appended timestamp:
-/// the time always trails the caption inline — on ONE line when both fit
-/// there (2026-10-16), else at the end of line two — and a longer caption
-/// truncates early so the time always sits un-clipped at the end.
+/// The main-feed caption's two-line contract with the appended timestamp
+/// (#2252): the block is ALWAYS two lines tall and the date is never on line
+/// one — alone on line two after a one-line caption (or none), inline at the
+/// end of line two after a longer one — and a caption longer still truncates
+/// early so the date always sits un-clipped at the end.
 @MainActor
 struct SnapChromeCaptionTests {
     /// A realistic live-cell caption width (390pt cell − two `lg` insets).
@@ -18,12 +19,63 @@ struct SnapChromeCaptionTests {
         SnapChromeView.captionLineCount(string, width: width)
     }
 
-    /// Case A: a short caption takes its time on the SAME line (the owner,
-    /// 2026-10-16) — one line, so the block above comes down a line.
-    @Test func aShortCaptionTakesItsTimeOnItsLine() {
+    /// (#2252) A one-line caption puts the date ALONE on line two: the block
+    /// is two lines tall, so nothing above it comes down. (Case A — the date
+    /// inline on the caption's one line, the owner 2026-10-16 — is gone.)
+    @Test func aOneLineCaptionPutsTheDateAloneOnLineTwo() {
         let composed = SnapChromeView.composedCaption("Golden hour.", timestamp: timestamp, width: width)
-        #expect(composed.string == "Golden hour.  7\u{00A0}weeks")
-        #expect(lineCount(composed) == 1)
+        #expect(composed.string == "Golden hour.\n\(shownTime)")
+        #expect(lineCount(composed) == 2)
+        // The date is all of line two: nothing of the caption followed it.
+        #expect(composed.string.components(separatedBy: "\n").last == shownTime)
+    }
+
+    /// (#2252) No caption (media only): line one empty and reserved, the
+    /// date on line two — still two lines, so the author row over it holds.
+    @Test func noCaptionGivesTheDateOnLineTwo() {
+        let composed = SnapChromeView.composedCaption("", timestamp: timestamp, width: width)
+        #expect(composed.string == "\n\(shownTime)")
+        #expect(lineCount(composed) == 2)
+    }
+
+    /// (#2252) The date is never on line one, whatever the caption's length
+    /// and the width — a one-line caption sends it down a line, a longer one
+    /// keeps it at line two's end — and the block is always two lines.
+    /// Across widths, as a stand-in for Dynamic Type too: a larger caption
+    /// font wraps a caption the way a narrower column does, and the
+    /// composition measures at the font it draws in.
+    @Test func theDateIsNeverOnLineOne() {
+        let captions = [
+            "", "Hi.", "Golden hour.", "New city, same habits.",
+            "Rebuilt the whole deploy pipeline over a slow rainy weekend.",
+            "Weekend build log: rebuilt the pipeline end to end, found two race conditions that only reproduce on cold caches, and learned more about backpressure than I ever wanted to.",
+        ]
+        for width: CGFloat in stride(from: 160, through: 400, by: 20) {
+            for caption in captions {
+                let composed = SnapChromeView.composedCaption(caption, timestamp: timestamp, width: width)
+                #expect(SnapChromeView.captionLineCount(composed, width: width) == 2, "\(width): \(caption)")
+                #expect(composed.string.hasSuffix(shownTime), "\(width): \(caption)")
+                // Line one, as the label lays it out, holds no part of the date.
+                let firstLine = Self.firstLine(of: composed, width: width)
+                #expect(!firstLine.contains(shownTime) && !firstLine.contains("weeks"), "\(width): \(caption) → \(firstLine)")
+            }
+        }
+    }
+
+    /// The text of the first line `string` lays out on at `width`, through
+    /// TextKit the way a label wraps it.
+    private static func firstLine(of string: NSAttributedString, width: CGFloat) -> String {
+        let storage = NSTextStorage(attributedString: string)
+        let layout = NSLayoutManager()
+        let container = NSTextContainer(size: CGSize(width: width, height: .greatestFiniteMagnitude))
+        container.lineFragmentPadding = 0
+        layout.addTextContainer(container)
+        storage.addLayoutManager(layout)
+        guard layout.numberOfGlyphs > 0 else { return "" }
+        var range = NSRange()
+        layout.lineFragmentRect(forGlyphAt: 0, effectiveRange: &range)
+        let characters = layout.characterRange(forGlyphRange: range, actualGlyphRange: nil)
+        return (string.string as NSString).substring(with: characters)
     }
 
     /// The time is one piece: whatever the caption's length, "7 weeks" is
@@ -78,7 +130,7 @@ struct SnapChromeCaptionTests {
     }
 
     /// The invariant across every length: the timestamp is ALWAYS present at
-    /// the end and the block is ALWAYS within two lines.
+    /// the end and the block is ALWAYS exactly two lines (#2252).
     @Test func everyCompositionEndsWithTheTimestampWithinTwoLines() {
         let captions = [
             "Hi.",
@@ -89,18 +141,19 @@ struct SnapChromeCaptionTests {
         for caption in captions {
             let composed = SnapChromeView.composedCaption(caption, timestamp: timestamp, width: width)
             #expect(composed.string.hasSuffix(shownTime))
-            #expect(lineCount(composed) <= 2)
+            #expect(lineCount(composed) == 2)
         }
     }
 
     /// The GEOMETRY LOCK, per line: every line is one caption line tall (the
-    /// caption's register, `.subheadline` since #1708), so a one-line caption
-    /// is exactly one line and a two-line one exactly two — the smaller
-    /// footnote time never shrinks the line it ends.
+    /// caption's register, `.subheadline` since #1708), and every block is
+    /// exactly two (#2252) — the smaller footnote time never shrinks the line
+    /// it ends, even alone on it.
     @Test func captionContainerIsWholeBodyLines() {
         let bodyLineHeight = UIFont.appFont(forTextStyle: SnapChromeView.CaptionRegister.textStyle).lineHeight
         let cases: [(String, Int)] = [
-            ("Golden hour.", 1), // A — one line, time inline
+            ("Golden hour.", 2), // the date alone on line two (#2252)
+            ("", 2), // no caption: line one empty, the date on line two
             ("Rebuilt the whole deploy pipeline over a slow rainy weekend.", 2), // B — inline on line two
             ("Weekend build log: rebuilt the pipeline end to end, found two race conditions that only reproduce on cold caches, and learned more about backpressure than I ever wanted to.", 2), // C — truncated
         ]
@@ -149,7 +202,7 @@ struct SnapChromeCaptionTests {
     /// and its own solid grey (#2052, the owner: a little darker than the
     /// caption), on every case; the caption keeps its white (#2012).
     @Test func timestampRendersSmallerInItsOwnGrey() throws {
-        for caption in ["Golden hour.", // Case A
+        for caption in ["Golden hour.", // the date alone on line two (#2252)
                         "Rebuilt the whole deploy pipeline over a slow rainy weekend.", // Case B
                         "Weekend build log: rebuilt the pipeline end to end, found two race conditions that only reproduce on cold caches, and learned more about backpressure than I ever wanted to."] { // Case C
             let composed = SnapChromeView.composedCaption(caption, timestamp: timestamp, width: width)

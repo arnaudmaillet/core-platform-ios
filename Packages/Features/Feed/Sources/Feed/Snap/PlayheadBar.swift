@@ -204,6 +204,14 @@ final class PlayheadBarView: UIView {
 
     typealias Strip = SnapMediaPageBarView
 
+    /// The track's drawn thickness at rest and under the finger: 3 and 8 pt,
+    /// the Shots clip bar's until #2252. That issue thinned the Shots strip
+    /// to a 2 pt line growing to 6 (`SnapMediaPageBarView.thickness`,
+    /// `touchedThickness`); the sound sheet was out of its scope and keeps
+    /// these until the owner says otherwise.
+    static let restingTrackHeight: CGFloat = 3
+    static let handledTrackHeight: CGFloat = 8
+
     var ink: Ink = .onMedia {
         didSet { setNeedsLayout() }
     }
@@ -394,7 +402,7 @@ final class PlayheadBarView: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        let height = Strip.clipTrackHeight + (Strip.handledTrackHeight - Strip.clipTrackHeight) * handling.value
+        let height = Self.restingTrackHeight + (Self.handledTrackHeight - Self.restingTrackHeight) * handling.value
         track.frame = CGRect(x: 0, y: (bounds.height - height) / 2, width: bounds.width, height: height)
         track.layer.cornerRadius = height / 2
         track.backgroundColor = baseInk.withAlphaComponent(Strip.restingAlpha)

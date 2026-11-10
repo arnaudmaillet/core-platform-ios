@@ -220,6 +220,28 @@ struct MediaTimelineOverlapTrackTests {
         track.debugRelease()
     }
 
+    /// ⚠️ **A LONG DRAG IN FINE SAMPLES LEAVES THE START CAP WHERE IT WAS**
+    /// (#2198): a scroll view rounds its offset to the pixel, and the
+    /// compensation added each sample's shift to the ROUNDED offset — a
+    /// fraction of a point lost per sample, adding up over the drag (0.95 pt
+    /// over six samples on an iPhone SE). A real finger sends many small
+    /// samples; a hundred and twenty half-points loses points on any screen.
+    @Test func aDragInFineSamplesKeepsTheStartCapStill() throws {
+        let track = heldBesideALongDissolve()
+        let start = onScreen(track.debugStartGrip, of: track)
+        let end = onScreen(track.debugEndGrip, of: track)
+
+        track.debugTakeHold(at: track.debugEndGrip.midX)
+        try #require(track.debugGrip == .end, "guard: the drag took \(String(describing: track.debugGrip))")
+        for _ in 0..<120 { track.debugDrag(byPoints: -0.5) }
+
+        #expect(abs(onScreen(track.debugStartGrip, of: track) - start) < 0.5,
+                "the start cap moved \(onScreen(track.debugStartGrip, of: track) - start)pt")
+        #expect(abs(onScreen(track.debugEndGrip, of: track) - (end - 60)) < 0.5,
+                "the end cap moved \(onScreen(track.debugEndGrip, of: track) - end)pt for -60pt of finger")
+        track.debugRelease()
+    }
+
     /// ⚠️ **AND THE LEFT PINCE FOLLOWS IT WHILE THE END CAP STANDS STILL** —
     /// by review, the end and everything after it drifted by a quarter of the
     /// trim. Sixty points right is a second off the drawn width again.

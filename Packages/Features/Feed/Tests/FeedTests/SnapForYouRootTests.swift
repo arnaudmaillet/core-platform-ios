@@ -311,8 +311,8 @@ struct SnapForYouRootTests {
 
     /// Shots wears every feed's bottom layout — the strip left of the sound
     /// cover — and every feed stands a breath over its bottom bar (Shots 12 pt,
-    /// the rest 6, #1716/#1722); with no strip, Shots' caption comes down to
-    /// the cover's line.
+    /// the rest 6, #1716/#1722); strip or not, the caption stands on the
+    /// cover's line (#2252), and each strip is centred on its own bar's glass.
     @Test func everyFeedStandsOneBreathOverItsBar() {
         func laidOut(pages: Int, shots: Bool) -> SnapChromeView {
             let chrome = SnapActionColumnLayoutTests.chrome()
@@ -340,8 +340,17 @@ struct SnapForYouRootTests {
                 "Shots' cover is not its breath over the bar")
         #expect(abs(plainSound.maxY - (barLine - SnapActionColumn.bottomBreath - SnapActionColumn.inputRestingGap)) < 0.5,
                 "another feed's cover is not its breath over the bar")
+        // A breath apart, and each centred on its own bar's glass (#2252):
+        // the toolbar's drops further under the safe-area line than the tab
+        // bar's.
+        let centring = SnapChromeView.pageBarCenterOffset(overTabBar: false)
+            - SnapChromeView.pageBarCenterOffset(overTabBar: true)
         #expect(abs(frame(plain.debugPageBar, in: plain).minY - bar.minY
-            - (SnapActionColumn.shotsBottomBreath - SnapActionColumn.bottomBreath)) < 0.5, "the strips are not a breath apart")
+            - (SnapActionColumn.shotsBottomBreath - SnapActionColumn.bottomBreath) - centring) < 0.5,
+                "the strips are not a breath apart")
+        // The caption on the cover's line over a strip too (#2252).
+        #expect(abs(shots.debugCaptionFrame.maxY - sound.maxY) < 0.5, "over a strip the caption left the cover's line")
+        #expect(abs(plain.debugCaptionFrame.maxY - plainSound.maxY) < 0.5, "over a strip the caption left the cover's line")
 
         let lone = laidOut(pages: 1, shots: true)
         let loneSound = frame(lone.debugSoundBubble, in: lone)

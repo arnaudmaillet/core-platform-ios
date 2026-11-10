@@ -1,4 +1,5 @@
 import CoreModels
+import DesignSystem
 import Testing
 import UIKit
 @testable import Profile
@@ -211,6 +212,12 @@ struct ProfileRelationshipsTabSyncTests {
     @Test("The pager wears the header's blur, the lists none")
     func everyListFadesUnderTheHeader() {
         let controller = makeController()
+        // On screen: the clearance is measured only there (#2240).
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        window.rootViewController = controller
+        window.isHidden = false
+        controller.view.layoutIfNeeded()
+        defer { window.isHidden = true }
         let paging = controller.pager.pagingScrollView
         func lists() -> [UICollectionView] {
             var found: [UICollectionView] = []
@@ -236,6 +243,15 @@ struct ProfileRelationshipsTabSyncTests {
         // filmed) — and the lists stay clear, or two bands would stack.
         #expect(!paging.topEdgeEffect.isHidden && paging.topEdgeEffect.style == .soft)
         #expect(all.allSatisfy { $0.topEdgeEffect.isHidden })
+        // ⚠️ AND EVERY LIST RESTS BELOW THE BLUR'S FADE (#2240, the owner's
+        // report: the first face softened at rest). The blur is the pager's,
+        // the space is each list's — the opening one and the ones made by
+        // paging alike — and none on the pager, whose content does not
+        // scroll under the bar.
+        #expect(all.allSatisfy { $0.topFadeClearance == SoftTopEdge.fadeLength },
+                "\(all.map(\.topFadeClearance))")
+        #expect(all.allSatisfy { $0.contentInset.top >= SoftTopEdge.fadeLength })
+        #expect(paging.contentInset.top == 0)
     }
 }
 

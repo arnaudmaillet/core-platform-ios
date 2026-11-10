@@ -666,6 +666,11 @@ final class SnapFeedViewController: UIViewController {
         // builds the dismissal, ahead of the reveal geometry.
         view.backgroundColor = emptyGround
         configureCollectionView()
+        #if DEBUG
+        // The comments sheet's catalogue checked at launch (#2195 § 5): read
+        // here, a broken one fails its assertion before any sheet opens.
+        _ = CommentsSheetShape.catalogue
+        #endif
         if installsSideList {
             let sideList = SnapSideListController(host: self, imagePipeline: imagePipeline, videoPlayback: videoPlayback)
             sideList.install(in: view)
@@ -3725,10 +3730,14 @@ final class SnapFeedViewController: UIViewController {
         detail?.onPostUnavailable = { [weak self] id in self?.markPostUnavailable(id) }
         // The avatar and the field alone: no like, no slot, no post actions.
         detail?.setComposerBare()
-        // A short stream rests at its top: the sheet is fitted to it, and a
-        // stream anchored to the bottom moved its rows as the sheet settled.
-        detail?.anchorsShortStream = false
-        // …and, held whole, leaves a drag on it to the sheet.
+        // A SHORT THREAD IN A FIXED SHEET (#2195): the sheet keeps its
+        // shape's height, so one or two comments leave room in it. Each tab
+        // keeps its own reading — Popular from the top, as a ranking (#2007);
+        // Recent from the bottom, its last comment over the composer, the
+        // conversation the owner decided on (#1799) — the panel's own rule
+        // (`anchorsShortStream`, Recent only), left on. Until #2195 the sheet
+        // was fitted to its stream and the anchor was turned off.
+        // A stream held whole leaves a drag on it to the sheet.
         detail?.letSheetTakeShortStreams()
         // The sheet rises over the keyboard itself: Recent does not ride it.
         detail?.streamsRideKeyboard = false

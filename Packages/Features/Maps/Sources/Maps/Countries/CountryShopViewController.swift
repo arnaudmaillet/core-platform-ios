@@ -165,8 +165,9 @@ public final class CountryShopViewController: UIViewController {
         // The system's progressive blur under the bar and the search field
         // (see the type's note). STATED rather than left `.automatic`: under
         // a titled bar the automatic style is the tinted frost over the whole
-        // header that the app rejected (2026-09-22).
-        collectionView.topEdgeEffect.style = .soft
+        // header that the app rejected (2026-09-22). Through the titled
+        // contract, which also rests the first row below the fade (#2240).
+        collectionView.applyTopEdge(for: .titled)
         view.addSubview(collectionView)
         collectionView.pin(to: view)
         // Named, not searched for: the effect is drawn where the bar meets

@@ -181,6 +181,9 @@ public final class ProfileViewModel {
             case .reposts: reposts
             case .tagged: tagged
             case .history: history
+            // Not posts (#2232): its page draws the profile's channels,
+            // which `ProfileChannelsViewModel` reads.
+            case .channels: .empty(message: "")
             }
         }
 

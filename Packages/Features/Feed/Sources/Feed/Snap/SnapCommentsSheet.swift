@@ -20,72 +20,84 @@ import UIKit
 /// sheet through its entrance, a drag down and its exit — never a second
 /// animation trying to keep pace with UIKit's.
 ///
-/// Two heights for a portrait media (the owner, 2026-11-03): collapsed, the
-/// content's own, at most what the media leaves it (`restingHeight`) — a
-/// short thread takes a short sheet, with no room above its first row — and,
-/// for comments that outgrow it, expanded to the top of the screen, the media
-/// shrinking on in the room left (a floating preview takes it from there,
-/// #2087's next steps). A square or landscape media gets ONE height (#2184):
-/// it keeps the screen's width and never shrinks; the comments scroll inside
-/// the sheet. The
+/// ONE HEIGHT PER SHAPE, NEVER ITS COMMENTS' (#2195, the owner 2026-11-08):
+/// collapsed, the sheet rests at its media's shape's height
+/// (`restingHeight`, `CommentsSheetShape`) — the same sheet with no comments
+/// or a thousand, as TikTok and Instagram keep it. Comments arriving, a
+/// comment sent, replies opened, Popular ↔ Recent: nothing refits it; they
+/// only decide whether the expanded detent is offered
+/// (`offerExpandedDetentIfNeeded`). A short thread reads in the room left:
+/// Popular from the top, Recent from the bottom, as a conversation.
+///
+/// Expanded, for a shape that offers it (portrait today) and comments that
+/// outgrow the collapsed sheet: up to the top of the screen, the media
+/// shrinking on in the room left and a floating preview taking it from
+/// there. ONCE EXPANDED, the sheet offers that detent alone (the owner,
+/// 2026-11-10): a swipe down closes it straight to the bottom, UIKit's own
+/// dismissal deciding, and the collapsed height is back at the next opening
+/// (`CommentsSheetDetents`). A full-width shape (square, 4:3, 16:9) keeps its
+/// one height and never shrinks; the comments scroll inside the sheet. The
 /// sheet is undimmed, so the media above it stays lit; a tap there closes
 /// it, as a swipe down does.
 @MainActor
-final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationControllerDelegate {
-    /// A portrait media's sheet, as shares of the screen: never under the
-    /// floor, which keeps the rows readable, never over the ceiling
-    /// (`restingHeight`). The ceiling also bounds a square or landscape one.
-    static let floorShare: CGFloat = 0.6
-    static let ceilingShare: CGFloat = 0.75
-    /// The shortest a square or landscape media's sheet gets (#2184): its bar
-    /// (~56 pt), three comment rows (~60 pt each) and its composer (~64 pt),
-    /// measured on the simulator. Under it, the media shrinks to fit — a
-    /// square on an iPhone SE.
-    static let minimumSheetHeight: CGFloat = 300
-    static let detent = UISheetPresentationController.Detent.Identifier("feed.comments.v2")
+final class SnapCommentsSheetSession: NSObject, UISheetPresentationControllerDelegate {
+    /// The sheet's numbers, next to its catalogue (#2195 § 5).
+    private static let layout = CommentsSheetLayout.standard
+    static let detent = CommentsSheetDetents.collapsed
     /// The sheet up to the top of the screen — offered only while the
     /// comments outgrow `detent` (the owner, 2026-11-03), the media shrinking
-    /// on in the room left above it.
-    static let expandedDetent = UISheetPresentationController.Detent.Identifier("feed.comments.v2.expanded")
-    /// Between the shrunk media's bottom and the sheet's top.
-    static let mediaGap: CGFloat = Spacing.sm
-    /// Between the shrunk media and the screen's sides: it never touches
-    /// them (the owner, 2026-11-03).
-    static let mediaSideMargin: CGFloat = Spacing.sm
+    /// on in the room left above it; once selected, the only one
+    /// (`CommentsSheetDetents`).
+    static let expandedDetent = CommentsSheetDetents.expanded
 
-    /// The sheet's tallest resting height: one per shape on a screen
-    /// (#2184, `SnapFeedCell.CommentsSheetShape`), read once, at the opening
-    /// — a carousel paged under the sheet does not move it.
+    /// The sheet's collapsed height: ONE per shape on a screen (#2184, #2195,
+    /// `CommentsSheetShape`), read once, at the opening — a carousel paged
+    /// under the sheet does not move it, and its comments never do. The
+    /// shape's `layout` decides:
     ///
-    /// - **Portrait:** the media shrinks into the room above a sheet between
-    ///   `floorShare` and `ceilingShare` of the screen — the width would
-    ///   leave the sheet no room.
-    /// - **Square and landscape:** the media keeps the screen's whole width,
-    ///   less `mediaSideMargin` on each side (it never touches them, the
-    ///   owner 2026-11-03), and the sheet takes exactly what is left — never
-    ///   under `minimumSheetHeight`, where the media shrinks to fit instead.
+    /// - **`shrinksIntoRoom`** (portrait): the media shrinks into the room
+    ///   above a sheet between `floorShare` and `ceilingShare` of the screen —
+    ///   the width would leave the sheet no room.
+    /// - **`fullWidth`** (square, 4:3, 16:9): the media keeps the screen's
+    ///   whole width, less `mediaSideMargin` on each side (it never touches
+    ///   them, the owner 2026-11-03), and the sheet takes exactly what is
+    ///   left — never under `minimumSheetHeight`, where the media shrinks to
+    ///   fit instead (a square on an iPhone SE).
+    ///
+    /// On a 17 Pro Max: 60 % portrait, 45 % square, 56 % 4:3, 64 % 16:9. A
+    /// picture not known yet gets the floor, as a shrinking shape would.
     ///
     /// The height of a custom detent, so it leaves out the bottom safe area
     /// the sheet stands on.
     ///
     /// - Parameter picture: what the sheet shrinks, as the page draws it
     ///   (`SnapFeedCell.commentsSheetPictureSize`).
-    static func restingHeight(screen: CGSize, safeArea: UIEdgeInsets, picture: CGSize) -> CGFloat {
-        let ceiling = screen.height * ceilingShare
-        guard let shape = SnapFeedCell.CommentsSheetShape.of(picture) else { return screen.height * floorShare }
-        let mediaHeight = (screen.width - 2 * mediaSideMargin) * picture.height / picture.width
-        let left = screen.height - safeArea.top - mediaHeight - mediaGap - safeArea.bottom
-        guard shape != .portrait else { return min(max(left, screen.height * floorShare), ceiling) }
-        return min(max(left, minimumSheetHeight), ceiling)
+    static func restingHeight(
+        screen: CGSize, safeArea: UIEdgeInsets, picture: CGSize,
+        catalogue: [CommentsSheetShape] = CommentsSheetShape.catalogue,
+        layout: CommentsSheetLayout = .standard
+    ) -> CGFloat {
+        let ceiling: CGFloat = screen.height * layout.ceilingShare
+        let floor: CGFloat = screen.height * layout.floorShare
+        guard let shape = CommentsSheetShape.of(picture, in: catalogue) else { return floor }
+        let mediaWidth: CGFloat = screen.width - 2 * layout.mediaSideMargin
+        let mediaHeight: CGFloat = mediaWidth * picture.height / picture.width
+        let reserved: CGFloat = safeArea.top + mediaHeight + layout.mediaGap + safeArea.bottom
+        let left: CGFloat = screen.height - reserved
+        let lowest: CGFloat = shape.layout == .shrinksIntoRoom ? floor : layout.minimumSheetHeight
+        return min(max(left, lowest), ceiling)
     }
 
     /// Whether a sheet over a picture of `picture`'s shape offers its
-    /// expanded detent at all (#2184): only a portrait one; a square or
-    /// landscape media keeps its one height and never shrinks — the comments
-    /// scroll inside the sheet. A picture not known yet reads as portrait,
-    /// today's sheet.
-    static func offersExpandedDetent(picture: CGSize) -> Bool {
-        (SnapFeedCell.CommentsSheetShape.of(picture) ?? .portrait) == .portrait
+    /// expanded detent at all (#2184): the shape says
+    /// (`CommentsSheetShape.offersExpandedDetent`, portrait only today); a
+    /// full-width media keeps its one height and never shrinks — the comments
+    /// scroll inside the sheet. A picture not known yet offers it, as the
+    /// floor height it gets is a shrinking shape's.
+    static func offersExpandedDetent(
+        picture: CGSize, catalogue: [CommentsSheetShape] = CommentsSheetShape.catalogue
+    ) -> Bool {
+        CommentsSheetShape.of(picture, in: catalogue)?.offersExpandedDetent ?? true
     }
 
     let postID: PostID
@@ -106,27 +118,27 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
     private var hasEnded = false
     /// The sheet is on its way out: its height holds still.
     private var isLeaving = false
-    /// The content height the detent last resolved against.
-    private var fittedHeight: CGFloat?
     /// Where the sheet's top rests, in the window: kept while it is not
     /// leaving (`follow`).
     private var restingTop: CGFloat?
     /// The sheet's top as last drawn (`follow`): what a frame that cannot be
     /// read is given.
     private var lastDrawnTop: CGFloat?
-    /// The detent last resolved at the media's cap, not at its content's
-    /// height, and where the sheet's top should then rest, in the window
+    /// The collapsed detent last resolved under the screen's top (a floating
+    /// sheet's), and where the sheet's top should then rest, in the window
     /// (`correctCap`).
     private var restsAtCap = false
     private var capTop: CGFloat?
-    /// The collapsed detent's tallest height (`restingHeight`), and the
-    /// bottom safe area the sheet stands on: whether the comments outgrow it
-    /// (`isExpandable`).
-    private var restingHeight: CGFloat = 0
-    private var bottomInset: CGFloat = 0
-    /// Whether the media's shape lets the sheet expand at all (#2184):
-    /// portrait only (`offersExpandedDetent`).
-    private var shapeOffersExpanded = true
+    /// The detents' rule for this opening (#2195): the shape's height, whether
+    /// the shape offers the expanded detent, and whether it has been selected
+    /// since the sheet opened. A new opening is a new session: the collapsed
+    /// detent is back.
+    private var detentRule = CommentsSheetDetents(restingHeight: 0, bottomInset: 0, offersExpanded: false)
+    /// The sheet left from expanded (#2195, the owner 2026-11-10): the top
+    /// the media's growth back to full screen is measured from — where the
+    /// leave began, then where the media took the picture back from its
+    /// preview (`follow`). Nil otherwise.
+    private var leaveRestTop: CGFloat?
     /// What a floating sheet's detent needs on top of `restingHeight` to rest
     /// where it says, measured on the first sheet and kept (`correctCap`).
     private static var capCorrection: CGFloat = 0
@@ -178,17 +190,21 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         // detent change, ~10 ms of the frame that starts the move, and the
         // dynamic colours shifted between the two heights.
         sheet.traitOverrides.userInterfaceLevel = .base
-        restingHeight = resting
-        self.bottomInset = bottomInset
-        shapeOffersExpanded = Self.offersExpandedDetent(picture: cell.commentsSheetPictureSize)
+        let rule = CommentsSheetDetents(
+            restingHeight: resting, bottomInset: bottomInset,
+            offersExpanded: Self.offersExpandedDetent(picture: cell.commentsSheetPictureSize)
+        )
+        detentRule = rule
         if let controller = sheet.sheetPresentationController {
-            collapsedDetent = .custom(identifier: Self.detent) { [weak self, weak content] context in
+            // ⚠️ THE SHAPE'S HEIGHT, WHATEVER THE COMMENTS (#2195): no content
+            // height reaches this closure, so nothing the comments do can
+            // move the collapsed sheet — only the floating sheet's
+            // correction, once, on the way in (`correctCap`).
+            collapsedDetent = .custom(identifier: Self.detent) { [weak self] context in
                 MainActor.assumeIsolated {
-                    if let held = self?.keysHeldHeight { return min(held, context.maximumDetentValue) }
-                    let cap = min(context.maximumDetentValue, resting + Self.capCorrection)
-                    let height = content?.fittedHeight.map { min(cap, $0 - bottomInset) } ?? cap
-                    self?.restsAtCap = height == cap && cap < context.maximumDetentValue
-                    self?.collapsedHeight = height
+                    let maximum = context.maximumDetentValue
+                    let height = rule.collapsedHeight(capCorrection: Self.capCorrection, maximum: maximum)
+                    self?.restsAtCap = height < maximum
                     return height
                 }
             }
@@ -218,7 +234,12 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
                 offersExpanded: controller.detents.contains { $0.identifier == Self.expandedDetent }
             )
             if route.expands {
-                controller.animateChanges { controller.selectedDetentIdentifier = Self.expandedDetent }
+                controller.animateChanges {
+                    controller.selectedDetentIdentifier = Self.expandedDetent
+                    // Selected in code, which UIKit does not report: the
+                    // collapsed detent goes in the same change.
+                    self.detentSelected(Self.expandedDetent)
+                }
             }
             return route.detached
         }
@@ -242,17 +263,17 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
             keyboardTracker.heightAnchor.constraint(equalToConstant: 1),
         ])
         observeKeyboard()
-        // Laid out at the sheet's width before it is presented, so the first
-        // height it resolves is already its content's.
+        // Laid out at its height before it is presented: the stream settles
+        // in the room it will have (a short Recent anchored to its bottom),
+        // and its content's height is known.
         sheet.view.frame = CGRect(x: 0, y: 0, width: window.bounds.width, height: resting + bottomInset)
         content.composerBottomInset = bottomInset
         sheet.view.layoutIfNeeded()
         content.applyPanelInsets()
         content.view.layoutIfNeeded()
-        fittedHeight = content.fittedHeight
         // The detents once the content's height is known: the expanded one
         // only for comments that outgrow the collapsed one.
-        sheet.sheetPresentationController?.detents = detents(expandable: isExpandable)
+        if let controller = sheet.sheetPresentationController { applyDetents(to: controller) }
 
         let link = CADisplayLink(target: DisplayLinkTarget(self), selector: #selector(DisplayLinkTarget.tick(_:)))
         // As fast as the screen: a 120 Hz sheet followed at 60 drags its
@@ -357,7 +378,7 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
     @objc func close() {
         guard !hasEnded, sheet.presentingViewController != nil else { return }
         endEditing()
-        isLeaving = true
+        beginLeaving()
         content.freeze()
         feed?.dismiss(presented: sheet)
     }
@@ -522,7 +543,7 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         // it is followed before the frame commits (`followCommitObserver`).
         let shownTop = predictedTop(drawn: drawnTop, model: modelTop)
         // …against where it RESTS. The model frame is the end of whatever is
-        // animating — the rest on the way in and on a refit — but once the
+        // animating — the rest on the way in — but once the
         // sheet starts to leave it is the finger's, then the exit's, off the
         // screen. Read there (measured, 2026-11-03), the progress stayed at 1
         // under the finger and ran to 157 on the release: the media held its
@@ -550,7 +571,6 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         }
         guard let restingTop else { return }
         let top = shownTop
-        let progress = (height - top) / max(1, height - restingTop)
         // The room above the sheet, a breath short of its top and of the
         // screen's sides: the media never touches them.
         //
@@ -560,7 +580,7 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         // it over as the sheet goes on rising (`followPreview`); with no
         // preview to take it, it scales out where it stands.
         let roomTop = window.safeAreaInsets.top
-        let room = top - Self.mediaGap - roomTop
+        let room = top - Self.layout.mediaGap - roomTop
         // ⚠️ ON THE KEYS, THE MEDIA STAYS (the owner, 2026-11-04): a
         // collapsed sheet the keys raise is held there — pulled, it gives a
         // few points — and handing the picture to the preview for those left
@@ -573,10 +593,11 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         ).height
         let smallest = ridesKeys ? min(previewHeight, Self.keyboardFloor) : previewHeight
         let region = CGRect(
-            x: Self.mediaSideMargin, y: roomTop,
-            width: window.bounds.width - 2 * Self.mediaSideMargin,
+            x: Self.layout.mediaSideMargin, y: roomTop,
+            width: window.bounds.width - 2 * Self.layout.mediaSideMargin,
             height: max(room, smallest)
         )
+        let wasPreviewOwned = previewOwnsMedia
         if isSheetAtRest(top: top) {
             previewOwnsMedia = room < smallest - Self.previewTakesAt
         } else if !previewOwnsMedia, room < smallest - Self.previewTakesAt {
@@ -585,22 +606,36 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
             previewOwnsMedia = false
         }
         if room >= smallest { isPreviewUnavailable = false }
+        // ⚠️ FROM EXPANDED, ONE MOVE TO FULL SCREEN (#2195, the owner
+        // 2026-11-10). Measured against the collapsed rest, the media came
+        // back from the preview at the room's size, held it down to the
+        // collapsed sheet's top — the shrunk media of a sheet the swipe never
+        // stops at — and only then grew to full screen. Leaving from
+        // expanded, its growth is measured from where it takes the picture
+        // back (`leaveRestTop`): from the preview's size, at that top, to
+        // full screen at the bottom, in one curve.
+        if leaveRestTop != nil, wasPreviewOwned, !previewOwnsMedia { leaveRestTop = top }
+        let progressRest: CGFloat = leaveRestTop ?? restingTop
+        let progress: CGFloat = (height - top) / max(1, height - progressRest)
         // Out before the preview comes — one picture at a time; with no
         // preview to come, out past its smallest, with the sheet.
         let out: CGFloat = isPreviewUnavailable
             ? min(1, max(0, (smallest - room) / Self.mediaOutSpan))
             : timedMediaOut()
         // From the collapsed rest's room down to the smallest: the corners
-        // turn the preview's on the way.
-        let restingRoom = restingTop - Self.mediaGap - roomTop
-        let towardsPreview = min(1, max(0, (restingRoom - room) / max(1, restingRoom - smallest)))
+        // turn the preview's on the way. Leaving from expanded, they go with
+        // the growth itself.
+        let restingRoom = restingTop - Self.layout.mediaGap - roomTop
+        let towardsPreview: CGFloat = leaveRestTop != nil
+            ? min(1, max(0, progress))
+            : min(1, max(0, (restingRoom - room) / max(1, restingRoom - smallest)))
         let sheetRadius = sheetCornerRadius(below: container)
         cell.setCommentsSheetLayout(
             progress: progress, mediaRegion: region, sheetCornerRadius: sheetRadius, out: out,
             towardsPreview: towardsPreview, previewCornerRadius: SnapCommentsPreview.cornerRadius
         )
         followPreview(wantsPreview: previewOwnsMedia && mediaOutShare >= 1, in: window, sheetTop: top)
-        refit()
+        offerExpandedDetentIfNeeded()
     }
 
     // MARK: The preview
@@ -814,8 +849,8 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         let top = max(window.safeAreaInsets.top, sheetTop) + content.barBottom + Spacing.sm
         let bottom = (content.composerTop ?? window.bounds.height - window.safeAreaInsets.bottom) - Spacing.sm
         return CGRect(
-            x: Self.mediaSideMargin, y: top,
-            width: window.bounds.width - 2 * Self.mediaSideMargin, height: max(0, bottom - top)
+            x: Self.layout.mediaSideMargin, y: top,
+            width: window.bounds.width - 2 * Self.layout.mediaSideMargin, height: max(0, bottom - top)
         )
     }
 
@@ -870,10 +905,19 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
     /// The preview's expand button: the sheet down to its collapsed height,
     /// the media back above it — the preview flies into it on the way
     /// (`followPreview`). The keyboard goes first.
+    ///
+    /// A tap asking for it, not a swipe (#2195): the collapsed detent, taken
+    /// out once the sheet expanded, comes back with it — and the expanded
+    /// detent's rule starts over, as at an opening.
     private func previewExpanded() {
         guard let controller = sheet.sheetPresentationController else { return }
         if content.isKeyboardUp { endEditing() }
-        controller.animateChanges { controller.selectedDetentIdentifier = Self.detent }
+        detentRule.collapseAgain()
+        let identifiers = detentRule.identifiers(contentHeight: content.contentHeight, capCorrection: Self.capCorrection)
+        controller.animateChanges {
+            if !holdsDetent { controller.detents = detents(for: identifiers) }
+            controller.selectedDetentIdentifier = Self.detent
+        }
     }
 
     /// The preview into its corner, on a spring carrying the throw.
@@ -980,40 +1024,50 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         controller.animateChanges { controller.invalidateDetents() }
     }
 
-    /// The detent again when the content's height has moved — rows landing,
-    /// a thread's replies opening, the other tab — never on the way out; and
-    /// the expanded detent offered, or taken back, as the comments outgrow
-    /// the collapsed one or no longer do.
-    private func refit() {
-        guard !isLeaving, !holdsDetent, let controller = sheet.sheetPresentationController else { return }
-        // ⚠️ NOT WHILE THE KEYS CARRY THE SHEET (measured, 2026-11-04): a
-        // comment sent with the keys up grew the rows, the sheet refitted
-        // over the keys and its composer, pinned at its height for them,
-        // stood 85 pt above them — the media handed to its preview besides.
-        // The collapsed detent holds its height until the keys have gone;
-        // the refit comes then.
-        if content.isKeyboardUp || isKeyboardHiding {
-            if keysHeldHeight == nil { keysHeldHeight = collapsedHeight }
-            return
-        }
-        keysHeldHeight = nil
-        let fitted = content.fittedHeight
-        if let fitted, let last = fittedHeight, abs(fitted - last) < 1 { return }
-        guard fitted != fittedHeight else { return }
-        fittedHeight = fitted
-        let expandable = isExpandable
-        controller.animateChanges {
-            if expandable != controller.detents.contains(where: { $0.identifier == Self.expandedDetent }) {
-                controller.detents = detents(expandable: expandable)
-            }
-            controller.invalidateDetents()
-        }
+    /// ⚠️ THE CONTENT NEVER MOVES THE SHEET (#2195, the owner 2026-11-08).
+    /// Rows landing, a comment sent, replies opened, the other tab: until
+    /// #2195 each refitted the collapsed sheet to its content, animated —
+    /// the media above shrinking and moving with it — and the height held
+    /// while the keys carried the sheet existed only for that refit (a
+    /// comment sent with the keys up refitted it 85 pt above them): it went
+    /// with it. A change of content now only offers the expanded detent, or
+    /// takes it back, as the comments outgrow the collapsed sheet or no
+    /// longer do: a change of the list alone, with the collapsed detent
+    /// selected, which moves nothing.
+    ///
+    /// Never on the way out, nor while the detached composer holds the list
+    /// (`holdDetent`), nor while the keys carry the sheet: UIKit lays the
+    /// sheet out again over the keys on a change of its list. The offer
+    /// comes once they have gone — the collapsed height the same.
+    private func offerExpandedDetentIfNeeded() {
+        guard !isLeaving, !holdsDetent, !content.isKeyboardUp, !isKeyboardHiding,
+              let controller = sheet.sheetPresentationController else { return }
+        applyDetents(to: controller)
     }
 
-    /// The collapsed detent's height as last resolved, and as held while the
-    /// keys carry the sheet (`refit`).
-    private var collapsedHeight: CGFloat?
-    private var keysHeldHeight: CGFloat?
+    /// The list the rule asks for, set only when it differs from the one up.
+    private func applyDetents(to controller: UISheetPresentationController) {
+        let wanted = detentRule.identifiers(contentHeight: content.contentHeight, capCorrection: Self.capCorrection)
+        guard controller.detents.map(\.identifier) != wanted else { return }
+        controller.detents = detents(for: wanted)
+    }
+
+    /// A detent selected, by a drag (`sheetPresentationControllerDidChangeSelectedDetentIdentifier`)
+    /// or in code (the field's way in, #2153): once it is the expanded one,
+    /// the collapsed one leaves the list (#2195). The sheet stands at the
+    /// expanded detent, which stays: the change is invisible.
+    private func detentSelected(_ identifier: UISheetPresentationController.Detent.Identifier?) {
+        let had = detentRule.hasExpanded
+        detentRule.select(identifier)
+        guard detentRule.hasExpanded, !had, !isLeaving, !holdsDetent,
+              let controller = sheet.sheetPresentationController else { return }
+        applyDetents(to: controller)
+    }
+
+    /// The selected detent, as the sheet stands now.
+    private var isExpanded: Bool {
+        sheet.sheetPresentationController?.selectedDetentIdentifier == Self.expandedDetent
+    }
 
     /// While the detached composer edits, the sheet holds its height: a drag
     /// at the rows' top puts the keys away and leaves the sheet be.
@@ -1022,6 +1076,8 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
     private func holdDetent(_ hold: Bool) {
         guard hold != holdsDetent, let controller = sheet.sheetPresentationController else { return }
         holdsDetent = hold
+        // On the way out, the list is left to the exit.
+        guard !isLeaving else { return }
         // ⚠️ THE UNDIMMED DETENT WITH IT (the owner, 2026-11-04): left on the
         // expanded one, missing from a list held at the collapsed one, UIKit
         // dimmed the page at once — a black veil over the media.
@@ -1030,7 +1086,8 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
             controller.largestUndimmedDetentIdentifier = current
             controller.detents = controller.detents.filter { $0.identifier == current }
         } else {
-            controller.detents = detents(expandable: isExpandable)
+            let wanted = detentRule.identifiers(contentHeight: content.contentHeight, capCorrection: Self.capCorrection)
+            controller.detents = detents(for: wanted)
             controller.largestUndimmedDetentIdentifier = Self.expandedDetent
         }
     }
@@ -1049,20 +1106,17 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
     /// The collapsed detent (`present`), kept to rebuild the list with.
     private var collapsedDetent: UISheetPresentationController.Detent?
 
-    /// Whether the comments stand taller than the collapsed detent: the
-    /// expanded one has something to show — over a portrait media only
-    /// (#2184), however many comments a square or landscape one has.
-    private var isExpandable: Bool {
-        guard shapeOffersExpanded, let fitted = content.fittedHeight else { return false }
-        return fitted - bottomInset > restingHeight + Self.capCorrection + 1
-    }
-
-    /// The sheet's detents: the collapsed one, and the expanded one when the
-    /// comments outgrow it.
-    private func detents(expandable: Bool) -> [UISheetPresentationController.Detent] {
-        guard let collapsedDetent else { return [] }
-        guard expandable else { return [Self.opaque(collapsedDetent)] }
-        return [collapsedDetent, .custom(identifier: Self.expandedDetent) { $0.maximumDetentValue }].map(Self.opaque)
+    /// The sheet's detents for the rule's identifiers, in its order.
+    private func detents(
+        for identifiers: [UISheetPresentationController.Detent.Identifier]
+    ) -> [UISheetPresentationController.Detent] {
+        identifiers.compactMap { identifier -> UISheetPresentationController.Detent? in
+            if identifier == Self.detent { return collapsedDetent.map(Self.opaque) }
+            let expanded = UISheetPresentationController.Detent.custom(identifier: Self.expandedDetent) { context in
+                context.maximumDetentValue
+            }
+            return Self.opaque(expanded)
+        }
     }
 
     private var styleRegistration: (any UITraitChangeRegistration)?
@@ -1120,16 +1174,107 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
     /// A swipe down has begun: the sheet leaves from here, unless it is let
     /// go back to its rest.
     func presentationControllerWillDismiss(_ presentationController: UIPresentationController) {
-        isLeaving = true
+        beginLeaving()
         content.freeze()
         sheet.transitionCoordinator?.notifyWhenInteractionChanges { [weak self] context in
             guard context.isCancelled else { return }
             self?.isLeaving = false
+            self?.leaveRestTop = nil
         }
+    }
+
+    /// The sheet starts to leave: its rest holds still, and from expanded the
+    /// media's way back to full screen is measured from here (`follow`).
+    private func beginLeaving() {
+        isLeaving = true
+        leaveRestTop = isExpanded ? (lastDrawnTop ?? capTop) : nil
     }
 
     func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
         end()
+    }
+
+    // MARK: UISheetPresentationControllerDelegate
+
+    /// A drag let go at another detent: up to the expanded one, the
+    /// collapsed one leaves the list (#2195).
+    func sheetPresentationControllerDidChangeSelectedDetentIdentifier(
+        _ sheetPresentationController: UISheetPresentationController
+    ) {
+        detentSelected(sheetPresentationController.selectedDetentIdentifier)
+    }
+}
+
+/// The comments sheet's detents for one opening, as one pure rule (#2195):
+///
+/// - **The collapsed height is the shape's** (`collapsedHeight`): the resting
+///   height and the floating sheet's correction, nothing the comments do.
+/// - **The expanded detent** is offered while the shape offers it and the
+///   comments outgrow the collapsed sheet (`isExpandable`) — the only thing
+///   a change of content decides.
+/// - **Once the expanded detent is selected, it is the only one** (the owner,
+///   2026-11-10): a swipe down from there closes the sheet straight to the
+///   bottom, UIKit's own dismissal deciding — no gesture of ours, no
+///   velocity read. The collapsed height comes back at the next opening, a
+///   new rule (or by the preview's own button, `collapseAgain`); a drag
+///   back to it is gone, which the owner accepted.
+@MainActor
+struct CommentsSheetDetents {
+    typealias Identifier = UISheetPresentationController.Detent.Identifier
+    static let collapsed = Identifier("feed.comments.v2")
+    static let expanded = Identifier("feed.comments.v2.expanded")
+
+    /// The shape's height (`SnapCommentsSheetSession.restingHeight`), a
+    /// custom detent's: without the bottom safe area.
+    let restingHeight: CGFloat
+    /// The bottom safe area the sheet stands on, which the content's height
+    /// includes.
+    let bottomInset: CGFloat
+    /// Whether the media's shape offers the expanded detent at all
+    /// (`CommentsSheetShape.offersExpandedDetent`).
+    let offersExpanded: Bool
+    /// The expanded detent has been selected since this opening.
+    private(set) var hasExpanded = false
+
+    init(restingHeight: CGFloat, bottomInset: CGFloat, offersExpanded: Bool) {
+        self.restingHeight = restingHeight
+        self.bottomInset = bottomInset
+        self.offersExpanded = offersExpanded
+    }
+
+    /// The collapsed detent's height: the shape's, plus what a floating
+    /// sheet needs to rest where it says, within what UIKit allows. No
+    /// content height comes in.
+    func collapsedHeight(capCorrection: CGFloat, maximum: CGFloat) -> CGFloat {
+        min(maximum, restingHeight + capCorrection)
+    }
+
+    /// Whether the comments (`contentHeight`, the panel's, nil before it is
+    /// known) stand taller than the collapsed sheet, over a shape that
+    /// offers the expanded detent.
+    func isExpandable(contentHeight: CGFloat?, capCorrection: CGFloat) -> Bool {
+        guard offersExpanded, let contentHeight else { return false }
+        let collapsed: CGFloat = restingHeight + capCorrection + 1
+        return contentHeight - bottomInset > collapsed
+    }
+
+    /// The sheet's detents, smallest first: the expanded one alone once
+    /// selected; otherwise the collapsed one, and the expanded one while the
+    /// comments outgrow it.
+    func identifiers(contentHeight: CGFloat?, capCorrection: CGFloat) -> [Identifier] {
+        if hasExpanded { return [Self.expanded] }
+        let expandable = isExpandable(contentHeight: contentHeight, capCorrection: capCorrection)
+        return expandable ? [Self.collapsed, Self.expanded] : [Self.collapsed]
+    }
+
+    /// A detent selected, by a drag or in code.
+    mutating func select(_ identifier: Identifier?) {
+        if identifier == Self.expanded, offersExpanded { hasExpanded = true }
+    }
+
+    /// The preview's button asked for the collapsed sheet: as at an opening.
+    mutating func collapseAgain() {
+        hasExpanded = false
     }
 }
 
@@ -1414,14 +1559,18 @@ final class SnapCommentsSheetViewController: UIViewController, UINavigationBarDe
         topPocketInteraction.scrollView = list
     }
 
-    /// The panel's height for what it shows (`PostDetailViewController.fittedHeight`).
+    /// The panel's height for what it shows (`PostDetailViewController.fittedHeight`):
+    /// whether the comments outgrow the collapsed sheet, and so whether the
+    /// expanded detent is offered — never the sheet's height, which is its
+    /// shape's (#2195).
     ///
     /// ⚠️ AN EMPTY PAGE, BY ITS OWN BLOCK (measured, 2026-11-04): the "No
     /// comments yet" page stretches over the room it is given, so its rows
-    /// measured the sheet's cap — the sheet opened ~140 pt too tall and sank
-    /// to its height over a second. Its block's own height decides, as the
-    /// text post's composer sizes its sheet.
-    var fittedHeight: CGFloat? {
+    /// only ever measure the sheet. Its block's own height — the caption
+    /// over it included — says whether it outgrows the sheet, as the text
+    /// post's composer sizes its sheet. (Until #2195 it also sized the
+    /// collapsed sheet, which opened ~140 pt too tall without it.)
+    var contentHeight: CGFloat? {
         guard let detail = panel as? PostDetailViewController else { return nil }
         if let empty = detail.viewHeightShowingEmptyPage(
             contentSizeCategory: traitCollection.preferredContentSizeCategory

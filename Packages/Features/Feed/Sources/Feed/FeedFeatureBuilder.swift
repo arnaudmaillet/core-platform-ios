@@ -582,9 +582,14 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         // Reduce Motion: the stack's own push, no flight and no window
         // (`HeroMotionPolicy`).
         let reducesMotion = HeroMotionPolicy.prefersNativePush
-        guard origin.hasHero, !reducesMotion,
+        // A flat row of words (#2243) opens with the native push too: no
+        // window, so the plain push's close — the native pop, whatever page
+        // the feed shows by then (`heroLandingAcceptsHero = { false }`), its
+        // vertical closes pulls.
+        let nativePush = reducesMotion || origin.opensWithNativePush
+        guard origin.hasHero, !nativePush,
               let flyable = destination as? any ZoomTransitionDestination else {
-            pushWithoutFlight(destination, on: nav, reveal: reducesMotion ? nil : origin.textReveal)
+            pushWithoutFlight(destination, on: nav, reveal: nativePush ? nil : origin.textReveal)
             return
         }
         // The feed is a pager and this origin lands where it took off, so the

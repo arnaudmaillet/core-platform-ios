@@ -122,7 +122,7 @@ public final class HeroBannerView: UIView {
 
         // Over the scrim too: the veil fades the whole banner, as the
         // view's alpha did.
-        veil.backgroundColor = Surface.page
+        veil.backgroundColor = HeroPageGround.color
         veil.isUserInteractionEnabled = false
         veil.isHidden = true
         veil.pin(to: self)
@@ -317,7 +317,7 @@ public final class HeroBannerView: UIView {
     }
 
     private func applyRampTone(animated: Bool = false) {
-        let tone: UIColor = format == .band ? (bandTone ?? Self.bandRampTone) : Surface.page
+        let tone: UIColor = format == .band ? (bandTone ?? Self.bandRampTone) : HeroPageGround.color
         // ⚠️ NO PICTURE (loading, or failed): a FLAT grey — the bone, or the
         // backdrop — with no ramp and no scrim over it, as an emote's
         // skeleton (the owner, 2026-10-27). One contract, one look: a black

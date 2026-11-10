@@ -1605,6 +1605,15 @@ final class AppContainer {
         // screen. The SAME service the map itself writes through, so the rail
         // and the button cannot hold different opinions about who is pinned.
         builder.mapPinning = mapsFeature.profilePinning
+        // A profile's Channels tab (#2232): Chat's read of the channels a
+        // profile owns, and its new channel's sheet for "Create a Channel".
+        // Only with `-channels` — off, no profile asks, and opening one
+        // never builds Chat. The rows' Join / Request / Open are the
+        // showcase card's (`PostEmbedView.makeChannelActions`, above).
+        if DebugFlags.isOn("-channels") {
+            builder.makeProfileChannels = { [unowned self] in chatFeature.makeProfileChannels() }
+            builder.makeChannelCreation = { [unowned self] in chatFeature.makeChannelCreationViewController() }
+        }
         return builder
     }()
 
