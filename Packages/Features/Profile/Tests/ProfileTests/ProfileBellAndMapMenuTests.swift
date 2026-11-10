@@ -520,11 +520,20 @@ extension ProfileBellAndMapMenuTests {
         defer { window.isHidden = true }
         try #require(await settle { screen.followButtonState == .follow && screen.transitionCoordinator == nil })
 
+        // ⚠️ THE PUSH RUNS FAST, NOT ON THE RUNNER'S CLOCK: on a starved CI
+        // runner (#2254's and #2255's runs) the real-time push outlived the
+        // settle below and "Follow never came in" — the bar was waiting for a
+        // rest that hadn't come yet. The window's layers run 50× faster: the
+        // push is still a running transition when Follow is asked for, and
+        // its end comes in a few frames whatever the load.
+        window.layer.speed = 50
+        defer { window.layer.speed = 1 }
         navigation.pushViewController(UIViewController(), animated: true)
         try #require(screen.transitionCoordinator != nil, "guard: the push is running")
         screen.debugSetTrayScrolledAway(true)
         #expect(screen.debugBarRelationshipItem == nil, "Follow came in mid-push")
 
+        #expect(await settle { navigation.transitionCoordinator == nil }, "the push never ended")
         #expect(await settle { screen.debugBarRelationshipItem != nil }, "Follow never came in")
     }
 
