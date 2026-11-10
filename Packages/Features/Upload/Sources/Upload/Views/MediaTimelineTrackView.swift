@@ -420,6 +420,15 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
     private var selected: Int?
     /// Which end of the selection the finger has hold of, if any.
     private var grip: MediaTimelining.Edge?
+    /// Where the pince's compensation wants the film, unrounded (#2198).
+    ///
+    /// ⚠️ **A SCROLL VIEW ROUNDS ITS OFFSET TO THE PIXEL.** On a 2× screen
+    /// 10.158 reads back as 10.0. Adding each sample's shift to the ROUNDED
+    /// offset dropped up to a quarter of a point per sample, and the drops
+    /// add up: the cap that should stand still slid ~1 pt over a 60 pt trim
+    /// on an iPhone SE, and further over a long drag. The shifts are added
+    /// here instead, and the scroller is given the sum.
+    private var exactDragOffset: CGFloat?
     /// ⚠️ **SET ONLY AROUND A PROGRAMMATIC SCROLL.** `setContentOffset` calls
     /// `scrollViewDidScroll` synchronously, so following the player would emit a
     /// scrub, which the screen turns into a seek, which moves the player, which
@@ -2982,6 +2991,7 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
     private func takeHold(at x: CGFloat) {
         stopEasing()
         grip = edge(at: x)
+        exactDragOffset = nil
         guard grip != nil else { return }
         onScrubbing?(true)
     }
@@ -3025,7 +3035,7 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
             let shift = CGFloat(after[index].drawnFrom - before[index].drawnFrom) * pointsPerSecond
             if abs(shift) > 0.01 {
                 isFollowingPlayback = true
-                scroller.contentOffset.x += shift
+                scroller.contentOffset.x = exactOffset(movedBy: shift)
                 isFollowingPlayback = false
             }
         }
@@ -3062,7 +3072,7 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
                 isFollowingPlayback = true
                 scroller.contentInset.left =
                     MediaTimelining.centringInset(forTrackWidth: bounds.width) + leadingSlack
-                scroller.contentOffset.x -= lost
+                scroller.contentOffset.x = exactOffset(movedBy: -lost)
                 isFollowingPlayback = false
             }
         }
@@ -3079,9 +3089,22 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
         }
     }
 
+    /// The drag's unrounded offset moved by `delta` (`exactDragOffset`). One
+    /// that no longer matches the scroller — something else scrolled it, or
+    /// the inset clamped it — starts again from where the scroller is.
+    private func exactOffset(movedBy delta: CGFloat) -> CGFloat {
+        let pixel = 1 / max(traitCollection.displayScale, 1)
+        var exact = exactDragOffset ?? scroller.contentOffset.x
+        if abs(exact - scroller.contentOffset.x) > pixel { exact = scroller.contentOffset.x }
+        exact += delta
+        exactDragOffset = exact
+        return exact
+    }
+
     private func finishDrag() {
         let hadGrip = grip != nil
         grip = nil
+        exactDragOffset = nil
         // The slack was the gesture's; the track settles back onto the composition.
         if leadingSlack != 0 {
             leadingSlack = 0
