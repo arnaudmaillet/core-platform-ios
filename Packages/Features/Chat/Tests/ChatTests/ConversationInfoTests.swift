@@ -202,12 +202,18 @@ struct ConversationInfoTests {
         try await hosting(screen) { screen, stack in
             await settle { model.state.phase == .loaded }
             for (index, list) in screen.captions.enumerated() {
+                // ⚠️ Each push lands before the next tap: UIKit drops a push
+                // made while the last transition still runs, which left the
+                // first counter's lists on top (seen running the suite).
+                await settle { stack.transitionCoordinator == nil && stack.topViewController === screen }
                 let counter = screen.heroHeader.counters[index]
                 #expect(counter.isTappable, "\(list) does not open")
                 counter.sendActions(for: .touchUpInside)
+                await settle { stack.topViewController is PersonListsViewController }
                 let lists = try #require(stack.topViewController as? PersonListsViewController, "\(list) pushed nothing")
-                #expect(lists.activeTab == list.rawValue)
+                #expect(lists.activeTab == list.rawValue, "opened \(lists.activeTab) for \(list.rawValue)")
                 #expect(lists.debugTabIDs == ["subscribers", "admins", "requests"])
+                await settle { stack.transitionCoordinator == nil }
                 stack.setViewControllers([screen], animated: false)
             }
         }

@@ -38,8 +38,11 @@ struct PersonListsTests {
         func performLeadingAction(in tab: String, from screen: PersonListsViewController) {}
     }
 
+    /// A budget of looks, not of time, and a wide one: the suite runs in
+    /// parallel, and a starved runner ran out of 300 (the empty tab's read
+    /// had not landed).
     private func settle(_ condition: () -> Bool) async {
-        for _ in 0..<300 where !condition() {
+        for _ in 0..<2_000 where !condition() {
             try? await Task.sleep(for: .milliseconds(10))
         }
     }
