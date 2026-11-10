@@ -170,8 +170,10 @@ final class PostDetailViewController: UIViewController {
     private let sheetEdgePocket = UIScrollEdgeElementContainerInteraction()
 
     /// The panel's height for its visible stream as laid out — the engaged
-    /// top, the rows, the composer's band — what a sheet fitted to its content
-    /// asks for (#2087). Nil before the stream has rows or engaged insets.
+    /// top, the rows, the composer's band: whether the comments outgrow the
+    /// comments sheet, which offers its expanded detent for them (#2087; the
+    /// sheet's own height is its media's shape's since #2195). Nil before the
+    /// stream has rows or engaged insets.
     var fittedHeight: CGFloat? {
         guard let engaged = engagedStreamInsets else { return nil }
         let rows = stream.collectionView.contentSize.height
