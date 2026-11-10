@@ -32,6 +32,9 @@ struct GroupAvatarTests {
 
         let bare = GroupAvatarContent(name: "Sofía Reyes and Tom Okafor", memberCount: 3)
         #expect(bare.drawing == .initials("ST"))
+        // A name of its own keeps the app's rule.
+        #expect(GroupAvatarContent(name: "Weekend hike", memberCount: 4).monogram == "WH")
+        #expect(GroupAvatarContent(name: "Ava, Kenji and Lena", memberCount: 4).monogram == "AK")
     }
 
     /// The other members, the viewer excluded: a group of three shows two

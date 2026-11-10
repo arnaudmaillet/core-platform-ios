@@ -79,8 +79,25 @@ public nonisolated struct GroupAvatarContent: Equatable, Sendable {
         return .stack(shown, more: max(0, groupSize - shown.count))
     }
 
-    /// The group's initials, by the app's one rule.
-    public var monogram: String { MonogramAvatarView.monogram(name: name, handle: "") }
+    /// The group's initials. A group named after its members ("Sofía Reyes
+    /// and Tom Okafor", a nameless group's title) takes one initial per
+    /// member named — "ST" — not the app's person rule, whose "SR" read as
+    /// Sofía alone (the pill's "SR", #2233). Any other name takes the app's
+    /// one rule.
+    public var monogram: String {
+        let members: [String] = Self.memberNames(in: name)
+        guard members.count >= 2 else { return MonogramAvatarView.monogram(name: name, handle: "") }
+        let letters: [String] = members.prefix(2).compactMap { member in member.first.map { String($0).uppercased() } }
+        return letters.joined()
+    }
+
+    /// The members a name lists: "A, B and C" → ["A", "B", "C"]; one part
+    /// for a name that lists none.
+    static func memberNames(in name: String) -> [String] {
+        let joined: String = name.replacingOccurrences(of: " and ", with: ", ")
+        let parts: [String] = joined.components(separatedBy: ", ")
+        return parts.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+    }
 
     /// The other members, as counted: the member count less the viewer, or
     /// the faces when the count is not known.
