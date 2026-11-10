@@ -41,6 +41,19 @@ public enum Surface {
     /// the card.
     public static let card: UIColor = .secondarySystemGroupedBackground
 
+    /// What a FLAT list of posts lies on (#2243, behind
+    /// `PostListStyle.flat`): the plain background, white in the light and
+    /// black in the dark — a timeline one reads, its posts parted by
+    /// hairlines rather than raised as cards. Byte-identical to `page` in the
+    /// dark, so only the light side changes.
+    public static let plainPage: UIColor = .systemBackground
+
+    /// A card's tone on `plainPage` — a text tile, a shelf's text card: one
+    /// grey step down from the white page, since a white card on white has
+    /// no edge in the light (#2243). Identical to `card` in the dark, where
+    /// the card keeps its hairline edge.
+    public static let cardOnPlainPage: UIColor = .secondarySystemBackground
+
     /// THE skeleton's ground (#1753): one opaque, neutral grey every bone
     /// (`SkeletonBoneView`) wears by default, whatever lies behind it — the
     /// grey of an emote's skeleton, now the same on a page, a card, a banner
