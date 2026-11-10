@@ -32,7 +32,7 @@ public enum HeroPageMetrics {
 /// **The contract a page kind fulfils** — small, by overriding:
 /// - hand its header and its pager to `init` (and the selector's strip and
 ///   home, used only if it places the selector);
-/// - `heroPageRefresh()`: a pull was released past its threshold;
+/// - `heroPageRefresh()`: a finger's pull reached the threshold (#2235);
 /// - `heroPageHeaderDidMove(travelled:)`: the header moved — a bar identity
 ///   item on scroll-away hangs here (`isActionRowUnderBar`);
 /// - `heroPageBottomBreathingRoom`: the air under the last row.
@@ -110,8 +110,9 @@ open class HeroPageViewController<Tab: Equatable>: UIViewController {
 
     // MARK: - The contract
 
-    /// A pull was released past its threshold (the spinner is turning), or
-    /// a page asked for a refresh. Nothing by default.
+    /// A finger's pull reached the threshold (the spinner is turning,
+    /// `PullRefreshRule`, #2235), or a page asked for a refresh — a failed
+    /// state's "Try Again", at once. Nothing by default.
     open func heroPageRefresh() {}
 
     /// The header moved to `travelled` — after its position, fade and bar
@@ -275,16 +276,17 @@ open class HeroPageViewController<Tab: Equatable>: UIViewController {
         heroPager.onVerticalScroll = { [weak self] offset in
             guard let self else { return }
             self.applyHeaderOffset(offset)
-            // Negative travel is the overscroll the indicator draws from.
-            self.pullIndicator.setPull(
-                max(0, -offset), isTracking: self.heroPager.activePage?.scrollView.isTracking ?? false
-            )
+            #if DEBUG
+            self.pullIndicator.tracedScrollView = self.heroPager.activePage?.scrollView
+            #endif
+            self.followPull(offset: offset, isTracking: self.heroPager.activePage?.scrollView.isTracking ?? false)
         }
-        heroPager.onPullReleased = { [weak self] distance in
-            guard let self, self.pullIndicator.shouldRefresh(releasedAt: distance) else { return }
-            self.pullIndicator.beginRefreshing()
-            self.heroPageRefresh()
-        }
+        // ⚠️ THE PULL FIRES UNDER THE FINGER, NOT ON THE RELEASE (#2235): the
+        // indicator decides, with the plain lists' rule (`PullRefreshRule`),
+        // and says so here. A release is no longer the trigger: past 120 pt,
+        // it fired the profile sooner than Messages, which fires mid-drag.
+        pullIndicator.onRefresh = { [weak self] in self?.heroPageRefresh() }
+        // A page's own ask — the failed state's "Try Again" — refreshes at once.
         heroPager.onPullToRefresh = { [weak self] in self?.heroPageRefresh() }
         // The band's minimize rides whichever page is in front. The pager is
         // what knows, and it is what says so.
@@ -604,6 +606,33 @@ open class HeroPageViewController<Tab: Equatable>: UIViewController {
     @objc private func decorativeMotionDidChange() {
         updateBannerVideo()
     }
+
+    // MARK: - The pull
+
+    /// One reading of the active page's pull: the vertical `offset` the
+    /// header rides, negative past the top — the overscroll past the page's
+    /// top whatever the header's height, the same measure as the plain lists'
+    /// (`PullRefreshRule.pulled`).
+    private func followPull(offset: CGFloat, isTracking: Bool) {
+        pullIndicator.setPull(max(0, -offset), isTracking: isTracking)
+    }
+
+    #if DEBUG
+    /// A finger pulls the active page from its top to `distance` past it and
+    /// lets go, through the screen's own pull path — a test, or a QA hook,
+    /// cannot put a finger on the list (`isTracking` is UIKit's) (#2235).
+    public func debugFingerPull(by distance: CGFloat) {
+        followPull(offset: 0, isTracking: true)
+        followPull(offset: -distance, isTracking: true)
+        followPull(offset: -distance, isTracking: false)
+        followPull(offset: 0, isTracking: false)
+    }
+
+    /// One reading of the pull, a finger on the list or not (#2235). Tests.
+    public func debugFollowPull(by distance: CGFloat, isTracking: Bool) {
+        followPull(offset: -distance, isTracking: isTracking)
+    }
+    #endif
 
     // MARK: - The selector's touch
 

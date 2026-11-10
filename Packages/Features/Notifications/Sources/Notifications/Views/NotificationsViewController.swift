@@ -282,7 +282,7 @@ final class NotificationsViewController: UIViewController {
         // custom container, whatever order the views end up in.
         setContentScrollView(collectionView, for: .top)
 
-        refreshControl.addAction(UIAction { [weak self] _ in self?.viewModel.refresh() }, for: .valueChanged)
+        refreshControl.onRefresh = { [weak self] in self?.viewModel.refresh() }
         collectionView.refreshControl = refreshControl
 
         let rowRegistration = UICollectionView.CellRegistration<NotificationCell, String> {

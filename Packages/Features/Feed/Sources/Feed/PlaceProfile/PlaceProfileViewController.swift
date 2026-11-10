@@ -513,8 +513,8 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
         // `-place-stretch-sweep`: the profile's `-profile-stretch-sweep` —
         // the page pulled past its top, the banner stretching, held, let go
         // and settled (`HERO-SCROLL place-stretch/<phase> …`). No refresh:
-        // a refresh is asked by a drag ENDING past the threshold, which a
-        // scripted offset never does — `-place-pull-refresh` does.
+        // a refresh is asked by a FINGER reaching the threshold (#2235),
+        // which a scripted offset never has — `-place-pull-refresh` does.
         if arguments.contains("-place-stretch-sweep") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
                 QAWait.until("-place-stretch-sweep", { [weak self] in
@@ -532,9 +532,9 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
                 }
             }
         }
-        // `-place-pull-refresh`: releases a pull past the threshold on the
-        // active page through the drag's own end, the path a finger takes,
-        // and says how long the spinner ran — or `[qa] GAVE UP`, which is
+        // `-place-pull-refresh`: a finger's pull past the threshold, through
+        // the screen's own pull path and the app's rule (#2235), and says
+        // how long the spinner ran — or `[qa] GAVE UP`, which is
         // what a release through the stock control did while nothing
         // answered it.
         if arguments.contains("-place-pull-refresh") {
@@ -2420,10 +2420,11 @@ extension PlaceProfileViewController {
     /// How many hydrations reached the page — a refresh that brought the same
     /// members must leave it where it was.
     var debugRenderCount: Int { renders }
-    /// Releases a pull on the page, as a finger letting go does.
+    /// A finger pulls the page `distance` past its top and lets go, through
+    /// the screen's own pull path and the app's rule (#2235).
     func debugReleasePull(by distance: CGFloat = HeroPullToRefreshView.threshold + 40) {
         loadViewIfNeeded()
-        activityPage.debugReleasePull(by: distance)
+        debugFingerPull(by: distance)
     }
     /// Whether the page leads with the Popular row and titles its list
     /// Recent.

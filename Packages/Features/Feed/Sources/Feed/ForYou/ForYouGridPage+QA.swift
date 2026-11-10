@@ -21,16 +21,6 @@ import UIKit
 // MARK: - Drives and accessors
 
 extension ForYouGridPage {
-    /// Pulls the page `distance` past its top and lets go, through the drag's
-    /// own delegate callback — what a finger reaches. A scripted offset alone
-    /// never ends a drag, so it never asks for a refresh.
-    func debugReleasePull(by distance: CGFloat) {
-        setVerticalOffset(-distance)
-        scrollViewDidEndDragging(collectionView, willDecelerate: false)
-        // And springs back, as a released page does.
-        setVerticalOffset(0)
-    }
-
     /// Whether the page still carries the stock control.
     var debugHasRefreshControl: Bool { collectionView.refreshControl != nil }
 

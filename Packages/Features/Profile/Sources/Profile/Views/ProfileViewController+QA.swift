@@ -49,7 +49,7 @@ extension ProfileViewController {
         guard let (now, offset) = HeroStretchSweep.at(CACurrentMediaTime() - began) else { return probe.finish() }
         if now != phase {
             probe.beginPhase(now.rawValue)
-            if now == .release { galleryPager.onPullReleased?(HeroStretchSweep.depth) }
+            if now == .release { debugFingerPull(by: HeroStretchSweep.depth) }
         }
         probe.frame { _ = galleryPager.debugSetVerticalOffset(offset) }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0 / 60) { [weak self] in
@@ -276,10 +276,10 @@ extension ProfileViewController {
     var debugIsHeaderRedacted: Bool { headerView.debugIsRedacted }
     var debugHasAvatarPicture: Bool { headerView.debugHasAvatarPicture }
 
-    /// Releases a pull past the threshold, through the pager's own callback —
-    /// what a finger letting go does.
+    /// A finger pulls past the threshold and lets go, through the screen's
+    /// own pull path and the app's rule (#2235).
     func debugReleasePull() {
-        galleryPager.onPullReleased?(HeroPullToRefreshView.threshold + 40)
+        debugFingerPull(by: HeroPullToRefreshView.threshold + 40)
     }
 
     /// Puts the active page at `offset` (negative: pulled past its top) and

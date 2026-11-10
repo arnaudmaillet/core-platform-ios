@@ -164,7 +164,7 @@ final class ConversationListViewController: UIViewController {
         relations?.observe(by: self) { [weak self] peers in self?.applyRelations(of: peers) }
         // Pull to refresh, with the app's loader (#1901, the owner 2026-10-30):
         // the pull came back when search moved into the stacked field.
-        refreshControl.addAction(UIAction { [weak self] _ in self?.pullToRefresh() }, for: .valueChanged)
+        refreshControl.onRefresh = { [weak self] in self?.pullToRefresh() }
         tableView.refreshControl = refreshControl
         viewModel.onHasMoreChange = { [weak self] _ in self?.updatePagingFooter() }
         // A row's mute, once the server has answered (#803).

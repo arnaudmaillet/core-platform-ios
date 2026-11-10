@@ -1082,7 +1082,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         // `-profile-stretch-sweep`: once the profile and its picture are in,
         // pulls the page down past its top — the banner stretching — to
         // `HeroStretchSweep.depth`, holds, lets go through the refresh a
-        // finger's release would start, and settles at rest while it lands
+        // finger's pull would start (#2235), and settles at rest while it lands
         // (`HERO-SCROLL profile-stretch/<phase> …` on standard error, see
         // `HeroScrollFrameProbe`).
         if arguments.contains("-profile-stretch-sweep") {
@@ -2689,7 +2689,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
 
     // MARK: - The hero page's contract
 
-    /// A pull released past its threshold, or a page asking.
+    /// A finger's pull reached the threshold (#2235), or a page asking.
     override func heroPageRefresh() {
         viewModel.refresh()
         // The channels too (#2232): a pull reads the whole profile again.

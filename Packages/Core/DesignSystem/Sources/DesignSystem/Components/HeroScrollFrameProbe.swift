@@ -409,8 +409,8 @@ public final class HeroScrollFrameProbe {
 /// The pull-down both picture-led headers are swept through by
 /// `-profile-stretch-sweep` / `-place-stretch-sweep`: the page pulled past
 /// its top to `depth` (the banner stretching), held there a beat, let go —
-/// where a profile refreshes, as a finger's release past the threshold
-/// does — and watched at rest while the refresh lands.
+/// where a profile refreshes, as a finger's pull past the threshold does
+/// (#2235) — and watched at rest while the refresh lands.
 public enum HeroStretchSweep {
     public enum Phase: String, Sendable {
         case pull, hold, release, settle
