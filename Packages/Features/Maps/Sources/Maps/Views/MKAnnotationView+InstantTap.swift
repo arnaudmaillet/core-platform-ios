@@ -1,4 +1,5 @@
 import MapKit
+import PostGrid
 import UIKit
 import VoiceKitUI
 
@@ -43,9 +44,10 @@ final class MapMarkerTapGestureDelegate: NSObject, UIGestureRecognizerDelegate {
     static let shared = MapMarkerTapGestureDelegate()
 
     /// A touch on the text bubble's voice — its play button, its waveform —
-    /// is the voice's (#2208): the rest of the bubble still opens the post.
+    /// is the voice's (#2208), and one on a showcase card's action button is
+    /// the card's (#2216): the rest of the bubble still opens the post.
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
-        !VoicePostCaptionView.keepsTouch(touch)
+        !VoicePostCaptionView.keepsTouch(touch) && !PostEmbedView.keepsTouch(touch)
     }
 
     func gestureRecognizer(

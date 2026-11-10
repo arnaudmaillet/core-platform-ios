@@ -3,6 +3,7 @@ import DesignSystem
 import EmoteKit
 import MediaCore
 import MediaPlayback
+import PostGrid
 import UIKit
 
 /// The single source of truth for how a post renders as a rounded media card:
@@ -611,8 +612,16 @@ final class PinCardView: UIView {
         textFaceView.setVoiceMark(shown)
     }
 
+    /// A channel's showcase marker (#2216): the text marker with the embed's
+    /// mark — on a 44 pt disc, the channel's megaphone alone, on the voice's
+    /// plate (the mark's photo and name do not fit). It outranks a voice.
+    func setChannelMark(_ shown: Bool) {
+        textFaceView.setChannelMark(shown)
+    }
+
     #if DEBUG
     var debugWearsVoiceMark: Bool { textFaceView.wearsVoiceMark }
+    var debugWearsChannelMark: Bool { textFaceView.wearsChannelMark }
     #endif
 
     /// The author's face for a TEXT marker — see `PinTextFaceView.setAvatar`.
@@ -1495,10 +1504,22 @@ private final class PinTextFaceView: UIView {
     /// clips.
     /// A plain plate holding the mic: not an image view of the face's own,
     /// whose two (the glyph and the author) the face swaps between.
+    ///
+    /// The same plate carries a showcase's megaphone (#2216): one glyph
+    /// swapped, never another view on the face (`PinMarkerGeometryTests`).
     private let micBadge = UIView()
     private let micGlyph = UIImageView()
     static let micBadgeSide: CGFloat = 16
-    var wearsVoiceMark: Bool { !micBadge.isHidden }
+    private var showsVoiceMark = false
+    private var showsChannelMark = false
+    var wearsVoiceMark: Bool { !micBadge.isHidden && !showsChannelMark }
+    var wearsChannelMark: Bool { !micBadge.isHidden && showsChannelMark }
+    private static let micImage = UIImage(systemName: "mic.fill")?.withConfiguration(
+        UIImage.SymbolConfiguration(pointSize: 9, weight: .bold)
+    )
+    private static let channelImage = UIImage(systemName: ChannelEmbedCopy.channelSymbol)?.withConfiguration(
+        UIImage.SymbolConfiguration(pointSize: 8, weight: .bold)
+    )
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -1552,9 +1573,7 @@ private final class PinTextFaceView: UIView {
         avatar.isHidden = true
         addSubview(avatar)
 
-        micGlyph.image = UIImage(systemName: "mic.fill")?.withConfiguration(
-            UIImage.SymbolConfiguration(pointSize: 9, weight: .bold)
-        )
+        micGlyph.image = Self.micImage
         micGlyph.contentMode = .center
         micGlyph.tintColor = .systemBackground
         micGlyph.frame = CGRect(x: 0, y: 0, width: Self.micBadgeSide, height: Self.micBadgeSide)
@@ -1570,7 +1589,19 @@ private final class PinTextFaceView: UIView {
     }
 
     func setVoiceMark(_ shown: Bool) {
-        micBadge.isHidden = !shown
+        showsVoiceMark = shown
+        applyMark()
+    }
+
+    func setChannelMark(_ shown: Bool) {
+        showsChannelMark = shown
+        applyMark()
+    }
+
+    /// The plate shows for either mark, the channel's glyph over the mic's.
+    private func applyMark() {
+        micGlyph.image = showsChannelMark ? Self.channelImage : Self.micImage
+        micBadge.isHidden = !(showsVoiceMark || showsChannelMark)
         setNeedsLayout()
     }
 

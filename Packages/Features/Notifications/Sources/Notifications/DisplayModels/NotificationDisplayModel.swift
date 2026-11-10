@@ -31,13 +31,21 @@ public struct NotificationDisplayModel: Equatable, Sendable, Identifiable {
     /// The subject post's still, drawn at the trailing edge.
     public let thumbnailURL: URL?
     /// A text post's opening, drawn under the sentence — for a voice post
-    /// (#2208), "🎙 Voice post · 0:32" or its words marked.
+    /// (#2208), "🎙 Voice post · 0:32" or its words marked; for a channel's
+    /// showcase (#2216), "📣 Harbour notes · " and its words.
     public let excerpt: String?
     public let isRead: Bool
 
-    /// - Parameter showsVoice: `-voice-posts` (#2208): off, a voice post's
-    ///   row reads as the text post it is.
-    public init(item: NotificationItem, now: Date = Date(), showsVoice: Bool = DebugFlags.isOn("-voice-posts")) {
+    /// - Parameters:
+    ///   - showsVoice: `-voice-posts` (#2208): off, a voice post's row reads
+    ///     as the text post it is.
+    ///   - showsEmbed: `-channels` (#2216): off, a showcase's row reads as
+    ///     the text post it is — PostGrid's `PostEmbeds.areDrawn`, read here
+    ///     by name: a row draws no card, so Notifications needs no PostGrid.
+    public init(
+        item: NotificationItem, now: Date = Date(), showsVoice: Bool = DebugFlags.isOn("-voice-posts"),
+        showsEmbed: Bool = DebugFlags.isOn("-channels")
+    ) {
         id = item.id
         action = item.action
         actorsText = Self.actors(for: item)
@@ -51,7 +59,7 @@ public struct NotificationDisplayModel: Equatable, Sendable, Identifiable {
         }
         self.faces = faces
         thumbnailURL = item.subjectPreview?.thumbnailURL
-        excerpt = Self.excerpt(of: item.subjectPreview, showsVoice: showsVoice)
+        excerpt = Self.excerpt(of: item.subjectPreview, showsVoice: showsVoice, showsEmbed: showsEmbed)
         isRead = item.isRead
     }
 
@@ -62,10 +70,16 @@ public struct NotificationDisplayModel: Equatable, Sendable, Identifiable {
         return [text, excerpt, when].compactMap { $0 }.joined(separator: ", ")
     }
 
-    /// The line under the sentence: a text post's opening, or a voice post's
-    /// text (#2208) — none under a picture. Pure.
-    static func excerpt(of preview: NotificationSubjectPreview?, showsVoice: Bool) -> String? {
+    /// The line under the sentence: a text post's opening, a showcase's
+    /// channel and words (#2216), or a voice post's text (#2208) — none
+    /// under a picture. Pure.
+    ///
+    /// A showcase's channel comes first: the card is what the post IS
+    /// (its caption's place on every surface that draws one), and a row has
+    /// room for one mark.
+    static func excerpt(of preview: NotificationSubjectPreview?, showsVoice: Bool, showsEmbed: Bool = false) -> String? {
         guard let preview, preview.thumbnailURL == nil else { return nil }
+        if showsEmbed, let embed = preview.embed { return embed.previewText(caption: preview.excerpt) }
         guard showsVoice, let voice = preview.voice else { return preview.excerpt }
         return voice.previewText(caption: preview.excerpt)
     }

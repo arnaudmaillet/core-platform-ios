@@ -24,6 +24,22 @@ public enum PostEmbeds {
         drawn ? embed : nil
     }
 
+    /// The longest caption a showcase's share text carries — the voice's
+    /// (#2208), so the two read alike in the system sheet.
+    public static let shareCaptionLimit = 80
+
+    /// What a showcase's share says where no card is drawn (#2216): "📣
+    /// Harbour notes", and the author's words cut at `shareCaptionLimit`
+    /// ("📣 Harbour notes · Boats in at six"); nil for a post with no embed,
+    /// or with the switch off. The system sheet's title and Mail's subject
+    /// carry it (`ShareCard.detail`). Pure.
+    public static func shareText(caption: String?, embed: PostEmbed?, drawn: Bool = areDrawn) -> String? {
+        guard let embed = shown(embed, drawn: drawn) else { return nil }
+        let words = caption?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let cut = words.count > shareCaptionLimit ? String(words.prefix(shareCaptionLimit)) + "…" : words
+        return embed.previewText(caption: cut)
+    }
+
     /// How much room a surface gives the caption's card — #2204's rule
     /// again: each surface keeps its text design, only the caption's place
     /// becomes the card, sized to the room.

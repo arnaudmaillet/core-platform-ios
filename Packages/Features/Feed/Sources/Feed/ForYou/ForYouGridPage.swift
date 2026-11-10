@@ -4311,6 +4311,9 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
         // media, and its preview is the post screen in small — the band, the
         // caption, the top comments.
         let post = posts[index]
+        // A showcase's card keeps its button's press (#2216): a hold on Join
+        // lifts nothing, a hold anywhere else on the card lifts the post.
+        if Self.holdIsCardButtons(at: point, in: collectionView, indexPath: indexPath) { return nil }
         if let row = collectionView.cellForItem(at: indexPath) as? PostGridListRowCell, post.kind != .text {
             guard let media = row.mediaHeroRect,
                   media.contains(collectionView.convert(point, to: row)) else { return nil }
@@ -4456,6 +4459,15 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
     }
 
     @objc private func swallowHold() {}
+
+    /// Whether a press at `point` (in the collection view) lands on a
+    /// showcase card's action button, inside the item at `indexPath` — a
+    /// press the button keeps (#2216).
+    static func holdIsCardButtons(at point: CGPoint, in collectionView: UICollectionView, indexPath: IndexPath) -> Bool {
+        guard let cell = collectionView.cellForItem(at: indexPath) else { return false }
+        let local = collectionView.convert(point, to: cell)
+        return PostEmbedView.keepsTouch(on: cell.hitTest(local, with: nil))
+    }
 
     /// Whether a long press at `point` (in the collection view) lands on a
     /// list card off its media and off any control.

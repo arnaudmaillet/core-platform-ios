@@ -1703,7 +1703,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     public func updateCounts(from post: GalleryPost) {
         baseReactionCount = post.reactionCount
         applyReactionCount(animated: true)
-        applyCommentCount(post.commentCount, animated: true)
+        applyCommentCount(showsShowcase ? nil : post.commentCount, animated: true)
     }
 
     /// The likes: the post's count, and the heart turned to the points' red
@@ -1840,6 +1840,20 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// hangs off the voice.
     private var voiceFollowsBand: NSLayoutConstraint!
     private var captionFollowsVoice: NSLayoutConstraint!
+    /// A showcase's card (#2216, behind `-channels`): the shared embed card
+    /// under the author's words — full on the list's card, compact and alone
+    /// on a shelf's fixed card. Its action button takes its own tap; the rest
+    /// of it is the card's, which opens the post.
+    private let embedCard = PostEmbedView()
+    /// Whether the card shows a showcase's embed: it then draws no comment
+    /// count (#2216).
+    private var showsShowcase = false
+    /// The card hangs off the caption; while it shows, the closing line (or
+    /// the card's foot) hangs off the card instead of the caption.
+    private var embedFollowsCaption: NSLayoutConstraint!
+    private var metaFollowsEmbed: NSLayoutConstraint!
+    private var metaStandsUnderEmbed: NSLayoutConstraint!
+    private var embedClosesCard: NSLayoutConstraint!
     /// Emoji and `:code:` emotes animate in the caption (`plain` marks them).
     private let captionLabel = EmoteLabel()
     private var isCaptionExpanded = false
@@ -2177,6 +2191,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
             mediaView.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -Self.mediaInset),
             mediaHeight
         ]
+        buildEmbedCard()
     }
 
     /// Whether the closing line shows anything at all, and the card's closer
@@ -2192,11 +2207,18 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         // hidden, it draws nothing, and an unconstrained hidden view is an
         // ambiguity for nothing.
         let isFixed = fixedCaptionLines != nil
-        metaFollowsCaption.isActive = !hasMedia && !isFixed
-        metaStandsUnderCaption.isActive = !hasMedia && isFixed
+        // A showcase's card (#2216) stands between the words and the line: a
+        // text post's foot is the card's then, not the caption's.
+        let hasEmbed = !embedCard.isHidden && !hasMedia
+        let textFoot = !hasMedia && !hasEmbed
+        metaFollowsCaption.isActive = textFoot && !isFixed
+        metaStandsUnderCaption.isActive = textFoot && isFixed
+        metaFollowsEmbed.isActive = hasEmbed && !isFixed
+        metaStandsUnderEmbed.isActive = hasEmbed && isFixed
         metaFollowsMedia.isActive = hasMedia
         metaClosesCard.isActive = !isEmpty
-        captionClosesCard.isActive = isEmpty && !hasMedia
+        captionClosesCard.isActive = isEmpty && textFoot
+        embedClosesCard.isActive = isEmpty && hasEmbed
         mediaClosesCard.isActive = isEmpty && hasMedia
         let hang = closingLineHang
         metaLeading.constant = Self.actionLineInset - hang.leading
@@ -2387,6 +2409,68 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         voiceCaption.leftScreen()
     }
 
+    // MARK: - A showcase's card (#2216)
+
+    /// Between the author's words and the card under them.
+    public static let embedCaptionGap: CGFloat = Spacing.sm
+
+    /// The size a card gives a showcase's embed (#2216), nil for a post with
+    /// none or with the switch off: full on the list's card, the words above
+    /// it; compact on a card of a FIXED height (`captionLines` — a shelf's),
+    /// the card alone. Pure.
+    public static func embedSize(
+        for post: GalleryPost, captionLines: Int?, showsEmbed: Bool
+    ) -> PostEmbeds.Size? {
+        guard post.kind == .text, PostEmbeds.shown(post.embed, drawn: showsEmbed) != nil else { return nil }
+        return captionLines == nil ? .full : .compact
+    }
+
+    /// Built once the closing line exists: the card's foot hangs it.
+    private func buildEmbedCard() {
+        embedCard.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(embedCard)
+        embedFollowsCaption = embedCard.topAnchor.constraint(
+            equalTo: captionLabel.bottomAnchor, constant: Self.embedCaptionGap
+        )
+        metaFollowsEmbed = metaRow.topAnchor.constraint(
+            equalTo: embedCard.bottomAnchor, constant: Self.captionFollowGap
+        )
+        // ⚠️ SOFT on a fixed card (a shelf's): the lane's height is measured
+        // for its words (`fixedTextCardHeight`), and a compact card can be a
+        // few points taller than two lines — it leans into the gap above the
+        // line rather than break the card's own constraints.
+        metaStandsUnderEmbed = metaRow.topAnchor.constraint(
+            greaterThanOrEqualTo: embedCard.bottomAnchor, constant: Spacing.xs
+        )
+        metaStandsUnderEmbed.priority = .defaultHigh
+        embedClosesCard = embedCard.bottomAnchor.constraint(
+            equalTo: card.bottomAnchor, constant: -Self.contentInset
+        )
+        NSLayoutConstraint.activate([
+            embedCard.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: Self.captionInset),
+            embedCard.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -Self.captionInset),
+            embedFollowsCaption,
+        ])
+    }
+
+    /// Shows `post`'s embed at `size`, or none. The caller decides the words
+    /// first (`fullCaption`): flush under no words, a gap under some.
+    private func applyEmbed(_ size: PostEmbeds.Size?, for post: GalleryPost?, imagePipeline: ImagePipeline?) {
+        guard let size, let embed = post?.embed else {
+            embedCard.clear()
+            return
+        }
+        embedCard.show(embed, size: size, pipeline: imagePipeline)
+        embedFollowsCaption.constant = fullCaption.isEmpty ? 0 : Self.embedCaptionGap
+    }
+
+    #if DEBUG
+    /// The showcase's card under the card's words, nil for none (#2216).
+    public var debugEmbedCard: PostEmbedView? { embedCard.isHidden ? nil : embedCard }
+    /// Whether the comment count shows (#2216: a showcase draws none).
+    public var debugShowsCommentCount: Bool { !commentsAction.isHidden }
+    #endif
+
     #if DEBUG
     /// The voice the card draws in its caption's place, nil for none.
     public var debugVoiceCaption: VoicePostCaptionView? { voiceCaption.isHidden ? nil : voiceCaption }
@@ -2439,6 +2523,8 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         onRevealFullCaption = nil
         // A voice it played stops: the card is another post's now (#2208).
         applyVoice(nil, for: nil)
+        // So does a showcase's card, and a write in flight for it (#2216).
+        applyEmbed(nil, for: nil, imagePipeline: nil)
         // Back to truncated. A recycled row must not inherit the previous
         // post's expansion — `configure` re-applies the host's answer for the
         // post it is actually bound to.
@@ -2588,7 +2674,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     public func configure(
         with post: GalleryPost, imagePipeline: ImagePipeline, captionExpanded: Bool = false,
         showsAuthorIdentity: Bool = true, captionLines: Int? = nil,
-        showsVoice: Bool = VoicePostDisplay.areDrawn
+        showsVoice: Bool = VoicePostDisplay.areDrawn, showsEmbed: Bool = PostEmbeds.areDrawn
     ) {
         fixedCaptionLines = captionLines
         isCaptionExpanded = captionExpanded && captionLines == nil
@@ -2596,13 +2682,21 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         // The fixed card's label cuts its own tail; the list's card writes
         // its ellipsis and "Show more" into the text (`composeCaption`).
         captionLabel.lineBreakMode = captionLines == nil ? .byWordWrapping : .byTruncatingTail
+        // A showcase (#2216): its card under the author's words on the list's
+        // card, the card alone on a shelf's. It outranks a voice: a post
+        // carrying both shows the card, the one thing the caption's place
+        // holds (the backend gives a showcase no voice).
+        let embedSize = Self.embedSize(for: post, captionLines: captionLines, showsEmbed: showsEmbed)
         // A voice post (#2208): the voice in the caption's place — its words
         // under it on the list's card, the voice alone on a shelf's.
-        let voiceSize = Self.voiceSize(for: post, captionLines: captionLines, showsVoice: showsVoice)
-        fullCaption = voiceSize == .compact ? "" : post.caption
+        let voiceSize: VoicePostDisplay.Size? = embedSize == nil
+            ? Self.voiceSize(for: post, captionLines: captionLines, showsVoice: showsVoice) : nil
+        let wordsGo = voiceSize == .compact || embedSize == .compact
+        fullCaption = wordsGo ? "" : post.caption
         bindAuthorBand(to: post, imagePipeline: imagePipeline, showsIdentity: showsAuthorIdentity)
         showMoreRange = nil
         applyVoice(voiceSize, for: post)
+        applyEmbed(embedSize, for: post, imagePipeline: imagePipeline)
         // Provisional: the real composition needs the row's final width, which
         // only `preferredLayoutAttributesFitting` knows. Set here so a cell
         // that is never sized (a measuring instance) still reads correctly.
@@ -2636,8 +2730,11 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         baseReactionCount = post.reactionCount
         configuredReactionCount = post.reactionCount
         applyReactionCount(animated: false)
-        // A number the post does not have draws no action at all.
-        applyCommentCount(post.commentCount, animated: false)
+        // A number the post does not have draws no action at all — nor does
+        // a showcase, which takes no comments (#2216: the conversation is
+        // the channel), whatever count the post carries.
+        showsShowcase = embedSize != nil
+        applyCommentCount(showsShowcase ? nil : post.commentCount, animated: false)
         // ⚠️ THE COUNT IS A CONTROL ON EVERY CARD, TEXT POSTS INCLUDED.
         //
         // It used to be switched off on a text post, on the argument that its
@@ -2992,7 +3089,62 @@ public final class PostGridTileCell: UICollectionViewCell {
             voiceMark.clear()
             accessibilityLabel = nil
         }
+        if embedMarkIsBuilt {
+            embedMark.clear()
+            accessibilityLabel = nil
+        }
     }
+
+    // MARK: - A showcase's mark (#2216)
+
+    /// A showcase's tile (behind `-channels`): its text face, the embed's
+    /// mark — the channel's photo with its glyph, its name — in the middle,
+    /// the caption gone. Not interactive: a tap is the tile's, it opens the
+    /// post; a hold is the tile's preview.
+    private lazy var embedMark: PostEmbedView = {
+        let mark = PostEmbedView()
+        mark.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(mark)
+        NSLayoutConstraint.activate([
+            mark.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
+            mark.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
+            mark.widthAnchor.constraint(lessThanOrEqualTo: contentView.widthAnchor, constant: -16),
+        ])
+        return mark
+    }()
+
+    /// Whether the mark was ever built: most tiles never wear one.
+    private var embedMarkIsBuilt = false
+
+    /// The size a tile gives a showcase's embed: the mark, for a text post
+    /// with one and the switch on; nil otherwise. Pure.
+    public static func embedSize(for post: GalleryPost, showsEmbed: Bool) -> PostEmbeds.Size? {
+        post.kind == .text && PostEmbeds.shown(post.embed, drawn: showsEmbed) != nil ? .mark : nil
+    }
+
+    private func applyEmbedMark(_ size: PostEmbeds.Size?, for post: GalleryPost, imagePipeline: ImagePipeline) {
+        guard let size, let embed = post.embed else {
+            if embedMarkIsBuilt { embedMark.clear() }
+            return
+        }
+        embedMarkIsBuilt = true
+        embedMark.show(embed, size: size, pipeline: imagePipeline)
+        // A mark takes no touch — `PostEmbedView` says so for `.mark` — and
+        // the tile reads as one element: "Channel Harbour notes, 12.4K
+        // subscribers".
+        accessibilityLabel = embed.channel.map(ChannelEmbedCopy.accessibilityLabel)
+    }
+
+    /// Whether the tile's words give way to a mark — a voice's or a
+    /// showcase's — in their place.
+    private var wearsCaptionMark: Bool {
+        (voiceMarkIsBuilt && !voiceMark.isHidden) || (embedMarkIsBuilt && !embedMark.isHidden)
+    }
+
+    #if DEBUG
+    /// The showcase's mark the tile wears in its words' place, nil for none.
+    public var debugEmbedMark: PostEmbedView? { embedMarkIsBuilt && !embedMark.isHidden ? embedMark : nil }
+    #endif
 
     // MARK: - A voice post's mark (#2208)
 
@@ -3226,7 +3378,7 @@ public final class PostGridTileCell: UICollectionViewCell {
     /// tile of that size wears none.
     public static func makeInfoOverlay(
         for post: GalleryPost, restingSize: CGSize, imagePipeline: ImagePipeline?, viewerStake: Int = 0,
-        showsVoice: Bool = VoicePostDisplay.areDrawn
+        showsVoice: Bool = VoicePostDisplay.areDrawn, showsEmbed: Bool = PostEmbeds.areDrawn
     ) -> PostCardCaptionOverlay? {
         let variant = PostTileInfo.variant(for: restingSize)
         guard variant != .none else { return nil }
@@ -3234,6 +3386,7 @@ public final class PostGridTileCell: UICollectionViewCell {
             for: post, variant: variant, referenceSize: restingSize,
             imagePipeline: imagePipeline, viewerStake: viewerStake,
             voiceAlone: voiceSize(for: post, showsVoice: showsVoice) != nil
+                || embedSize(for: post, showsEmbed: showsEmbed) != nil
         )
         overlay.frame = CGRect(origin: .zero, size: restingSize)
         UIView.performWithoutAnimation { overlay.layoutIfNeeded() }
@@ -3278,7 +3431,7 @@ public final class PostGridTileCell: UICollectionViewCell {
             let overlay = Self.makeInfoOverlay(
                 for: infoPost, variant: variant, referenceSize: infoReferenceSize,
                 imagePipeline: infoImagePipeline, viewerStake: infoViewerStake,
-                voiceAlone: voiceMarkIsBuilt && !voiceMark.isHidden
+                voiceAlone: wearsCaptionMark
             )
             overlay.frame = contentView.bounds
             // Above the picture and any video surface (both sit just above
@@ -3315,10 +3468,15 @@ public final class PostGridTileCell: UICollectionViewCell {
     public func configure(
         with post: GalleryPost, imagePipeline: ImagePipeline,
         showsInfo: Bool = false, infoReferenceSize: CGSize? = nil,
-        showsVoice: Bool = VoicePostDisplay.areDrawn
+        showsVoice: Bool = VoicePostDisplay.areDrawn, showsEmbed: Bool = PostEmbeds.areDrawn
     ) {
+        // A showcase's tile: its text face, the card's mark in the words'
+        // place (#2216). It outranks a voice, as on the list's card.
+        let embedSize = Self.embedSize(for: post, showsEmbed: showsEmbed)
         // A voice post's tile: its text face, its mark in the words' place (#2208).
-        applyVoiceMark(Self.voiceSize(for: post, showsVoice: showsVoice), for: post)
+        let voiceSize: VoicePostDisplay.Size? = embedSize == nil ? Self.voiceSize(for: post, showsVoice: showsVoice) : nil
+        applyVoiceMark(voiceSize, for: post)
+        applyEmbedMark(embedSize, for: post, imagePipeline: imagePipeline)
         // The media ground under a picture, the card under words (#1771) —
         // on a dark page, the on-dark ground and bone (`groundsOnDark`).
         contentView.backgroundColor = groundsOnDark && post.kind != .text
