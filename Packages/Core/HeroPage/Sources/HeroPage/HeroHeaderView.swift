@@ -54,9 +54,12 @@ public struct HeroHeaderContent: Equatable, Sendable {
     /// the banner's slot shows its skeleton rather than the bannerless
     /// layout (#1752).
     public var bannerPending: Bool
+    /// A small SF Symbol after the title, in the subtitle's ink — a
+    /// channel's megaphone (#2230, #2237). Nil: none.
+    public var titleSymbol: String?
 
     public init(
-        title: String, subtitle: String, isVerified: Bool = false, bio: String? = nil,
+        title: String, subtitle: String, isVerified: Bool = false, titleSymbol: String? = nil, bio: String? = nil,
         websiteText: String? = nil, websiteURL: URL? = nil, counterValues: [String?],
         avatarURL: URL? = nil, avatarMonogram: String = "", avatarFrameID: String? = nil,
         bannerImageURL: URL? = nil, bannerVideoURL: URL? = nil, bannerPending: Bool = false
@@ -64,6 +67,7 @@ public struct HeroHeaderContent: Equatable, Sendable {
         self.title = title
         self.subtitle = subtitle
         self.isVerified = isVerified
+        self.titleSymbol = titleSymbol
         self.bio = bio
         self.websiteText = websiteText
         self.websiteURL = websiteURL
@@ -213,6 +217,10 @@ open class HeroHeaderView: UIView {
     private let avatarCutout = FaceCutout()
     private let nameLabel = UILabel()
     private let verifiedBadge = UIImageView(image: UIImage(systemName: "checkmark.seal.fill"))
+    /// The content's `titleSymbol` after the name (a channel's megaphone,
+    /// #2237); hidden with none.
+    private let titleMark = UIImageView()
+    private var subtitleTap: UITapGestureRecognizer?
     /// The chevron after the name, shown while `onTitleTapped` is set: the
     /// name opens something of its own — the own profile's switcher (the
     /// owner, 2026-11-08).
@@ -988,6 +996,7 @@ open class HeroHeaderView: UIView {
         if changed(\.title) { nameLabel.text = content.title }
         if changed(\.subtitle) { handleLabel.text = content.subtitle }
         if changed(\.isVerified) { verifiedBadge.isHidden = !content.isVerified }
+        if changed(\.titleSymbol) { applyTitleMark(content.titleSymbol) }
 
         if changed(\.bio) { applyBio(content.bio) }
 
@@ -1091,6 +1100,7 @@ open class HeroHeaderView: UIView {
             self.nameLabel.text = content.title
             self.handleLabel.text = content.subtitle
             self.verifiedBadge.isHidden = !content.isVerified
+            self.applyTitleMark(content.titleSymbol)
             self.applyBanner(content)
             self.loadAvatar(content.avatarURL)
         }
@@ -1226,7 +1236,7 @@ open class HeroHeaderView: UIView {
             // Everything data-driven drops to alpha 0 in place — the badge
             // included, so a verified profile fades it in with the name
             // instead of popping it beside the finished text.
-            for view in [nameLabel, handleLabel, bioLabel, websiteButton, verifiedBadge, titleChevron] {
+            for view in [nameLabel, handleLabel, bioLabel, websiteButton, verifiedBadge, titleMark, titleChevron] {
                 view.alpha = 0
             }
             for bone in redactionBones { bone.isHidden = false; bone.alpha = 1 }
@@ -1251,7 +1261,7 @@ open class HeroHeaderView: UIView {
         let reveal = {
             for view in [
                 self.nameLabel, self.handleLabel, self.bioLabel,
-                self.websiteButton, self.verifiedBadge, self.titleChevron
+                self.websiteButton, self.verifiedBadge, self.titleMark, self.titleChevron
             ] {
                 view.alpha = 1
             }
@@ -1407,6 +1417,36 @@ open class HeroHeaderView: UIView {
         titleTap?.isEnabled = tappable
         nameLabel.accessibilityTraits = tappable ? [.header, .button] : .header
         nameLabel.accessibilityHint = tappable ? "Switches profile" : nil
+    }
+
+    /// A tap on the subtitle — a channel's "by @owner" opens the owner's
+    /// profile (#2237). Nil: the subtitle is text alone.
+    public var onSubtitleTapped: (() -> Void)? {
+        didSet {
+            let tappable = onSubtitleTapped != nil
+            if tappable, subtitleTap == nil {
+                let tap = UITapGestureRecognizer(target: self, action: #selector(subtitleTapped))
+                handleLabel.addGestureRecognizer(tap)
+                subtitleTap = tap
+            }
+            handleLabel.isUserInteractionEnabled = tappable
+            handleLabel.accessibilityTraits = tappable ? .button : .staticText
+        }
+    }
+
+    @objc private func subtitleTapped() { onSubtitleTapped?() }
+
+    /// The subtitle's tap, as a finger would.
+    public func debugTapSubtitle() { onSubtitleTapped?() }
+
+    /// The symbol after the title, or nil (#2237).
+    public var debugTitleSymbol: String? { titleMark.isHidden ? nil : titleSymbolName }
+    private var titleSymbolName: String?
+
+    private func applyTitleMark(_ symbol: String?) {
+        titleSymbolName = symbol
+        titleMark.image = symbol.flatMap { UIImage(systemName: $0) }
+        titleMark.isHidden = titleMark.image == nil
     }
 
     /// The name's row is tapped: on the name or its chevron, not the air
@@ -1617,7 +1657,16 @@ open class HeroHeaderView: UIView {
 
         // Name + verified badge sit on one line; a spacer keeps them leading
         // while the row itself stretches with the fill-aligned column.
-        let nameRow = UIStackView(arrangedSubviews: [nameLabel, verifiedBadge, titleChevron, UIView()])
+        titleMark.tintColor = Self.pageHandleInk
+        titleMark.contentMode = .scaleAspectFit
+        titleMark.isHidden = true
+        titleMark.isAccessibilityElement = false
+        titleMark.preferredSymbolConfiguration = UIImage.SymbolConfiguration(
+            font: UIFont.scaledFont(forTextStyle: .subheadline, weight: .semibold), scale: .small
+        )
+        titleMark.setContentHuggingPriority(.required, for: .horizontal)
+        titleMark.setContentCompressionResistancePriority(.required, for: .horizontal)
+        let nameRow = UIStackView(arrangedSubviews: [nameLabel, verifiedBadge, titleMark, titleChevron, UIView()])
         nameRow.axis = .horizontal
         nameRow.alignment = .center
         nameRow.spacing = Spacing.xs

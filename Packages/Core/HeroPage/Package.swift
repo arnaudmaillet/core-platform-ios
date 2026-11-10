@@ -23,11 +23,14 @@ let package = Package(
         // `AvatarView`), the banner's loop, a bio's emotes.
         .package(path: "../MediaCore"),
         .package(path: "../MediaPlayback"),
-        .package(path: "../EmoteKit")
+        .package(path: "../EmoteKit"),
+        // The lists behind the counters (#2237): the full-surface back
+        // swipe's gate (`ContentPopGating`), as the profile's lists wear it.
+        .package(path: "../CoreNavigation")
     ],
     targets: [
         .target(name: "HeroPage", dependencies: [
-            "DesignSystem", "FeedInterface", "PostGrid", "MediaCore", "MediaPlayback", "EmoteKit"
+            "DesignSystem", "FeedInterface", "PostGrid", "MediaCore", "MediaPlayback", "EmoteKit", "CoreNavigation"
         ]),
         .testTarget(name: "HeroPageTests", dependencies: ["HeroPage", "DesignSystem", "FeedInterface", "MediaCore"])
     ]
