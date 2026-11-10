@@ -31,6 +31,7 @@ struct StackScreenGuardTests {
         "SearchPendingSurfaceViewController": "a page of search results",
         "PostSetSurfaceViewController": "a page of search results and hashtags",
         "ProfileRelationshipListViewController": "a page of the relationship lists",
+        "PersonListPageViewController": "a page of the lists behind a hero header's counters (#2237)",
         "PostDetailViewController": "the feed's side panel",
         "SideDrawerContainerViewController": "the drawer's container",
         "LensLabPage": "a page of the DEBUG lens bench",
@@ -66,6 +67,7 @@ struct StackScreenGuardTests {
         "EmbedCatalogViewController": "a DEBUG sheet, and the root of -embed-catalog (#2216)",
         "AppButtonCatalogViewController": "a DEBUG sheet",
         "SnapCommentsSheetViewController": "a sheet",
+        "ConversationEditViewController": "a sheet: a group's or a channel's editing sheet (#2237)",
         "ToastOverlayRootController": "the toast window's root",
         // Neither.
         "HeroPageViewController": "a base class: its subclasses state theirs",
