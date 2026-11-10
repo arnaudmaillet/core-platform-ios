@@ -213,8 +213,8 @@ struct ProfileGalleryOffsetSyncTests {
     @Test func settingTheOffsetReachesEveryPage() {
         let pager = makePager()
         pager.setVerticalOffset(0)
-        // Posts · Channels · Reposts · Tagged (#2232).
-        #expect(pager.debugVerticalOffsets.count == ProfileTab.publicTabs.count)
+        // Every page the pager was given (the three post pages here, #2232).
+        #expect(pager.debugVerticalOffsets.count == ProfileTab.postTabsForTests.count)
     }
 
     /// A page can be excluded — the one currently under the finger, which is

@@ -436,7 +436,13 @@ struct ProfileChannelsTests {
         let screen = screen(channels: channels)
         screen.loadViewIfNeeded()
         #expect(screen.galleryPager.allTabs.contains(.channels))
+        // The read, then the tab: on a starved runner the tab's wait ran out
+        // before the read had landed (seen running the suite).
+        await settle { provider.asked.first != nil }
         await settle { screen.debugTabTitles.contains("Channels") }
+        await settle {
+            (screen.galleryPager.builtPage(for: .channels) as? ProfileChannelsPage)?.debugRowIDs.isEmpty == false
+        }
         #expect(provider.asked.first == viewer, "the channels of someone else were asked")
         #expect(Array(screen.debugTabTitles.prefix(2)) == ["Posts", "Channels"])
         let page = try #require(screen.galleryPager.builtPage(for: .channels) as? ProfileChannelsPage)
