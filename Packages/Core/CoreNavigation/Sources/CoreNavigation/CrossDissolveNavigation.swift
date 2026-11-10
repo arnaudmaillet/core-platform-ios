@@ -24,13 +24,41 @@ public extension UINavigationController {
     /// growing out of the top-left corner). The dissolve is the container's
     /// transition and survives animations being disabled for the block; the
     /// implicit frame animation does not.
+    ///
+    /// ⚠️ THE OUTGOING SCREEN FADES AS A PICTURE, NOT AS LIVE VIEWS (#2246).
+    /// `UIView.transition(…, .transitionCrossDissolve)` dissolved the live
+    /// navigation view, and Liquid Glass bar elements are drawn live: filmed
+    /// at 60 fps on the search screen's Cancel, the field's glass refracted
+    /// the map (the screen the pop had already put underneath) before the
+    /// dissolve showed, its caret came back for the whole fade, and on a
+    /// device the Cancel capsule morphed with its title clipped inside. So
+    /// the outgoing navigation view is snapshotted as it last rendered and
+    /// laid over it, the change runs as a `cut` underneath — the incoming
+    /// screen, its bar included, is simply there as itself — and the
+    /// picture fades out over the same duration. Nothing under the picture
+    /// can glitch: nobody sees it until the picture is gone.
     func crossDissolve(duration: TimeInterval = 0.25, _ change: @escaping () -> Void) {
         guard let container = viewIfLoaded, container.window != nil else {
             change()
             return
         }
-        UIView.transition(with: container, duration: duration, options: [.transitionCrossDissolve]) {
-            UIView.performWithoutAnimation(change)
+        guard let host = container.superview,
+              let picture = CrossDissolvePicture.make(container) else {
+            // No picture to fade (no host, or nothing rendered yet): UIKit's
+            // own dissolve, as before.
+            UIView.transition(with: container, duration: duration, options: [.transitionCrossDissolve]) {
+                UIView.performWithoutAnimation(change)
+            }
+            return
+        }
+        picture.frame = container.frame
+        picture.isUserInteractionEnabled = false
+        host.insertSubview(picture, aboveSubview: container)
+        cut(change)
+        UIView.animate(withDuration: duration, delay: 0, options: [.curveEaseInOut, .allowUserInteraction]) {
+            picture.alpha = 0
+        } completion: { _ in
+            picture.removeFromSuperview()
         }
     }
 
@@ -50,4 +78,12 @@ public extension UINavigationController {
             viewIfLoaded?.layoutIfNeeded()
         }
     }
+}
+
+/// How `crossDissolve` takes its picture of the outgoing screen (#2246): the
+/// navigation view as it last rendered. A seam for tests, where nothing has
+/// rendered and a snapshot comes back empty.
+@MainActor
+enum CrossDissolvePicture {
+    static var make: (UIView) -> UIView? = { $0.snapshotView(afterScreenUpdates: false) }
 }
