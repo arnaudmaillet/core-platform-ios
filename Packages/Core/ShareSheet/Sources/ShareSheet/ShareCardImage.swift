@@ -72,7 +72,8 @@ public final class ShareItemSource: NSObject, UIActivityItemSource {
     public func activityViewController(
         _ controller: UIActivityViewController, subjectForActivityType activityType: UIActivity.ActivityType?
     ) -> String {
-        // Mail's subject line; a voice post's words when it has them (#2208).
+        // Mail's subject line; a voice post's words when it has them (#2208),
+        // a showcase's channel (#2216).
         card.detail.map { "\(card.displayName) · \($0)" } ?? "\(card.displayName) (\(card.handle))"
     }
 

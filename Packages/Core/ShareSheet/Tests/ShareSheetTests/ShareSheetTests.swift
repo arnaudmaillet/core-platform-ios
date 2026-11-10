@@ -1,4 +1,5 @@
 import CoreModels
+import LinkPresentation
 import MediaCore
 import Testing
 import UIKit
@@ -116,6 +117,22 @@ struct ShareSheetTests {
         #expect(voice.shareTitle == "Ava Moreau · 🎙 Voice post · 0:32")
         let plain = ShareCard(displayName: "Ava Moreau", handle: "@ava", avatarURL: nil, url: link)
         #expect(plain.shareTitle == "Ava Moreau · @ava")
+    }
+
+    /// A channel's showcase's share (#2216): no card fits the system sheet,
+    /// so its title and Mail's subject say the channel with its glyph — "📣
+    /// Film stock club" — and the author's words.
+    @Test func aShowcasesShareSaysItsChannel() {
+        let link = URL(string: "https://core-platform.click/p/2")!
+        let embed = PostEmbed.channel(ChannelEmbed(conversationID: ConversationID("ch-film"), name: "Film stock club"))
+        let card = ShareCard(displayName: "Ava Moreau", handle: "@ava", avatarURL: nil, url: link,
+                             detail: embed.previewText(caption: "Rolls from Sunday"))
+        #expect(card.shareTitle == "Ava Moreau · 📣 Film stock club · Rolls from Sunday")
+        let source = ShareItemSource(card: card, icon: nil)
+        let controller = UIActivityViewController(activityItems: [link], applicationActivities: nil)
+        #expect(source.activityViewController(controller, subjectForActivityType: .mail)
+            == "Ava Moreau · 📣 Film stock club · Rolls from Sunday")
+        #expect(source.activityViewControllerLinkMetadata(controller)?.title == card.shareTitle)
     }
 }
 
