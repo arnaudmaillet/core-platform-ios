@@ -129,8 +129,10 @@ struct InboxFailedLoadRetryTests {
             #expect(page.listScrollView?.refreshControl is AppRefreshControl,
                     "\(type(of: page)) has no pull to refresh, or the stock spinner")
         }
-        let control = try #require(pages[0].listScrollView?.refreshControl)
-        control.sendActions(for: .valueChanged)
+        // A finger's pull to the app's threshold, through the shared rule
+        // (#2235): UIKit's own `.valueChanged` alone no longer refreshes.
+        let control = try #require(pages[0].listScrollView?.refreshControl as? AppRefreshControl)
+        control.debugFingerPull(to: PullRefreshRule.threshold)
         #expect(await settle { await inbox.inboxLoads >= 1 }, "a pull did not reload the inbox")
     }
 

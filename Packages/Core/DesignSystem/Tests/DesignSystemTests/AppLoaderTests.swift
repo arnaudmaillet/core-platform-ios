@@ -461,11 +461,16 @@ struct PullThresholdFeedbackTests {
         #expect(!feedback.isArmed)
     }
 
-    /// Both indicators wear it.
+    /// Both indicators wear it — through the shared trigger (#2235): the
+    /// tick sounds as the finger's pull fires the refresh.
     @Test func bothRefreshIndicatorsTick() {
         let hero = HeroPullToRefreshView()
+        hero.minimumShown = 0
+        hero.setPull(10, isTracking: true)
         hero.setPull(HeroPullToRefreshView.threshold + 4, isTracking: true)
         #expect(hero.debugThresholdFeedback.isArmed)
+        #expect(hero.debugIsRefreshing)
+        hero.endRefreshing()
         hero.setPull(10, isTracking: true)
         #expect(!hero.debugThresholdFeedback.isArmed)
 
