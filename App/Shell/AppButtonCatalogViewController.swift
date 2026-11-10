@@ -64,6 +64,7 @@ final class AppButtonCatalogViewController: UIViewController {
         buildPlace()
         buildPersonRow()
         buildMessageRequest()
+        buildRowAction()
         buildPostCard()
         buildShop()
         buildSignIn()
@@ -477,9 +478,9 @@ final class AppButtonCatalogViewController: UIViewController {
     private func buildPersonRow() {
         section(
             "Person row",
-            source: "RelationshipListCell · SuggestionCell — Follow / Follow Back ⇄ Following / Requested, a bare ✕"
+            source: "RelationshipListCell · SuggestionCell — the row action (#2231): Follow / Follow Back ⇄ Following / Requested, a bare ✕"
         )
-        let follow = track(AppButton(aspect: .pill(.prominent), size: .row, content: .title("Follow")))
+        let follow = track(AppButton(aspect: .rowAction, size: .row, content: .title("Follow")))
         follow.isToggle = true
         // The row's trailing button: it grows and shrinks from its right edge.
         follow.morphAnchor = .trailing
@@ -490,8 +491,8 @@ final class AppButtonCatalogViewController: UIViewController {
         name.font = UIFont.scaledFont(forTextStyle: .body, weight: .semibold)
         row([name, UIView(), follow, dismiss], fills: true, on: Surface.card)
         var shown = RowState.follow
-        // The row's own rule (`RelationshipListCell`): an invitation stands
-        // prominent, a fact is selected — the quiet ground.
+        // The row's own rule (`RelationshipListCell`): an invitation is the
+        // row action's own look, a fact is selected — the quiet ground.
         func apply(_ state: RowState) {
             let (title, selected): (String, Bool) = switch state {
             case .follow: ("Follow", false)
@@ -517,8 +518,8 @@ final class AppButtonCatalogViewController: UIViewController {
     // MARK: - Message request
 
     private func buildMessageRequest() {
-        section("Message request", source: "MessageRequestCell — Accept · ✕")
-        let accept = track(AppButton(aspect: .pill(.prominent), size: .row, content: .title("Accept")))
+        section("Message request", source: "MessageRequestCell — the row action (#2231): Accept · ✕")
+        let accept = track(AppButton(aspect: .rowAction, size: .row, content: .title("Accept")))
         let decline = track(AppIconButton(style: .bubble(.quiet), content: .symbol("xmark")))
         decline.inkColor = .secondaryLabel
         let name = UILabel()
@@ -530,6 +531,65 @@ final class AppButtonCatalogViewController: UIViewController {
             accept.setPhase(.loading, animated: true)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { accept.setPhase(.content, animated: true) }
         }, for: .primaryActionTriggered)
+    }
+
+    // MARK: - Row action
+
+    /// The row action (#2231) in both looks, side by side on a row's card —
+    /// tinted (the decision), then bare words (`-row-action-style text`) —
+    /// through its states. Tapping Follow walks it to Following through a
+    /// load, as the rows do; the chips jump every look at once.
+    private func buildRowAction() {
+        section(
+            "Row action",
+            source: "AppButton(aspect: .rowAction) — Follow · Accept · Approve on every row: tinted, then words (-row-action-style text)"
+        )
+        var follows: [AppButton] = []
+        var accepts: [AppButton] = []
+        for style in AppButton.RowActionStyle.allCases {
+            func rowAction(_ title: String) -> AppButton {
+                let button = track(AppButton(aspect: .rowAction, size: .row, content: .title(title)))
+                button.rowActionStyle = style
+                button.morphAnchor = .trailing
+                return button
+            }
+            let label = UILabel()
+            label.text = style == .tinted ? "Tinted" : "Words"
+            label.font = .appFont(forTextStyle: .subheadline)
+            label.textColor = .secondaryLabel
+            let follow = rowAction("Follow")
+            follow.isToggle = true
+            follow.reservedContents = [.title("Follow"), .title("Following")]
+            follow.addAction(UIAction { [weak follow] _ in
+                guard let follow else { return }
+                let following = !follow.isSelected
+                follow.busyLabel = following ? "Following…" : "Unfollowing…"
+                follow.setPhase(.loading, animated: true)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak follow] in
+                    guard let follow else { return }
+                    follow.setContent(.title(following ? "Following" : "Follow"), selected: following, animated: true)
+                    follow.setPhase(.content, animated: true)
+                }
+            }, for: .primaryActionTriggered)
+            // Accept stands for Approve too: the same button, other words.
+            let accept = rowAction("Accept")
+            let dismiss = track(AppIconButton(style: .glyph, content: .symbol("xmark")))
+            dismiss.inkColor = .tertiaryLabel
+            row([label, UIView(), follow, accept, dismiss], fills: true, on: Surface.card)
+            follows.append(follow)
+            accepts.append(accept)
+        }
+        let all = follows + accepts
+        states([
+            ("Normal", {
+                follows.forEach { $0.setContent(.title("Follow"), selected: false, animated: true) }
+                all.forEach { $0.isEnabled = true; $0.setPhase(.content, animated: true) }
+            }),
+            ("Selected", { follows.forEach { $0.setContent(.title("Following"), selected: true, animated: true) } }),
+            ("Loading", { all.forEach { $0.setPhase(.loading, animated: true) } }),
+            ("Placeholder", { all.forEach { $0.setPhase(.placeholder, animated: true) } }),
+            ("Disabled", { all.forEach { $0.isEnabled = false } }),
+        ])
     }
 
     // MARK: - Post card

@@ -39,10 +39,11 @@ final class RelationshipListCell: UICollectionViewListCell {
     /// from "Following" alone; "Follow Back" (#717) is longer, and wrapped onto
     /// two lines inside a host one word too narrow.
     private final class ActionAccessoryView: UIView {
-        /// Prominent while it invites (Follow, Follow Back); selected — the
-        /// quiet ground — once it states a fact (Following, Requested).
+        /// The row action (#2231) while it invites (Follow, Follow Back);
+        /// selected — the quiet ground — once it states a fact (Following,
+        /// Requested).
         let button: AppButton = {
-            let button = AppButton(aspect: .pill(.prominent), size: .row, content: .title("Follow"))
+            let button = AppButton(aspect: .rowAction, size: .row, content: .title("Follow"))
             button.isToggle = true
             return button
         }()
@@ -78,7 +79,8 @@ final class RelationshipListCell: UICollectionViewListCell {
             let actions: [ProfileRelationshipsViewModel.RowAction] = [.follow, .followBack, .following, .requested]
             // ⚠️ TYPED BY HAND: Xcode 26 (CI) inferred the closure's result as
             // Double and would not convert it into the cache's CGFloat tuple.
-            let probe = AppButton(aspect: .pill(.prominent), size: .row, content: .title("Follow"))
+            // Either look measures the same (#2231): the probe's is the rows'.
+            let probe = AppButton(aspect: .rowAction, size: .row, content: .title("Follow"))
             let widths: [CGFloat] = actions.compactMap(RelationshipListCell.buttonState(for:)).map { state in
                 let fitted: CGFloat = probe.fittingSize(for: .title(state.title)).width
                 return fitted.rounded(.up)
@@ -190,8 +192,8 @@ final class RelationshipListCell: UICollectionViewListCell {
 
     /// The row's decision on the shared button (`AppButton`, as the inbox's
     /// Requests and Suggestions rows): an invitation (Follow, Follow Back)
-    /// stands on the prominent ground, a fact (Following, Requested) is the
-    /// selected, quiet one. Internal for tests.
+    /// is the row action's own ground (tinted, #2231), a fact (Following,
+    /// Requested) is the selected, quiet one. Internal for tests.
     static func buttonState(
         for action: ProfileRelationshipsViewModel.RowAction
     ) -> (title: String, selected: Bool)? {

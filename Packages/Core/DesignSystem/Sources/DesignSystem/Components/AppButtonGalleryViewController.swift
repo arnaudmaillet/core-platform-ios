@@ -53,6 +53,7 @@ public final class AppButtonGalleryViewController: UIViewController {
         buildAspects()
         buildForm()
         buildStates()
+        buildRowAction()
     }
 
     // MARK: - Sections
@@ -196,6 +197,43 @@ public final class AppButtonGalleryViewController: UIViewController {
         row([liked, makeIcon(.glyph, AppIconButton.Content(symbol: "bubble.right", count: 48))])
     }
 
+    // MARK: - Row action (#2231)
+
+    /// The row action in both looks — tinted (the decision), then bare
+    /// words (`-row-action-style text`) — through its states: normal,
+    /// selected, greyed, loading, placeholder, and Follow → Following with
+    /// its load on a tap.
+    private func buildRowAction() {
+        for style in AppButton.RowActionStyle.allCases {
+            header("Row action · \(style.rawValue)")
+            func rowAction(_ title: String) -> AppButton {
+                let button = make(.rowAction, .row, .title(title))
+                button.rowActionStyle = style
+                return button
+            }
+            let demo = rowAction("Follow")
+            demo.isToggle = true
+            demo.haptic = .tick
+            demo.morphAnchor = .trailing
+            demo.addAction(UIAction { [weak self, weak demo] _ in
+                guard let demo else { return }
+                self?.cycleFollow(demo)
+            }, for: .primaryActionTriggered)
+            let selected = rowAction("Following")
+            selected.isSelected = true
+            let disabled = rowAction("Accept")
+            disabled.isEnabled = false
+            row([demo, selected, disabled])
+            let loading = rowAction("Approve")
+            loading.busyLabel = "Approving…"
+            loading.setPhase(.loading, animated: false)
+            let placeholder = rowAction("Follow")
+            placeholder.reservedContents = [.title("Follow"), .title("Following"), .title("Requested")]
+            placeholder.setPhase(.placeholder, animated: false)
+            row([loading, placeholder])
+        }
+    }
+
     // MARK: - Motion
 
     private func buildMotion() {
@@ -203,7 +241,10 @@ public final class AppButtonGalleryViewController: UIViewController {
         let demo = make(.pill(.prominent), .row, .title("Follow"))
         demo.isToggle = true
         demo.haptic = .tick
-        demo.addAction(UIAction { [weak self] _ in self?.cycleFollow() }, for: .primaryActionTriggered)
+        demo.addAction(UIAction { [weak self, weak demo] _ in
+            guard let demo else { return }
+            self?.cycleFollow(demo)
+        }, for: .primaryActionTriggered)
         self.demo = demo
         let counter = makeIcon(.glyph, AppIconButton.Content(symbol: AppSymbol.like.rawValue, count: 99))
         counter.selectedTint = Palette.tint
@@ -243,8 +284,7 @@ public final class AppButtonGalleryViewController: UIViewController {
 
     /// Follow → (loading) → Following → Follow: the content change, the held
     /// width and the state tint, in one tap.
-    private func cycleFollow() {
-        guard let demo else { return }
+    private func cycleFollow(_ demo: AppButton) {
         let following = !demo.isSelected
         demo.busyLabel = following ? "Following…" : "Unfollowing…"
         demo.setPhase(.loading, animated: true)

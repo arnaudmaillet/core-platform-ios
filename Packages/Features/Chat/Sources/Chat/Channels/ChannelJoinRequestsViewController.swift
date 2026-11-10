@@ -116,8 +116,7 @@ final class ChannelJoinRequestsViewController: UIViewController {
             monogram: MonogramAvatarView.monogram(name: row.name, handle: row.handle ?? "")
         ))
         cell.avatar.setPicture(row.avatarURL, pipeline: imagePipeline)
-        let approve = AppButton(aspect: .pill(.prominent), size: .row, content: .title("Approve"))
-        approve.accessibilityLabel = "Approve \(row.name)"
+        let approve = Self.approveButton(for: row.name)
         let decline = AppIconButton(style: .glyph, content: .symbol("xmark"))
         decline.inkColor = .secondaryLabel
         decline.accessibilityLabel = "Decline \(row.name)"
@@ -133,6 +132,15 @@ final class ChannelJoinRequestsViewController: UIViewController {
             .customView(configuration: .init(customView: approve, placement: .trailing(displayed: .always), reservedLayoutWidth: .actual)),
             .customView(configuration: .init(customView: decline, placement: .trailing(displayed: .always), reservedLayoutWidth: .actual)),
         ]
+    }
+
+    /// A request's Approve: the row action (#2231) — repeated on every
+    /// request, so on the tinted ground, not a solid capsule. Internal for
+    /// tests.
+    static func approveButton(for name: String) -> AppButton {
+        let approve = AppButton(aspect: .rowAction, size: .row, content: .title("Approve"))
+        approve.accessibilityLabel = "Approve \(name)"
+        return approve
     }
 
     // MARK: - Render

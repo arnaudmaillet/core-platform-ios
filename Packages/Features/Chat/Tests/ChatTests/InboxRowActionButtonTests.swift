@@ -119,14 +119,16 @@ struct InboxRowActionButtonTests {
         )
     }
 
-    /// Follow stands on the prominent ground, Following on the quiet one
-    /// (selected), each labelled with the person; the ✕ is the same button,
-    /// bare.
+    /// Follow is the row action (#2231) — the tinted ground, the flag off —
+    /// Following the quiet one (selected), each labelled with the person;
+    /// the ✕ is the same button, bare.
     @Test func suggestionRowsShowFollowAndFollowing() {
         let cell = SuggestionCell(style: .default, reuseIdentifier: nil)
         cell.configure(with: suggestion(following: false), imagePipeline: nil)
         #expect(cell.debugFollowButton.content.title == "Follow")
-        #expect(cell.debugFollowButton.currentGround == .prominent)
+        #expect(cell.debugFollowButton.aspect == .rowAction)
+        #expect(cell.debugFollowButton.rowActionStyle == .tinted)
+        #expect(cell.debugFollowButton.currentGround == .tinted)
         #expect(cell.debugFollowButton.configuration?.title == "Follow")
         #expect(cell.debugFollowButton.accessibilityLabel == "Follow Name s1")
 
@@ -219,12 +221,14 @@ struct InboxRowActionButtonTests {
 
     // MARK: - Requests
 
-    /// Accept stands on the prominent ground, Decline is a bare ✕ glyph
-    /// (#2088) — both the shared button, one press each.
+    /// Accept is the row action (#2231), on the tinted ground with the flag
+    /// off; Decline is a bare ✕ glyph (#2088) — both the shared button, one
+    /// press each.
     @Test func requestRowsShowAcceptAndDecline() {
         let cell = MessageRequestCell(style: .default, reuseIdentifier: nil)
         #expect(cell.debugAcceptButton.content.title == "Accept")
-        #expect(cell.debugAcceptButton.currentGround == .prominent)
+        #expect(cell.debugAcceptButton.aspect == .rowAction)
+        #expect(cell.debugAcceptButton.currentGround == .tinted)
         let decline = cell.debugDismissButton
         #expect(decline.content.symbol == "xmark" && decline.content.count == nil, "Decline is not the ✕")
         #expect(decline.style == .glyph)
@@ -260,5 +264,53 @@ struct InboxRowActionButtonTests {
         next.debugDismissButton.sendActions(for: .primaryActionTriggered)
         #expect(viewModel.phase == .empty, "Decline did not take the request away: \(viewModel.phase)")
         #expect(snapshot?.active.map(\.id.rawValue) == ["r1"], "Decline moved the request to All")
+    }
+
+    // MARK: - The row action's two looks (#2231)
+
+    /// Every inbox row action — Suggestions' Follow, Requests' Accept, a
+    /// join request's Approve — in each look: tinted, the wash then the
+    /// quiet ground; bare words, no ground in either state. One press each.
+    @Test(arguments: AppButton.RowActionStyle.allCases)
+    func everyInboxRowActionWearsEitherLook(_ style: AppButton.RowActionStyle) {
+        let suggestionRow = SuggestionCell(style: .default, reuseIdentifier: nil)
+        suggestionRow.configure(with: suggestion(following: false), imagePipeline: nil)
+        let request = MessageRequestCell(style: .default, reuseIdentifier: nil)
+        let actions: [(String, AppButton)] = [
+            ("Follow", suggestionRow.debugFollowButton),
+            ("Accept", request.debugAcceptButton),
+            ("Approve", ChannelJoinRequestsViewController.approveButton(for: "Ava")),
+        ]
+        for (name, button) in actions {
+            #expect(button.aspect == .rowAction, "\(name) is not the row action")
+            button.rowActionStyle = style
+            let inviting: AppButton.Ground? = style == .tinted ? .tinted : nil
+            #expect(button.currentGround == inviting, "\(name) inviting")
+            button.isSelected = true
+            let acted: AppButton.Ground? = style == .tinted ? .quiet : nil
+            #expect(button.currentGround == acted, "\(name) acted")
+            button.isSelected = false
+            expectOnePress(button, name)
+        }
+    }
+
+    /// Following, in words or on the tinted ground, takes the same width:
+    /// a Suggestions row does not move between the looks.
+    @Test func aSuggestionRowMeasuresTheSameInBothLooks() {
+        let cell = SuggestionCell(style: .default, reuseIdentifier: nil)
+        cell.configure(with: suggestion(following: true), imagePipeline: nil)
+        let button = cell.debugFollowButton
+        button.rowActionStyle = .tinted
+        let tinted = button.fittingSize(for: button.content)
+        button.rowActionStyle = .text
+        let text = button.fittingSize(for: button.content)
+        #expect(abs(tinted.width - text.width) < 0.01, "\(tinted) vs \(text)")
+    }
+
+    /// A join request's Approve names the person.
+    @Test func approveNamesThePerson() {
+        let approve = ChannelJoinRequestsViewController.approveButton(for: "Ava")
+        #expect(approve.accessibilityLabel == "Approve Ava")
+        #expect(approve.content.title == "Approve")
     }
 }
