@@ -34,23 +34,18 @@ struct NotificationsTopEdgeTests {
         #expect(collection.topEdgeEffect.style == .soft)
     }
 
-    /// ⚠️ "New" rests below the soft blur's fade (#2240): the contract adds
-    /// what the first title's own step lacks, and the skeleton — a sibling
-    /// of the list — moves down by the same amount, so the rows land where
-    /// its bones stood.
-    @Test func theFirstSectionRestsBelowTheFade() throws {
+    /// ⚠️ NO CLEARANCE UNDER THE LARGE TITLE (#2240): "Notifications"
+    /// rests on a large title, so "New" already starts far below the soft
+    /// fade, and the titled contract adds nothing (seen on the simulator:
+    /// 40 pt of empty space when it did). The skeleton stays pinned to the top.
+    @Test func theLargeTitleTakesNoClearance() throws {
         let (controller, list) = makeList()
         let collection = try #require(list)
-        let expected = SoftTopEdge.clearance(below: Spacing.sm)
-        #expect(NotificationsViewController.skeletonTopClearance == expected)
-        // Empty, before the first page: a plain list's whole fade, in place
-        // before the first frame; the first title's step gives some back
-        // once it is laid out.
-        #expect(collection.topFadeClearance >= expected)
-        let skeleton = try #require(controller.view.subviews.first { $0 is PersonListSkeletonView })
         controller.view.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
         controller.view.layoutIfNeeded()
-        #expect(abs(skeleton.frame.minY - expected) < 0.5)
+        #expect(collection.topFadeClearance == 0)
+        let skeleton = try #require(controller.view.subviews.first { $0 is PersonListSkeletonView })
+        #expect(abs(skeleton.frame.minY) < 0.5)
     }
 
     /// The bar draws the effect over the scroll view it tracks; the skeleton

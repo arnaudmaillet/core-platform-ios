@@ -131,6 +131,8 @@ struct TitledHeaderTopEdgeGuardTests {
     static let fadeClearanceOptOuts: [String: String] = [
         "PostDetailViewController.swift":
             "the comments sheet's stream owns its top inset (its shapes, #2195, and the short stream's anchor re-assert it): a clearance under it would fight them every pass",
+        "NotificationsViewController.swift":
+            "it rests on a large title, so its first section already starts far below the fade, which only reaches the rows once the title has folded into the bar by scrolling; a clearance there left 40 pt of empty space under the title (seen on the simulator)",
     ]
 
     @Test func everyFadeClearanceOptOutIsArgued() {

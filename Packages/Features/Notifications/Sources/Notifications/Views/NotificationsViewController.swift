@@ -239,14 +239,6 @@ final class NotificationsViewController: UIViewController {
     /// The first section title's step under the large title.
     private static let firstHeaderTopPadding: CGFloat = Spacing.sm
 
-    /// What the titled contract adds above that first title to clear the
-    /// soft fade (#2240), known before the list has a row: the skeleton, a
-    /// sibling of the list, moves down by exactly as much, so the rows land
-    /// where its bones stood.
-    static var skeletonTopClearance: CGFloat {
-        SoftTopEdge.clearance(below: firstHeaderTopPadding)
-    }
-
     private func makeLayout() -> UICollectionViewLayout {
         UICollectionViewCompositionalLayout { index, environment in
             var configuration = UICollectionLayoutListConfiguration(appearance: .plain)
@@ -277,9 +269,11 @@ final class NotificationsViewController: UIViewController {
         // UIKit's soft edge effect under its bar (asked for, 2026-09-28):
         // rows scrolling up under "Notifications" soften into the system's
         // own top-edge blur — the titled header's rule since #1591. Through
-        // the contract, not the style by hand: it also starts the first
-        // section below the fade at rest (#2240), where "New" sat softened.
-        collectionView.applyTopEdge(for: .titled)
+        // the contract, not the style by hand (#2240), but with no clearance:
+        // the list rests on its large title, so "New" already sits far below
+        // the fade, which only reaches the rows once the title has folded by
+        // scrolling (seen on the simulator: 40 pt of empty space with one).
+        collectionView.prefersSoftTopEdge(keepsContentBelowFade: false)
         collectionView.pin(to: view)
         // Named, not searched for: the effect is drawn where the navigation
         // bar's pocket meets the scroll view it TRACKS, and the skeleton and
@@ -370,7 +364,7 @@ final class NotificationsViewController: UIViewController {
     }
 
     private func configureStatusViews() {
-        skeleton.pin(to: view, insets: NSDirectionalEdgeInsets(top: Self.skeletonTopClearance, leading: 0, bottom: 0, trailing: 0))
+        skeleton.pin(to: view)
         skeleton.isHidden = true
         emptyState.pin(to: view)
         emptyState.isHidden = true

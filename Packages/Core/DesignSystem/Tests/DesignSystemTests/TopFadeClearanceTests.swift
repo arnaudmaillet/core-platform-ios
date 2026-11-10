@@ -8,6 +8,8 @@ import UIKit
 @MainActor
 struct TopFadeClearanceTests {
     private static let fade = SoftTopEdge.fadeLength
+    /// The windows the lists stand in, kept for the suite's life.
+    private static var windows: [UIWindow] = []
 
     /// A list of `rows` rows whose first section starts `sectionTop` points
     /// into the content (0: a plain list's first row at the very top).
@@ -35,6 +37,11 @@ struct TopFadeClearanceTests {
         list.register(UICollectionViewCell.self, forCellWithReuseIdentifier: "row")
         let source = List(rows: rows)
         list.dataSource = source
+        // On screen: the clearance is measured only there.
+        let window = UIWindow(frame: list.frame)
+        window.addSubview(list)
+        window.isHidden = false
+        Self.windows.append(window)
         return (list, source)
     }
 
@@ -118,6 +125,10 @@ struct TopFadeClearanceTests {
         let content = UIView(frame: CGRect(x: 0, y: 12, width: 402, height: 900))
         scroll.addSubview(content)
         scroll.contentSize = CGSize(width: 402, height: 912)
+        let window = UIWindow(frame: scroll.frame)
+        window.addSubview(scroll)
+        window.isHidden = false
+        Self.windows.append(window)
         scroll.applyTopEdge(for: .titled)
         #expect(scroll.topFadeClearance == Self.fade - 12)
     }
@@ -138,6 +149,18 @@ struct TopFadeClearanceTests {
 @MainActor
 struct HorizontalPagerTopFadeClearanceTests {
     private static let fade = SoftTopEdge.fadeLength
+    /// The windows the lists stand in, kept for the suite's life.
+    private static var windows: [UIWindow] = []
+
+    /// The clearance is measured only on screen.
+    private func onScreen(_ view: UIView) {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        view.frame = window.bounds
+        window.addSubview(view)
+        window.isHidden = false
+        view.layoutIfNeeded()
+        Self.windows.append(window)
+    }
 
     private func page() -> (UIView, UICollectionView) {
         let host = UIView()
@@ -149,6 +172,7 @@ struct HorizontalPagerTopFadeClearanceTests {
     @Test func theTitledPagerHandsTheSpaceToItsLists() {
         let first = page(), second = page()
         let pager = HorizontalPagerView(pages: [first.0, second.0], prefersClearTopEdge: false)
+        onScreen(pager)
         pager.pagingScrollView.applyTopEdge(for: .titled)
         #expect(pager.pagingScrollView.topEdgeEffect.style == .soft)
         #expect(pager.pagingScrollView.contentInset.top == 0, "the pager's own content does not scroll under the bar")
@@ -167,6 +191,7 @@ struct HorizontalPagerTopFadeClearanceTests {
             }
         }
         let pager = HorizontalPagerView(lazyPages: makers, initialIndex: 0, prefersClearTopEdge: false)
+        onScreen(pager)
         pager.pagingScrollView.applyTopEdge(for: .titled)
         #expect(made.count == 1)
         #expect(made[0].topFadeClearance == Self.fade)

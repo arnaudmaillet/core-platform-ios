@@ -131,6 +131,12 @@ final class TopFadeClearanceKeeper: NSObject {
     /// Brings the clearance to what the first content lacks now.
     func update() {
         guard let scrollView, !isWriting else { return }
+        // Measured once on screen: off it, the screen holding the list (and
+        // whether it rests on a large title) isn't known yet, and a value
+        // written then and taken back on arrival moved a large-titled list's
+        // rest (seen on the simulator). The arrival's layout measures it,
+        // before the first frame is drawn.
+        guard scrollView.window != nil else { return }
         // ⚠️ NEVER UNDER A REFRESH: the list is held open by the control's
         // own inset then, and a change of ours would fight its fold-back.
         // The next content change measures again.
@@ -146,7 +152,14 @@ final class TopFadeClearanceKeeper: NSObject {
         // a list whose content turns out to clear the fade gives it back
         // at its first layout, before it is drawn.
         let first: CGFloat = Self.firstContentTop(in: scrollView, within: SoftTopEdge.fadeLength) ?? 0
-        let wanted: CGFloat = SoftTopEdge.isClearanceOff ? 0 : SoftTopEdge.clearance(below: first, inset: base)
+        // ⚠️ NOT UNDER A LARGE TITLE: a screen resting on one (Settings, the
+        // wallet's pages) starts its content below the title, far from the
+        // fade, which only reaches the rows once the title has folded into
+        // the bar — by scrolling, where it belongs (seen on the simulator:
+        // 40 pt of empty space under "Notifications" when it took one).
+        let restsOnLargeTitle: Bool = Self.restsOnLargeTitle(scrollView)
+        let wanted: CGFloat = SoftTopEdge.isClearanceOff || restsOnLargeTitle
+            ? 0 : SoftTopEdge.clearance(below: first, inset: base)
         #if DEBUG
         trace(scrollView, base: base, first: first, wanted: wanted)
         #endif
@@ -165,6 +178,28 @@ final class TopFadeClearanceKeeper: NSObject {
         isWriting = false
         applied = wanted
         writtenTop = scrollView.contentInset.top
+    }
+
+    /// Whether the screen holding `scrollView` shows a large title at rest:
+    /// its navigation item, as the navigation controller holds it (a child's
+    /// own item is not the one drawn), asks for one, or the bar prefers them
+    /// and the item doesn't refuse.
+    static func restsOnLargeTitle(_ scrollView: UIScrollView) -> Bool {
+        var responder: UIResponder? = scrollView
+        var screen: UIViewController?
+        while let next = responder {
+            if let controller = next as? UIViewController {
+                screen = controller
+                if controller.parent is UINavigationController || controller.parent == nil { break }
+            }
+            responder = next.next
+        }
+        guard let screen else { return false }
+        switch screen.navigationItem.largeTitleDisplayMode {
+        case .always: return true
+        case .automatic: return screen.navigationController?.navigationBar.prefersLargeTitles == true
+        default: return false
+        }
     }
 
     /// A plain scroll view's content is its subviews, whose frames may be

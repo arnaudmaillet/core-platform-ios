@@ -212,6 +212,12 @@ struct ProfileRelationshipsTabSyncTests {
     @Test("The pager wears the header's blur, the lists none")
     func everyListFadesUnderTheHeader() {
         let controller = makeController()
+        // On screen: the clearance is measured only there (#2240).
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        window.rootViewController = controller
+        window.isHidden = false
+        controller.view.layoutIfNeeded()
+        defer { window.isHidden = true }
         let paging = controller.pager.pagingScrollView
         func lists() -> [UICollectionView] {
             var found: [UICollectionView] = []
