@@ -429,6 +429,37 @@ struct ChannelsTests {
         #expect(joined == [harbour], "the inbox wasn't told")
     }
 
+    /// #2236: Leave is the thread's ⋯ menu's now — left, the thread stays,
+    /// and the bar comes back with the way in: Join for a public channel,
+    /// Request to Join for one on request. The inbox drops the row.
+    @Test func leavingFromTheThreadKeepsItWithTheWayBackIn() async throws {
+        let repository = make()
+        func leave(_ id: ConversationID) async -> (ConversationThreadGroup?, [ConversationID]) {
+            let viewModel = ConversationViewModel(conversationID: id, repository: repository)
+            var context = GroupThreadContext(
+                service: repository, makeInfo: { _, _ in UIViewController() }, openProfile: { _, _ in },
+                createdAt: { _ in nil }, knownKind: { _ in nil }
+            )
+            context.kinds = [.channel]
+            var left: [ConversationID] = []
+            context.onMembershipChange = { changed, didLeave in if didLeave { left.append(changed) } }
+            let driver = ConversationThreadDriver(viewModel: viewModel, viewer: repository, avatars: nil, groupContext: context)
+            var group: ConversationThreadGroup?
+            driver.onGroupChange = { group = $0 }
+            driver.viewDidLoad()
+            await settle { group?.readerStanding == .subscribed }
+            driver.leave(from: UIViewController())
+            await settle { group?.readerStanding != .subscribed }
+            return (group, left)
+        }
+        let (publicChannel, leftPublic) = await leave(tides)
+        #expect(publicChannel?.readerStanding == .canJoin, "a public channel offers Join again")
+        #expect(leftPublic == [tides], "the inbox wasn't told")
+        let (onRequest, leftOnRequest) = await leave(botanic)
+        #expect(onRequest?.readerStanding == .canRequest, "one on request offers Request to Join")
+        #expect(leftOnRequest == [botanic])
+    }
+
     @Test func requestingOneOnRequestWaitsAndCanBeWithdrawn() async throws {
         let repository = make()
         let viewModel = ConversationViewModel(conversationID: film, repository: repository)
