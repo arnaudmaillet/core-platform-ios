@@ -150,12 +150,14 @@ struct AuthAppButtonTests {
     /// grace has passed with the call still running; the answer — the lock
     /// lifting, the caller going on — waits for the load's minimum.
     @Test func theOthersAreLockedAtOnceButGreyOnlyAfterTheGrace() throws {
+        // Apple, not the passkey: `SignInMethod.all` lists no passkey row
+        // (it is offered only when there is one to ask).
         let time = ManualLoadingClock()
         let (list, window) = Self.hostedList(time)
         defer { window.isHidden = true }
-        let others = Self.methods.filter { $0 != .passkey }
+        let others = Self.methods.filter { $0 != .provider(.apple) }
 
-        list.setWorking(.passkey)
+        list.setWorking(.provider(.apple))
         #expect(list.locksOthers, "× takes a tap under a running sign-in")
         for method in others {
             let button = try #require(list.debugButton(for: method))
@@ -171,7 +173,7 @@ struct AuthAppButtonTests {
             #expect(list.debugButton(for: method)?.isEnabled == false, "\(method) not grey past the grace")
         }
         #expect(!list.debugCloseItem.isEnabled, "× not grey past the grace")
-        #expect(list.debugButton(for: .passkey)?.isEnabled == true)
+        #expect(list.debugButton(for: .provider(.apple))?.isEnabled == true)
 
         var answered = false
         list.setWorking(nil) { answered = true }
@@ -192,7 +194,8 @@ struct AuthAppButtonTests {
         let time = ManualLoadingClock()
         let (list, window) = Self.hostedList(time)
         defer { window.isHidden = true }
-        list.setWorking(.passkey)
+        list.setWorking(.provider(.apple))
+        #expect(list.debugButton(for: .provider(.apple))?.phase == .loading, "guard: the sign-in is running")
         time.advance(AppButton.MorphMetrics.loadGrace / 2)
         var answered = false
         list.setWorking(nil) { answered = true }
