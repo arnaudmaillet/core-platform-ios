@@ -264,6 +264,24 @@ public struct MockBackend: Sendable {
             socialServices.setShowcases(showcase)
             pinShowcase = { showcase($0)?.embed }
         }
+        // A showcase published this session (#2216) is read the same way: its
+        // channel re-read for the viewer at every read of the post or its
+        // pin. Without the channels, it is served as it was created.
+        var hydrateEmbed: (@Sendable (PostEmbed) -> PostEmbed)?
+        if seedsChannels {
+            let viewer = MockSocialDataset.viewerProfileID
+            let hydrate: @Sendable (PostEmbed) -> PostEmbed = { embed in
+                switch embed {
+                case .channel(let created):
+                    let read = chatService.channelEmbed(created.conversationID.rawValue, blocksOwner: { owner in
+                        socialGraph.isBlockedEitherWay(viewer, owner)
+                    })
+                    return read.map(PostEmbed.channel) ?? embed
+                }
+            }
+            socialServices.setEmbedHydration(hydrate)
+            hydrateEmbed = hydrate
+        }
         socialGraph.register(on: bff)
         // Contacts find a profile only through a channel its owner left on,
         // and never across a block (#412, backend #806).
@@ -276,7 +294,10 @@ public struct MockBackend: Sendable {
         let geoDiscovery = MockGeoDiscoveryService(
             dataset: dataset, spreadsHierarchy: seedsMapHierarchy,
             likeCount: { counterStore.likeCount(for: $0) }, countryOf: countryOf,
-            showcase: pinShowcase
+            showcase: pinShowcase,
+            // The session's own placed posts stand on the map (#2216).
+            postStore: postStore,
+            hydrateEmbed: hydrateEmbed
         )
         geoDiscovery.register(on: bff)
         moderationService.register(on: bff)

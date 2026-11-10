@@ -24,6 +24,10 @@ public final class MockSocialServices: @unchecked Sendable {
     /// composition, which owns the graph; nil lets everyone through.
     /// Guarded by `lock`.
     private var showcase: (@Sendable (_ postID: String) -> (embed: PostEmbed, text: String)?)?
+    /// How an authored showcase's embed is read for the viewer (#2216): its
+    /// conversation re-read now, as the seeded showcases' are. Nil serves the
+    /// embed as it was created. Guarded by `lock`.
+    private var embedHydration: (@Sendable (PostEmbed) -> PostEmbed)?
     private var audienceGate: (@Sendable (_ readers: [String], _ author: String, _ privacy: Bool) -> Bool)?
 
     /// The viewer's editable profile, mutated by the `UpdateProfile` /
@@ -789,6 +793,14 @@ public final class MockSocialServices: @unchecked Sendable {
         lock.withLock { self.showcase = showcase }
     }
 
+    /// How an authored showcase's embed is read for the viewer (#2216) — set
+    /// by `MockBackend` with the channels, so a post published from a
+    /// channel's info screen shows the viewer's standing at every read, as a
+    /// seeded showcase does.
+    public func setEmbedHydration(_ hydrate: @escaping @Sendable (PostEmbed) -> PostEmbed) {
+        lock.withLock { embedHydration = hydrate }
+    }
+
     public func setAudienceGate(_ gate: @escaping @Sendable (_ readers: [String], _ author: String, _ privacy: Bool) -> Bool) {
         lock.withLock { audienceGate = gate }
     }
@@ -902,6 +914,19 @@ public final class MockSocialServices: @unchecked Sendable {
             }
             // The voice it was created with (#2206), never an attachment.
             if let voice = draft.voice { PostVoiceWire.write(voice, to: &view) }
+            // A showcase (#2216): the embed it was created with, its
+            // conversation read for the viewer now; and the place its author
+            // gave it.
+            if let embed = draft.embed {
+                let hydrate = lock.withLock { embedHydration }
+                PostEmbedWire.write(hydrate?(embed) ?? embed, to: &view)
+            }
+            if let location = draft.location {
+                var point = Post_V1_GeoPoint()
+                point.lat = location.latitude
+                point.lng = location.longitude
+                view.location = point
+            }
             return .success(view)
         }
 
