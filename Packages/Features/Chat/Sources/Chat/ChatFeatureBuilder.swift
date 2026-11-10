@@ -120,6 +120,14 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         )
     }
 
+    /// A profile's channels (#2232), with the channels on: the read behind
+    /// its Channels tab, over the same repository. Nil with them off — no
+    /// profile then has the tab.
+    public func makeProfileChannels() -> (any ProfileChannelsProviding)? {
+        guard channels != nil, let reader = repository as? any ProfileChannelsReading else { return nil }
+        return ProfileChannels(service: reader)
+    }
+
     public func makeInboxViewController(
         initialCategory: MessagesCategory,
         onUnreadCountChange: ((Int) -> Void)? = nil

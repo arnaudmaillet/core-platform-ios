@@ -158,3 +158,17 @@ extension ChatRepository: ConversationManaging {
         _ = try await propose("unsubscribe") { .unsubscribe(viewer: $0, conversationID: conversationID.rawValue) }
     }
 }
+
+// MARK: - A profile's channels (#2232)
+
+extension ChatRepository: ProfileChannelsReading {
+    /// The channels `owner` owns that the viewer may see, in the server's
+    /// order: nothing with the channels off, so a profile has no tab.
+    public func ownedChannels(of owner: ProfileID) async throws -> [OwnedChannel] {
+        guard showsChannels else { return [] }
+        let reply = try await propose("ownedChannels") { .ownedChannels(viewer: $0, owner: owner.rawValue) }
+        return reply.details.filter { $0.kind == .channel }.map {
+            OwnedChannel(id: ConversationID($0.conversationID), identity: ConversationIdentity($0))
+        }
+    }
+}
