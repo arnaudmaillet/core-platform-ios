@@ -24,8 +24,9 @@ import VoiceKitUI
 ///   the post's age; the words on two lines at most, cut at the second's
 ///   end, the post's blank lines folded.
 /// - **A voice post (#2208, behind `-voice-posts`)** keeps the bubble: the
-///   shared voice component, full size, in the words' place under the
-///   author — play / pause, the waveform, the timer — its words under it.
+///   shared voice component's compact panel (#2241) across the column, in
+///   the words' place under the author — play / pause, the waveform, the
+///   timer — its words under it.
 ///   The voice's taps are its own; the rest of the bubble opens the post. It
 ///   stops when the bubble folds (the voice leaves the window).
 /// - **A channel's showcase (#2216, behind `-channels`)** keeps the bubble
@@ -88,7 +89,9 @@ final class MapTextBubbleView: UIView {
 
     let authorLabel = UILabel()
     let label = UILabel()
-    /// A voice post's voice, full size, between the author and the words.
+    /// A voice post's voice, between the author and the words: the compact
+    /// panel (#2241, the issue's table) across the column — a sideways drag
+    /// on it stays the map's.
     let voiceCaption = VoicePostCaptionView()
     /// A showcase's card, full size, under the words (#2216).
     let embedCard = PostEmbedView()
@@ -97,7 +100,9 @@ final class MapTextBubbleView: UIView {
     private let column = UIView()
 
     /// The glass's vibrancy, for the voice: the label's ink, the bars'
-    /// unplayed share of it, the timer's secondary grey.
+    /// unplayed share of it, the timer's secondary grey — and the panel's
+    /// ground, derived from the label's ink (`Inks.panel`, #2241), the glass
+    /// showing through it.
     static let voiceInks = VoiceView.Inks(
         played: UIColor.label.withAlphaComponent(0.8), unplayed: UIColor.label.withAlphaComponent(0.28),
         timer: .secondaryLabel
@@ -146,7 +151,7 @@ final class MapTextBubbleView: UIView {
         if let voice = content.voice {
             voiceCaption.show(
                 postID: content.postID.rawValue, url: voice.url, duration: voice.duration, levels: voice.waveform,
-                author: content.authorName.isEmpty ? nil : content.authorName, size: .full
+                author: content.authorName.isEmpty ? nil : content.authorName, size: Self.voiceDisplaySize
             )
         } else {
             voiceCaption.clear()
@@ -213,16 +218,21 @@ final class MapTextBubbleView: UIView {
         (voiceCaption.isHidden && embedCard.isHidden) || !(label.text ?? "").isEmpty
     }
 
-    /// The voice's size, zero without one: its length's width (`VoiceView
-    /// .width`), held to the column, at its line's height.
+    /// The size the bubble gives a voice (#2241's table).
+    static let voiceDisplaySize: VoicePostDisplay.Size = .compact
+
+    /// The voice's size, zero without one: the column's whole width — the
+    /// panel is one width whatever the length (#2241) — at its panel's
+    /// height.
     private var voiceSize: CGSize {
-        guard !voiceCaption.isHidden, let player = voiceCaption.voiceView else { return .zero }
-        let width = min(Self.textWidth, VoiceView.width(forDuration: player.state.duration))
+        guard !voiceCaption.isHidden, voiceCaption.voiceView != nil else { return .zero }
+        let width = Self.textWidth
         let height = voiceCaption.systemLayoutSizeFitting(
             CGSize(width: width, height: UIView.layoutFittingCompressedSize.height),
             withHorizontalFittingPriority: .required, verticalFittingPriority: .fittingSizeLevel
         ).height
-        return CGSize(width: width, height: ceil(max(height, VoiceView.buttonSide)))
+        let panel: CGFloat = VoiceView.panelHeight(for: .compact)
+        return CGSize(width: width, height: ceil(max(height, panel)))
     }
 
     override func sizeThatFits(_ size: CGSize) -> CGSize {

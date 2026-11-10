@@ -10,9 +10,15 @@ import VoiceKitUI
 typealias ThreadVoiceView = VoiceView
 
 extension VoiceView {
-    /// The thread's bubble: full size, at the text column.
+    /// The thread's voice: the neutral panel at full size (#2241), from the
+    /// text column to the row's end — every message one width whatever its
+    /// length, held to `conversationMaxWidth` so a landscape or iPad column
+    /// never stretches it.
     static func thread() -> VoiceView {
-        VoiceView(size: .full, leadingInset: CommentRowView.avatarSize + CommentRowView.avatarGap)
+        VoiceView(
+            size: .full, leadingInset: CommentRowView.avatarSize + CommentRowView.avatarGap,
+            maxPanelWidth: VoiceView.conversationMaxWidth
+        )
     }
 }
 

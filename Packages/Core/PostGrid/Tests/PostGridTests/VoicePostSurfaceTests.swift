@@ -8,9 +8,10 @@ import VoiceKitUI
 @testable import PostGrid
 
 /// A voice post on the grid's surfaces (#2208): each keeps its text face and
-/// draws the caption as the voice, at its room's size — full on a list card
-/// and a history row, compact on a shelf's fixed card, the mark on a tile —
-/// and none of it with the switch off.
+/// draws the caption as the voice, at its room's size — full on a list card,
+/// compact on a shelf's fixed card and a history row (#2241), the mark on a
+/// tile — and none of it with the switch off. The voice is the neutral panel
+/// (#2241), across the width its surface gives.
 @MainActor
 struct VoicePostSurfaceTests {
     private let voice = PostVoice(assetID: "voice-post-hike", url: URL(fileURLWithPath: "/tmp/hike.m4a"),
@@ -43,7 +44,8 @@ struct VoicePostSurfaceTests {
         #expect(PostGridListRowCell.voiceSize(for: speaking, captionLines: 2, showsVoice: true) == .compact,
                 "a shelf's fixed card is compact: a drag is the shelf's")
         #expect(PostGridTileCell.voiceSize(for: speaking, showsVoice: true) == .mark)
-        #expect(PostHistoryRowCell.voiceSize(for: speaking, showsVoice: true) == .full)
+        #expect(PostHistoryRowCell.voiceSize(for: speaking, showsVoice: true) == .compact,
+                "a history row is compact (#2241): a shorter panel, a sideways drag the list's")
     }
 
     @Test func noSurfaceDrawsAVoiceWithTheSwitchOffOrWithoutOne() {
@@ -68,6 +70,27 @@ struct VoicePostSurfaceTests {
         #expect(cell.debugCaptionText == "From the ridge", "the words under a full voice went")
         let voiceFrame = caption.convert(caption.bounds, to: cell)
         #expect(cell.debugCaptionFrame.minY >= voiceFrame.maxY, "the words aren't under the voice")
+    }
+
+    /// The panel takes the caption's whole width on a list card and a
+    /// shelf's card (#2241), whatever the voice's length.
+    @Test(arguments: [nil, 2] as [Int?])
+    func aCardsPanelFillsTheCaptionsWidth(_ captionLines: Int?) throws {
+        var short = post()
+        short.voice = PostVoice(assetID: "short", url: voice.url, duration: 2, waveform: voice.waveform)
+        var long = post()
+        long.voice = PostVoice(assetID: "long", url: voice.url, duration: 50, waveform: voice.waveform)
+        let widths = try [short, long].map { candidate -> CGFloat in
+            let cell = listCard(candidate, captionLines: captionLines)
+            let caption = try #require(cell.debugVoiceCaption)
+            let player = try #require(caption.voiceView)
+            player.layoutIfNeeded()
+            #expect(abs(player.debugPanelFrame.width - caption.bounds.width) < 0.5,
+                    "\(player.debugPanelFrame) in \(caption.bounds)")
+            #expect(caption.bounds.width > 250, "the voice didn't take the card's width")
+            return player.debugPanelFrame.width
+        }
+        #expect(widths[0] == widths[1], "a 2 s and a 50 s voice drew different panels")
     }
 
     @Test func aShelfCardDrawsTheVoiceCompactAndAlone() throws {
@@ -142,7 +165,7 @@ struct VoicePostSurfaceTests {
         row.debugVoicePart.hub = VoicePlaybackHub.silentForTests()
         row.configure(with: post(), viewedAt: nil, imagePipeline: nil, showsVoice: true)
         let caption = try #require(row.debugVoiceCaption)
-        #expect(caption.voiceView?.size == .full)
+        #expect(caption.voiceView?.size == .compact)
         #expect(!row.debugShowsTitle)
         #expect(row.accessibilityLabel?.hasPrefix("Voice post, 13 seconds, From the ridge") == true)
         #expect(row.accessibilityCustomActions?.contains { $0.name == "Play or pause the voice" } == true)
@@ -164,6 +187,6 @@ struct VoicePostSurfaceTests {
         let plain = PostHistoryRowCell.squareSide(titleFont: title, detailFont: detail, wraps: false)
         let speaking = PostHistoryRowCell.squareSide(titleFont: title, detailFont: detail, wraps: false, speaks: true)
         #expect(speaking >= plain)
-        #expect(speaking >= VoiceView.buttonSide + 2 * PostHistoryRowCell.verticalPadding)
+        #expect(speaking >= VoiceView.panelHeight(for: .compact) + 2 * PostHistoryRowCell.verticalPadding)
     }
 }

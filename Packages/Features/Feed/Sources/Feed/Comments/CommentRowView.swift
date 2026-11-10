@@ -950,7 +950,9 @@ final class CommentRowView: UIView {
 final class CaptionBubbleCell: UICollectionViewCell {
     private let row = CommentRowView()
     /// A voice post's caption (#2207): the shared voice component, full size,
-    /// under the author line — the caption's words under it.
+    /// under the author line — the caption's words under it. The neutral
+    /// panel takes the text column's whole width (#2241): the post's page
+    /// is the content width's, uncapped, unlike a conversation's message.
     private lazy var voiceView: VoiceView = {
         let view = VoiceView(size: .full)
         return view

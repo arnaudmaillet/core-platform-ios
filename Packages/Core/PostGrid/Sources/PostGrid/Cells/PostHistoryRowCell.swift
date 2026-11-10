@@ -72,11 +72,14 @@ public final class PostHistoryRowCell: UICollectionViewListCell {
     /// under `minimumSquareSide`.
     ///
     /// A voice post's first line is its voice (#2208): `speaks` measures it
-    /// at the voice's height when that is taller than the title's line.
+    /// at the compact panel's height (#2241) when that is taller than the
+    /// title's line.
     public static func squareSide(titleFont: UIFont, detailFont: UIFont, wraps: Bool, speaks: Bool = false) -> CGFloat {
         let detailLine = detailFont.lineHeight.rounded(.up)
         let titleLine = titleFont.lineHeight.rounded(.up)
-        let first = (speaks ? max(titleLine, VoiceView.buttonSide) : titleLine) + (wraps ? detailLine : 0)
+        let panel: CGFloat = VoiceView.panelHeight(for: .compact)
+        let firstLine: CGFloat = speaks ? max(titleLine, panel) : titleLine
+        let first: CGFloat = firstLine + (wraps ? detailLine : 0)
         let second = avatarDiameter(detailFont: detailFont) + (wraps ? detailLine : 0)
         let side = verticalPadding * 2 + first + lineGap + second
         return max(minimumSquareSide, side.rounded(.up))
@@ -329,8 +332,9 @@ public final class PostHistoryRowCell: UICollectionViewListCell {
     private let square = PostHistorySquareView()
     private let titleLabel = EmoteLabel()
     /// A voice post's first line (#2208, behind `-voice-posts`): the shared
-    /// voice component, full size, in the title's place — the post's words
-    /// stay in the square's miniature, under it in reading order.
+    /// voice component, compact (#2241), in the title's place — the panel
+    /// across the line up to the time, the post's words in the square's
+    /// miniature, under it in reading order.
     private let voiceCaption = VoicePostCaptionView()
     /// A showcase's card (#2216, behind `-channels`): the shared embed card,
     /// full size, under the title — the author's words stay on the first
@@ -539,10 +543,12 @@ public final class PostHistoryRowCell: UICollectionViewListCell {
 
     // MARK: - A voice post (#2208)
 
-    /// The size a row gives a voice post's caption: full, in the title's
-    /// place, for a text post that speaks with the switch on. Pure.
+    /// The size a row gives a voice post's caption, for a text post that
+    /// speaks with the switch on: compact (#2241, the issue's table) — the
+    /// shorter panel keeps a history row a list row, and a sideways drag
+    /// stays the list's. Pure.
     public static func voiceSize(for post: GalleryPost, showsVoice: Bool) -> VoicePostDisplay.Size? {
-        showsVoice && post.kind == .text && post.voice != nil ? .full : nil
+        showsVoice && post.kind == .text && post.voice != nil ? .compact : nil
     }
 
     /// Whether the first line is a voice now.
@@ -552,7 +558,7 @@ public final class PostHistoryRowCell: UICollectionViewListCell {
         if let post, let voice = post.voice {
             voiceCaption.show(
                 postID: post.id.rawValue, url: voice.url, duration: voice.duration, levels: voice.waveform,
-                author: post.authorName, size: .full
+                author: post.authorName, size: Self.voiceSize(for: post, showsVoice: true) ?? .compact
             )
         } else {
             voiceCaption.clear()

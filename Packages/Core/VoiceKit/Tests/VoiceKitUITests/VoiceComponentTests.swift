@@ -90,15 +90,17 @@ struct VoiceComponentTests {
         #expect(mark.subviews.allSatisfy { !($0 is UIControl) })
     }
 
-    /// The play button keeps a 44 pt target round its 32 pt glyph.
+    /// The play button keeps a 44 pt target round its 32 pt compact disc.
     @Test func thePlayButtonKeepsA44PointTarget() {
         let voice = VoiceView(size: .compact)
         voice.configure(VoiceView.State(levels: nil, duration: 5))
         let button = voice.debugPlayButton
-        button.frame = CGRect(x: 0, y: 0, width: VoiceView.buttonSide, height: VoiceView.buttonSide)
-        let edge = (44 - VoiceView.buttonSide) / 2
-        #expect(button.point(inside: CGPoint(x: -edge + 0.5, y: VoiceView.buttonSide / 2), with: nil))
-        #expect(!button.point(inside: CGPoint(x: -edge - 2, y: VoiceView.buttonSide / 2), with: nil))
+        let side = VoiceView.buttonSide(for: .compact)
+        button.frame = CGRect(x: 0, y: 0, width: side, height: side)
+        button.layoutIfNeeded()
+        let edge = (44 - side) / 2
+        #expect(button.point(inside: CGPoint(x: -edge + 0.5, y: side / 2), with: nil))
+        #expect(!button.point(inside: CGPoint(x: -edge - 2, y: side / 2), with: nil))
     }
 
     /// The ink is the host's.
@@ -108,6 +110,9 @@ struct VoiceComponentTests {
         voice.inks = inks
         #expect(voice.waveform.playedInk == .white)
         #expect(voice.waveform.unplayedInk == inks.unplayed)
+        #expect(voice.debugTimerInk == .white)
+        // The panel's ground follows the ink too (#2241).
+        #expect(rgba(voice.debugPanelFill, .light) == rgba(UIColor(white: 1, alpha: VoiceView.Inks.panelOpacityLight), .light))
         let mark = VoiceMarkView()
         mark.ink = .systemPink
         #expect(mark.ink == .systemPink)
