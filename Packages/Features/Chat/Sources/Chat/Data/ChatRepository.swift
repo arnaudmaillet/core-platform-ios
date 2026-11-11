@@ -81,9 +81,10 @@ public struct Conversation: Equatable, Sendable, Identifiable {
     /// A group's or a channel's identity and the viewer's place in it
     /// (#2213); nil for a DM, whose identity is its peer.
     public let identity: ConversationIdentity?
-    /// The faces a nameless, photoless group stacks: up to three members'
-    /// avatars (#2213).
-    public let memberAvatarURLs: [URL]
+    /// The faces a group's picture stacks without a photo (#2233): up to
+    /// four of its other members, owner first then by join date
+    /// (`ConversationMember.faceOrder`). Empty for a DM and a channel.
+    public let memberFaces: [GroupAvatarFace]
     /// Who wrote a GROUP's last message, when it is someone else (#2214):
     /// the inbox row prefixes the preview with their first name ("Alice: see
     /// you there"). Nil for a DM — whose sender is obvious — and for the
@@ -154,7 +155,7 @@ public struct Conversation: Equatable, Sendable, Identifiable {
         kind: ConversationKind = .direct,
         isOutgoingRequest: Bool = false,
         identity: ConversationIdentity? = nil,
-        memberAvatarURLs: [URL] = [],
+        memberFaces: [GroupAvatarFace] = [],
         lastMessageSenderName: String? = nil,
         invitedByName: String? = nil
     ) {
@@ -162,7 +163,7 @@ public struct Conversation: Equatable, Sendable, Identifiable {
         self.kind = kind
         self.isOutgoingRequest = isOutgoingRequest
         self.identity = identity
-        self.memberAvatarURLs = memberAvatarURLs
+        self.memberFaces = memberFaces
         self.lastMessageSenderName = lastMessageSenderName
         self.invitedByName = invitedByName
         self.title = title
@@ -619,14 +620,42 @@ public actor ChatRepository: ChatProviding {
             kind: kind,
             isOutgoingRequest: entry.request,
             identity: identity,
-            memberAvatarURLs: kind == .group && identity?.photoURL == nil
-                ? Array(otherIDs.compactMap { avatarCache[$0] }.prefix(ConversationIdentity.stackedFaces))
-                : [],
+            // Filled whatever the photo (#2233): the picture decides what
+            // it draws, and a photo removed falls back on them at once.
+            memberFaces: kind == .group ? groupFaces(of: detail?.members ?? [], viewer: viewer) : [],
             lastMessageSenderName: kind == .group
                 ? last.map { ProfileID($0.senderID) }.flatMap { $0 == viewer ? nil : nameCache[$0] }
                 : nil,
             invitedByName: identity?.invitedBy.flatMap { nameCache[$0] }
         )
+    }
+
+    /// A group's faces for its picture (#2233), from the members its row
+    /// already read and the names hydrated for its title.
+    private func groupFaces(of members: [Chat_V1_MemberView], viewer: ProfileID) -> [GroupAvatarFace] {
+        let list: [ConversationMember] = members.map { member in
+            ConversationMember(
+                profileID: ProfileID(member.profileID), role: Self.role(of: member.role),
+                joinedAt: Date(timeIntervalSince1970: TimeInterval(member.joinedAtMs) / 1000)
+            )
+        }
+        return ConversationMember.groupFaces(list, viewer: viewer) { id in
+            let name = nameCache[id] ?? ""
+            return (name: name.isEmpty ? handleCache[id] ?? "" : name, avatarURL: avatarCache[id])
+        }
+    }
+
+    /// The app's role for the wire's: one this build doesn't know counts as
+    /// a member, shown rather than dropped.
+    static func role(of role: Chat_V1_Role) -> ConversationRole {
+        switch role {
+        case .owner: .owner
+        case .admin: .admin
+        case .member: .member
+        case .subscriber: .subscriber
+        case .guest: .guest
+        case .UNRECOGNIZED: .member
+        }
     }
 
     /// The app's kind for the wire's (#2212).

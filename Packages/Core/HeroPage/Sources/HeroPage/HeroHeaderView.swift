@@ -1548,7 +1548,10 @@ open class HeroHeaderView: UIView {
         // ⚠️ NO EDGE (#2082, the owner 2026-11-03): the face alone, over the
         // banner or the page — no grey rim (#1792) and no relation ring
         // (#2014); the badge alone says the relation.
-        avatarView.backgroundColor = Surface.avatarGround
+        // A `.custom` view draws its own ground — a place's flag fills the
+        // disc, a group's faces stand on nothing as they do in its inbox row
+        // (#2233) — so the person's light ground is a person's alone.
+        avatarView.backgroundColor = customAvatar == nil ? Surface.avatarGround : .clear
         avatarView.clipsToBounds = true
 
         if let avatar {

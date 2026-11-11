@@ -8,12 +8,19 @@ import UIKit
 /// (optional — the members' names stand in, as the field's placeholder
 /// shows), who is in it, and "Create".
 ///
-/// The disc shows the group's initials once it has a name — no photo is
+/// The disc is the group's picture (#2233): the faces of the members
+/// picked, as its inbox row and its thread will show them — no photo is
 /// picked yet (`GroupCreationViewModel`).
 final class GroupNameViewController: UIViewController {
     private let viewModel: GroupCreationViewModel
+    private let imagePipeline: ImagePipeline?
+    /// Where the picked members' pictures are looked up; nil: their
+    /// initials.
+    private let profiles: (any ChatProfileLookup)?
+    /// The pictures found, once the lookup answered.
+    private var pictures: [ProfileID: URL]?
 
-    private let disc = MonogramAvatarView(diameter: GroupNameViewController.discDiameter)
+    private let disc = GroupAvatarView(diameter: GroupNameViewController.discDiameter, size: .px256)
     private let nameField = UITextField()
     private let membersLabel = UILabel()
     private let errorLabel = UILabel()
@@ -21,8 +28,10 @@ final class GroupNameViewController: UIViewController {
 
     static let discDiameter: CGFloat = 96
 
-    init(viewModel: GroupCreationViewModel) {
+    init(viewModel: GroupCreationViewModel, imagePipeline: ImagePipeline? = nil, profiles: (any ChatProfileLookup)? = nil) {
         self.viewModel = viewModel
+        self.imagePipeline = imagePipeline
+        self.profiles = profiles
         super.init(nibName: nil, bundle: nil)
         title = "Name the group"
     }
@@ -34,7 +43,8 @@ final class GroupNameViewController: UIViewController {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
         let placeholder = viewModel.placeholderName
-        disc.setMonogram(MonogramAvatarView.monogram(name: placeholder, handle: ""))
+        drawDisc()
+        loadPictures()
 
         nameField.placeholder = placeholder
         nameField.font = .appFont(forTextStyle: .title3)
@@ -85,10 +95,52 @@ final class GroupNameViewController: UIViewController {
     }
 
     private func nameChanged() {
-        let text = nameField.text ?? ""
-        viewModel.nameChanged(text)
-        let shown = text.trimmingCharacters(in: .whitespaces).isEmpty ? viewModel.placeholderName : text
-        disc.setMonogram(MonogramAvatarView.monogram(name: shown, handle: ""))
+        viewModel.nameChanged(nameField.text ?? "")
+        // The name is the picture's last resort: its initials, with no face.
+        drawDisc()
+    }
+
+    /// The group's picture as it stands: the picked members' faces, their
+    /// pictures' skeletons while the lookup is on its way.
+    private func drawDisc() {
+        let typed = viewModel.name.trimmingCharacters(in: .whitespaces)
+        disc.setContent(
+            Self.groupAvatar(
+                members: viewModel.members, name: typed.isEmpty ? viewModel.placeholderName : typed,
+                pictures: pictures, awaitsPictures: profiles != nil
+            ),
+            pipeline: imagePipeline
+        )
+    }
+
+    private func loadPictures() {
+        guard let profiles, pictures == nil else { return }
+        let ids = viewModel.members.map(\.id)
+        Task { [weak self] in
+            let found = await profiles.profiles(ids)
+            guard let self else { return }
+            var urls: [ProfileID: URL] = [:]
+            for (id, profile) in found { urls[id] = profile.avatarURL }
+            self.pictures = urls
+            self.drawDisc()
+        }
+    }
+
+    /// The new group's picture (#2233): its members' faces in the order
+    /// they were picked — the order they join in — the viewer counted in
+    /// its size. `pictures` nil: the lookup is still on its way, and a face
+    /// holds its skeleton when `awaitsPictures`, its initials otherwise.
+    static func groupAvatar(
+        members: [PersonDisplayModel], name: String, pictures: [ProfileID: URL]?, awaitsPictures: Bool
+    ) -> GroupAvatarContent {
+        let faces: [GroupAvatarFace] = members.prefix(ConversationIdentity.stackedFaces).map { member in
+            GroupAvatarFace(
+                name: member.displayName.isEmpty ? member.handle : member.displayName,
+                avatarURL: pictures?[member.id],
+                awaitsPicture: pictures == nil && awaitsPictures
+            )
+        }
+        return GroupAvatarContent(name: name, faces: faces, memberCount: members.count + 1)
     }
 
     private func create() {

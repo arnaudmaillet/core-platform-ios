@@ -88,6 +88,11 @@ final class MockConversationBook: @unchecked Sendable {
     /// The public group the viewer follows (#2217): muted in their inbox,
     /// and the one `-mock-group-private-after` turns private.
     static let followedGroupID = "grp-riverside"
+    /// Photoless groups for the group avatar's stacks (#2233): four members,
+    /// five, and forty.
+    static let fourFacesGroupID = "grp-tram"
+    static let fiveFacesGroupID = "grp-zine"
+    static let largeGroupID = "grp-festival"
     /// The channel the viewer follows, joined muted (#2230): its unread
     /// posts show on its row and stay out of the Chats badge.
     static let mutedChannelID = "ch-botanic"
@@ -137,6 +142,19 @@ final class MockConversationBook: @unchecked Sendable {
                       visibility: .public, subscriberCount: 340),
                 members: [author(36): .owner, author(37): .member, author(38): .member, viewer: .subscriber],
                 since: now - 25 * day, unnamedMembers: 15, publicSince: now - 25 * day)
+            // The group avatar's stacks (#2233), all without a photo: four
+            // members (three faces), five (four faces), forty (three faces
+            // and "+37"). grp-studio is the group of three (two faces).
+            add(.init(conversationID: Self.fourFacesGroupID, kind: .group, visibility: .private),
+                members: [viewer: .member, author(36): .owner, author(9): .member, author(14): .member],
+                since: now - 6 * day)
+            add(.init(conversationID: Self.fiveFacesGroupID, kind: .group, name: "Zine swap", visibility: .private),
+                members: [viewer: .owner, author(40): .admin, author(16): .member, author(22): .member, author(47): .member],
+                since: now - 20 * day)
+            var festival: [String: ProposedChat.Role] = [viewer: .member, author(50): .owner]
+            for index in [27, 31, 43, 45] { festival[author(index)] = .member }
+            add(.init(conversationID: Self.largeGroupID, kind: .group, name: "Kite festival", visibility: .private),
+                members: festival, since: now - 70 * day, unnamedMembers: 40 - festival.count)
         }
         if seedsChannels {
             add(.init(conversationID: "ch-daily", kind: .channel, name: "Daily light", photoURL: photo("dailylight"),

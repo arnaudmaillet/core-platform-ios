@@ -5,6 +5,7 @@ import CoreNetworking
 import CoreNetworkingMocks
 import FeedInterface
 import Foundation
+import MediaCore
 import Testing
 import UIKit
 @testable import Chat
@@ -57,7 +58,8 @@ struct GroupChatsTests {
         let model = ConversationDisplayModel(conversation: hike)
         #expect(model.title == "Weekend hike")
         #expect(model.groupPhotoURL != nil)
-        #expect(model.memberFaceURLs.isEmpty, "a group with a photo stacks no faces")
+        // A group with a photo draws it, its faces kept for when it has none (#2233).
+        #expect(model.groupAvatar?.drawing == model.groupPhotoURL.map { GroupAvatarContent.Drawing.photo($0) }, "a group with a photo stacks faces")
         #expect(model.peerID == nil, "a group passed for a DM")
         #expect(model.invitation == nil)
         // "See you there 🥾", by a member: their first name before it.
@@ -72,11 +74,12 @@ struct GroupChatsTests {
         let model = ConversationDisplayModel(conversation: studio)
         #expect(model.title.contains(" and "), "named by its members: \(model.title)")
         #expect(model.groupPhotoURL == nil)
-        #expect((1...ConversationIdentity.stackedFaces).contains(model.memberFaceURLs.count))
+        let faces = try #require(model.groupAvatar?.faces)
+        #expect((1...ConversationIdentity.stackedFaces).contains(faces.count))
 
         let row = ConversationRowView()
         row.configure(with: model)
-        #expect(row.debugStackedFaceCount == model.memberFaceURLs.count)
+        #expect(row.debugStackedFaceCount == faces.count)
         #expect(row.debugPreviewText?.hasPrefix("\(model.previewSender ?? "?"): ") == true)
     }
 

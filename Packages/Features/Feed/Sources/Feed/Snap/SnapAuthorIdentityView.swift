@@ -272,8 +272,20 @@ final class SnapAuthorIdentityView: UIView {
     func setPerson(
         id: ProfileID?, name: String, meta: String, avatarURL: URL?, pipeline: ImagePipeline, animated: Bool
     ) {
+        setPerson(id: id, name: name, meta: meta, avatarURL: avatarURL, group: nil, pipeline: pipeline, animated: animated)
+    }
+
+    /// `setPerson`, with `group`: a group's picture in the face's place
+    /// (#2233) — its photo, its members' faces or its initials, the inbox
+    /// row's picture — nil for a person. A group's new faces or photo change
+    /// the picture in place.
+    func setPerson(
+        id: ProfileID?, name: String, meta: String, avatarURL: URL?, group: GroupAvatarContent?,
+        pipeline: ImagePipeline, animated: Bool
+    ) {
         let moves = animated && window != nil
-        let faceChanged = id != authorID || avatarURL != personAvatarURL
+        let groupChanged = group != pill.groupAvatarContent
+        let faceChanged = id != authorID || avatarURL != personAvatarURL || groupChanged
         guard faceChanged || name != pill.name || meta != pill.handle else { return }
         // Someone else than the person drawn: an id that replaces another
         // id. A first id for the name already drawn is the same person.
@@ -290,6 +302,7 @@ final class SnapAuthorIdentityView: UIView {
             self.pill.avatar.setMonogram(MonogramAvatarView.monogram(
                 name: name, handle: Self.handle(fromMeta: meta)
             ))
+            if groupChanged { self.pill.setGroupAvatar(group, pipeline: pipeline) }
         }
         if personChanged, moves {
             personFades += 1
@@ -327,6 +340,10 @@ final class SnapAuthorIdentityView: UIView {
     var debugContentFrame: CGRect { pill.frame }
     /// The name drawn, for tests.
     var debugName: String { pill.name ?? "" }
+    /// The group drawn in the face's place (#2233), for tests.
+    var debugGroupAvatar: GroupAvatarContent? { pill.groupAvatarContent }
+    /// The group's picture view, for tests.
+    var debugGroupAvatarView: GroupAvatarView? { pill.debugGroupAvatar }
     #endif
 
     /// What the pill's second line says for a post's meta ("@handle · 3m"):

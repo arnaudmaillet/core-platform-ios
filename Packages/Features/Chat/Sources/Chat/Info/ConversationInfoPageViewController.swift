@@ -37,6 +37,10 @@ class ConversationInfoPageViewController: HeroPageViewController<ConversationInf
     private var actionViews: [(ConversationInfoAction, UIView)] = []
     /// The bell's state; nil: no bell (the viewer is not in).
     private(set) var bellMuted: Bool?
+    /// A group's picture in the header's disc (#2233): the shared group
+    /// avatar — photo, faces, initials — in place of a person's. Nil for a
+    /// channel, whose disc is its photo or initials.
+    let groupAvatarView: GroupAvatarView?
 
     init(channel: Bool, postsPage: any PostGridPage, imagePipeline: ImagePipeline?) {
         isChannel = channel
@@ -46,7 +50,10 @@ class ConversationInfoPageViewController: HeroPageViewController<ConversationInf
         // The header needs a pipeline; a composition without one (a test)
         // draws placeholders.
         let pipeline = imagePipeline ?? ImagePipeline(fetcher: PlaceholderImageFetcher())
-        let header = HeroHeaderView(imagePipeline: pipeline, counters: captions.map(\.caption), avatar: .person)
+        let groupPicture: GroupAvatarView? = channel ? nil : GroupAvatarView(diameter: 96, size: .px512)
+        groupAvatarView = groupPicture
+        let slot: HeroHeaderAvatar = groupPicture.map { HeroHeaderAvatar.custom($0) } ?? .person
+        let header = HeroHeaderView(imagePipeline: pipeline, counters: captions.map(\.caption), avatar: slot)
         // One page, so no selector is ever placed — and no docked slot: the
         // whole header climbs under the bar, as the place page's.
         super.init(
@@ -113,6 +120,11 @@ class ConversationInfoPageViewController: HeroPageViewController<ConversationInf
             counterValues: header.counterValues(captions),
             avatarURL: header.photoURL, avatarMonogram: header.monogram
         ))
+        if let groupAvatarView, let picture = header.groupAvatar {
+            groupAvatarView.setContent(picture, pipeline: imagePipeline)
+            // The header is the element; its picture says nothing more.
+            groupAvatarView.isAccessibilityElement = false
+        }
         for (stat, list) in zip(heroHeader.counters, captions) {
             stat.isTappable = header.openable.contains(list) && header.counters[list] != nil
         }

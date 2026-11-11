@@ -483,6 +483,15 @@ public final class MockChatService: @unchecked Sendable {
         case (MockConversationBook.followedGroupID, _):
             lines = [(pick(0), "Thursday: the old boathouse, 18:30", 2_000), (pick(1), "Bringing the new watercolour set", 900),
                      (pick(2), "Light was lovely tonight", 120)]
+        case (MockConversationBook.fourFacesGroupID, _):
+            lines = [(pick(0), "The 6:40 tram is cancelled again", 80), (viewer, "Taking the bus then", 75),
+                     (pick(1), "Save me a seat", 20)]
+        case (MockConversationBook.fiveFacesGroupID, _):
+            lines = [(viewer, "Issue 4 deadline is Friday", 900), (pick(2), "Mine's at the printer", 600),
+                     (pick(3), "Can someone bring the long stapler?", 240)]
+        case (MockConversationBook.largeGroupID, _):
+            lines = [(pick(0), "Field is booked for the 14th", 3_000), (pick(1), "Wind forecast looks perfect", 1_500),
+                     (pick(2), "Who's on the spare lines stall?", 400)]
         // A channel created in this session starts empty: it is new (#2215).
         case (_, .channel?) where !id.contains("-new-"):
             let author = publishers.first ?? pick(0)

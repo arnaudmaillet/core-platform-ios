@@ -1,6 +1,7 @@
 import CoreModels
 import DesignSystem
 import Foundation
+import MediaCore
 import UIKit
 
 /// View-ready row for the conversation list.
@@ -25,10 +26,14 @@ public struct ConversationDisplayModel: Equatable, Sendable, Identifiable {
     /// whenever `isUnread` is false; see `Conversation.unreadCount` for what
     /// bounds it.
     public let unreadCount: Int
-    /// A group's own photo (#2214): the row's face instead of initials.
+    /// A group's or a channel's own photo (#2214): the row's face instead
+    /// of initials.
     public let groupPhotoURL: URL?
-    /// A photoless group's members' faces, stacked (#2214): up to three.
-    public let memberFaceURLs: [URL]
+    /// A group's picture (#2233): its photo, else its other members' faces
+    /// stacked, else its initials — what `GroupAvatarView` draws, the
+    /// thread's pill the same. Nil for a DM, and for a channel, which keeps
+    /// its photo or initials (one voice, no faces).
+    public let groupAvatar: GroupAvatarContent?
     /// Who wrote a group's last message, as the preview is prefixed: their
     /// first name, or "You" (#2214). Nil for a DM, and for a group with no
     /// message yet.
@@ -83,9 +88,12 @@ public struct ConversationDisplayModel: Equatable, Sendable, Identifiable {
         self.isChannel = isChannel
         runsChannel = isChannel && conversation.identity?.viewerState.runsChannel == true
         ownsChannel = isChannel && conversation.identity?.viewerState == .owner
-        memberFaceURLs = isGroup && conversation.identity?.photoURL == nil
-            ? Array(conversation.memberAvatarURLs.prefix(ConversationIdentity.stackedFaces))
-            : []
+        groupAvatar = isGroup
+            ? GroupAvatarContent(
+                name: conversation.title, photoURL: conversation.identity?.photoURL,
+                faces: conversation.memberFaces, memberCount: conversation.identity?.memberCount ?? 0
+            )
+            : nil
         previewSender = isGroup && !conversation.lastMessage.isEmpty
             ? Self.previewSender(isMine: conversation.lastMessageIsMine, name: conversation.lastMessageSenderName)
             : nil

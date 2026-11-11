@@ -26,7 +26,7 @@ extension Conversation {
             kind: kind,
             isOutgoingRequest: isOutgoingRequest,
             identity: identity,
-            memberAvatarURLs: memberAvatarURLs
+            memberFaces: memberFaces
         )
     }
 }

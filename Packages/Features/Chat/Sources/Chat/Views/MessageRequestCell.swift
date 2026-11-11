@@ -36,6 +36,9 @@ final class MessageRequestCell: UITableViewCell {
 
     /// The face, wearing the relation mark (#2088), as an All row's.
     private let avatarView = RelationMarkedAvatarView()
+    /// A group's invitation wears the group's picture over the face's place
+    /// (#2233), as its row will once accepted.
+    private let groupAvatar = GroupAvatarView()
     private var avatarTask: Task<Void, Never>?
     /// Guards a late fetch against cell reuse — see `ConversationCell`.
     private var avatarPeerID: ProfileID?
@@ -68,6 +71,8 @@ final class MessageRequestCell: UITableViewCell {
     var debugBadge: RelationBadgeView { avatarView.badge }
     /// The mark on show. Internal for tests.
     var relationMark: PersonPill.Badge { avatarView.mark }
+    /// The group's picture, on an invitation (#2233). Internal for tests.
+    var debugGroupAvatar: GroupAvatarView? { groupAvatar.isHidden ? nil : groupAvatar }
 
     override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
         super.init(style: style, reuseIdentifier: reuseIdentifier)
@@ -86,6 +91,7 @@ final class MessageRequestCell: UITableViewCell {
         avatarPeerID = nil
         peerID = nil
         avatarView.setPicture(nil, pipeline: nil)
+        groupAvatar.setContent(nil, pipeline: nil)
         // A reused row starts unknown for its next person, never wearing
         // the previous one's mark (#2098).
         avatarView.setMark(.loading, animated: false)
@@ -109,7 +115,18 @@ final class MessageRequestCell: UITableViewCell {
         avatarView.setMonogram(model.monogram)
         avatarView.setMark(model.peerID == nil ? .none : mark, animated: false)
         avatarView.onFollowTapped = onFollow
-        loadAvatar(for: model, imagePipeline: imagePipeline, avatars: avatars)
+        let isGroup = model.groupAvatar != nil
+        groupAvatar.setContent(model.groupAvatar, pipeline: imagePipeline)
+        groupAvatar.isHidden = !isGroup
+        avatarView.alpha = isGroup ? 0 : 1
+        if isGroup {
+            avatarTask?.cancel()
+            avatarTask = nil
+            avatarPeerID = nil
+            avatarView.setPicture(nil, pipeline: nil)
+        } else {
+            loadAvatar(for: model, imagePipeline: imagePipeline, avatars: avatars)
+        }
         applyUnreadStyle(model.isUnread)
         nameLabel.text = model.title
         previewLabel.text = Self.previewText(for: model)
@@ -316,6 +333,15 @@ final class MessageRequestCell: UITableViewCell {
         row.pin(to: contentView, insets: NSDirectionalEdgeInsets(
             top: inset, leading: Spacing.lg, bottom: inset, trailing: Spacing.lg
         ))
+        groupAvatar.isHidden = true
+        // The row reads as one sentence: it says the group's name.
+        groupAvatar.isAccessibilityElement = false
+        groupAvatar.constrain(in: contentView) { _ in
+            groupAvatar.leadingAnchor.constraint(equalTo: avatarView.leadingAnchor)
+            groupAvatar.trailingAnchor.constraint(equalTo: avatarView.trailingAnchor)
+            groupAvatar.topAnchor.constraint(equalTo: avatarView.topAnchor)
+            groupAvatar.bottomAnchor.constraint(equalTo: avatarView.bottomAnchor)
+        }
     }
 
     /// Primary call to action: a filled accent pill. It carries a word rather

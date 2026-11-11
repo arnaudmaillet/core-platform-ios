@@ -1808,9 +1808,11 @@ final class ConversationThreadViewController: UIViewController {
         if hasRenderedContent { applySnapshot(animated: false) }
     }
 
-    /// The conversation is a group (#2214): the pill shows its photo, its
-    /// name and its subtitle, and a tap opens its info screen; each row is
-    /// signed by its sender. Nil: a DM after all — the peer's pill again.
+    /// The conversation is a group (#2214): the pill shows its picture — its
+    /// photo, else its members' faces, else its initials, the inbox row's
+    /// own (#2233) — its name and its subtitle, and a tap opens its info
+    /// screen; each row is signed by its sender. A channel keeps its photo
+    /// or initials. Nil: a DM after all — the peer's pill again.
     private func adoptGroup(_ newGroup: ConversationThreadGroup?) {
         let wasGroup = group != nil
         group = newGroup
@@ -1824,9 +1826,14 @@ final class ConversationThreadViewController: UIViewController {
         view.accessibilityLabel = "Group conversation, \(newGroup.name)"
         let settled = view.window != nil && transitionCoordinator == nil
         peerPill.setFollowBadge(.none)
+        // ⚠️ NEVER THE GROUP'S INITIALS ON A PERSON'S FACE (#2233): a
+        // nameless group is named after its members, so "Sofía Reyes and Tom
+        // Okafor" drew "SR" — read as Sofía's avatar. The group's picture
+        // takes the face's place; the person's face under it loads nothing.
+        let picture = newGroup.avatar
         peerPill.setPerson(
-            id: nil, name: newGroup.name, meta: newGroup.subtitle, avatarURL: newGroup.photoURL,
-            pipeline: imagePipeline, animated: settled
+            id: nil, name: newGroup.name, meta: newGroup.subtitle, avatarURL: picture == nil ? newGroup.photoURL : nil,
+            group: picture, pipeline: imagePipeline, animated: settled
         )
         if !settled { peerPill.settleLayout() }
         peerPill.onGroupTapped = mode == .full ? { [weak self] in
@@ -2717,6 +2724,10 @@ extension ConversationThreadViewController {
     }
     /// What the header pill shows (#2214). Tests.
     var debugPillName: String { peerPill.debugName }
+    /// The group the pill draws in its face's place (#2233). Tests.
+    var debugPillGroupAvatar: GroupAvatarContent? { peerPill.debugGroupAvatar }
+    /// The pill's group picture view (#2233). Tests.
+    var debugPillGroupAvatarView: GroupAvatarView? { peerPill.debugGroupAvatarView }
     /// Whether the composer shows — a channel's reader gets the bar (#2215). Tests.
     var debugShowsComposer: Bool { !composeBar.isHidden }
     /// The reader bar's standing while it shows (#2215). Tests.

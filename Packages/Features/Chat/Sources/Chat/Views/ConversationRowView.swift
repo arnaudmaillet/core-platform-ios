@@ -21,10 +21,11 @@ final class ConversationRowView: UIView {
     /// The face, wearing the relation mark (#2049): the unread count left it
     /// for the trailing column (`unreadPill`).
     private let avatarView = RelationMarkedAvatarView()
-    /// A photoless group's members, stacked over the face's place (#2214).
-    /// A sibling laid over the face rather than inside it: the face draws
-    /// nothing but its avatar and its badge (`drawsRing`).
-    private let groupFaces = GroupFacesView()
+    /// A group's picture over the face's place (#2233): its photo, its
+    /// members' faces cut apart, or its initials — the shared component the
+    /// thread's pill draws too. A sibling laid over the face rather than
+    /// inside it: the face draws nothing but its avatar and its badge.
+    private let groupAvatar = GroupAvatarView()
     private var avatarTask: Task<Void, Never>?
     /// The peer this row is currently showing. A reused row can outlive its own
     /// fetch, so the late result is checked against this before it draws —
@@ -67,7 +68,7 @@ final class ConversationRowView: UIView {
         avatarTask = nil
         avatarPeerID = nil
         avatarView.setPicture(nil, pipeline: nil)
-        groupFaces.setFaces([], pipeline: nil)
+        groupAvatar.setContent(nil, pipeline: nil)
         // A reused row starts unknown for its next person, never wearing
         // the previous one's mark (#2098).
         avatarView.setMark(.loading, animated: false)
@@ -98,13 +99,21 @@ final class ConversationRowView: UIView {
         avatarView.setMonogram(model.monogram)
         // A group keeps its initials, with no mark.
         avatarView.setMark(model.peerID == nil ? .none : mark, animated: false)
-        loadAvatar(for: model, imagePipeline: imagePipeline, avatars: avatars)
-        // A photoless group wears its members' faces (#2214); the face's
-        // place stays laid out under them, so nothing moves.
-        let stacks = !model.memberFaceURLs.isEmpty
-        groupFaces.setFaces(model.memberFaceURLs, pipeline: imagePipeline)
-        groupFaces.isHidden = !stacks
-        avatarView.alpha = stacks ? 0 : 1
+        // A group wears its picture (#2233); the face's place stays laid
+        // out under it, so nothing moves.
+        let isGroup = model.groupAvatar != nil
+        groupAvatar.setContent(model.groupAvatar, pipeline: imagePipeline)
+        groupAvatar.isHidden = !isGroup
+        avatarView.alpha = isGroup ? 0 : 1
+        if isGroup {
+            // Under the group's picture: nothing to load.
+            avatarTask?.cancel()
+            avatarTask = nil
+            avatarPeerID = nil
+            avatarView.setPicture(nil, pipeline: nil)
+        } else {
+            loadAvatar(for: model, imagePipeline: imagePipeline, avatars: avatars)
+        }
         titleLabel.text = model.title
         channelBadge.isHidden = !model.isChannel
         let preview = model.preview.isEmpty ? "No messages yet" : model.previewLine
@@ -355,12 +364,14 @@ final class ConversationRowView: UIView {
         row.pin(to: self, insets: NSDirectionalEdgeInsets(
             top: inset, leading: Spacing.lg, bottom: inset, trailing: Spacing.lg
         ))
-        groupFaces.isHidden = true
-        groupFaces.constrain(in: self) { _ in
-            groupFaces.leadingAnchor.constraint(equalTo: avatarView.leadingAnchor)
-            groupFaces.trailingAnchor.constraint(equalTo: avatarView.trailingAnchor)
-            groupFaces.topAnchor.constraint(equalTo: avatarView.topAnchor)
-            groupFaces.bottomAnchor.constraint(equalTo: avatarView.bottomAnchor)
+        groupAvatar.isHidden = true
+        // The row is the element: it says the group's name.
+        groupAvatar.isAccessibilityElement = false
+        groupAvatar.constrain(in: self) { _ in
+            groupAvatar.leadingAnchor.constraint(equalTo: avatarView.leadingAnchor)
+            groupAvatar.trailingAnchor.constraint(equalTo: avatarView.trailingAnchor)
+            groupAvatar.topAnchor.constraint(equalTo: avatarView.topAnchor)
+            groupAvatar.bottomAnchor.constraint(equalTo: avatarView.bottomAnchor)
         }
     }
 }
@@ -378,7 +389,9 @@ extension ConversationRowView {
     /// Whether the face has the badge's cutout taken out. Tests.
     var debugFaceIsCutOut: Bool { avatarView.faceIsCutOut }
     /// The members' faces stacked, while a photoless group shows them. Tests.
-    var debugStackedFaceCount: Int { groupFaces.isHidden ? 0 : groupFaces.faceCount }
+    var debugStackedFaceCount: Int { groupAvatar.isHidden ? 0 : groupAvatar.drawnFaceCount }
+    /// The group's picture, while the row shows a group (#2233). Tests.
+    var debugGroupAvatar: GroupAvatarView? { groupAvatar.isHidden ? nil : groupAvatar }
     /// The preview line. Tests.
     var debugPreviewText: String? { previewLabel.attributedText?.string ?? previewLabel.text }
     /// Whether the channel's megaphone shows (#2215, #2230). Tests.

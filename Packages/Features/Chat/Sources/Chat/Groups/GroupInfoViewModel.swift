@@ -4,6 +4,7 @@ import CoreNetworking
 import DesignSystem
 import Foundation
 import HeroPage
+import MediaCore
 
 /// A group's info screen (#2214, #2237): its identity, its counters, what
 /// the viewer may do — which their role decides, here, in one place
@@ -86,6 +87,9 @@ final class GroupInfoViewModel {
         /// rename field starts from.
         var ownName = ""
         var photoURL: URL?
+        /// The header's picture (#2233): the photo, else the other members'
+        /// faces, else the initials — the inbox row's and the pill's.
+        var groupAvatar = GroupAvatarContent(name: "")
         var description = ""
         var memberCount = 0
         /// A public group's audience (#2217), counted apart from its members.
@@ -234,7 +238,8 @@ final class GroupInfoViewModel {
             linkText: ConversationInfoHeader.linkText(link), linkURL: link,
             photoURL: state.photoURL, monogram: MonogramAvatarView.monogram(name: state.name, handle: ""),
             counters: counters, openable: openable, capsules: capsules,
-            bubbles: link == nil ? [] : [.share]
+            bubbles: link == nil ? [] : [.share],
+            groupAvatar: state.groupAvatar
         )
     }
 
@@ -332,6 +337,18 @@ final class GroupInfoViewModel {
             ? ConversationIdentity.memberName(others, total: max(0, next.memberCount - 1))
             : identity.name
         next.photoURL = identity.photoURL
+        // The members read so far — the admins and the first page — each once.
+        var seen = Set<ProfileID>()
+        let readMembers = (adminList + firsts).filter { seen.insert($0.profileID).inserted }
+        next.groupAvatar = GroupAvatarContent(
+            name: next.name, photoURL: identity.photoURL,
+            faces: ConversationMember.groupFaces(readMembers, viewer: viewer) { id in
+                let profile = profiles[id]
+                let name = profile?.name ?? ""
+                return (name: name.isEmpty ? profile?.handle ?? "" : name, avatarURL: profile?.avatarURL)
+            },
+            memberCount: next.memberCount
+        )
         next.description = identity.description
         next.admins = Self.rows(adminList, profiles: profiles, viewer: viewer, viewerRole: viewerRole)
         next.isMuted = isMuted()
