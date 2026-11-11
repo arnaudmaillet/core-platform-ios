@@ -80,12 +80,18 @@ struct SnapBarPillWidthsTests {
             ).toolbarAuthor
             let run = 27.5 + (pill + 10) + 12.5 + platter + 12.5 + 48 + 27.5
             #expect(run <= width, "\(width)pt, \(icon)pt glyphs: the footer is \(run) — ⇄ folds into •••")
-            // The conversation's footer is the same run: [📷 🖼] for [☆ ⇄],
-            // and a thread that sends no media wears ⋯ alone.
-            let peer = width - SnapBarPillWidths.toolbarReserve(icon: icon, platter: true)
-            #expect(27.5 + (peer + 10) + 12.5 + platter + 12.5 + 48 + 27.5 <= width)
+            // A footer that wears ⋯ alone.
             let textOnly = width - SnapBarPillWidths.toolbarReserve(icon: icon, platter: false)
             #expect(27.5 + (textOnly + 10) + 12.5 + 48 + 27.5 <= width)
+            // The conversation's (#2305): [pin] [bell] [⋯], each a bubble of
+            // its own — a lone glyph's bubble is the glyph and 10 (☆ alone
+            // measured 59 at XXXL) — or [pin] [⋯] on a draft.
+            for lone in 1...2 {
+                let peer = width - SnapBarPillWidths.toolbarReserve(icon: icon, lone: lone)
+                let bubbles = CGFloat(lone) * (12.5 + icon + 10)
+                #expect(27.5 + (peer + 10) + bubbles + 12.5 + 48 + 27.5 <= width,
+                        "\(width)pt, \(icon)pt glyphs, \(lone) lone bubbles: the bell folds into •••")
+            }
         }
     }
 
