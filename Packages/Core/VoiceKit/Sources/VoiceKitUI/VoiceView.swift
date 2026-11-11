@@ -1086,8 +1086,23 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
         let chip = widestChipSize(for: category)
         let font = timerLabel.font ?? Self.timerFont
         let timer = (Self.timerText(state.duration, style: style) as NSString).size(withAttributes: [.font: font])
-        slotWidth?.constant = ceil(max(chip.width, timer.width))
-        slotHeight?.constant = ceil(chip.height)
+        let width = ceil(max(chip.width, timer.width)), height = ceil(chip.height)
+        guard width != slotWidth?.constant || height != slotHeight?.constant else { return }
+        slotWidth?.constant = width
+        slotHeight?.constant = height
+        relayout()
+    }
+
+    /// ⚠️ A CONSTRAINT CHANGED: LAY THE PANEL OUT AGAIN (#2329). A constant
+    /// or a constraint changed on a panel already laid out — a reused row
+    /// shown with another length or role, at the same width — left its
+    /// frames as they were: nothing marked the view, so the next layout pass
+    /// (a host's `layoutIfNeeded`) skipped it and the panel kept the last
+    /// voice's width and slot. Both the view (the panel's frame) and the
+    /// panel (the parts' frames, whose size may not change) are marked.
+    private func relayout() {
+        setNeedsLayout()
+        frameView.setNeedsLayout()
     }
 
     /// The length the timer says now: the total at rest and at the end; the
@@ -1292,6 +1307,7 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
         lengthRuleKey = key
         NSLayoutConstraint.deactivate(lengthRule)
         lengthRule = []
+        relayout()
         guard widthFollowsLength else { return }
         let share = Self.lengthShare(state.duration)
         let narrowest = Self.minimumPanelWidth
@@ -1322,6 +1338,7 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
         // Off first: two ends at once would conflict.
         if message { endsAtSlot?.isActive = false } else { endsAtDot?.isActive = false }
         if message { endsAtDot?.isActive = true } else { endsAtSlot?.isActive = true }
+        relayout()
     }
 
     /// The host's inks on every part (#2241): the bars, the play glyph, the
