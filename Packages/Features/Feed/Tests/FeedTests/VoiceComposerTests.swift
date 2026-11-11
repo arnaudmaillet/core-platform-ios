@@ -62,6 +62,8 @@ struct VoiceComposerTests {
             }
         )
         let bar = CommentsInputBar()
+        // A conversation's contract: its field records a message (#2308).
+        bar.configuration = .conversation(voice: .message, attachments: [])
         let host = UIView(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         host.addSubview(bar)
         composer.attach(to: bar, host: host)
@@ -89,7 +91,7 @@ struct VoiceComposerTests {
     /// Hold, wait past 200 ms, release: sent.
     @Test func holdThenReleaseSends() async {
         let (composer, bar, sent) = composer()
-        #expect(bar.holdsToRecord)
+        #expect(bar.speaksFromField)
         composer.handle(.began)
         #expect(await settle { composer.phase == .holding(revealed: true) }, "the strip never showed")
         #expect(bar.voiceOverlay === composer.debugStrip)
@@ -172,7 +174,6 @@ struct VoiceComposerTests {
         window.addSubview(bar)
         window.isHidden = false
         defer { window.isHidden = true }
-        bar.actsFromOwnBubble = true
         bar.layoutIfNeeded()
         let bubble = bar.debugRowActionButton
         let rest = bubble.frame
@@ -230,7 +231,6 @@ struct VoiceComposerTests {
         window.addSubview(bar)
         window.isHidden = false
         defer { window.isHidden = true }
-        bar.actsFromOwnBubble = true
         bar.layoutIfNeeded()
         let bubble = bar.debugRowActionButton
         let glyph = bar.debugHoldGlyph
@@ -331,7 +331,6 @@ struct VoiceComposerTests {
         window.addSubview(bar)
         window.isHidden = false
         defer { window.isHidden = true }
-        bar.actsFromOwnBubble = true
         bar.layoutIfNeeded()
         let bubble = bar.debugRowActionButton
         #expect(bar.speaksFromField)
@@ -365,7 +364,6 @@ struct VoiceComposerTests {
     @Test func theInstructionsAreCentred() {
         let (_, bar, _) = composer()
         bar.frame = CGRect(x: 0, y: 0, width: 390, height: 120)
-        bar.actsFromOwnBubble = true
         bar.layoutIfNeeded()
         let field = bar.debugFieldBounds
         let words = bar.debugPlaceholderFrame
@@ -382,7 +380,6 @@ struct VoiceComposerTests {
         window.addSubview(bar)
         window.isHidden = false
         defer { window.isHidden = true }
-        bar.actsFromOwnBubble = true
         bar.layoutIfNeeded()
         let strip = VoiceRecordingStrip()
         strip.setTime(0, remaining: nil) // as the composer does, before it shows
@@ -417,7 +414,6 @@ struct VoiceComposerTests {
         defer { window.isHidden = true }
         // The window is the host the lock rises in (the helper's own is gone).
         composer.attach(to: bar, host: window)
-        bar.actsFromOwnBubble = true
         bar.layoutIfNeeded()
         composer.handle(.began)
         #expect(await settle { composer.phase == .holding(revealed: true) })
@@ -431,20 +427,27 @@ struct VoiceComposerTests {
     /// impractical, and the bubble is the emote button.
     @Test func voiceOverRecordsFromTheField() async {
         let (composer, bar, _) = composer()
-        bar.actsFromOwnBubble = true
         let action = bar.debugTextView.accessibilityCustomActions?.first { $0.name == "Record voice message" }
         #expect(action != nil)
         if let action { _ = action.actionHandler?(action) }
         #expect(await settle { composer.phase != .idle }, "VoiceOver's action recorded nothing")
     }
 
-    /// A post's comments keep their emote button and their wording.
-    @Test func aPostsFieldKeepsItsEmoteButton() {
+    /// A post's comments (#2308): the same own bubble — the emote button at
+    /// rest — and no voice: the field's hold records nothing, and nothing
+    /// promises it (no instructions, no VoiceOver action).
+    @Test func aPostsFieldHasTheOwnBubbleAndNoVoice() {
         let bar = CommentsInputBar()
+        bar.frame = CGRect(x: 0, y: 0, width: 390, height: 120)
+        bar.onVoiceHold = { _ in }
         bar.layoutIfNeeded()
+        #expect(bar.configuration.voice == .none)
         #expect(!bar.speaksFromField)
-        #expect(bar.debugShowsFieldEmoteToggle)
+        #expect(!bar.debugFieldHoldBegins, "a comment's field records")
+        #expect(bar.debugRowActionButton.accessibilityLabel == "Emotes")
+        #expect(!bar.debugShowsFieldEmoteToggle, "two emote buttons at rest")
         #expect(bar.debugPlaceholder != CommentsInputBar.speakOrWritePlaceholder)
+        #expect(bar.debugTextView.accessibilityCustomActions == nil)
     }
 
     final class Joins {
@@ -510,7 +513,6 @@ struct VoiceComposerTests {
         window.isHidden = false
         defer { window.isHidden = true }
         composer.attach(to: bar, host: window)
-        bar.actsFromOwnBubble = true
         bar.layoutIfNeeded()
         composer.handle(.began)
         #expect(await settle { composer.phase == .holding(revealed: true) })
@@ -531,7 +533,6 @@ struct VoiceComposerTests {
         window.makeKeyAndVisible()
         defer { window.isHidden = true }
         bar.defaultPlaceholder = "Message…"
-        bar.actsFromOwnBubble = true
         bar.layoutIfNeeded()
         #expect(bar.debugPlaceholder == CommentsInputBar.speakOrWritePlaceholder)
         #expect(bar.debugFieldHoldBegins)
@@ -626,7 +627,6 @@ struct VoiceComposerTests {
         window.addSubview(bar)
         window.isHidden = false
         defer { window.isHidden = true }
-        bar.actsFromOwnBubble = true
         bar.layoutIfNeeded()
         let toggle = bar.debugEmoteToggle
         #expect(toggle.isHidden, "an emote button in the empty field")
@@ -658,7 +658,6 @@ struct VoiceComposerTests {
         window.isHidden = false
         defer { window.isHidden = true }
         bar.removeFromSuperview()
-        bar.actsFromOwnBubble = true
         bar.draftText = "hi"
         bar.frame = CGRect(x: 0, y: 700, width: 390, height: 120)
         window.addSubview(bar)
@@ -687,7 +686,6 @@ struct VoiceComposerTests {
         window.addSubview(bar)
         window.isHidden = false
         defer { window.isHidden = true }
-        bar.actsFromOwnBubble = true
         bar.layoutIfNeeded()
         let toggle = bar.debugEmoteToggle
         bar.draftText = "a"
@@ -714,7 +712,6 @@ struct VoiceComposerTests {
         window.addSubview(bar)
         window.isHidden = false
         defer { window.isHidden = true }
-        bar.actsFromOwnBubble = true
         bar.layoutIfNeeded()
         let toggle = bar.debugEmoteToggle
         bar.draftText = "h"
@@ -732,9 +729,10 @@ struct VoiceComposerTests {
         #expect(await settle { toggle.isHidden && bar.debugEmoteSlotWidth == 0 }, "the way out never ended")
     }
 
-    /// A post's comments keep today's tap: no hold.
-    @Test func aPostsComposerKeepsTheTap() {
+    /// A post's comments declare no voice (#2309 comes next): no hold.
+    @Test func aPostsComposerHasNoHold() {
         let bar = CommentsInputBar()
-        #expect(!bar.holdsToRecord)
+        #expect(!bar.speaksFromField)
+        #expect(!bar.debugFieldHoldBegins)
     }
 }

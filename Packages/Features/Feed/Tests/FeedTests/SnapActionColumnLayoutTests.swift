@@ -332,7 +332,8 @@ struct SnapActionColumnLayoutTests {
     /// ⚠️ THE CONTRACT. The engaged composer's stake pill sits on the like
     /// pill's frame and its rail slot — the sound's cover — on the sound
     /// bubble's, in screen coordinates. The field rests on the toolbar below
-    /// them, level with the slot, and the waveform is in the field.
+    /// them, level with the slot, and the composer's own bubble (#2308)
+    /// stands between the field and the slot, on their line.
     @Test func theComposerBubblesStandExactlyOnTheMediaLayoutsBubbles() throws {
         let media = Self.mediaColumn()
         let (controller, window) = Self.engagedPanel()
@@ -344,8 +345,11 @@ struct SnapActionColumnLayoutTests {
         #expect(Self.same(stake, media.like), "stake \(stake) vs like \(media.like)")
         #expect(Self.same(composer.rail, media.sound), "rail \(composer.rail) vs sound \(media.sound)")
         #expect(composer.bar.debugRailSymbol == CommentsInputBar.soundRailSymbol)
-        #expect(!composer.bar.debugFieldActionButton.isHidden, "the waveform is in the field")
-        #expect(composer.bar.debugFieldActionSymbol == CommentsInputBar.waveformSymbol)
+        let bubble = composer.bar.debugRowActionButton.convert(composer.bar.debugRowActionButton.bounds, to: window)
+        #expect(composer.bar.debugOwnBubbleSymbol == CommentsInputBar.emoteSymbol)
+        #expect(abs(bubble.maxY - composer.field.maxY) < 0.5, "the own bubble is off the field's line: \(bubble)")
+        #expect(abs(bubble.minX - (composer.field.maxX + Spacing.sm)) < 0.5, "own bubble \(bubble), field \(composer.field)")
+        #expect(abs(bubble.maxX - (composer.rail.minX - Spacing.sm)) < 0.5, "own bubble \(bubble), slot \(composer.rail)")
         #expect(abs(composer.field.maxY - (Self.toolbarGlassTop - SnapActionColumn.glassGap - SnapActionColumn.bottomBreath)) < 0.5,
                 "the field ends at \(composer.field.maxY), not glassGap above the glass at \(Self.toolbarGlassTop)")
         _ = window
@@ -381,8 +385,8 @@ struct SnapActionColumnLayoutTests {
     /// the like face keeps a square stake), md apart, the slot resting on the
     /// field's line, and a field that grows
     /// BESIDE the stake, never moving it. Without a rail face (a draft post)
-    /// the slot holds no bubble but keeps its station, and the field holds the
-    /// waveform as on every bar.
+    /// the slot holds no bubble but keeps its station, and the own bubble
+    /// stands before it, as on every bar.
     @Test func theColumnBarHoldsTheStakeStillWhileTheFieldGrows() throws {
         let (bar, host) = hostedColumnBar()
 
@@ -396,8 +400,11 @@ struct SnapActionColumnLayoutTests {
         #expect(abs(field.frame.maxY - bar.bounds.maxY) < 0.5, "the field is the bar's bottom")
         #expect(abs(bar.bounds.maxY - slot.frame.maxY) < 0.5, "the slot rests on the field's line")
         #expect(slot.isHidden, "no rail face, no rail bubble")
-        #expect(!bar.debugFieldActionButton.isHidden, "the waveform is in the field")
-        #expect(bar.debugFieldActionSymbol == CommentsInputBar.waveformSymbol)
+        let bubble = bar.debugRowActionButton
+        #expect(bar.debugShowsRowAction)
+        #expect(bar.debugOwnBubbleSymbol == CommentsInputBar.emoteSymbol)
+        #expect(abs(bubble.frame.maxX - (slot.frame.minX - Spacing.sm)) < 0.5, "own bubble \(bubble.frame), slot \(slot.frame)")
+        #expect(abs(bubble.frame.maxY - field.frame.maxY) < 0.5)
         #expect(abs(bar.bounds.height - CommentsInputBar.restingHeight(for: .large, likeFace: false)) < 0.5)
         #expect(!bar.hasAmbiguousLayout)
 
@@ -408,16 +415,21 @@ struct SnapActionColumnLayoutTests {
         #expect(!bar.hasAmbiguousLayout)
     }
 
-    /// A text post with no sound has no slot (#1790): the field reaches
-    /// where the slot ended; with a face, or empty (a draft), it stops short.
+    /// A text post with no sound has no slot (#1790): the own bubble takes
+    /// where the slot was, the field before it; with a face, or empty (a
+    /// draft), they stop short.
     @Test func withNoSlotTheFieldTakesItsPlace() throws {
         let (withSlot, _) = hostedColumnBar(railFace: .empty)
         let (without, host) = hostedColumnBar(railFace: .noSlot)
         let slot = withSlot.debugRailButton
         let kept = try #require(Self.fieldView(in: withSlot))
         let widened = try #require(Self.fieldView(in: without))
-        #expect(kept.frame.maxX < slot.frame.minX, "the field ran under the kept slot")
-        #expect(abs(widened.frame.maxX - slot.frame.maxX) < 0.5, "the field did not reach where the slot ended")
+        let own = CommentsInputBar.Metrics.controlSize + Spacing.sm
+        #expect(withSlot.debugRowActionButton.frame.maxX < slot.frame.minX, "the own bubble ran under the kept slot")
+        #expect(kept.frame.maxX < withSlot.debugRowActionButton.frame.minX, "the field ran under the own bubble")
+        #expect(abs(without.debugRowActionButton.frame.maxX - slot.frame.maxX) < 0.5,
+                "the own bubble did not take where the slot ended")
+        #expect(abs(widened.frame.maxX - (slot.frame.maxX - own)) < 0.5, "the field did not reach the own bubble")
         #expect(without.debugRailButton.isHidden)
         #expect(!without.hasAmbiguousLayout)
         #expect(CommentsInputBar.fieldTrailingInset(progress: 0, keepsSlot: false) == 0)
@@ -460,43 +472,47 @@ struct SnapActionColumnLayoutTests {
         #expect(rail.isEnabled)
     }
 
-    /// ⚠️ THE FIELD'S WAVEFORM IS THE SEND. Over a draft it becomes the send
-    /// arrow — the same button, its glyph replaced (`symbolContentTransition`)
-    /// — a tap sends, and the emptied field wears the waveform again.
-    @Test func theFieldsWaveformBecomesSendWhileThereIsText() throws {
+    /// ⚠️ THE OWN BUBBLE IS THE SEND (#2308, every host). Over a draft the
+    /// emote button becomes the send arrow — the same button, its glyph
+    /// replaced (`symbolContentTransition`) — a tap sends, and the emptied
+    /// field gives the emote button back. Over an empty field its tap opens
+    /// the emote panel, and a second one the keyboard; it never records.
+    @Test func theOwnBubbleBecomesSendWhileThereIsText() throws {
         let (bar, _) = hostedColumnBar(railFace: .repost)
         var sent: [String] = []
-        var voiceTaps = 0
         bar.onSend = { sent.append($0) }
-        bar.onVoiceNote = { voiceTaps += 1 }
-        let action = bar.debugFieldActionButton
+        let action = bar.debugRowActionButton
 
         #expect(action.configuration?.symbolContentTransition != nil, "the glyph swap is a symbol replace")
-        #expect(bar.debugFieldActionSymbol == CommentsInputBar.waveformSymbol)
+        #expect(bar.debugOwnBubbleSymbol == CommentsInputBar.emoteSymbol)
+        #expect(action.accessibilityLabel == "Emotes")
         action.sendActions(for: .primaryActionTriggered)
-        #expect(voiceTaps == 1)
+        #expect(bar.debugShowsEmotePanel, "the bubble at rest is not the emote button")
+        #expect(bar.debugOwnBubbleSymbol == CommentsInputBar.keyboardSymbol)
+        action.sendActions(for: .primaryActionTriggered)
+        #expect(!bar.debugShowsEmotePanel)
+        #expect(sent.isEmpty)
 
         bar.draftText = "   "
-        #expect(bar.debugFieldActionSymbol == CommentsInputBar.waveformSymbol, "blank is not a draft")
+        #expect(bar.debugOwnBubbleSymbol == CommentsInputBar.emoteSymbol, "blank is not a draft")
 
         bar.draftText = "Nice one"
-        #expect(bar.debugFieldActionSymbol == CommentsInputBar.sendSymbol)
+        #expect(bar.debugOwnBubbleSymbol == CommentsInputBar.sendSymbol)
         #expect(action.accessibilityLabel == "Send comment")
         #expect(action.isEnabled)
         action.sendActions(for: .primaryActionTriggered)
         #expect(sent == ["Nice one"])
-        #expect(voiceTaps == 1, "a tap over a draft sends, it does not record")
 
-        // Sent: the field emptied, and the button is the waveform again.
+        // Sent: the field emptied, and the bubble is the emote button again.
         #expect(bar.draftText.isEmpty)
-        #expect(bar.debugFieldActionSymbol == CommentsInputBar.waveformSymbol)
+        #expect(bar.debugOwnBubbleSymbol == CommentsInputBar.emoteSymbol)
 
         // In flight: the send face holds, quiet, until the host is done.
         bar.isSending = true
-        #expect(bar.debugFieldActionSymbol == CommentsInputBar.sendSymbol)
+        #expect(bar.debugOwnBubbleSymbol == CommentsInputBar.sendSymbol)
         #expect(!action.isEnabled)
         bar.isSending = false
-        #expect(bar.debugFieldActionSymbol == CommentsInputBar.waveformSymbol)
+        #expect(bar.debugOwnBubbleSymbol == CommentsInputBar.emoteSymbol)
 
         // The draft post's wording.
         bar.sendAccessibilityLabel = "Publish post"
@@ -504,23 +520,20 @@ struct SnapActionColumnLayoutTests {
         #expect(action.accessibilityLabel == "Publish post")
     }
 
-    /// The waveform in the field and the emote button both fit inside it, the
-    /// waveform at the field's end.
-    @Test func theWaveformSitsBesideTheEmoteButtonInsideTheField() throws {
+    /// The field holds the emote button alone, at its end, and only over a
+    /// draft — no waveform, no send (#2308): those are the own bubble's.
+    @Test func theFieldHoldsOnlyTheEmoteButton() throws {
         let (bar, _) = hostedColumnBar(railFace: .repost)
         let field = try #require(Self.fieldView(in: bar))
-        let voice = bar.debugFieldActionButton
-        let emote = try #require(
-            field.contentView.subviews.compactMap { $0 as? UIButton }.first { $0 !== voice }
-        )
+        let emote = bar.debugEmoteToggle
+        #expect(field.contentView.subviews.compactMap { $0 as? UIButton }.allSatisfy { $0 === emote },
+                "another button in the field")
+        #expect(!bar.debugShowsFieldEmoteToggle, "an emote button in the empty field beside the bubble's")
+        bar.draftText = "Hello"
         field.layoutIfNeeded()
-        #expect(voice.superview === field.contentView)
-        #expect(emote.frame.maxX <= voice.frame.minX + 0.5, "the emote button is not before the waveform")
-        #expect(voice.frame.maxX <= field.bounds.width)
-        var voiceTaps = 0
-        bar.onVoiceNote = { voiceTaps += 1 }
-        voice.sendActions(for: .primaryActionTriggered)
-        #expect(voiceTaps == 1)
+        #expect(bar.debugShowsFieldEmoteToggle)
+        #expect(emote.superview === field.contentView)
+        #expect(abs(emote.frame.maxX - field.contentView.bounds.maxX) < 0.5, "the emote button is not at the field's end")
     }
 
     // MARK: - The keyboard
@@ -562,7 +575,9 @@ struct SnapActionColumnLayoutTests {
         let restStake = stake.convert(stake.bounds, to: host)
         let restRail = rail.convert(rail.bounds, to: host)
         let restBar = bar.frame
-        let fullWidth = bar.bounds.width - field.frame.minX
+        // The row's end is the own bubble's (#2308): the field stops short of
+        // it, risen or not.
+        let fullWidth = bar.bounds.width - field.frame.minX - (CommentsInputBar.Metrics.controlSize + Spacing.sm)
         let restWidth = fullWidth - (SnapActionColumn.bubbleSize + Spacing.sm)
         #expect(abs(restField.width - restWidth) < 0.5, "rest width \(restField.width) vs \(restWidth)")
         #expect(bar.riseProgress == 0)
@@ -733,7 +748,7 @@ struct SnapActionColumnLayoutTests {
     /// ⚠️ THE CONTRACT, KEYBOARD UP. On the engaged panel the column's
     /// bubbles stand on the media layout's like pill and sound bubble with a
     /// keyboard up exactly as at rest — equal frames, in window coordinates —
-    /// while the field rides `sm` above the keyboard at full width.
+    /// while the row rides `sm` above the keyboard at full width.
     @Test func theColumnHoldsTheMediaLayoutsBubblesWithTheKeyboardUp() throws {
         let media = Self.mediaColumn()
         let (controller, window) = Self.engagedPanel()
@@ -752,7 +767,11 @@ struct SnapActionColumnLayoutTests {
         #expect(Self.same(up.rail, media.sound), "rail \(up.rail) vs sound \(media.sound)")
         #expect(up.stake == rest.stake && up.rail == rest.rail)
         #expect(abs(up.field.maxY - (Self.screen.height - 336 - Spacing.sm)) < 0.5)
-        #expect(abs(up.field.maxX - up.rail.maxX) < 0.5, "the risen field does not take the column's width")
+        // The risen row takes the column's width: the own bubble (#2308)
+        // where the slot ends, the field up to it.
+        let bubble = up.bar.debugRowActionButton.convert(up.bar.debugRowActionButton.bounds, to: window)
+        #expect(abs(bubble.maxX - up.rail.maxX) < 0.5, "the risen bubble does not take the column's width")
+        #expect(abs(up.field.maxX - (bubble.minX - Spacing.sm)) < 0.5, "the risen field does not reach the bubble")
         #expect(up.bar.debugRailSymbol == CommentsInputBar.soundRailSymbol)
         _ = window
     }

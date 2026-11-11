@@ -4,6 +4,7 @@ import FeedInterface
 import MediaCore
 import Testing
 import UIKit
+import VoiceKit
 @testable import Feed
 
 /// #2305: on a conversation's screen the camera and the library stand in the
@@ -24,6 +25,7 @@ struct ConversationRowAttachmentsTests {
         var onGroupChange: ((ConversationThreadGroup?) -> Void)?
 
         let sendsMedia: Bool
+        let sendsVoice: Bool
         /// Nil: a draft conversation, nothing to pin or mute yet.
         var pinned: Bool?
         var muted: Bool?
@@ -31,8 +33,9 @@ struct ConversationRowAttachmentsTests {
         private(set) var pinToggles = 0
         private(set) var mutes: [Bool] = []
 
-        init(sendsMedia: Bool = true, pinned: Bool? = false, muted: Bool? = false) {
+        init(sendsMedia: Bool = true, sendsVoice: Bool = false, pinned: Bool? = false, muted: Bool? = false) {
             self.sendsMedia = sendsMedia
+            self.sendsVoice = sendsVoice
             self.pinned = pinned
             self.muted = muted
         }
@@ -153,16 +156,19 @@ struct ConversationRowAttachmentsTests {
         #expect(bar.debugShowsAttachments)
     }
 
-    /// Messenger's rule: shown only while the reader is not writing — not
-    /// while the field is edited, nor while it holds a draft (text or a
-    /// voice take), and never without sources.
+    /// Messenger's rule, the contract's one for every host's list (#2308):
+    /// shown only while the reader is not writing — not while the field is
+    /// edited, nor while the draft holds anything (text, a voice take, later
+    /// an attachment), and never without sources.
     @Test func theRuleHidesThemWhileTheReaderWrites() {
         let rule = CommentsInputBar.showsAttachments
-        #expect(rule(true, false, false, false))
-        #expect(!rule(true, true, false, false), "shown while the field is edited")
-        #expect(!rule(true, false, true, false), "shown beside a draft")
-        #expect(!rule(true, false, false, true), "shown beside a voice take")
-        #expect(!rule(false, false, false, false), "shown with no sources")
+        #expect(rule(true, false, []))
+        #expect(!rule(true, true, []), "shown while the field is edited")
+        #expect(!rule(true, false, .text), "shown beside a draft")
+        #expect(!rule(true, false, .voiceTake), "shown beside a voice take")
+        #expect(!rule(true, false, .attachments), "shown beside a picked attachment")
+        #expect(!rule(true, false, [.text, .attachments]))
+        #expect(!rule(false, false, []), "shown with no sources")
     }
 
     /// Each hands its own source to the driver, ending editing first.
@@ -205,39 +211,67 @@ struct ConversationRowAttachmentsTests {
         #expect(!Self.contains(CommentsInputBar.self, in: screen.view))
     }
 
-    /// The post's composer declares none: its row is unchanged. And a list
-    /// given to a composer without the own bubble (a post's, with its
-    /// column) never shows: the attachments are counted from that bubble.
+    /// The post's composer declares none (#2308: `ComposerConfiguration
+    /// .comments`). The same list declared by comments later (#2310) shows
+    /// with no change to the composer — the column stays.
     @Test func thePostsComposerHasNoAttachments() {
         let post = CommentsInputBar()
-        #expect(post.attachmentSources.isEmpty)
+        #expect(post.configuration.attachments.isEmpty)
         #expect(post.debugAttachmentButtons.isEmpty)
         #expect(!post.debugShowsAttachments)
 
-        post.attachmentSources = [
+        post.configuration.attachments = [
             ComposerAttachmentSource(id: "test.camera", symbol: "camera", accessibilityLabel: "Camera") {},
         ]
-        #expect(!post.debugShowsAttachments, "shown without the own bubble")
-        post.actsFromOwnBubble = true
+        #expect(post.debugAttachmentButtons.count == 1)
         #expect(post.debugShowsAttachments)
+        #expect(post.configuration.column == .post)
     }
 
     /// The same entries with new actions keep their bubbles; a tap runs the
     /// newest action.
     @Test func newActionsKeepTheBubbles() {
         let bar = CommentsInputBar()
-        bar.actsFromOwnBubble = true
         let taps = Taps()
-        bar.attachmentSources = [
+        bar.configuration = .conversation(voice: .none, attachments: [
             ComposerAttachmentSource(id: "test.camera", symbol: "camera", accessibilityLabel: "Camera") { taps.names.append("old") },
-        ]
+        ])
         let button = bar.debugAttachmentButtons.first
-        bar.attachmentSources = [
+        bar.configuration = .conversation(voice: .none, attachments: [
             ComposerAttachmentSource(id: "test.camera", symbol: "camera", accessibilityLabel: "Camera") { taps.names.append("new") },
-        ]
+        ])
         #expect(bar.debugAttachmentButtons.first === button, "the bubble was rebuilt for a new action")
         button?.sendActions(for: .primaryActionTriggered)
         #expect(taps.names == ["new"])
+    }
+
+    // MARK: - The contract (#2308)
+
+    /// A conversation builds the one composer from its contract: a message's
+    /// voice (five minutes) where its driver sends voice, `[camera, library]`,
+    /// no column — and its recorder takes the declared limit.
+    @Test func theConversationDeclaresItsVoiceAndItsAttachments() {
+        let (screen, window) = makeScreen(Driver(sendsVoice: true))
+        defer { window.isHidden = true }
+        let contract = screen.debugComposeBar.configuration
+        #expect(contract.voice == .message)
+        #expect(contract.voice.limit == VoiceRecorder.maximumDuration)
+        #expect(contract.voice.limit == 5 * 60)
+        #expect(contract.attachments.map(\.id) == [ConversationThreadViewController.cameraID, ConversationThreadViewController.libraryID])
+        #expect(contract.column == .none)
+        #expect(contract.emote == .emotes)
+        #expect(screen.debugComposeBar.speaksFromField)
+        #expect(screen.debugComposeBar.debugPlaceholder == CommentsInputBar.speakOrWritePlaceholder)
+        #expect(screen.voiceComposer?.recorder.limit == VoiceRecorder.maximumDuration)
+
+        // A driver that sends no voice: the field does not record, and
+        // nothing says it does.
+        let (quiet, quietWindow) = makeScreen(Driver(sendsVoice: false))
+        defer { quietWindow.isHidden = true }
+        #expect(quiet.debugComposeBar.configuration.voice == .none)
+        #expect(!quiet.debugComposeBar.speaksFromField)
+        #expect(quiet.voiceComposer == nil)
+        #expect(quiet.debugComposeBar.debugPlaceholder != CommentsInputBar.speakOrWritePlaceholder)
     }
 
     // MARK: - The footer

@@ -6,8 +6,9 @@ import UIKit
 
 /// The composer's FIELD, asked 2026-10-02: the send arrow one blue on every
 /// host, the trailing glyphs never shaved by their containers at any text
-/// size, 44pt targets around them, and a field that grows and shrinks with
-/// its lines in an animation rather than a jump.
+/// size, a 44pt target around the field's emote button, and a field that
+/// grows and shrinks with its lines in an animation rather than a jump. The
+/// send and the emote face are the OWN BUBBLE's since #2308, on every host.
 @MainActor
 struct CommentsInputBarFieldTests {
     /// A bar on a real window's root view — the field's growth animates only
@@ -62,8 +63,8 @@ struct CommentsInputBarFieldTests {
             let (bar, _, window) = hostedBar(hostTint: tint)
             defer { window.isHidden = true }
             bar.draftText = "Hello"
-            #expect(bar.debugFieldActionSymbol == CommentsInputBar.sendSymbol)
-            let action = bar.debugFieldActionButton
+            #expect(bar.debugOwnBubbleSymbol == CommentsInputBar.sendSymbol)
+            let action = bar.debugRowActionButton
             let color = action.configuration?.baseForegroundColor
             for style in [UIUserInterfaceStyle.light, .dark] {
                 #expect(Self.resolved(color, style) == Self.resolved(Palette.tint, style),
@@ -73,20 +74,18 @@ struct CommentsInputBarFieldTests {
             // colour resolves to the tint on its own and only turns grey here,
             // against the button's ancestors.
             action.layoutIfNeeded()
-            let drawn = try #require(
-                Self.descendants(of: action).compactMap { $0 as? UIImageView }.first { $0.image != nil }
-            )
+            let drawn = try #require(action.imageView)
             #expect(drawn.tintColor.resolvedColor(with: action.traitCollection)
                 == Palette.tint.resolvedColor(with: action.traitCollection),
                     "drawn in \(String(describing: drawn.tintColor)) under a \(String(describing: tint)) host")
-            // The waveform stays the field's quiet ink.
+            // The emote face stays the row's quiet ink.
             bar.draftText = ""
-            #expect(bar.debugFieldActionButton.configuration?.baseForegroundColor == .secondaryLabel)
+            #expect(bar.debugRowActionButton.configuration?.baseForegroundColor == .secondaryLabel)
         }
         #expect(CommentsInputBar.sendTint === Palette.tint)
     }
 
-    // MARK: - The waveform ↔ send swap
+    // MARK: - The emote ↔ send swap
 
     /// The painted pixels of `image` drawn under `style`: (r, g, b) of every
     /// pixel at least half opaque, un-premultiplied, 0…1.
@@ -139,16 +138,16 @@ struct CommentsInputBarFieldTests {
         abs(pixel.0 - pixel.2) < 0.1 && abs(pixel.1 - pixel.2) < 0.1
     }
 
-    /// ⚠️ THE COLOUR IS IN THE GLYPH. The waveform is grey and the arrow blue
-    /// whatever the image view's tint says, so the replace can never show
-    /// one glyph in the other's colour: the tint was a channel of its own,
-    /// applied apart from the image, and the swap flashed the wrong ink.
+    /// ⚠️ THE COLOUR IS IN THE GLYPH. The emote face is grey and the arrow
+    /// blue whatever the image view's tint says, so the replace can never
+    /// show one glyph in the other's colour: the tint was a channel of its
+    /// own, applied apart from the image, and the swap flashed the wrong ink.
     /// The grey still follows the appearance (a conversation is light or
     /// dark; a media post's composer is dark).
     @Test func eachFaceCarriesItsOwnInk() throws {
-        let send = try #require(CommentsInputBar.fieldActionImage(sends: true))
-        let waveform = try #require(CommentsInputBar.fieldActionImage(sends: false))
-        for image in [send, waveform] {
+        let send = try #require(CommentsInputBar.ownBubbleImage(sends: true, panelUp: false))
+        let emote = try #require(CommentsInputBar.ownBubbleImage(sends: false, panelUp: false))
+        for image in [send, emote] {
             #expect(image.renderingMode == .alwaysOriginal)
             #expect(image.isSymbolImage, "a symbol, so the replace still runs")
         }
@@ -157,13 +156,13 @@ struct CommentsInputBarFieldTests {
             let sendInk = try Self.ink(of: send, style)
             try #require(!sendInk.isEmpty)
             #expect(sendInk.allSatisfy(Self.isTint), "\(style.rawValue): send drawn \(sendInk.prefix(3))")
-            let waveInk = try Self.ink(of: waveform, style)
-            try #require(!waveInk.isEmpty)
-            #expect(waveInk.allSatisfy(Self.isGrey), "\(style.rawValue): waveform drawn \(waveInk.prefix(3))")
-            greys[style] = waveInk.map(\.0).reduce(0, +) / CGFloat(waveInk.count)
+            let emoteInk = try Self.ink(of: emote, style)
+            try #require(!emoteInk.isEmpty)
+            #expect(emoteInk.allSatisfy(Self.isGrey), "\(style.rawValue): emote face drawn \(emoteInk.prefix(3))")
+            greys[style] = emoteInk.map(\.0).reduce(0, +) / CGFloat(emoteInk.count)
         }
         #expect((greys[.dark] ?? 0) > (greys[.light] ?? 1) + 0.3,
-                "the waveform's grey resolves per appearance: \(greys)")
+                "the emote face's grey resolves per appearance: \(greys)")
     }
 
     /// FAST: a down-then-up replace at 2.5× the system's speed (about 0.3 s at
@@ -174,7 +173,7 @@ struct CommentsInputBarFieldTests {
         #expect(CommentsInputBar.fieldActionTransitionSpeed >= 2)
         for draft in ["", "Hello", ""] {
             bar.draftText = draft
-            let transition = try #require(bar.debugFieldActionButton.configuration?.symbolContentTransition)
+            let transition = try #require(bar.debugRowActionButton.configuration?.symbolContentTransition)
             #expect(transition.options == .speed(CommentsInputBar.fieldActionTransitionSpeed))
             let replace = try #require(transition.contentTransition as? ReplaceSymbolEffect)
             #expect(replace == .replace.downUp)
@@ -183,41 +182,39 @@ struct CommentsInputBarFieldTests {
 
     /// Glyph and ink land in ONE update, at once: right after a keystroke the
     /// drawn image view already shows the arrow in blue, and right after the
-    /// field empties the waveform in grey — no later layout pass (which a
+    /// field empties the emote face in grey — no later layout pass (which a
     /// line break runs inside the growth spring) owes either half.
     @Test func glyphAndInkChangeInTheSameUpdate() throws {
         let (bar, _, window) = hostedBar()
         defer { window.isHidden = true }
-        let action = bar.debugFieldActionButton
+        let action = bar.debugRowActionButton
         func drawnInk() throws -> [(CGFloat, CGFloat, CGFloat)] {
-            let drawn = try #require(
-                Self.descendants(of: action).compactMap { $0 as? UIImageView }.first { $0.image != nil }
-            )
+            let drawn = try #require(action.imageView)
             return try Self.ink(of: #require(drawn.image), bar.traitCollection.userInterfaceStyle)
         }
         #expect(try drawnInk().allSatisfy(Self.isGrey))
         for draft in ["H", "Hello\nworld", "", "Hi"] {
             bar.draftText = draft
             let sends = !draft.isEmpty
-            #expect(bar.debugFieldActionSymbol
-                == (sends ? CommentsInputBar.sendSymbol : CommentsInputBar.waveformSymbol))
+            #expect(bar.debugOwnBubbleSymbol
+                == (sends ? CommentsInputBar.sendSymbol : CommentsInputBar.emoteSymbol))
             let ink = try drawnInk()
             try #require(!ink.isEmpty)
             #expect(ink.allSatisfy(sends ? Self.isTint : Self.isGrey),
                     "\(draft.debugDescription): drawn \(ink.prefix(3))")
             // The spinner's ink agrees with the face.
             let base = action.configuration?.baseForegroundColor
-            #expect(base == (sends ? CommentsInputBar.sendTint : CommentsInputBar.waveformTint))
+            #expect(base == (sends ? CommentsInputBar.sendTint : CommentsInputBar.restingTint))
         }
     }
 
     // MARK: - Trailing glyphs
 
-    /// Every face of the field's two trailing buttons — the emote face and
-    /// its keyboard face, the waveform, the send disc, the send's spinner —
-    /// drawn WHOLE inside its button, and each button inside the field, at
-    /// every text size from the smallest to the largest accessibility size.
-    /// The send disc stands concentric with the field's trailing cap.
+    /// Every face of the row's trailing buttons — the field's emote button
+    /// and its keyboard face, the own bubble's emote face, send and spinner
+    /// — drawn WHOLE inside its button, the emote button inside the field
+    /// and the own bubble outside it, at every text size from the smallest
+    /// to the largest accessibility size.
     @Test(arguments: [
         UIContentSizeCategory.extraSmall, .large, .extraExtraExtraLarge,
         .accessibilityMedium, .accessibilityExtraExtraExtraLarge,
@@ -226,17 +223,20 @@ struct CommentsInputBarFieldTests {
         let (bar, screen, window) = hostedBar(category: category)
         defer { window.isHidden = true }
         let field = try #require(SnapActionColumnLayoutTests.fieldView(in: bar))
-        let action = bar.debugFieldActionButton
-        let toggle = try #require(
-            field.contentView.subviews.compactMap { $0 as? UIButton }.first { $0 !== action }
-        )
+        let bubble = bar.debugRowActionButton
+        let toggle = bar.debugEmoteToggle
 
         func expectWhole(_ button: UIButton, _ face: String) throws {
             screen.view.layoutIfNeeded()
             button.layoutIfNeeded()
             let inField = button.convert(button.bounds, to: field.contentView)
-            #expect(field.contentView.bounds.insetBy(dx: -0.5, dy: -0.5).contains(inField),
-                    "\(face) @\(category.rawValue): the button \(inField) leaves the field \(field.bounds)")
+            if button === toggle {
+                #expect(field.contentView.bounds.insetBy(dx: -0.5, dy: -0.5).contains(inField),
+                        "\(face) @\(category.rawValue): the button \(inField) leaves the field \(field.bounds)")
+            } else {
+                #expect(inField.minX >= field.contentView.bounds.maxX - 0.5,
+                        "\(face) @\(category.rawValue): the own bubble \(inField) overlaps the field \(field.bounds)")
+            }
             let glyphs = Self.descendants(of: button).filter {
                 !$0.isHidden && $0.alpha > 0.01 && ($0 is UIImageView || $0 is UIActivityIndicatorView)
             }
@@ -252,19 +252,15 @@ struct CommentsInputBarFieldTests {
             }
         }
 
-        try expectWhole(toggle, "emote face")
-        try expectWhole(action, "waveform")
+        try expectWhole(bubble, "emote face")
+        // The field's emote button shows with a draft (the bubble is the
+        // emote button over an empty field).
         bar.draftText = "Hello"
-        try expectWhole(action, "send")
-        // Concentric with the cap: the cap's circle is the field's last
-        // `controlSize` square, bottom-anchored like the button.
-        let cap = CommentsInputBar.Metrics.controlSize
-        let disc = action.convert(action.bounds, to: field)
-        #expect(abs(disc.midX - (field.bounds.width - cap / 2)) < 0.5)
-        #expect(abs(disc.midY - (field.bounds.height - cap / 2)) < 0.5)
+        try expectWhole(toggle, "emote button")
+        try expectWhole(bubble, "send")
 
         bar.isSending = true
-        try expectWhole(action, "spinner")
+        try expectWhole(bubble, "spinner")
         bar.isSending = false
 
         // The emote panel's face (EmoteKit swaps the toggle's image to the
@@ -282,11 +278,9 @@ struct CommentsInputBarFieldTests {
         func widths(_ category: UIContentSizeCategory) throws -> [CGFloat] {
             let (bar, screen, window) = hostedBar(category: category)
             defer { window.isHidden = true }
-            let field = try #require(SnapActionColumnLayoutTests.fieldView(in: bar))
-            let action = bar.debugFieldActionButton
-            let toggle = try #require(
-                field.contentView.subviews.compactMap { $0 as? UIButton }.first { $0 !== action }
-            )
+            bar.draftText = "Hello"
+            let action = bar.debugRowActionButton
+            let toggle = bar.debugEmoteToggle
             screen.view.layoutIfNeeded()
             #expect(toggle.showsLargeContentViewer && action.showsLargeContentViewer)
             // The spinner too: it sizes itself by the button's text size
@@ -307,32 +301,32 @@ struct CommentsInputBarFieldTests {
         #expect(small == huge, "the glyphs scaled with the text: \(small) → \(huge)")
     }
 
-    /// The emote toggle and the field button answer to a 44pt target around
-    /// what they draw, however narrow the glyph's own frame.
-    @Test func theFieldButtonsAnswerToA44ptTarget() throws {
+    /// The field's emote button answers to a 44pt target around what it
+    /// draws, however narrow the glyph's own frame — never over the own
+    /// bubble beside the field.
+    @Test func theEmoteButtonAnswersToA44ptTarget() throws {
         let (bar, _, window) = hostedBar()
         defer { window.isHidden = true }
         let field = try #require(SnapActionColumnLayoutTests.fieldView(in: bar))
-        let action = bar.debugFieldActionButton
-        let toggle = try #require(
-            field.contentView.subviews.compactMap { $0 as? UIButton }.first { $0 !== action }
-        )
+        bar.draftText = "Hello"
+        bar.layoutIfNeeded()
+        let toggle = bar.debugEmoteToggle
         let reach = CommentsInputBar.Metrics.minimumHitSide / 2 - 0.5
-        for (button, outward) in [(action, CGFloat(1)), (toggle, -1)] {
-            let frame = button.convert(button.bounds, to: bar)
-            let points = [
-                CGPoint(x: frame.midX, y: frame.midY - reach),
-                CGPoint(x: frame.midX, y: frame.midY + reach),
-                CGPoint(x: frame.midX + outward * max(frame.width / 2 - 0.5, reach), y: frame.midY),
-            ]
-            for point in points {
-                #expect(bar.hitTest(point, with: nil) === button,
-                        "\(button.accessibilityLabel ?? "-") missed at \(point) (frame \(frame))")
-            }
+        let frame = toggle.convert(toggle.bounds, to: bar)
+        let points = [
+            CGPoint(x: frame.midX, y: frame.midY - reach),
+            CGPoint(x: frame.midX, y: frame.midY + reach),
+            CGPoint(x: frame.midX + max(frame.width / 2 - 0.5, reach), y: frame.midY),
+        ]
+        for point in points {
+            #expect(bar.hitTest(point, with: nil) === toggle, "the emote button missed at \(point) (frame \(frame))")
         }
-        // Well outside both, the field's own touches are untouched.
+        // Well outside it, the field's own touches are untouched; the own
+        // bubble keeps its own.
         let text = CGPoint(x: field.frame.minX + 40, y: field.frame.midY)
-        #expect(bar.hitTest(text, with: nil) !== action && bar.hitTest(text, with: nil) !== toggle)
+        #expect(bar.hitTest(text, with: nil) !== toggle)
+        let bubble = bar.debugRowActionButton.frame
+        #expect(bar.hitTest(CGPoint(x: bubble.midX, y: bubble.midY), with: nil) !== toggle)
     }
 
     // MARK: - Growth
