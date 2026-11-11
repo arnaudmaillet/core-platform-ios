@@ -313,7 +313,8 @@ struct SnapActionColumnLayoutTests {
         #expect(sound.maxX == like.maxX)
         #expect(abs(sound.minY - (like.maxY + SnapActionColumn.gap)) < 0.5)
         #expect(chrome.debugCaptionFrame.maxX <= sound.minX - Spacing.md + 0.5)
-        #expect(chrome.debugPageBarFrame.maxX == chrome.debugCaptionFrame.maxX)
+        // The strip runs on under the cover to the column's edge (#2291).
+        #expect(abs(chrome.debugPageBarFrame.maxX - sound.maxX) < 0.5)
         #expect(chrome.interactionRoots.contains { $0 === chrome.debugSoundBubble })
     }
 
