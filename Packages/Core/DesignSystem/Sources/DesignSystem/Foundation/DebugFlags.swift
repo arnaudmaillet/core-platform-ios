@@ -33,8 +33,6 @@ public enum DebugFlags {
         Flag(argument: "-voice-posts", title: "Voice posts",
              detail: "A text post's caption can be a voice: drawn on every surface, recorded in the composer (#2204)",
              appliesAtLaunch: true),
-        Flag(argument: "-map-text-bubble", title: "Map text-post bubble",
-             detail: "The text marker nearest the map's centre opens a glass bubble with its author and words", appliesAtLaunch: true),
         Flag(argument: "-viewport-share", title: "Viewport share trace",
              detail: "Logs the half-the-display playback measure (#1914)", appliesAtLaunch: false),
         Flag(argument: "-pull-refresh-trace", title: "Pull to refresh trace",

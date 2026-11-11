@@ -221,7 +221,7 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerDressing
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
         guard !card.isAwaitingIcon else { return false }
         // The featured marker's bubble is the marker's too: a tap anywhere on
-        // it opens the post (`-map-text-bubble`, the owner, 2026-11-09).
+        // it opens the post (the text bubble, #2203, the owner, 2026-11-09).
         if let bubble = featuredHalo.bubbleHitFrame, bubble.contains(point) { return true }
         return super.point(inside: point, with: event)
     }
@@ -404,7 +404,7 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerDressing
         card.reinstallPreviewPlayback()
     }
 
-    // MARK: - Featured by the text bubble (`-map-text-bubble`)
+    // MARK: - Featured by the text bubble (#2203)
 
     /// The marker the map's text bubble speaks for (`MapFeaturedHalo`).
     let featuredHalo = MapFeaturedHalo()
@@ -416,7 +416,7 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerDressing
         featuredHalo.set(featured, card: card, in: self, animated: animated)
     }
 
-    /// `-map-text-bubble`: the bubble round the featured marker, or none.
+    /// The text bubble (#2203): the bubble round the featured marker, or none.
     /// The post the bubble speaks for, while one shows.
     var bubblePostID: PostID? { featuredHalo.bubblePostID }
 

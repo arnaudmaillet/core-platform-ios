@@ -282,7 +282,7 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
             // the fleet too, where there is no country access yet (#564).
             // Members there still see no location controls without it.
             locator: locator,
-            // `-map-text-bubble`: a text post's words, from the feed's store.
+            // The text bubble (#2203): a text post's words, from the feed's store.
             loadTextPosts: { ids in await feedFeature().galleryPosts(ids) },
             heldTextPost: { id in feedFeature().heldGalleryPost(id) }
         )

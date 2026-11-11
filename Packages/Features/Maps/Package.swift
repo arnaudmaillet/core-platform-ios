@@ -42,7 +42,7 @@ let package = Package(
                 "DesignSystem",
                 "MediaCore",
                 "MediaPlayback",
-                // `GalleryPost`: the text bubble's words (`-map-text-bubble`).
+                // `GalleryPost`: the text bubble's words (the text bubble, #2203).
                 "PostGrid",
                 // The flag palette lives in the device cache's UI assets class
                 // (#971).

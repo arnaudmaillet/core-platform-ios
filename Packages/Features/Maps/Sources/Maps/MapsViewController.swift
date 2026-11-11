@@ -294,11 +294,10 @@ final class MapsViewController: UIViewController {
     /// around you" card while nothing is open (guest mode §3.1).
     private let locationControls = MapLocationControlsView()
 
-    // MARK: The text bubble (`-map-text-bubble`, the owner 2026-11-09)
+    // MARK: The text bubble (#2203; every build since #2299)
 
-    /// Whether the text marker nearest the map's centre opens a bubble round
-    /// it with its author and words (`MapTextBubbleView`).
-    let usesTextBubble = DebugFlags.isOn("-map-text-bubble")
+    /// The text marker nearest the map's centre opens a bubble round it with
+    /// its author and words (`MapTextBubbleView`).
     /// The marker the bubble speaks for.
     var textBubbleFeatured: (any MKAnnotation)?
     /// The text posts' words, as they arrive.
@@ -1212,7 +1211,7 @@ final class MapsViewController: UIViewController {
         mapView.showsCompass = true
         // They filter posts the guest cannot see.
         filterBar.isHidden = locked
-        if usesTextBubble { updateTextBubble(animated: view.window != nil) }
+        updateTextBubble(animated: view.window != nil)
         if locked {
             subFilterBar.isHidden = true
             pendingQuery?.cancel()

@@ -121,7 +121,7 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerD
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
         guard !card.isAwaitingIcon else { return false }
         // The featured marker's bubble is the marker's too: a tap anywhere on
-        // it opens the post (`-map-text-bubble`, the owner, 2026-11-09).
+        // it opens the post (the text bubble, #2203, the owner, 2026-11-09).
         if let bubble = featuredHalo.bubbleHitFrame, bubble.contains(point) { return true }
         return super.point(inside: point, with: event)
     }
@@ -332,7 +332,7 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerD
     /// bound player to the pool before it is reused for another group.
     var onReuse: (() -> Void)?
 
-    // MARK: - Featured by the text bubble (`-map-text-bubble`)
+    // MARK: - Featured by the text bubble (#2203)
 
     /// A group whose face is a text post, featured as a single marker is.
     let featuredHalo = MapFeaturedHalo()
@@ -347,7 +347,7 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerD
     /// The post the bubble speaks for, while one shows.
     var bubblePostID: PostID? { featuredHalo.bubblePostID }
 
-    /// `-map-text-bubble`: the bubble round the featured marker, or none.
+    /// The text bubble (#2203): the bubble round the featured marker, or none.
     /// The pipeline the last configure handed over, for the bubble's
     /// showcase card (#2216).
     private var bubblePipeline: ImagePipeline?

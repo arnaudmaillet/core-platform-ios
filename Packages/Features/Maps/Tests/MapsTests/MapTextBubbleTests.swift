@@ -6,7 +6,7 @@ import Testing
 import UIKit
 @testable import Maps
 
-/// `-map-text-bubble` (the owner, 2026-11-09): the text marker nearest the
+/// The text bubble (#2203, the owner, 2026-11-09; every build since #2299): the text marker nearest the
 /// map's centre opens a glass bubble round it, with its author and words.
 @MainActor
 struct MapTextBubbleTests {
@@ -171,10 +171,24 @@ struct MapTextBubbleTests {
         #expect(card.transform == CGAffineTransform(scaleX: MapFeaturedHalo.scale, y: MapFeaturedHalo.scale))
     }
 
-    /// The flag is the debug dashboard's, read at launch; the other text
-    /// cards' flags are gone.
-    @Test func theFlagIsListed() {
-        #expect(DebugFlags.all.contains { $0.argument == "-map-text-bubble" && $0.appliesAtLaunch })
-        #expect(!DebugFlags.all.contains { $0.argument == "-map-text-card" || $0.argument == "-map-text-bubble-around" })
+    /// The bubble ships in every build (#2299): its flag is gone, as the
+    /// other text cards' flags are.
+    @Test func noFlagIsLeft() {
+        let retired: Set<String> = ["-map-text" + "-bubble", "-map-text-card", "-map-text" + "-bubble-around"]
+        #expect(!DebugFlags.all.contains { retired.contains($0.argument) })
+    }
+
+    /// Nothing gates the bubble any more (#2299): the map features the
+    /// nearest text marker with no argument passed. Read off the sources,
+    /// since a whole map screen won't stand up in a unit test.
+    @Test func nothingGatesTheBubble() throws {
+        let maps = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/Maps")
+        for name in ["MapsViewController.swift", "MapsViewController+TextBubble.swift"] {
+            let source = try String(contentsOf: maps.appendingPathComponent(name), encoding: .utf8)
+            #expect(!source.contains("usesTextBubble"), "\(name) still gates the bubble")
+            #expect(!source.contains("DebugFlags.isOn(\"-map-text"), "\(name) still reads a bubble flag")
+        }
     }
 }

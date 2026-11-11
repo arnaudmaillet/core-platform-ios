@@ -4,7 +4,7 @@ import MapKit
 import PostGrid
 import UIKit
 
-/// `-map-text-bubble` (the owner, 2026-11-09): the TEXT marker nearest the
+/// The text bubble (#2203, the owner, 2026-11-09; every build since #2299): the TEXT marker nearest the
 /// map's centre opens a bubble round it with its author and its words — see
 /// `MapTextBubbleView` and `MapFeaturedHalo`.
 ///
@@ -95,7 +95,6 @@ extension MapsViewController {
 
     /// The marker nearest the open part's centre takes the bubble.
     func updateTextBubble(animated: Bool) {
-        guard usesTextBubble else { return }
         guard !isGuestLocked else { return feature(nil, animated: animated) }
         let candidates = textBubbleCandidates()
         let open = textBubbleOpenRect
@@ -190,7 +189,6 @@ extension MapsViewController {
     /// The map rests: the bubble picks again, a moment later — unless the
     /// map moves again first.
     func textBubbleRegionSettled() {
-        guard usesTextBubble else { return }
         scheduleTextBubbleUpdate()
     }
 
@@ -200,7 +198,7 @@ extension MapsViewController {
     /// now — never the old words round a new face (the owner, 2026-11-09, a
     /// fast zoom) — and the next pick, once the map rests, opens the right one.
     func textBubbleMarkerChanged(_ annotation: any MKAnnotation) {
-        guard usesTextBubble, Self.same(annotation, textBubbleFeatured) else { return }
+        guard Self.same(annotation, textBubbleFeatured) else { return }
         let shown: PostID? = switch mapView.view(for: annotation) {
         case let single as MapAnnotationView: single.bubblePostID
         case let group as MapClusterAnnotationView: group.bubblePostID
@@ -233,7 +231,6 @@ extension MapsViewController {
     /// Markers arrived: the featured one stands out again (a view realized
     /// afresh) and opens its bubble, and one may be the first post.
     func textBubbleViewsAdded(_ views: [MKAnnotationView]) {
-        guard usesTextBubble else { return }
         if let featured = textBubbleFeatured {
             for view in views where Self.same(view.annotation, featured) {
                 (view as? MapAnnotationView)?.setFeatured(true, animated: false)
