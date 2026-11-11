@@ -182,8 +182,10 @@ open class AppControl: UIButton {
         )
         // The wash follows the SAME finger decisions as the press.
         pressFeedback?.onPressChanged = { [weak self] _ in self?.applyWash() }
-        // The ground swells by its own size, about its own middle.
+        // The ground swells by its own size, about its own middle: its size
+        // grows, and the content scales evenly (#2284).
         pressFeedback?.drawnRect = { [weak self] in self?.groundRect ?? .zero }
+        pressFeedback?.grounds = { [weak self] in self?.groundLayers ?? [] }
         addAction(UIAction { [weak self] _ in self?.prepareHaptic() }, for: .touchDown)
         addAction(UIAction { [weak self] _ in self?.tapped() }, for: .primaryActionTriggered)
         NotificationCenter.default.addObserver(
@@ -235,6 +237,30 @@ open class AppControl: UIButton {
 
     /// The ground drawn now; nil for none.
     open var currentGround: Ground? { nil }
+
+    /// What draws the ground, for the swell (#2284): every view laid on the
+    /// ground's rect — the configuration's background, the material, the
+    /// prominent fill, the wash, the flash — but the content (the words,
+    /// the symbol). Under a finger their SIZE grows, as a system glass
+    /// button's platter does, round at every frame; the content scales by
+    /// one factor on both axes (`PressFeedback.swell(for:)`).
+    ///
+    /// ⚠️ **BY WHERE IT IS LAID, NOT BY NAME.** The configuration's
+    /// background is UIKit's own view, with no API to reach it; it is the one
+    /// laid on the ground's rect (`backgroundInsets`), as ours are. The words
+    /// and the symbol are told by their kind — asking `titleLabel` would
+    /// build a label on a button that has none. Hidden views are left out.
+    open var groundLayers: [CALayer] {
+        let ground = groundRect
+        let whole = bounds
+        func laid(_ frame: CGRect, on rect: CGRect) -> Bool {
+            abs(frame.minX - rect.minX) < 0.5 && abs(frame.minY - rect.minY) < 0.5
+                && abs(frame.width - rect.width) < 0.5 && abs(frame.height - rect.height) < 0.5
+        }
+        return subviews.filter { view in
+            !view.isHidden && !(view is UILabel) && !(view is UIImageView) && (laid(view.frame, on: ground) || laid(view.frame, on: whole))
+        }.map(\.layer)
+    }
 
     /// Whether a ground is drawn at all now — false while a placeholder's
     /// bone is the whole picture.

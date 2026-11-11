@@ -203,8 +203,9 @@ struct ThreadVoiceViewTests {
     }
 
     /// A finger scrubbing the bars swells the whole panel as one (#2274) —
-    /// the bars, the timer and the chip move nothing inside it; it settles
-    /// when the scrub ends.
+    /// the bars, the timer and the chip move nothing inside it, and scale by
+    /// one factor while the ground grows (#2284); it settles when the scrub
+    /// ends.
     @Test func scrubbingSwellsThePanel() {
         var state = ThreadVoiceView.State(levels: Array(repeating: 9, count: 100), duration: 12)
         state.playback = .playing(progress: 0.3)
@@ -213,7 +214,11 @@ struct ThreadVoiceViewTests {
         #expect(view.debugShowsChip && view.debugPanelTransform == .identity)
         view.waveform.onSeek?(0.5, true)
         #expect(view.debugShowsChip, "the chip stays")
-        #expect(view.debugPanelTransform == ThreadVoiceView.swelledScale(for: view.debugPanelRestingSize))
+        let resting = view.debugPanelRestingSize
+        #expect(view.debugPanelTransform == ThreadVoiceView.swelledScale(for: resting))
+        #expect(view.debugPanelTransform.a == view.debugPanelTransform.d, "the panel's content is stretched")
+        #expect(view.debugGroundSize == ThreadVoiceView.swelledGroundSize(for: resting), "the ground didn't grow")
+        #expect(view.debugGroundSize.height > resting.height)
         #expect(view.debugPartTransforms.allSatisfy { $0 == .identity }, "a part moved inside the panel")
         view.waveform.onSeek?(0.6, false)
         #expect(view.debugPanelTransform == .identity)

@@ -433,7 +433,7 @@ struct AppButtonTests {
         button.sendActions(for: .touchDown)
         button.sendActions(for: .touchDragEnter)
         #expect(press.isPressed)
-        #expect(press.scale == (reduced ? 1 : PressFeedback.swelledScale(for: button.bounds.size).y))
+        #expect(press.scale == (reduced ? 1 : PressFeedback.swell(for: button.groundRect.size).content))
         #expect(reduced || press.scale > 1, "a pill gave under the finger instead of swelling")
         button.sendActions(for: .touchUpInside)
         let presses = press.debugEvents.filter { if case .pressed = $0 { true } else { false } }
@@ -442,6 +442,53 @@ struct AppButtonTests {
         #expect(releases.count == 1)
         #expect(press.debugEvents.last == .released(tap: false, sprang: !reduced), "silent unless a sound is asked")
         #expect(PressFeedback.attached(to: button) === press, "a second press was attached")
+    }
+
+    /// A full-width Continue under the finger (#2284): its words scale by
+    /// ONE factor on both axes, about 5 %, while its ground — the prominent
+    /// fill, and whatever else is laid on the ground's rect — grows by the
+    /// swell's points across and down, a capsule still. Nothing of the
+    /// content grows in size; under Reduce Motion nothing moves at all.
+    @Test(arguments: [false, true])
+    func aWideButtonsWordsScaleEvenlyWhileItsGroundGrows(_ reduced: Bool) throws {
+        let button = AppButton(aspect: .pill(.prominent), size: .form, content: .title("Continue"))
+        button.reducesMotion = { reduced }
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 393, height: 852))
+        window.isHidden = true
+        button.translatesAutoresizingMaskIntoConstraints = false
+        window.addSubview(button)
+        NSLayoutConstraint.activate([
+            button.leadingAnchor.constraint(equalTo: window.leadingAnchor, constant: 16),
+            button.trailingAnchor.constraint(equalTo: window.trailingAnchor, constant: -16),
+            button.centerYAnchor.constraint(equalTo: window.centerYAnchor),
+        ])
+        window.layoutIfNeeded()
+        defer { window.isHidden = true }
+        let press = try #require(button.pressFeedback)
+        let rest = button.groundRect.size
+        #expect(rest.width > 300 && rest.height > 40, "guard: not a full-width button: \(rest)")
+
+        button.sendActions(for: .touchDown)
+        let grounds = press.debugGrownGrounds
+        guard !reduced else {
+            #expect(!press.debugIsHeldOnTheLayer && grounds.isEmpty, "something moved under Reduce Motion")
+            return
+        }
+        let held = try #require(PressFeedback.debugHeldScale(on: button.layer))
+        #expect(held.x == held.y, "the words are stretched: \(held)")
+        #expect(held.x > 1.04 && held.x < 1.06, "the words grew by \(held.x)")
+        #expect(grounds.contains { $0 === button.prominentGround.layer }, "the prominent fill is not the ground")
+        let words = button.subviews.filter { $0 is UILabel || $0 is UIImageView }.map(\.layer)
+        #expect(!grounds.contains { layer in words.contains { $0 === layer } }, "the words grew as a ground")
+        let grown = try #require(PressFeedback.debugHeldGround(on: button.prominentGround.layer))
+        let drawn = CGSize(width: grown.size.width * held.x, height: grown.size.height * held.y)
+        #expect(abs((drawn.width - rest.width) - 2 * PressFeedback.Metrics.swellAcross * rest.height) < 0.01, "across: \(drawn)")
+        #expect(abs((drawn.height - rest.height) - 2 * PressFeedback.Metrics.swellDown * rest.height) < 0.01, "down: \(drawn)")
+        #expect(abs(grown.cornerRadius - grown.size.height / 2) < 0.001, "the capsule's ends turned oval")
+        #expect(button.prominentGround.bounds.size == rest, "the swell wrote the model")
+
+        button.sendActions(for: .touchUpInside)
+        #expect(PressFeedback.debugHeldGround(on: button.prominentGround.layer) == nil, "the growth outlived the press")
     }
 
     @Test func aSoundIsTheTapsTick() throws {

@@ -72,6 +72,14 @@ public final class PressFeedback {
         /// finger, by the same few points whatever its width, overshooting a
         /// little, and springs back past rest on release — ticking on a tap.
         /// Its interactive stretch towards a dragging finger is not copied.
+        ///
+        /// ⚠️ **THE GROUND GROWS; THE CONTENT SCALES EVENLY (#2284).** Its
+        /// ground (`grounds`: a capsule, a bubble) reaches `swelledScale(for:)`
+        /// — more down than across on a wide button — with round corners at
+        /// every frame; everything else in it, the words, the glyph, scales
+        /// by ONE factor on both axes (`swell(for:)`). One two-factor
+        /// transform on the whole button stretched its words ~14 % taller
+        /// than wide on a full-width Continue (the owner, 2026-11-11).
         case swell
     }
 
@@ -151,13 +159,54 @@ public final class PressFeedback {
         public static let swellOut: (response: TimeInterval, dampingRatio: CGFloat) = (0.4, 0.37)
     }
 
-    /// The scales a swell takes an element of `size` to, across and down —
-    /// see `Metrics.swellAcross`. Never more across than down: a circle (a
-    /// 44pt bubble, a lone glyph) swells as a circle, not an ellipse.
+    /// The scales a swell takes the GROUND of an element of `size` to,
+    /// across and down — see `Metrics.swellAcross`. Never more across than
+    /// down: a circle (a 44pt bubble, a lone glyph) swells as a circle, not
+    /// an ellipse. Its content scales evenly instead (`swell(for:)`).
     public static func swelledScale(for size: CGSize) -> (x: CGFloat, y: CGFloat) {
         guard size.width > 0, size.height > 0 else { return (1, 1) }
         let down = 1 + 2 * Metrics.swellDown
         return (min(1 + 2 * Metrics.swellAcross * size.height / size.width, down), down)
+    }
+
+    /// A swell, split as it is drawn (#2284): the ONE factor the content
+    /// scales by on both axes, and what the ground grows by on top of it.
+    public struct Swell: Equatable, Sendable {
+        /// The content's scale, both axes: the ground's across factor — the
+        /// smaller of its two. On a wide button the words grow by about
+        /// 5 %; on a bubble by as much as its ground, so a bubble swells
+        /// exactly as it did.
+        public var content: CGFloat
+        /// What the ground's size grows by, in its own points — UNDER the
+        /// content's scale, so the ground drawn reaches `swelledScale(for:)`:
+        /// on a wide button its height alone, nothing on a square.
+        public var groundGrowth: CGSize
+    }
+
+    /// The swell of an element of `size`: its content's even factor, and
+    /// its ground's growth under it.
+    ///
+    /// ⚠️ **THE ACROSS FACTOR FOR THE CONTENT, BY DEFAULT (the owner,
+    /// 2026-11-11).** What a system glass button's label does under its
+    /// swelling platter is still to be measured on video; if it turns out to
+    /// be something else, this is the one line that says so.
+    public static func swell(for size: CGSize) -> Swell {
+        let ground = swelledScale(for: size)
+        let content = min(ground.x, ground.y)
+        guard content > 0 else { return Swell(content: 1, groundGrowth: .zero) }
+        return Swell(
+            content: content,
+            groundGrowth: CGSize(width: size.width * (ground.x / content - 1), height: size.height * (ground.y / content - 1))
+        )
+    }
+
+    /// The corner radius a ground of `size`, drawn with `radius`, takes once
+    /// grown by `growth`: a capsule — or a circle — stays one at every
+    /// frame; any other corner (a card's) keeps its radius.
+    public static func grownCornerRadius(_ radius: CGFloat, of size: CGSize, by growth: CGSize) -> CGFloat {
+        let shorter = min(size.width, size.height)
+        guard radius > 0, radius >= shorter / 2 - 0.5 else { return radius }
+        return min(size.width + growth.width, size.height + growth.height) / 2
     }
 
     /// The scale a press takes an element of `size` to — see `Metrics.depth`.
@@ -184,7 +233,8 @@ public final class PressFeedback {
 
     /// The factor the target is currently held at: the pressed or grown scale
     /// while a finger is down, 1 otherwise — and 1 throughout under Reduce
-    /// Motion, when nothing moves.
+    /// Motion, when nothing moves. A swell's is its content's even factor
+    /// (`swell(for:)`); its ground grows the rest in size.
     ///
     /// ⚠️ **THE TARGET, NOT THE PRESENTATION.** A ruler divides its drag by
     /// this, so the tick under the finger stays under it while the strip is
@@ -193,8 +243,15 @@ public final class PressFeedback {
     /// copy on every sample of every drag; a drag rarely starts inside that
     /// tenth, and when it does the error is a fraction of the six percent.
     public private(set) var scale: CGFloat = 1
-    /// The scales held, across and down — a swell's differ.
+    /// The scales held, across and down.
     private var held: (x: CGFloat, y: CGFloat) = (1, 1)
+    /// What a swell's ground grows by while held (#2284), and the layers it
+    /// grew: the grounds, and the stand-ins taking the target's place.
+    private var heldGrowth: CGSize = .zero
+    private var grownGrounds: [CALayer] = []
+    /// The last press's growth, kept past its release for a stand-in taking
+    /// the target's place while the ground springs back (`copyPress`).
+    private var lastGrowth: CGSize = .zero
 
     /// Whether a finger is pressing, as far as this feedback knows.
     public private(set) var isPressed = false
@@ -349,8 +406,9 @@ public final class PressFeedback {
         let drawn = drawnRect?() ?? target.bounds
         pivotOffset = CGPoint(x: drawn.midX - target.bounds.midX, y: drawn.midY - target.bounds.midY)
         if style == .swell {
-            let swelled = Self.swelledScale(for: drawn.size)
-            held = moves ? swelled : (1, 1)
+            let swell = Self.swell(for: drawn.size)
+            let even = swell.content
+            held = moves ? (even, even) : (1, 1)
             scale = held.y
             #if DEBUG
             record(.pressed(scale: scale))
@@ -358,9 +416,11 @@ public final class PressFeedback {
             guard moves else { return }
             // Held, then sprung into from where it stands, in one turn: the
             // two cancel on the first frame, and the spring's overshoot is
-            // the crest past the swell.
-            move(target.layer, Self.holding(swelled.x, swelled.y), forKey: Self.holdKey)
-            move(target.layer, Self.springing(from: (1 / swelled.x, 1 / swelled.y), Metrics.swellIn), forKey: nil)
+            // the crest past the swell. The whole target scales EVENLY — the
+            // content's factor — and its ground grows the rest, in size.
+            move(target.layer, Self.holding(even, even), forKey: Self.holdKey)
+            move(target.layer, Self.springing(from: (1 / even, 1 / even), Metrics.swellIn), forKey: nil)
+            grow(by: swell.groundGrowth)
             return
         }
         let factor = style == .hold ? Metrics.heldScale : Self.pressedScale(for: drawn.size)
@@ -390,9 +450,13 @@ public final class PressFeedback {
     public func release(asTap: Bool) {
         let wasPressed = isPressed
         let heldScales = held
+        let growth = heldGrowth
+        let grown = grownGrounds
         isPressed = false
         scale = 1
         held = (1, 1)
+        heldGrowth = .zero
+        grownGrounds = []
         if wasPressed { onPressChanged?(false) }
         if isDimmed, let layer = target?.layer {
             isDimmed = false
@@ -406,6 +470,15 @@ public final class PressFeedback {
             mirrors.forEach { $0.removeAnimation(forKey: Self.holdKey) }
             if style == .swell {
                 move(layer, Self.springing(from: heldScales, Metrics.swellOut), forKey: nil)
+                // The ground springs back from its growth on the same curve.
+                if growth != .zero {
+                    let back = Self.growing(growth, .spring(from: 1, Metrics.swellOut))
+                    let key = nextMotionKey(Self.growKey)
+                    for ground in grown {
+                        Self.removeGrowth(forKey: Self.growHoldKey, from: ground)
+                        Self.applyGrowth(back, growth: growth, to: ground, forKey: key)
+                    }
+                }
             } else {
                 move(layer, Self.springing(from: heldScales.y), forKey: nil)
             }
@@ -422,7 +495,25 @@ public final class PressFeedback {
     /// Layers that move with the target — a stand-in drawn in its place
     /// (`AppButton`'s content change): every scale the press adds to the
     /// target, it adds to them too, so a release lands on what is on screen.
+    ///
+    /// ⚠️ **A STAND-IN FOR THE WHOLE TARGET, ITS LAYER THE GROUND'S SHAPE**
+    /// (#2284): under a swell it scales by the content's even factor, as the
+    /// target does, and its own layer grows as the ground does — the layers
+    /// filling it with it (the stretched ground), the rest (its content)
+    /// kept on its middle.
     public var mirrors: [CALayer] = []
+
+    /// The layers that draw the target's ground — a capsule, a bubble — for
+    /// a swell (#2284): their SIZE grows (bounds and a capsule's corner
+    /// radius, additive, never the model), so the ground keeps round
+    /// corners at every frame; everything else in the target is content and
+    /// scales by one factor (`swell(for:)`). Nil: the target is all content.
+    ///
+    /// ⚠️ **EACH GROUND GROWS ABOUT ITS OWN MIDDLE, WITH WHAT FILLS IT.** A
+    /// layer the size of its parent grows with it (a fill view inside a
+    /// background view, a blur's backdrop); its bounds' origin moves by half
+    /// the growth, so anything else inside stays on its middle.
+    public var grounds: (@MainActor () -> [CALayer])?
 
     /// What the target draws, in its own bounds — the bounds when nil. A
     /// button holding a slot wider than its capsule (`AppButton.groundRect`)
@@ -438,10 +529,33 @@ public final class PressFeedback {
     /// place could not pick up the spring back already running. The stand-in
     /// is drawn on the capsule's middle: it scales about its own.
     private func move(_ layer: CALayer, _ animation: CAAnimation, forKey key: String?) {
-        motions += 1
-        let named = key ?? "\(Self.motionKey).\(motions)"
+        let named = key ?? nextMotionKey(Self.motionKey)
         layer.add(Self.pivoted(animation, by: pivotOffset), forKey: named)
         mirrors.forEach { $0.add(animation, forKey: named) }
+    }
+
+    /// A key no animation of this feedback holds yet, under `prefix`.
+    private func nextMotionKey(_ prefix: String) -> String {
+        motions += 1
+        return "\(prefix).\(motions)"
+    }
+
+    /// The swell's ground grows by `growth` (#2284): held there, and sprung
+    /// into from rest on the content's curve — the grounds, and the
+    /// stand-ins taking the target's place. Nothing on a square: its ground
+    /// scales with its content.
+    private func grow(by growth: CGSize) {
+        lastGrowth = growth
+        guard growth != .zero else { return }
+        heldGrowth = growth
+        grownGrounds = (grounds?() ?? []) + mirrors
+        let hold = Self.growing(growth, .hold)
+        let spring = Self.growing(growth, .spring(from: -1, Metrics.swellIn))
+        let key = nextMotionKey(Self.growKey)
+        for ground in grownGrounds {
+            Self.applyGrowth(hold, growth: growth, to: ground, forKey: Self.growHoldKey)
+            Self.applyGrowth(spring, growth: growth, to: ground, forKey: key)
+        }
     }
 
     /// `animation`'s scales taken about a point `offset` from the layer's
@@ -477,19 +591,128 @@ public final class PressFeedback {
     private var motions = 0
     private static let motionKey = "designSystem.pressFeedback.motion"
 
-    /// The press's scales now on `layer`, onto `mirror` — a stand-in that
-    /// takes the target's place mid-press.
-    public static func copyPress(from layer: CALayer, to mirror: CALayer) {
-        for key in layer.animationKeys() ?? [] where key == holdKey || key.hasPrefix(motionKey) {
+    /// The press now on the target, onto `mirror` — a stand-in that takes
+    /// the target's place mid-press: its scales, and under a swell its
+    /// ground's growth (#2284), each where it stands in its course.
+    public func copyPress(to mirror: CALayer) {
+        guard let layer = target?.layer else { return }
+        for key in layer.animationKeys() ?? [] where key == Self.holdKey || key.hasPrefix(Self.motionKey) {
             guard let running = layer.animation(forKey: key) else { continue }
-            mirror.add(unpivoted(running), forKey: key)
+            mirror.add(Self.unpivoted(running), forKey: key)
         }
+        // The spring back too, once the finger is up: the change a tap
+        // makes starts as its spring runs.
+        let growth = lastGrowth
+        guard growth != .zero, let source = grownGrounds.first ?? grounds?().first else { return }
+        for key in source.animationKeys() ?? [] where key == Self.growHoldKey || (key.hasPrefix(Self.growKey + ".") && !key.hasSuffix(Self.cornerSuffix)) {
+            guard let running = source.animation(forKey: key) as? CABasicAnimation else { continue }
+            Self.applyGrowth(running, growth: growth, to: mirror, forKey: key)
+        }
+        if isPressed { grownGrounds.append(mirror) }
     }
 
     // MARK: - The curves
 
     private static let holdKey = "designSystem.pressFeedback.hold"
     private static let dimKey = "designSystem.pressFeedback.dim"
+    /// The swell's ground growth (#2284): held, and its springs; a capsule's
+    /// corner follows under the same key and this suffix.
+    private static let growHoldKey = "designSystem.pressFeedback.growHold"
+    private static let growKey = "designSystem.pressFeedback.grow"
+    private static let cornerSuffix = ".corner"
+
+    /// How a ground's growth runs: held, or sprung home from a share of it.
+    private enum GrowthCurve {
+        case hold
+        case spring(from: CGFloat, (response: TimeInterval, dampingRatio: CGFloat))
+    }
+
+    /// The bounds' share of `growth`, as an additive rect: the size grown by
+    /// it, the origin moved back by half — so the layer grows about its
+    /// middle (its position is its anchor) and what it holds stays on that
+    /// middle.
+    private static func growthRect(_ share: CGFloat, _ growth: CGSize) -> NSValue {
+        NSValue(cgRect: CGRect(
+            x: -share * growth.width / 2, y: -share * growth.height / 2,
+            width: share * growth.width, height: share * growth.height
+        ))
+    }
+
+    /// The growth on `bounds`, additive: held at all of it, or sprung from
+    /// a share of it to none — with the swell's own springs, so the ground
+    /// keeps time with the content's scale.
+    private static func growing(_ growth: CGSize, _ curve: GrowthCurve) -> CABasicAnimation {
+        switch curve {
+        case .hold:
+            let hold = CABasicAnimation(keyPath: "bounds")
+            hold.isAdditive = true
+            hold.fromValue = growthRect(1, growth)
+            hold.toValue = growthRect(1, growth)
+            hold.duration = 1
+            hold.fillMode = .forwards
+            hold.isRemovedOnCompletion = false
+            return hold
+        case .spring(let share, let physics):
+            let spring = CASpringAnimation(keyPath: "bounds")
+            spring.isAdditive = true
+            spring.fromValue = growthRect(share, growth)
+            spring.toValue = growthRect(0, growth)
+            let omega = 2 * CGFloat.pi / CGFloat(physics.response)
+            spring.mass = 1
+            spring.stiffness = omega * omega
+            spring.damping = 2 * physics.dampingRatio * omega
+            spring.duration = spring.settlingDuration
+            return spring
+        }
+    }
+
+    /// `animation` — a growth on `bounds` — onto `layer` and every layer
+    /// filling it, with a capsule's corner following on the same curve
+    /// (`grownCornerRadius`).
+    ///
+    /// ⚠️ **THE CORNER IS A COPY OF THE BOUNDS' OWN CURVE**, its values the
+    /// same shares of the radius' growth: radius and height move as one, so
+    /// a capsule is a capsule at every frame of the spring, overshoot
+    /// included.
+    private static func applyGrowth(_ animation: CABasicAnimation, growth: CGSize, to layer: CALayer, forKey key: String) {
+        layer.add(animation, forKey: key)
+        let size = layer.bounds.size
+        let cornerGrowth = grownCornerRadius(layer.cornerRadius, of: size, by: growth) - layer.cornerRadius
+        if cornerGrowth != 0, let corner = animation.copy() as? CABasicAnimation {
+            func share(_ value: Any?) -> CGFloat {
+                guard let rect = (value as? NSValue)?.cgRectValue else { return 0 }
+                if growth.height != 0 { return rect.height / growth.height }
+                return growth.width != 0 ? rect.width / growth.width : 0
+            }
+            corner.keyPath = "cornerRadius"
+            corner.fromValue = share(animation.fromValue) * cornerGrowth
+            corner.toValue = share(animation.toValue) * cornerGrowth
+            layer.add(corner, forKey: key + cornerSuffix)
+        }
+        for filling in fillingLayers(of: layer) {
+            applyGrowth(animation, growth: growth, to: filling, forKey: key)
+        }
+    }
+
+    /// The layers inside `layer` laid on its whole bounds — its mask too.
+    private static func fillingLayers(of layer: CALayer) -> [CALayer] {
+        let bounds = layer.bounds
+        func fills(_ frame: CGRect) -> Bool {
+            abs(frame.minX - bounds.minX) < 0.5 && abs(frame.minY - bounds.minY) < 0.5
+                && abs(frame.width - bounds.width) < 0.5 && abs(frame.height - bounds.height) < 0.5
+        }
+        var filling = (layer.sublayers ?? []).filter { fills($0.frame) }
+        if let mask = layer.mask, fills(mask.frame) { filling.append(mask) }
+        return filling
+    }
+
+    /// The growth held under `key` off `layer` and everything in it.
+    private static func removeGrowth(forKey key: String, from layer: CALayer) {
+        layer.removeAnimation(forKey: key)
+        layer.removeAnimation(forKey: key + cornerSuffix)
+        layer.mask.map { removeGrowth(forKey: key, from: $0) }
+        layer.sublayers?.forEach { removeGrowth(forKey: key, from: $0) }
+    }
 
     /// The dim, on the scale's scheme: HELD at `-pressedDim` (additive opacity
     /// is summed onto the model's), with a transient that starts at the
@@ -623,6 +846,29 @@ public final class PressFeedback {
     public var debugIsHeldOnTheLayer: Bool {
         target?.layer.animation(forKey: Self.holdKey) != nil
     }
+
+    /// Internal for tests: the held scale on `layer` (the target's, or a
+    /// stand-in's), across and down — the crest before the overshoot. Nil
+    /// when nothing is held.
+    public static func debugHeldScale(on layer: CALayer) -> (x: CGFloat, y: CGFloat)? {
+        guard let hold = layer.animation(forKey: holdKey) as? CABasicAnimation,
+              let value = (hold.toValue as? NSValue)?.caTransform3DValue else { return nil }
+        return (value.m11, value.m22)
+    }
+
+    /// Internal for tests: the ground growth held on `layer` (#2284) — the
+    /// size it is drawn at, in its own points under the content's scale,
+    /// and its corner radius then. Nil when it holds no growth.
+    public static func debugHeldGround(on layer: CALayer) -> (size: CGSize, cornerRadius: CGFloat)? {
+        guard let hold = layer.animation(forKey: growHoldKey) as? CABasicAnimation,
+              let rect = (hold.toValue as? NSValue)?.cgRectValue else { return nil }
+        let corner = (layer.animation(forKey: growHoldKey + cornerSuffix) as? CABasicAnimation)?.toValue as? CGFloat ?? 0
+        let size = layer.bounds.size
+        return (CGSize(width: size.width + rect.width, height: size.height + rect.height), layer.cornerRadius + corner)
+    }
+
+    /// Internal for tests: the layers a swell grew for the press under way.
+    public var debugGrownGrounds: [CALayer] { grownGrounds }
 
     /// Internal for tests: whether the held dim is on the layer.
     public var debugIsDimmedOnTheLayer: Bool {
