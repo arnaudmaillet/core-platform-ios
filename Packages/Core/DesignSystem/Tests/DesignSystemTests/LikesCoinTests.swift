@@ -27,7 +27,9 @@ struct LikesCoinTests {
         let white = pixels.filter { min($0.r, $0.g, $0.b) > 0.95 }
         #expect(disc.count > pixels.count / 2, "the disc is not the pink")
         #expect(white.count > 20, "no white heart")
-        let red = pixels.filter { $0.r > 0.9 && $0.g < 0.35 && $0.b < 0.35 }
+        // A like's red (systemRed, FF3B30) has less blue than green; the pink
+        // (#2282's FF1358) has far more: blue barely above green is the red.
+        let red = pixels.filter { $0.r > 0.9 && $0.g < 0.35 && $0.b < $0.g + 0.1 }
         #expect(red.isEmpty, "a red pixel on the coin")
         _ = window
     }

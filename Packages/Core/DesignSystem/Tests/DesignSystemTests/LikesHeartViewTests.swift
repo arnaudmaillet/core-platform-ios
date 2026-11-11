@@ -56,8 +56,10 @@ struct LikesHeartViewTests {
         let image = render(heart)
         let middle = image.pixel(20, 22)
         #expect(middle.a > 0.9, "nothing painted inside the heart")
-        // Pink: red and blue both well above green (#1178).
-        #expect(middle.r > middle.g + 0.2 && middle.b > middle.g + 0.2, "the heart is not the gradient: \(middle)")
+        // Pink: red well above green, and blue above it too (#1178). #2282's
+        // FF1358 carries less blue than the old pink, so the gap is smaller;
+        // a like's red (FF3B30) has blue BELOW green.
+        #expect(middle.r > middle.g + 0.2 && middle.b > middle.g + 0.1, "the heart is not the gradient: \(middle)")
         #expect(image.pixel(1, 1).a < 0.1, "the gradient leaked outside the heart")
     }
 
