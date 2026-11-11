@@ -110,7 +110,7 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         super.viewDidLoad()
         // ⚠️ NO TITLE. "Messages" sat here for a while (the tab bar says the
         // word already); it went on 2026-09-22 with the map tab's and For
-        // You's. The section the list has scrolled into ("New", "Recent") is
+        // You's. The section the list has scrolled into ("Join requests") is
         // named in the bar, after the bell (#1301; first tried in #179 and
         // reverted in #181, when it had the leading group to itself).
         navigationItem.largeTitleDisplayMode = .never
@@ -489,7 +489,7 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         applyRestingBar()
     }
 
-    /// `[ bell ][ New · 8 ]——————————[ coins ][ search ]`
+    /// `[ bell ][ Join requests · 3 ]————————[ coins ][ search ]`
     ///
     /// What the shell hands in — the bell leading, the balance trailing —
     /// and, after the bell, the section the page in front has scrolled into
@@ -510,8 +510,9 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
 
     /// Its name after the bell — the conversation's day item, exactly (#750,
     /// #755; the owner, 2026-10-17): a system-titled glass bubble in the bar's
-    /// own type, interactive, one item per section and count so "New · 4"
-    /// becoming "Recent · 18" is UIKit's Liquid Glass morph. Minted, placed
+    /// own type, interactive, one item per section and count so a count
+    /// changing is UIKit's Liquid Glass morph. Only Requests' Join requests
+    /// section has a name since one list per tab (#2292). Minted, placed
     /// once per turn and held past a push by the contract
     /// (`PinnedSectionBarBinding`, #1573); the bell is its `leadingPrefix`.
     /// Only the leading group: the trailing one is the balance's.

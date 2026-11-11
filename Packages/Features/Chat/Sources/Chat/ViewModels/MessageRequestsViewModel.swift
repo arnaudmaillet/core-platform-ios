@@ -8,8 +8,8 @@ import Foundation
 /// It also drives the **Hidden requests** list (#552), the same screen over
 /// the HIDDEN REQUESTS folder: requests the viewer's hidden words or offensive
 /// filter caught. Opening, accepting and declining one work like any request;
-/// what differs is that a hidden request announces nothing (no badge, no New
-/// section) and the list has no row leading further.
+/// what differs is that a hidden request announces nothing (no badge, never
+/// marked new) and the list has no row leading further.
 ///
 /// It shares `InboxCatalog` with the conversation list, so the inbox is
 /// fetched once and a request accepted here appears in All immediately — the
@@ -23,7 +23,10 @@ import Foundation
 public final class MessageRequestsViewModel {
     public nonisolated enum Phase: Equatable, Sendable {
         case loading
-        case content(InboxListSections)
+        /// One list of requests, sorted by recency (#2292): no New / Recent
+        /// sections. Empty while only the Hidden requests row or the join
+        /// requests show.
+        case content([ConversationDisplayModel])
         case empty
         case failed(message: String)
     }
@@ -37,8 +40,7 @@ public final class MessageRequestsViewModel {
     /// THE NEW REQUESTS, each one 1 whatever its messages (the owner,
     /// 2026-11-07, #2171; it counted their unread messages, #1210): the
     /// requests the row marks new with its bold preview, falling as one is
-    /// opened. The Chats tab keeps counting messages. The watermark still
-    /// splits the list into New and Recent. Every join request waiting on
+    /// opened. The Chats tab keeps counting messages. Every join request waiting on
     /// a channel the viewer runs adds one too (#2230), until it is answered.
     private(set) public var newCount = 0
 
@@ -211,7 +213,7 @@ public final class MessageRequestsViewModel {
                 // No visible request, but hidden ones, or join requests
                 // (#2230): the list still shows, so its Hidden requests row
                 // and its Join requests section stay reachable.
-                phase = showsHiddenRequestsRow || !channelRequests.isEmpty ? .content(InboxListSections()) : .empty
+                phase = showsHiddenRequestsRow || !channelRequests.isEmpty ? .content([]) : .empty
                 return
             }
             let now = now()
@@ -227,21 +229,21 @@ public final class MessageRequestsViewModel {
             // row shows no count (#2171): the tab counts requests. `isUnread`
             // used to be the watermark here, which meant a request stayed
             // marked after being read.
-            let isNew = Dictionary(
-                uniqueKeysWithValues: requests.map { ($0.id, !isHiddenFolder && watermark.isNewOnRow($0)) }
-            )
+            //
+            // One list (#2292): the watermark's question — what arrived since
+            // the app opened — no longer splits it. It is carried on the row
+            // (`isNew`), as on Chats; a request draws no count, so it changes
+            // nothing a viewer sees here. A hidden request is never new.
             let models = requests.map {
                 ConversationDisplayModel(
                     conversation: $0,
                     now: now,
                     isUnread: snapshot.unreadIDs.contains($0.id),
-                    unreadCount: snapshot.unreadIDs.contains($0.id) ? $0.unreadCount : 0
+                    unreadCount: snapshot.unreadIDs.contains($0.id) ? $0.unreadCount : 0,
+                    isNew: !isHiddenFolder && watermark.isNewOnRow($0)
                 )
             }
-            // The SECTION is the watermark's question — what arrived since the
-            // app opened — which is a different question from whether a row has
-            // been read, and the two now have separate answers.
-            phase = .content(InboxListSections(rows: models) { isNew[$0.id] ?? false })
+            phase = .content(models)
         }
     }
 }

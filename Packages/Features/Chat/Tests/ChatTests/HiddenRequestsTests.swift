@@ -1,6 +1,7 @@
 import CoreModels
 import Foundation
 import Testing
+import UIKit
 @testable import Chat
 
 // The Hidden requests folder (#552).
@@ -68,7 +69,7 @@ struct HiddenRequestsTests {
 
     private func rowIDs(_ phase: MessageRequestsViewModel.Phase) -> [String]? {
         guard case .content(let sections) = phase else { return nil }
-        return sections.all.map(\.id.rawValue)
+        return sections.map(\.id.rawValue)
     }
 
     private static let everyFolder: [InboxFolder: [String?: InboxPage]] = [
@@ -102,6 +103,28 @@ struct HiddenRequestsTests {
         #expect(requests.newCount == 1)
     }
 
+    /// One list on Requests (#2292): the requests in one unheaded section,
+    /// and "Hidden requests" still the last row.
+    @Test func theRequestsListIsOneListEndingOnHiddenRequests() async throws {
+        var pages = Self.everyFolder
+        pages[.requests] = [nil: InboxPage(
+            conversations: [row("r1", at: 40, unreadCount: 2), row("r2", at: 35, unread: false), row("r3", at: 10)],
+            nextPageToken: nil
+        )]
+        let catalog = try await loaded(FolderedInbox(pages))
+        // The visit opened between r2 and r3: the split would have cut here.
+        let requests = MessageRequestsViewModel(catalog: catalog, now: { Date(timeIntervalSince1970: 20) })
+        let list = MessageRequestsViewController(viewModel: requests)
+        list.loadViewIfNeeded()
+        list.view.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+        list.view.layoutIfNeeded()
+
+        #expect(list.debugSections == [.conversations], "the requests are not one list")
+        #expect(list.debugHeadedSections.isEmpty, "a header over the requests")
+        #expect(list.debugRowIDs(in: .conversations).map(\.rawValue) == ["r1", "r2", "r3"])
+        #expect(list.debugEndsOnHiddenRequestsRow, "Hidden requests is not the last row")
+    }
+
     @Test func noHiddenRequestsMeansNoRow() async throws {
         var pages = Self.everyFolder
         pages[.hiddenRequests] = nil
@@ -124,8 +147,8 @@ struct HiddenRequestsTests {
         #expect(rowIDs(requests.phase) == [])
     }
 
-    /// The hidden list: its folder's rows, in one unheaded section (no New
-    /// split, no badge), and no row leading further.
+    /// The hidden list: its folder's rows, in one list (never new, no
+    /// badge), and no row leading further.
     @Test func theHiddenListShowsTheHiddenFolderAndAnnouncesNothing() async throws {
         let catalog = try await loaded(FolderedInbox(Self.everyFolder))
         let hidden = MessageRequestsViewModel(
@@ -133,12 +156,12 @@ struct HiddenRequestsTests {
         )
 
         #expect(rowIDs(hidden.phase) == ["h1", "h2"])
-        guard case .content(let sections) = hidden.phase else { return }
-        #expect(sections.new.isEmpty)
+        guard case .content(let rows) = hidden.phase else { return }
+        #expect(rows.allSatisfy { !$0.isNew }, "a hidden request marked new")
         #expect(hidden.newCount == 0)
         #expect(!hidden.showsHiddenRequestsRow)
         // The rows still wear the unread treatment, as any request's do.
-        #expect(sections.all.allSatisfy { $0.isUnread })
+        #expect(rows.allSatisfy { $0.isUnread })
     }
 
     @Test func theHiddenListIsEmptyWhenTheFolderIs() async throws {

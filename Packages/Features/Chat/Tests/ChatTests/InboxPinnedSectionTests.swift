@@ -6,14 +6,17 @@ import UIKit
 
 /// **The section the inbox names in its bar (#1301).** While a list is
 /// scrolled past a section's header, the bar says that section after the bell
-/// — `[bell][New 8] … [coins][search]` — and the header no longer floats
-/// under the bar. It follows the scroll and the page in front.
+/// — `[bell][Join requests · 3] … [coins][search]` — and the header no longer
+/// floats under the bar. It follows the scroll and the page in front.
+///
+/// Since one list per tab (#2292), the one section with a name is Requests'
+/// Join requests (#2230); the requests under it, and Chats, have none.
 @MainActor
 struct InboxPinnedSectionTests {
     // MARK: - The list's half: which section is stuck
 
-    /// Two sections of 20 rows under 55pt headers — the shape of a sectioned
-    /// inbox list.
+    /// Two sections of 20 rows under 55pt headers — the shape of the
+    /// Requests list with join requests above the requests.
     private final class TwoSections: NSObject, UITableViewDataSource, UITableViewDelegate {
         func numberOfSections(in tableView: UITableView) -> Int { 2 }
         func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { 20 }
@@ -35,20 +38,22 @@ struct InboxPinnedSectionTests {
         return (table, source)
     }
 
-    /// The lists' own read (`PinnedSectionTracker`, #1573): a headed section
-    /// named with its unread count.
+    /// The lists' own read (`PinnedSectionTracker`, #1573): the Join requests
+    /// section named with its count; the requests under it unheaded (#2292).
     private func read(
         _ tracker: PinnedSectionTracker<InboxPinnedSection>, _ table: UITableView, headed: Bool = true
     ) {
         tracker.update(in: table) { index in
             guard headed else { return nil }
-            let section = [InboxListSection.new, .earlier][index]
-            return InboxPinnedSection(section: section, count: section == .new ? 8 : 0)
+            let section = [InboxListSection.joinRequests, .conversations][index]
+            guard section.isHeaded else { return nil }
+            return InboxPinnedSection(section: section, count: 8)
         }
     }
 
-    /// Nothing at the top; "New" once the list moves past its header;
-    /// "Recent" once Recent's header reaches the line; nothing back at the top.
+    /// Nothing at the top; "Join requests" once the list moves past its
+    /// header; nothing once the unheaded requests reach the line — no name to
+    /// give them (#2292) — and nothing back at the top.
     @Test func theStuckSectionFollowsTheScroll() {
         let (table, source) = table()
         _ = source
@@ -61,22 +66,25 @@ struct InboxPinnedSectionTests {
 
         table.contentOffset.y = 100
         read(tracker, table)
-        #expect(tracker.pinned == InboxPinnedSection(section: .new, count: 8))
+        #expect(tracker.pinned == InboxPinnedSection(section: .joinRequests, count: 8))
         #expect(tracker.index == 0)
 
         table.contentOffset.y = table.rect(forSection: 1).minY
         read(tracker, table)
-        #expect(tracker.pinned == InboxPinnedSection(section: .earlier, count: 0))
-        #expect(tracker.index == 1)
+        #expect(tracker.pinned == nil, "the requests were named as join requests")
+
+        table.contentOffset.y = 100
+        read(tracker, table)
+        #expect(tracker.pinned == InboxPinnedSection(section: .joinRequests, count: 8))
 
         table.contentOffset.y = 0
         read(tracker, table)
         #expect(tracker.pinned == nil)
-        #expect(published.count == 3, "published on a scroll that changed nothing: \(published)")
+        #expect(published.count == 4, "published on a scroll that changed nothing: \(published)")
     }
 
-    /// A list with no arrivals is one unlabelled block (`headedSection` nil):
-    /// it names nothing however far it scrolls.
+    /// A list with no named section — Chats, Requests with no join requests
+    /// (#2292) — names nothing however far it scrolls.
     @Test func anUnheadedListNamesNothing() {
         let (table, source) = table()
         _ = source
@@ -95,10 +103,6 @@ struct InboxPinnedSectionTests {
         table.scrollFirstRow(ofSection: 1, animated: false)
         let pinLine = table.contentOffset.y + table.adjustedContentInset.top
         #expect(pinLine == table.rectForRow(at: IndexPath(row: 0, section: 1)).minY)
-
-        let tracker = PinnedSectionTracker<InboxPinnedSection>()
-        read(tracker, table)
-        #expect(tracker.pinned?.section == .earlier, "the bar did not name the section scrolled to")
     }
 
     // MARK: - The container's half: the bar item
@@ -135,7 +139,7 @@ struct InboxPinnedSectionTests {
         return item
     }
 
-    /// `[bell][New · 8]`: the item comes after the bell — the conversation's
+    /// `[bell][Join requests · 8]`: the item comes after the bell — the conversation's
     /// day item, a system-titled bubble — is a NEW item under a new identifier
     /// when the list scrolls on (UIKit's morph, not a title swapped in place),
     /// goes at the top, and its tap is the header's.
@@ -148,17 +152,17 @@ struct InboxPinnedSectionTests {
         #expect(screen.navigationItem.leftBarButtonItems?.count == 1)
         #expect(screen.debugSectionItem == nil)
 
-        surface.pin(.new, count: 8)
+        surface.pin(.joinRequests, count: 8)
         let leading = try #require(screen.navigationItem.leftBarButtonItems)
         #expect(leading.count == 2 && leading.first === bell, "the section did not follow the bell")
-        let new = try #require(screen.debugSectionItem)
-        #expect(new.title == "New · 8")
-        #expect(new.customView == nil, "not the bar's own titled bubble")
+        let eight = try #require(screen.debugSectionItem)
+        #expect(eight.title == "Join requests · 8")
+        #expect(eight.customView == nil, "not the bar's own titled bubble")
 
-        surface.pin(.earlier)
-        let recent = try #require(screen.debugSectionItem)
-        #expect(recent.title == "Recent", "a zero count was drawn")
-        #expect(recent !== new && recent.identifier != new.identifier, "a title edited in place gets no morph")
+        surface.pin(.joinRequests, count: 0)
+        let none = try #require(screen.debugSectionItem)
+        #expect(none.title == "Join requests", "a zero count was drawn")
+        #expect(none !== eight && none.identifier != eight.identifier, "a title edited in place gets no morph")
         #expect(screen.navigationItem.leftBarButtonItems?.count == 2)
 
         screen.debugTapSectionItem()
@@ -179,16 +183,16 @@ struct InboxPinnedSectionTests {
         screen.view.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
         screen.view.layoutIfNeeded()
 
-        chats.pin(.new, count: 2)
-        requests.pin(.earlier)
-        #expect(screen.debugSectionItem?.title == "New · 2", "a page behind named its section")
+        chats.pin(nil)
+        requests.pin(.joinRequests, count: 3)
+        #expect(screen.debugSectionItem == nil, "a page behind named its section")
 
         screen.setCategory(.requests, animated: false)
-        #expect(screen.debugSectionItem?.title == "Recent")
+        #expect(screen.debugSectionItem?.title == "Join requests · 3")
 
-        requests.pin(nil)
         screen.setCategory(.all, animated: false)
-        #expect(screen.debugSectionItem?.title == "New · 2")
+        #expect(screen.debugSectionItem == nil, "Chats wore the Requests page's section")
+        requests.pin(nil)
         screen.setCategory(.requests, animated: false)
         #expect(screen.debugSectionItem == nil)
     }

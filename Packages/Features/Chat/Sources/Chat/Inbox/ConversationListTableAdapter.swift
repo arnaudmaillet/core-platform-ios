@@ -16,14 +16,12 @@ import UIKit
 /// `performBatchUpdates`, which is UIKit's real move animation: the row slides,
 /// and the rows it passes shift to make room.
 ///
-/// ## Two sections, always
+/// ## One section, always
 ///
-/// The sections are fixed at `[.new, .earlier]` and an empty one simply holds
-/// no rows. That is not cosmetic — it removes section insert/delete from the
-/// update entirely, so every change is rows-only and the batch arithmetic stays
-/// small enough to be obviously right. `headedSection(at:)` still returns nil
-/// unless BOTH sections have rows, so a single-block list renders unlabelled
-/// exactly as it did before.
+/// One list, no header (#2292, the owner 2026-11-11): the New / Recent split
+/// went. The one section is there even when empty, which keeps section
+/// insert/delete out of the update entirely, so every change is rows-only and
+/// the batch arithmetic stays small enough to be obviously right.
 ///
 /// ## What it deliberately does not do
 ///
@@ -33,12 +31,10 @@ import UIKit
 /// reload, and none of the reconfigure-versus-move conflict that made the
 /// pinned row fade in the first place.
 final class ConversationListTableAdapter: NSObject, UITableViewDataSource {
-    /// Section order, fixed. Index 0 is New, index 1 is Recent.
-    static let sectionOrder: [InboxListSection] = [.new, .earlier]
-
     private weak var tableView: UITableView?
     private let cellProvider: (UITableView, IndexPath, ConversationID) -> UITableViewCell
-    private var rows: [[ConversationID]] = [[], []]
+    /// The rows, in display order: the one section's.
+    private var rows: [ConversationID] = []
 
     init(
         tableView: UITableView,
@@ -52,35 +48,17 @@ final class ConversationListTableAdapter: NSObject, UITableViewDataSource {
 
     // MARK: - Contents
 
-    var isEmpty: Bool { rows.allSatisfy(\.isEmpty) }
+    var isEmpty: Bool { rows.isEmpty }
 
-    var allIdentifiers: [ConversationID] { rows.flatMap(\.self) }
+    var allIdentifiers: [ConversationID] { rows }
 
     func itemIdentifier(for indexPath: IndexPath) -> ConversationID? {
-        guard rows.indices.contains(indexPath.section),
-              rows[indexPath.section].indices.contains(indexPath.row)
-        else { return nil }
-        return rows[indexPath.section][indexPath.row]
+        guard indexPath.section == 0, rows.indices.contains(indexPath.row) else { return nil }
+        return rows[indexPath.row]
     }
 
     func indexPath(for id: ConversationID) -> IndexPath? {
-        for (section, ids) in rows.enumerated() {
-            if let row = ids.firstIndex(of: id) { return IndexPath(row: row, section: section) }
-        }
-        return nil
-    }
-
-    /// The section at an index, or nil when the list is one unlabelled block —
-    /// titling the whole list says nothing, so it goes unheaded.
-    func headedSection(at index: Int) -> InboxListSection? {
-        guard rows.allSatisfy({ !$0.isEmpty }), Self.sectionOrder.indices.contains(index) else {
-            return nil
-        }
-        return Self.sectionOrder[index]
-    }
-
-    func index(of section: InboxListSection) -> Int? {
-        Self.sectionOrder.firstIndex(of: section)
+        rows.firstIndex(of: id).map { IndexPath(row: $0, section: 0) }
     }
 
     // MARK: - Updates
@@ -94,16 +72,16 @@ final class ConversationListTableAdapter: NSObject, UITableViewDataSource {
     ///
     /// The backing store is updated before the batch so the table can query it
     /// during the animation.
-    func apply(_ sections: InboxListSections, animated: Bool) {
-        let new = [sections.new.map(\.id), sections.earlier.map(\.id)]
-        guard let tableView, animated, !(rows.allSatisfy(\.isEmpty)) else {
+    func apply(_ models: [ConversationDisplayModel], animated: Bool) {
+        let new = models.map(\.id)
+        guard let tableView, animated, !rows.isEmpty else {
             // The same rows in the same places: nothing to reload. The inbox
             // reloads its catalog on every appearance, and a full
             // `reloadData` of an unchanged list re-dequeued every visible row
             // in the turn after a tab switch or a pop — a ~70 ms hang right
             // as the screen arrived (#2116). Content changes reach the live
             // cells through the controller's `reconfigureVisible`.
-            let unchanged = new == rows && !new.allSatisfy(\.isEmpty)
+            let unchanged = new == rows && !new.isEmpty
             rows = new
             if !unchanged { tableView?.reloadData() }
             return
@@ -131,31 +109,20 @@ final class ConversationListTableAdapter: NSObject, UITableViewDataSource {
         }
     }
 
-    /// Puts a section's first row on the pin line, under the bar — what
-    /// tapping that section's name means: "show me this part". See
-    /// `UITableView.scrollFirstRow(ofSection:)` for why not
-    /// `scrollToRow(at:.top)`. A no-op for an empty section.
-    func scroll(_ tableView: UITableView, toSectionAt index: Int) {
-        guard rows.indices.contains(index), !rows[index].isEmpty else { return }
-        tableView.scrollFirstRow(ofSection: index)
-    }
-
-    private static func indexPaths(in rows: [[ConversationID]]) -> [ConversationID: IndexPath] {
+    private static func indexPaths(in rows: [ConversationID]) -> [ConversationID: IndexPath] {
         var paths: [ConversationID: IndexPath] = [:]
-        for (section, ids) in rows.enumerated() {
-            for (row, id) in ids.enumerated() {
-                paths[id] = IndexPath(row: row, section: section)
-            }
+        for (row, id) in rows.enumerated() {
+            paths[id] = IndexPath(row: row, section: 0)
         }
         return paths
     }
 
     // MARK: - UITableViewDataSource
 
-    func numberOfSections(in tableView: UITableView) -> Int { rows.count }
+    func numberOfSections(in tableView: UITableView) -> Int { 1 }
 
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        rows[section].count
+        section == 0 ? rows.count : 0
     }
 
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {

@@ -26,6 +26,12 @@ public struct ConversationDisplayModel: Equatable, Sendable, Identifiable {
     /// whenever `isUnread` is false; see `Conversation.unreadCount` for what
     /// bounds it.
     public let unreadCount: Int
+    /// The row arrived since the app was opened (`InboxTabWatermark`, the
+    /// split the New section used to hold, #2292): what puts its unread count
+    /// in the primary rather than the grey (`unreadInk`). The watermark's
+    /// rule is unchanged — nothing in a session retires it, so a row turns
+    /// grey only when it is read, or at the next cold launch.
+    public let isNew: Bool
     /// A group's or a channel's own photo (#2214): the row's face instead
     /// of initials.
     public let groupPhotoURL: URL?
@@ -63,6 +69,7 @@ public struct ConversationDisplayModel: Equatable, Sendable, Identifiable {
         isMuted: Bool = false,
         isUnread: Bool = false,
         unreadCount: Int = 0,
+        isNew: Bool = false,
         joinedInvitation: Bool = false
     ) {
         id = conversation.id
@@ -84,6 +91,7 @@ public struct ConversationDisplayModel: Equatable, Sendable, Identifiable {
         self.isMuted = isMuted
         self.isUnread = isUnread
         self.unreadCount = unreadCount
+        self.isNew = isNew
         groupPhotoURL = isGroup || isChannel ? conversation.identity?.photoURL : nil
         self.isChannel = isChannel
         runsChannel = isChannel && conversation.identity?.viewerState.runsChannel == true
@@ -102,13 +110,32 @@ public struct ConversationDisplayModel: Equatable, Sendable, Identifiable {
             : nil
     }
 
-    /// Whether this row's unread messages count in the Chats badge and the
-    /// section headers that add up to it (#2230): everything but a MUTED
+    /// Whether this row's unread messages count in the Chats badge (#2230):
+    /// everything but a MUTED
     /// CHANNEL. A channel joins muted (WhatsApp's rule) and posts to an
     /// audience; counted, a few followed channels would keep the badge lit
     /// for news nobody asked to be told about. Its row still shows them —
     /// bold, the count. A muted DM or group keeps counting, as before.
     public var countsInBadge: Bool { !(isChannel && isMuted) }
+
+    /// The two inks of a row's unread count (#2292, the owner 2026-11-11).
+    public nonisolated enum UnreadInk: Equatable, Sendable {
+        /// The primary (`Palette.counter`): new since the visit, and for you.
+        case primary
+        /// A neutral grey: unread but waiting — older than the visit, or
+        /// muted.
+        case neutral
+    }
+
+    /// The ink of the row's unread count, nil when it is read (#2292): the
+    /// primary only on a row new since the visit (`isNew`) and not muted;
+    /// grey on every other unread row — the old "Recent", and a muted row
+    /// whether new or not (a grey count reads as muted in messaging apps).
+    /// The bold stays on every unread row, whatever the ink.
+    public var unreadInk: UnreadInk? {
+        guard isUnread else { return nil }
+        return isNew && !isMuted ? .primary : .neutral
+    }
 
     /// The first non-empty line of a post (#2215), trimmed.
     static func firstLine(of text: String) -> String {

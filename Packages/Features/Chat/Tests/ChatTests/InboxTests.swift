@@ -930,19 +930,17 @@ struct InboxSurfaceViewModelTests {
         list.viewWillAppear()
         await settle()
         #expect(listPhase == .empty)
-        guard case .content(let pendingSections) = requestsPhase else {
+        guard case .content(let pending) = requestsPhase else {
             Issue.record("expected a pending request, got \(String(describing: requestsPhase))")
             return
         }
-        let pending = pendingSections.all
         #expect(pending.map(\.id) == [ConversationID("request")])
 
         requests.accept(ConversationID("request"))
-        guard case .content(let rowsSections) = listPhase else {
+        guard case .content(let rows) = listPhase else {
             Issue.record("expected content, got \(String(describing: listPhase))")
             return
         }
-        let rows = rowsSections.all
         #expect(rows.map(\.id) == [ConversationID("request")])
         #expect(requestsPhase == .empty)
     }
@@ -966,11 +964,10 @@ struct InboxSurfaceViewModelTests {
         list.viewWillAppear()
         await settle()
 
-        guard case .content(let rowsSections) = phase else {
+        guard case .content(let rows) = phase else {
             Issue.record("expected content, got \(String(describing: phase))")
             return
         }
-        let rows = rowsSections.all
         // Both rows are present; only one is flagged.
         #expect(rows.map(\.id) == [ConversationID("read"), ConversationID("unread")])
         #expect(rows.map(\.isUnread) == [false, true])
@@ -994,11 +991,10 @@ struct InboxSurfaceViewModelTests {
 
         catalog.markRead(ConversationID("a"))
 
-        guard case .content(let rowsSections) = phase else {
+        guard case .content(let rows) = phase else {
             Issue.record("expected content, got \(String(describing: phase))")
             return
         }
-        let rows = rowsSections.all
         #expect(rows.count == 2)
         #expect(rows.map(\.isUnread) == [false, true])
     }
@@ -1053,14 +1049,15 @@ struct InboxSurfaceViewModelTests {
         #expect(MessagesCategory.all.title == "Chats")
     }
 
-    /// The badge and the SECTION are the watermark's answer — what arrived
-    /// since the app opened — and nothing in the session takes either away.
+    /// The badge and the NEW MARK are the watermark's answer — what arrived
+    /// since the app opened — and nothing in the session takes either away
+    /// (#2292: the mark is carried on the row, not a section).
     ///
-    /// ⚠️ Deliberately not asserted through `isUnread` any more. That flag is
-    /// the READ CURSOR now, the same as on the All list, so a request the
-    /// fixtures never marked unread is not bold — and the row's section is a
-    /// different question with a different answer.
-    @Test func theSectionSurvivesWhileTheTabIsOpen() async {
+    /// ⚠️ Deliberately not asserted through `isUnread`. That flag is the READ
+    /// CURSOR, the same as on the All list, so a request the fixtures never
+    /// marked unread is not bold — and whether a row is new is a different
+    /// question with a different answer.
+    @Test func theNewMarkSurvivesWhileTheTabIsOpen() async {
         let catalog = InboxCatalog(
             repository: StubInboxProvider(conversations: [], requests: [
                 conversation("r1", peer: "a"),
@@ -1074,15 +1071,24 @@ struct InboxSurfaceViewModelTests {
         requests.refresh()
         await settle()
 
-        guard case .content(let sections) = phase else {
+        guard case .content(let rows) = phase else {
             Issue.record("expected content, got \(String(describing: phase))")
             return
         }
-        // Nothing unread in these fixtures: no badge (#1210), the section
-        // still the arrivals'.
+        // Nothing unread in these fixtures: no badge (#1210), the rows still
+        // the arrivals'.
         #expect(requests.newCount == 0)
-        #expect(sections.new.count == 2)
-        #expect(sections.earlier.isEmpty)
+        #expect(rows.map(\.isNew) == [true, true])
+
+        // Time passes, the tab reloads: still new for the session.
+        clock.now = Date(timeIntervalSince1970: 10_000)
+        requests.refresh()
+        await settle()
+        guard case .content(let later) = phase else {
+            Issue.record("expected content, got \(String(describing: phase))")
+            return
+        }
+        #expect(later.map(\.isNew) == [true, true], "the session retired a new mark")
     }
 
     /// Opening a request is what un-bolds it: the thread moves the read cursor,
@@ -1105,8 +1111,8 @@ struct InboxSurfaceViewModelTests {
             Issue.record("expected content, got \(String(describing: phase))")
             return
         }
-        #expect(before.all.map(\.isUnread) == [true, true])
-        #expect(before.all.map(\.unreadCount) == [3, 2])
+        #expect(before.map(\.isUnread) == [true, true])
+        #expect(before.map(\.unreadCount) == [3, 2])
 
         // What the thread screen reports when it is opened.
         catalog.markRead(ConversationID("r1"))
@@ -1115,10 +1121,10 @@ struct InboxSurfaceViewModelTests {
             Issue.record("expected content, got \(String(describing: phase))")
             return
         }
-        #expect(after.all.map(\.isUnread) == [false, true])
-        #expect(after.all.map(\.unreadCount) == [0, 2])
+        #expect(after.map(\.isUnread) == [false, true])
+        #expect(after.map(\.unreadCount) == [0, 2])
         // The row stays put: reading it is not the same as it never arriving.
-        #expect(after.all.map(\.id) == before.all.map(\.id))
+        #expect(after.map(\.id) == before.map(\.id))
 
         // ⚠️ And because it stays put, the LIST has to be told. The row's id is
         // unchanged, so the diff between these two states is empty and a
@@ -1126,9 +1132,9 @@ struct InboxSurfaceViewModelTests {
         // correct projection that never reaches the cell is the bug this half
         // of the round trip exists to catch — it is what actually shipped on
         // Requests while every model-level assertion above passed.
-        let previous = Dictionary(uniqueKeysWithValues: before.all.map { ($0.id, $0) })
+        let previous = Dictionary(uniqueKeysWithValues: before.map { ($0.id, $0) })
         #expect(
-            InboxRowDiff.changedRows(in: after.all, against: previous) == [ConversationID("r1")]
+            InboxRowDiff.changedRows(in: after, against: previous) == [ConversationID("r1")]
         )
     }
 
@@ -1410,12 +1416,15 @@ struct MessageRequestCellTests {
     }
 }
 
-// MARK: - List sections
+// MARK: - One list per tab (#2292)
 
-/// The split, and the one property that makes it trustworthy: the first
-/// section's row count IS the tab badge's number.
+/// ONE LIST PER TAB (#2292, the owner 2026-11-11): no New / Recent sections
+/// on Chats or on Requests. The watermark that split them now decides only
+/// the ink of a row's unread count — the primary on a row new since the
+/// visit and not muted, a neutral grey on every other unread row — and the
+/// tab badges keep their own counts.
 @MainActor
-struct InboxListSectionTests {
+struct InboxOneListTests {
     private func settle() async {
         for _ in 0..<8 {
             await Task.yield()
@@ -1423,69 +1432,262 @@ struct InboxListSectionTests {
         }
     }
 
-    /// The Requests sections' header counts — their new requests (#2171) —
-    /// add up to the badge: one count, read off the same rows.
-    @Test func theSectionCountsAddUpToTheBadge() async {
-        let catalog = InboxCatalog(
-            repository: StubInboxProvider(conversations: [], requests: [
-                conversation("r1", peer: "a", isUnread: true, unreadCount: 3),
-                conversation("r2", peer: "b", isUnread: true, unreadCount: 2)
-            ])
+    /// The visit opened at 500: rows after it are new, rows before are not.
+    private nonisolated static let opened = Date(timeIntervalSince1970: 500)
+
+    private static func at(_ seconds: TimeInterval) -> Date { Date(timeIntervalSince1970: seconds) }
+
+    /// Two new conversations and two older ones, newest first; one of each
+    /// unread.
+    private func chatsCatalog() -> InboxCatalog {
+        InboxCatalog(repository: StubInboxProvider(conversations: [
+            conversation("new-1", peer: "a", isUnread: true, unreadCount: 2, activityAt: Self.at(1_000)),
+            conversation("new-2", peer: "b", activityAt: Self.at(900)),
+            conversation("old-1", peer: "c", isUnread: true, unreadCount: 3, activityAt: Self.at(100)),
+            conversation("old-2", peer: "d", activityAt: Self.at(50))
+        ], requests: []))
+    }
+
+    private func requestsCatalog() -> InboxCatalog {
+        InboxCatalog(repository: StubInboxProvider(conversations: [], requests: [
+            conversation("r1", peer: "a", isUnread: true, unreadCount: 3, activityAt: Self.at(1_000)),
+            conversation("r2", peer: "b", activityAt: Self.at(900)),
+            conversation("r3", peer: "c", isUnread: true, unreadCount: 1, activityAt: Self.at(100))
+        ]))
+    }
+
+    private func row(
+        new isNew: Bool, muted: Bool = false, unread: Int
+    ) -> ConversationDisplayModel {
+        ConversationDisplayModel(
+            conversation: conversation("c", isUnread: unread > 0, unreadCount: unread),
+            isMuted: muted,
+            isUnread: unread > 0,
+            unreadCount: unread,
+            isNew: isNew
         )
-        let requests = MessageRequestsViewModel(
-            catalog: catalog, now: { Date(timeIntervalSince1970: -1) }
-        )
+    }
+
+    // MARK: The lists
+
+    /// Chats: one list in recency order, the pinned rows first — a pinned
+    /// row older than the visit leads the new ones, where the split put it
+    /// under "Recent".
+    @Test func chatsIsOneListInRecencyOrderPinnedFirst() async {
+        let catalog = chatsCatalog()
+        let chats = ConversationListViewModel(catalog: catalog, now: { Self.opened })
+        var phase: ConversationListViewModel.Phase?
+        chats.onPhaseChange = { phase = $0 }
+        chats.refresh()
+        await settle()
+
+        guard case .content(let shown) = phase else {
+            Issue.record("expected content, got \(String(describing: phase))")
+            return
+        }
+        #expect(shown.map(\.id.rawValue) == ["new-1", "new-2", "old-1", "old-2"])
+        #expect(shown.map(\.isNew) == [true, true, false, false], "the watermark no longer marks the rows")
+
+        chats.togglePin(ConversationID("old-2"))
+        guard case .content(let pinnedFirst) = phase else {
+            Issue.record("expected content, got \(String(describing: phase))")
+            return
+        }
+        #expect(pinnedFirst.map(\.id.rawValue) == ["old-2", "new-1", "new-2", "old-1"])
+    }
+
+    /// Requests: one list in recency order too, the new requests and the
+    /// older ones together.
+    @Test func requestsIsOneListInRecencyOrder() async {
+        let requests = MessageRequestsViewModel(catalog: requestsCatalog(), now: { Self.opened })
         var phase: MessageRequestsViewModel.Phase?
         requests.onPhaseChange = { phase = $0 }
         requests.refresh()
         await settle()
 
-        guard case .content(let sections) = phase else {
+        guard case .content(let shown) = phase else {
             Issue.record("expected content, got \(String(describing: phase))")
             return
         }
-        #expect(sections.unreadRows(in: .new) + sections.unreadRows(in: .earlier) == requests.newCount)
-        #expect(sections.unreadRows(in: .new) == 2)
-        #expect(sections.earlier.isEmpty)
+        #expect(shown.map(\.id.rawValue) == ["r1", "r2", "r3"])
+        #expect(shown.map(\.isNew) == [true, true, false])
     }
 
-    /// Nothing new means ONE section, not an empty header over the list.
-    @Test func anInboxWithNoArrivalsIsASingleSection() async {
-        let catalog = InboxCatalog(
-            repository: StubInboxProvider(conversations: [], requests: [
-                conversation("r1", peer: "a"),
-                conversation("r2", peer: "b")
-            ])
-        )
-        // A `now` after the fixtures' activity: they were already there.
-        let requests = MessageRequestsViewModel(
-            catalog: catalog, now: { Date(timeIntervalSince1970: 10_000) }
-        )
-        var phase: MessageRequestsViewModel.Phase?
-        requests.onPhaseChange = { phase = $0 }
+    /// The tab badges keep their own counts (#2292: no headers left to add
+    /// up to them). Chats: every unread message, the older rows' too.
+    /// Requests: every unread request, one each, new or not.
+    @Test func theTabBadgesKeepTheirCounts() async {
+        let chats = ConversationListViewModel(catalog: chatsCatalog(), now: { Self.opened })
+        let requests = MessageRequestsViewModel(catalog: requestsCatalog(), now: { Self.opened })
+        chats.refresh()
         requests.refresh()
         await settle()
+        #expect(chats.newCount == 5, "2 on a new row and 3 on an older one")
+        #expect(requests.newCount == 2, "r1 and r3, one each")
+    }
 
-        guard case .content(let sections) = phase else {
+    // MARK: The count's ink
+
+    /// New and not muted → the primary; not new → grey; muted → grey, new
+    /// or not; read → none.
+    @Test func theCountsInkFollowsTheRow() {
+        #expect(row(new: true, unread: 2).unreadInk == .primary)
+        #expect(row(new: false, unread: 2).unreadInk == .neutral)
+        #expect(row(new: true, muted: true, unread: 2).unreadInk == .neutral)
+        #expect(row(new: false, muted: true, unread: 2).unreadInk == .neutral)
+        #expect(row(new: true, unread: 0).unreadInk == nil)
+        #expect(row(new: false, unread: 0).unreadInk == nil)
+    }
+
+    /// The view model carries it: the new unread row is primary, the older
+    /// one grey, the read ones none.
+    @Test func theListCarriesEachRowsInk() async {
+        let chats = ConversationListViewModel(catalog: chatsCatalog(), now: { Self.opened })
+        var phase: ConversationListViewModel.Phase?
+        chats.onPhaseChange = { phase = $0 }
+        chats.refresh()
+        await settle()
+        guard case .content(let shown) = phase else {
             Issue.record("expected content, got \(String(describing: phase))")
             return
         }
-        #expect(sections.new.isEmpty)
-        #expect(sections.earlier.count == 2)
-        #expect(requests.newCount == 0)
+        #expect(shown.map(\.unreadInk) == [.primary, nil, .neutral, nil])
     }
 
-    /// The split preserves the list's order, so a row does not jump when it
-    /// crosses between sections.
-    @Test func theSplitKeepsTheListsOrder() {
-        let rows = ["a", "b", "c", "d"].map {
-            ConversationDisplayModel(conversation: conversation($0), isUnread: $0 < "c")
-        }
-        let sections = InboxListSections(rows: rows, isNew: \.isUnread)
+    /// The pill draws the row's ink — the primary under white, the grey
+    /// under the text colour — in the same shape, and none on a read row.
+    @Test func thePillDrawsTheRowsInk() throws {
+        let view = ConversationRowView()
+        view.configure(with: row(new: true, unread: 3))
+        let pill = try #require(view.debugUnreadPill)
+        #expect(!pill.isHidden)
+        #expect(pill.ink == .primary)
+        #expect(pill.backgroundColor == Palette.counter)
+        #expect(pill.textColor == UnreadCountPill.primaryText)
+        let primarySize = pill.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
 
-        #expect(sections.new.map(\.id) == [ConversationID("a"), ConversationID("b")])
-        #expect(sections.earlier.map(\.id) == [ConversationID("c"), ConversationID("d")])
-        #expect(sections.all.map(\.id) == rows.map(\.id))
+        view.configure(with: row(new: false, unread: 3))
+        #expect(!pill.isHidden)
+        #expect(pill.ink == .neutral)
+        #expect(pill.backgroundColor == UnreadCountPill.neutralFill)
+        #expect(pill.textColor == UnreadCountPill.neutralText)
+        #expect(pill.shownText == "3")
+        #expect(pill.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize) == primarySize, "the grey changed shape")
+
+        view.configure(with: row(new: true, muted: true, unread: 3))
+        #expect(pill.ink == .neutral, "a muted row's count in the primary")
+
+        view.configure(with: row(new: true, unread: 0))
+        #expect(pill.isHidden, "a read row kept a count")
+    }
+
+    /// The bold stays on every unread row, grey or primary: a grey count is
+    /// still unread — waiting, not news.
+    @Test func everyUnreadRowIsBold() {
+        let view = ConversationRowView()
+        view.configure(with: row(new: true, unread: 2))
+        #expect(view.debugWearsUnreadStyle, "a new unread row is not bold")
+        view.configure(with: row(new: false, unread: 2))
+        #expect(view.debugWearsUnreadStyle, "an older unread row lost its bold with its primary")
+        view.configure(with: row(new: true, muted: true, unread: 2))
+        #expect(view.debugWearsUnreadStyle, "a muted unread row is not bold")
+        view.configure(with: row(new: true, unread: 0))
+        #expect(!view.debugWearsUnreadStyle, "a read row is bold")
+    }
+
+    /// VoiceOver says "new" only for a count in the primary.
+    @Test func unreadWordsSayNewOnlyForAPrimaryCount() {
+        #expect(ConversationRowView.unreadWords(row(new: true, unread: 3)) == "3 new unread")
+        #expect(ConversationRowView.unreadWords(row(new: false, unread: 3)) == "3 unread")
+        #expect(ConversationRowView.unreadWords(row(new: true, muted: true, unread: 3)) == "3 unread")
+        #expect(ConversationRowView.unreadWords(row(new: true, unread: 0)) == nil)
+        let muted = ConversationRowView().configure(with: row(new: true, muted: true, unread: 3))
+        #expect(muted.contains("3 unread") && muted.contains("Muted") && !muted.contains("new unread"))
+    }
+
+    // MARK: The grey's contrast
+
+    /// The resolved colours' WCAG contrast.
+    private static func contrast(_ first: UIColor, _ second: UIColor) -> CGFloat {
+        func luminance(_ color: UIColor) -> CGFloat {
+            var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
+            color.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+            func linear(_ channel: CGFloat) -> CGFloat {
+                channel <= 0.04045 ? channel / 12.92 : pow((channel + 0.055) / 1.055, 2.4)
+            }
+            return 0.2126 * linear(red) + 0.7152 * linear(green) + 0.0722 * linear(blue)
+        }
+        let lighter = max(luminance(first), luminance(second))
+        let darker = min(luminance(first), luminance(second))
+        return (lighter + 0.05) / (darker + 0.05)
+    }
+
+    private static func traits(_ style: UIUserInterfaceStyle, _ contrast: UIAccessibilityContrast) -> UITraitCollection {
+        UITraitCollection { mutable in
+            mutable.userInterfaceStyle = style
+            mutable.accessibilityContrast = contrast
+        }
+    }
+
+    /// The grey pill's count passes 4.5:1 in light and dark, with and
+    /// without Increased Contrast — measured off the resolved colours.
+    @Test(arguments: [UIUserInterfaceStyle.light, .dark], [UIAccessibilityContrast.normal, .high])
+    func theGreysCountPassesAA(_ style: UIUserInterfaceStyle, _ level: UIAccessibilityContrast) {
+        let resolved = Self.traits(style, level)
+        let fill = UnreadCountPill.neutralFill.resolvedColor(with: resolved)
+        let text = UnreadCountPill.neutralText.resolvedColor(with: resolved)
+        let ratio = Self.contrast(fill, text)
+        #expect(ratio >= 4.5, "\(style.rawValue)/\(level.rawValue): \(ratio):1")
+    }
+
+    /// Increased Contrast deepens the grey: the pill stands further off the
+    /// row's ground, in light and in dark.
+    @Test(arguments: [UIUserInterfaceStyle.light, .dark])
+    func increasedContrastDeepensTheGrey(_ style: UIUserInterfaceStyle) {
+        let normal = Self.traits(style, .normal)
+        let high = Self.traits(style, .high)
+        let ground = UIColor.systemBackground
+        let normalLift = Self.contrast(UnreadCountPill.neutralFill.resolvedColor(with: normal), ground.resolvedColor(with: normal))
+        let highLift = Self.contrast(UnreadCountPill.neutralFill.resolvedColor(with: high), ground.resolvedColor(with: high))
+        #expect(highLift > normalLift, "\(style.rawValue): \(highLift) ≤ \(normalLift)")
+    }
+
+    // MARK: The screens
+
+    private func screen(_ controller: UIViewController) {
+        controller.loadViewIfNeeded()
+        controller.view.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+        controller.view.layoutIfNeeded()
+    }
+
+    /// Chats draws one section with no header, in the list's order.
+    @Test func theChatsListIsOneSectionWithNoHeader() async {
+        let catalog = chatsCatalog()
+        let chats = ConversationListViewModel(catalog: catalog, now: { Self.opened })
+        chats.refresh()
+        await settle()
+        let list = ConversationListViewController(viewModel: chats)
+        screen(list)
+
+        let table = list.debugTableView
+        #expect(table.numberOfSections == 1)
+        #expect(list.debugRowIDs.map(\.rawValue) == ["new-1", "new-2", "old-1", "old-2"])
+        let headerHeight = table.delegate?.tableView?(table, heightForHeaderInSection: 0) ?? 0
+        #expect(headerHeight < 1, "a header over the one list: \(headerHeight)")
+        #expect(list.pinnedSection == nil, "Chats named a section in the bar")
+    }
+
+    /// Requests draws one unheaded list too.
+    @Test func theRequestsListIsOneSectionWithNoHeader() async {
+        let requests = MessageRequestsViewModel(catalog: requestsCatalog(), now: { Self.opened })
+        requests.refresh()
+        await settle()
+        let list = MessageRequestsViewController(viewModel: requests)
+        screen(list)
+
+        #expect(list.debugSections == [.conversations])
+        #expect(list.debugHeadedSections.isEmpty, "a header over the requests")
+        #expect(list.debugRowIDs(in: .conversations).map(\.rawValue) == ["r1", "r2", "r3"])
     }
 }
 
