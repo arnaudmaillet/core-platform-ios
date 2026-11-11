@@ -68,12 +68,13 @@ struct ListRowsPageTests {
 
     // MARK: - The hairlines
 
-    /// A run of rows: an inset line between two, none over the first nor
-    /// under the last.
-    @Test func aRunOfRowsHasInsetLinesBetweenAndNoneAtTheEnds() {
+    /// A run of rows: one full-width line between two (#2289), none over the
+    /// first nor under the last.
+    @Test func aRunOfRowsHasFullLinesBetweenAndNoneAtTheEnds() {
         let page = page(corpus(4, allText: true), style: .list)
-        #expect(page.rowSeparators(at: IndexPath(item: 0, section: 0)) == RowSeparators(top: .none, bottom: .inset))
-        #expect(page.rowSeparators(at: IndexPath(item: 2, section: 0)) == RowSeparators(top: .none, bottom: .inset))
+        #expect(page.rowSeparators(at: IndexPath(item: 0, section: 0)) == RowSeparators(top: .none, bottom: .full))
+        #expect(page.rowSeparators(at: IndexPath(item: 1, section: 0)) == RowSeparators(top: .none, bottom: .full))
+        #expect(page.rowSeparators(at: IndexPath(item: 2, section: 0)) == RowSeparators(top: .none, bottom: .full))
         #expect(page.rowSeparators(at: IndexPath(item: 3, section: 0)) == .none, "a line under the last post")
     }
 
@@ -119,5 +120,23 @@ struct ListRowsPageTests {
         #expect(textOrigin.opensWithNativePush)
         #expect(!photoOrigin.opensWithNativePush)
         page.endPlaybackHandoff()
+    }
+
+    // MARK: - The header's hairline (#2289)
+
+    /// The place page's header closes with the posts' hairline, as the
+    /// profile's does: the list's first row draws none above it.
+    @Test func thePlacesHeaderClosesWithTheHairline() {
+        let place = PlaceProfileViewController(
+            postIDs: [],
+            placeName: "Paris • City Cluster",
+            imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
+            videoPlayback: nil,
+            loadPosts: { [] },
+            openPost: { _, _, _ in }
+        )
+        #expect(place.debugHeader.drawsFootHairline)
+        let rows = page(corpus(3, allText: true), style: .list)
+        #expect(rows.rowSeparators(at: IndexPath(item: 0, section: 0)).top == .none, "a second line under the header")
     }
 }

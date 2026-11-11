@@ -1,13 +1,16 @@
 import DesignSystem
 
-/// A hairline a list row draws (#2243): none, one inset to the text column —
-/// between two posts, as Threads draws it — or one across the whole width,
-/// where the list meets something that is not a row (a block of tiles, a
-/// shelf).
+/// A hairline a list row draws (#2243): none, or one across the whole
+/// width — one device pixel, `.separator`, edge to edge.
+///
+/// ⚠️ ONE KIND OF LINE FOR EVERY BOUNDARY (#2289). There was an INSET line
+/// between two rows, from the text column after the avatar, as Threads draws
+/// it. Threads starts its line there because its text starts there; here the
+/// text stands under the avatar, so the line started on nothing and read as
+/// cut short (the owner, 2026-11-11). A post ends at every boundary, so every
+/// boundary takes the same line.
 public enum RowSeparator: Equatable, Sendable {
     case none
-    /// From the text column (after the avatar) to the trailing margin.
-    case inset
     /// Edge to edge.
     case full
 }
@@ -25,24 +28,28 @@ public struct RowSeparators: Equatable, Sendable {
     public static let none = RowSeparators(top: .none, bottom: .none)
 }
 
-/// Where the hairlines of a post list go (#2243) — pure, so the placement is
-/// a table rather than a reading of whichever cell happened to be realized.
+/// Where the hairlines of a post list go (#2243, #2289) — pure, so the
+/// placement is a table rather than a reading of whichever cell happened to
+/// be realized.
 ///
 /// ```
 ///   [shelf / tiles]
-///   ──────────────────────  full: the row's TOP, under something not a row
+///   ──────────────────────  the row's TOP, under something not a row
 ///   ◯ row
-///       ────────────────     inset: between two rows, the upper one's BOTTOM
+///   ──────────────────────  between two rows, the upper one's BOTTOM
 ///   ◯ row
-///   ──────────────────────  full: the row's BOTTOM, over something not a row
+///   ──────────────────────  the row's BOTTOM, over something not a row
 ///   [tiles]
 ///   ◯ row                    no line under a list's last row,
 ///   ┄┄ (end) ┄┄              nor above (or under) a section's title
 /// ```
 ///
 /// ⚠️ ONE LINE PER BOUNDARY, never two: between two rows only the UPPER one
-/// draws (its bottom); a full line is drawn by the row on whichever side of
-/// the boundary is a row — tiles and shelves draw nothing.
+/// draws (its bottom); a line next to tiles or a shelf is drawn by the row on
+/// whichever side of the boundary is a row — tiles and shelves draw nothing.
+/// Every line is the same full-width one. A hero page's header draws its own
+/// under it (`HeroHeaderView.drawsFootHairline`), so a list's first row
+/// takes none above.
 public enum ListSeparators {
     /// What lies on one side of a row.
     public enum Neighbour: Equatable, Sendable {
@@ -61,8 +68,7 @@ public enum ListSeparators {
     /// The hairlines a row draws, given what lies above and below it.
     public static func separators(above: Neighbour, below: Neighbour) -> RowSeparators {
         let bottom: RowSeparator = switch below {
-        case .row: .inset
-        case .other: .full
+        case .row, .other: .full
         case .sectionHeader, .none: .none
         }
         // The row above draws the line between two rows; a heading and the

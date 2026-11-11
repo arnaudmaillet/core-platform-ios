@@ -1202,9 +1202,11 @@ final class ForYouGridPage: UIView {
     // MARK: - The rows' hairlines and opening (#2243)
 
     /// The hairlines the row at `indexPath` draws, decided from what lies
-    /// above and below it (`ListSeparators`): an inset line between two
-    /// rows, a full one where the list meets tiles, paired cards or the
-    /// shelf, none at the ends nor next to a section's title.
+    /// above and below it (`ListSeparators`): one full-width line between
+    /// two rows and where the list meets tiles, paired cards or the shelf
+    /// (#2289), none at the ends nor next to a section's title — a hero
+    /// page's header draws the one over the first row
+    /// (`HeroHeaderView.drawsFootHairline`).
     ///
     /// Read off the MODEL (the data source's own counts), never the
     /// collection view's: a row is configured in the middle of an update,

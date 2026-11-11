@@ -56,6 +56,23 @@ public final class PostAuthorBandView: UIView {
     public static var bareHeight: CGFloat { PostMetaPillView.height }
     /// The width of the "..." control.
     public static var actionControlWidth: CGFloat { PostActionPillView.controlWidth }
+    /// The air between the "..." glyph's INK and its control's trailing edge:
+    /// the glyph is centred in a fixed width (`actionControlWidth`), so it is
+    /// half of what the glyph's ink leaves of that width — read off the
+    /// symbol's alignment rect, which is how the button lays the glyph.
+    /// What a list's row hangs its band out by, so the "..." ink ends on
+    /// the caption's column (#2289, `PostGridListRowCell.bandTrailingInset`).
+    public static var menuInkTrailing: CGFloat {
+        let configuration = PostActionPillView.glyphConfiguration(systemName: menuSymbol)
+        guard let image = configuration.image else { return 0 }
+        let drawn = configuration.preferredSymbolConfigurationForImage
+            .flatMap { image.applyingSymbolConfiguration($0) } ?? image
+        let insets = drawn.alignmentRectInsets
+        let ink = drawn.size.width - insets.left - insets.right
+        return max((PostActionPillView.controlWidth - ink) / 2, 0)
+    }
+    /// The "..." control's symbol.
+    static let menuSymbol = "ellipsis"
     /// How far below a card's top edge its caption begins, when the card wears
     /// a band of the given shape. The card's own top inset cancels — the band
     /// starts at `captionTopInset` and so does the caption inside a reveal's
@@ -207,7 +224,7 @@ public final class PostAuthorBandView: UIView {
     private let avatar = AvatarView(diameter: PostAuthorBandView.avatarDiameter, size: .avatar)
     private let nameLabel = UILabel()
     private let handleLabel = UILabel()
-    private let menuButton = PostActionPillView.makeGlyphControl(systemName: "ellipsis", label: "More actions")
+    private let menuButton = PostActionPillView.makeGlyphControl(systemName: menuSymbol, label: "More actions")
     private let identityControl = UIControl()
     /// The identity's vertical claim on the band — released for a bare band,
     /// whose height is the control's rather than the disc's.

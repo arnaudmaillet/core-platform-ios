@@ -1,14 +1,16 @@
+import CoreModels
 import DesignSystem
 import FeedInterface
 import HeroPage
+import MediaCore
 import PostGrid
 import Testing
 import UIKit
 @testable import Profile
 
 /// The profile's post lists (#2243; the only style since #2290): which of its
-/// pages are the vertical lists whose text posts are rows, and the ground it
-/// lies on.
+/// pages are the vertical lists whose text posts are rows, the ground it
+/// lies on, and the hairline closing its header (#2289).
 @MainActor
 struct ProfileListRowsTests {
     /// Posts, Reposts, Tagged (For You's list) and Short, Saved, Liked (the
@@ -31,4 +33,34 @@ struct ProfileListRowsTests {
     @Test func theProfileLiesOnThePlainPage() {
         #expect(HeroPageGround.color == Surface.plainPage)
     }
+
+    /// ⚠️ THE HEADER CLOSES WITH THE POSTS' HAIRLINE (#2289): the profile's
+    /// header draws it, over every tab, where a header built for another
+    /// screen (the profile card's sheet) draws none.
+    @Test func theProfilesHeaderClosesWithTheHairline() {
+        let pipeline = ImagePipeline(fetcher: PlaceholderImageFetcher())
+        let screen = ProfileViewController(
+            viewModel: ProfileViewModel(repository: NoProfiles()),
+            imagePipeline: pipeline,
+            makeGridPage: TestGridPages.factory(),
+            onLogout: nil
+        )
+        screen.loadViewIfNeeded()
+        #expect(screen.headerView.drawsFootHairline)
+        #expect(!ProfileHeaderView(imagePipeline: pipeline).drawsFootHairline, "on by default")
+    }
+}
+
+/// No profile behind it: the header only has to be built.
+private struct NoProfiles: ProfileProviding {
+    func currentUserProfile() async throws -> UserProfile { throw CancellationError() }
+    func profile(id: ProfileID) async throws -> UserProfile { throw CancellationError() }
+    func relationship(for profileID: ProfileID) async throws -> ProfileRelationship { .me }
+    func setFollowing(_ following: Bool, for profileID: ProfileID) async throws {}
+    func setBlocked(_ blocked: Bool, for profileID: ProfileID) async throws {}
+    func blockAccount(behind profileID: ProfileID) async throws -> [ProfileID] { [] }
+    func updateCurrentUserProfile(
+        displayName: String, bio: String, website: String, links: [ProfileLink]
+    ) async throws -> UserProfile { throw CancellationError() }
+    func changeHandle(_ newHandle: String) async throws -> UserProfile { throw CancellationError() }
 }

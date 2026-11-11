@@ -32,6 +32,6 @@ let package = Package(
         .target(name: "HeroPage", dependencies: [
             "DesignSystem", "FeedInterface", "PostGrid", "MediaCore", "MediaPlayback", "EmoteKit", "CoreNavigation"
         ]),
-        .testTarget(name: "HeroPageTests", dependencies: ["HeroPage", "DesignSystem", "FeedInterface", "MediaCore"])
+        .testTarget(name: "HeroPageTests", dependencies: ["HeroPage", "DesignSystem", "FeedInterface", "PostGrid", "MediaCore"])
     ]
 )

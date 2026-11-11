@@ -7,7 +7,7 @@ import UIKit
 @testable import PostGrid
 
 /// The post lists' rows (#2243; the only style since #2290): a text post's
-/// row with no card, the hairlines between rows, the list's insets, and how a
+/// row with no card, the full-width hairlines between rows (#2289), the list's insets, and how a
 /// post opens from where it is drawn. A shelf's card is the same cell in its
 /// other dress.
 @MainActor
@@ -26,11 +26,11 @@ struct ListRowStyleTests {
     }
 
     private static func cell(
-        dress: PostGridListRowCell.Dress, separators: RowSeparators = .none
+        dress: PostGridListRowCell.Dress, separators: RowSeparators = .none, author: Bool = true
     ) -> PostGridListRowCell {
         let cell = PostGridListRowCell(frame: CGRect(x: 0, y: 0, width: width, height: 140))
         cell.dress = dress
-        cell.configure(with: post(), imagePipeline: pipeline)
+        cell.configure(with: post(author: author), imagePipeline: pipeline)
         cell.rowSeparators = separators
         cell.layoutIfNeeded()
         return cell
@@ -66,32 +66,30 @@ struct ListRowStyleTests {
         #expect(cell.debugDress.cornerRadius == 0)
     }
 
-    /// An inset hairline starts at the text column — after the avatar — and
-    /// sits mid-gap under the row; a full one bleeds to the screen's edges.
-    @Test func theHairlinesSitWhereTheyShould() throws {
-        let cell = Self.cell(dress: .row, separators: RowSeparators(top: .full, bottom: .inset))
-        let frames = cell.debugRuleFrames
-        let bottom = try #require(frames.bottom)
-        let top = try #require(frames.top)
-        #expect(bottom.minX == PostGridListRowCell.separatorLeading(showsIdentity: true))
-        #expect(abs(bottom.midY - (cell.bounds.height + PostGridListRowCell.separatorOffset)) < 0.01)
-        #expect(top.minX == -PostGridListLayout.rowInset)
-        #expect(abs(top.maxX - (cell.bounds.width + PostGridListLayout.rowInset)) < 0.01)
-        #expect(top.midY < 0, "the top line sits in the gap above the row")
-    }
-
-    /// The text column after the avatar; the caption's column under a bare
-    /// band, which has no avatar.
-    @Test func theInsetIsTheTextColumn() {
-        #expect(PostGridListRowCell.separatorLeading(showsIdentity: true)
-            == PostGridListRowCell.captionInset + PostAuthorBandView.avatarDiameter + Spacing.sm)
-        #expect(PostGridListRowCell.separatorLeading(showsIdentity: false) == PostGridListRowCell.captionInset)
+    /// ⚠️ EVERY HAIRLINE SPANS THE SCREEN (#2289), the one between two rows
+    /// included — it used to start after the avatar and read as cut short —
+    /// and sits mid-gap: under the row's foot, over its head. One device
+    /// pixel, the system's separator.
+    @Test func theHairlinesSpanTheScreenMidGap() throws {
+        for author in [true, false] {
+            let cell = Self.cell(dress: .row, separators: RowSeparators(top: .full, bottom: .full), author: author)
+            let frames = cell.debugRuleFrames
+            let bottom = try #require(frames.bottom)
+            let top = try #require(frames.top)
+            for line in [top, bottom] {
+                #expect(line.minX == -PostGridListLayout.rowInset, "author \(author): \(line)")
+                #expect(abs(line.maxX - (cell.bounds.width + PostGridListLayout.rowInset)) < 0.01)
+                #expect(line.height == Surface.hairline(for: cell.traitCollection))
+            }
+            #expect(abs(bottom.midY - (cell.bounds.height + PostGridListRowCell.separatorOffset)) < 0.01)
+            #expect(abs(top.midY + PostGridListRowCell.separatorOffset) < 0.01, "the top line sits mid-gap above")
+        }
     }
 
     /// No hairline is drawn on a shelf's card, whatever it was handed, nor on
     /// a row where the page asked for none.
     @Test func noHairlineOnACardOrWhereNoneIsAsked() {
-        let card = Self.cell(dress: .card, separators: RowSeparators(top: .full, bottom: .inset)).debugRuleFrames
+        let card = Self.cell(dress: .card, separators: RowSeparators(top: .full, bottom: .full)).debugRuleFrames
         #expect(card.top == nil && card.bottom == nil)
         let row = Self.cell(dress: .row, separators: .none).debugRuleFrames
         #expect(row.top == nil && row.bottom == nil)
@@ -99,12 +97,27 @@ struct ListRowStyleTests {
 
     // MARK: - The hairlines' placement
 
-    /// Between two rows: one inset line, the upper row's.
-    @Test func betweenTwoRowsOneInsetLine() {
+    /// Between two rows: one full-width line (#2289), the upper row's.
+    @Test func betweenTwoRowsOneFullLine() {
         let upper = ListSeparators.separators(above: .none, below: .row)
         let lower = ListSeparators.separators(above: .row, below: .none)
-        #expect(upper == RowSeparators(top: .none, bottom: .inset))
+        #expect(upper == RowSeparators(top: .none, bottom: .full))
         #expect(lower == RowSeparators(top: .none, bottom: .none), "two lines between two rows")
+        #expect(ListSeparators.separators(above: .row, below: .row) == RowSeparators(top: .none, bottom: .full))
+    }
+
+    /// Every boundary a row draws is the same full line: no other kind is
+    /// left, whatever the neighbours.
+    @Test func everyBoundaryIsOneFullLine() {
+        let sides: [ListSeparators.Neighbour] = [.row, .other, .sectionHeader, .none]
+        for above in sides {
+            for below in sides {
+                let lines = ListSeparators.separators(above: above, below: below)
+                for line in [lines.top, lines.bottom] {
+                    #expect(line == .none || line == .full)
+                }
+            }
+        }
     }
 
     /// Around tiles and a shelf: a full line, drawn by the row.

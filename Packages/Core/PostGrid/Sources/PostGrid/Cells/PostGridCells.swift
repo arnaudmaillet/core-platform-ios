@@ -1382,6 +1382,10 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// The whole line moves as one container — the date and the page
     /// indicator lead it on this column too — so the line reads as a unit
     /// under the caption, not as a row whose ends disagree.
+    ///
+    /// ⚠️ A CARD'S COLUMN ONLY (#2289). A list's row has no side to press
+    /// against: its line stands on the caption's column instead, as does its
+    /// "..." — see `closingLineInset(for:)`.
     public static var actionLineInset: CGFloat {
         captionInset + PostCardPillView.plainInsets.leading
     }
@@ -1861,6 +1865,9 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// The VIEW is shared with the reveal's transition prop — see
     /// `PostAuthorBandView` for why that matters.
     private let authorBand = PostAuthorBandView()
+    /// The band's trailing end: on the caption's column on a card, hung out
+    /// by the "..."'s air on a row (#2289) — see `bandTrailingInset`.
+    private var bandTrailing: NSLayoutConstraint!
     /// The caption hangs off the band — at the band's gap when the band draws
     /// something, and flush when it has collapsed to nothing.
     private var captionFollowsBand: NSLayoutConstraint!
@@ -2184,14 +2191,14 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         metaRow.spacing = Self.chipGap
         // The ends HANG: `syncClosingLine` moves them out by the ink inset
         // of whatever box opens and closes the line, so the ink sits on the
-        // line's own column (`actionLineInset`). Written at that inset here,
-        // which is right for a line whose ends have no air of their own (the
-        // date, the indicator's capsule).
+        // line's own column (`closingLineInset(for:)`, the dress's). Written
+        // at that inset here, which is right for a line whose ends have no
+        // air of their own (the date, the indicator's capsule).
         let metaLeading = metaRow.leadingAnchor.constraint(
-            equalTo: card.leadingAnchor, constant: Self.actionLineInset
+            equalTo: card.leadingAnchor, constant: Self.closingLineInset(for: dress)
         )
         let metaTrailing = metaRow.trailingAnchor.constraint(
-            equalTo: card.trailingAnchor, constant: -Self.actionLineInset
+            equalTo: card.trailingAnchor, constant: -Self.closingLineInset(for: dress)
         )
         self.metaLeading = metaLeading
         self.metaTrailing = metaTrailing
@@ -2260,13 +2267,56 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         captionClosesCard.isActive = isEmpty && textFoot
         embedClosesCard.isActive = isEmpty && hasEmbed
         mediaClosesCard.isActive = isEmpty && hasMedia
+        hangLineEnds()
+    }
+
+    /// Hangs the closing line's two ends off this dress's column
+    /// (`closingLineInset(for:)`) by the air their boxes leave before the
+    /// ink, and the band's "..." the same way (`bandTrailingInset(for:)`).
+    /// Re-run on a dress change, since the column is the dress's.
+    private func hangLineEnds() {
+        if let bandTrailing {
+            bandTrailing.constant = -Self.bandTrailingInset(for: dress)
+        }
+        guard let metaLeading, let metaTrailing else { return }
+        let column = Self.closingLineInset(for: dress)
         let hang = closingLineHang
-        metaLeading.constant = Self.actionLineInset - hang.leading
-        metaTrailing.constant = -(Self.actionLineInset - hang.trailing)
+        metaLeading.constant = column - hang.leading
+        metaTrailing.constant = -(column - hang.trailing)
+    }
+
+    /// The closing line's column for a dress: where its first ink starts and
+    /// its last ink ends, from the cell's edges.
+    ///
+    /// * **A card** (a shelf's): `actionLineInset`, one plain padding inside
+    ///   the caption's — the card's sides are what the line was held off
+    ///   (2026-09-30).
+    /// * **A row** (#2289): the caption's own column. A row has no side to
+    ///   press against, and the card's 8 extra points stood everything on the
+    ///   right 8pt further in than everything on the left — the owner read
+    ///   the post as pushed left. On a row, every ink stands on one column,
+    ///   16pt from the screen on both sides (`PostGridListLayout.rowInset` +
+    ///   `captionInset`); a press's capsule spills about 8pt into the margin,
+    ///   which is fine on a page with no card edge.
+    public static func closingLineInset(for dress: Dress) -> CGFloat {
+        dress == .row ? captionInset : actionLineInset
+    }
+
+    /// The band's trailing inset for a dress, from the cell's trailing edge.
+    ///
+    /// * **A card**: the caption's column — the "..." control's BOX ends
+    ///   there, its glyph its air further in, over the closing line's last
+    ///   count (both on `actionLineInset`).
+    /// * **A row** (#2289): hung out by the "..."'s air
+    ///   (`PostAuthorBandView.menuInkTrailing`), so its INK ends on the
+    ///   caption's column, over the closing line's last count — which a row
+    ///   also ends there.
+    public static func bandTrailingInset(for dress: Dress) -> CGFloat {
+        dress == .row ? captionInset - PostAuthorBandView.menuInkTrailing : captionInset
     }
 
     /// How far the closing line's two ends reach past the line's column
-    /// (`actionLineInset`).
+    /// (`closingLineInset(for:)`).
     ///
     /// ⚠️ THE INK IS ON THE COLUMN, NOT THE BOX. A plain action still has a
     /// box — the press region, and the capsule the press wash draws — but
@@ -2276,9 +2326,10 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// air its own box leaves before the ink; the date and the indicator's
     /// capsule have none, and hang nothing.
     ///
-    /// The column being one plain padding inside the caption's, the widest
-    /// hang (the save glyph's ~8pt) puts that box back on the caption's
-    /// column — never past it.
+    /// On a card the column is one plain padding inside the caption's, so the
+    /// widest hang (the save glyph's ~8pt) puts that box back on the
+    /// caption's column — never past it. On a row the column IS the
+    /// caption's, and the box spills that hang into the margin (#2289).
     var closingLineHang: (leading: CGFloat, trailing: CGFloat) {
         let shown = metaRow.arrangedSubviews.filter { !$0.isHidden && $0 !== lineSpacer }
         return (
@@ -2352,6 +2403,10 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     }
 
     private func buildAuthorBand() {
+        let trailing = authorBand.trailingAnchor.constraint(
+            equalTo: card.trailingAnchor, constant: -Self.bandTrailingInset(for: dress)
+        )
+        bandTrailing = trailing
         authorBand.constrain(in: card) { parent in
             authorBand.topAnchor.constraint(
                 equalTo: parent.topAnchor, constant: Self.captionTopInset
@@ -2359,9 +2414,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
             authorBand.leadingAnchor.constraint(
                 equalTo: parent.leadingAnchor, constant: Self.captionInset
             )
-            authorBand.trailingAnchor.constraint(
-                equalTo: parent.trailingAnchor, constant: -Self.captionInset
-            )
+            trailing
         }
     }
 
@@ -2629,15 +2682,20 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// How this cell draws — set by its host (`ForYouGridPage` sets `.row`
     /// on its lists' rows).
     ///
-    /// ⚠️ ONLY THE DRESS CHANGES. The insets, the band, the caption, the
-    /// closing line and the preview keep every number they have: a row
-    /// stands on the page's margin because its SECTION narrows
-    /// (`PostGridListLayout.rowInset`), so a window's geometry and the post
-    /// page's register — both built on this cell's constants — are untouched.
+    /// ⚠️ THE DRESS CHANGES THE GROUND, AND THE TWO TRAILING ENDS. The
+    /// caption, the band's leading edge and the preview keep every number
+    /// they have: a row stands on the page's margin because its SECTION
+    /// narrows (`PostGridListLayout.rowInset`), so the post page's register,
+    /// built on `captionInset`, is untouched. What a row moves (#2289) is
+    /// the closing line's column and the "..."'s — onto the caption's, both
+    /// sides (`closingLineInset(for:)`, `bandTrailingInset(for:)`); the
+    /// shared constants (`contentInset`, `captionInset`, `actionLineInset`)
+    /// stay as they are.
     public var dress: Dress = .card {
         didSet {
             guard dress != oldValue else { return }
             applyDress()
+            hangLineEnds()
         }
     }
 
@@ -2653,15 +2711,6 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// The hairline sits mid-gap between two rows, outside the row's bounds:
     /// half the rows' spacing below its foot (and above its head).
     public static var separatorOffset: CGFloat { PostGridListLayout.rowSpacing / 2 }
-
-    /// Where an INSET hairline starts, from the row's leading edge: the text
-    /// column — after the band's avatar and its gap, as Threads draws it — or
-    /// the caption's own column under a bare band, which has no avatar.
-    public static func separatorLeading(showsIdentity: Bool) -> CGFloat {
-        showsIdentity
-            ? captionInset + PostAuthorBandView.avatarDiameter + Spacing.sm
-            : captionInset
-    }
 
     /// What a collection's box and gutter show: the card's tone, or the page
     /// through a row.
@@ -2711,18 +2760,16 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         let row = dress == .row
         let hairline = Surface.hairline(for: traitCollection)
         let offset = Self.separatorOffset
-        // FULL means the screen's width: the row stands `rowInset` in from
-        // each edge.
+        // Every line is FULL (#2289): the screen's width, and the row stands
+        // `rowInset` in from each edge.
         let bleed = PostGridListLayout.rowInset
-        let showsIdentity = authorBand.model?.showsIdentity ?? true
-        func frame(_ kind: RowSeparator, y: CGFloat) -> CGRect {
-            let leading = kind == .full ? -bleed : Self.separatorLeading(showsIdentity: showsIdentity)
-            return CGRect(x: leading, y: y, width: max(0, bounds.width + bleed - leading), height: hairline)
+        func frame(y: CGFloat) -> CGRect {
+            CGRect(x: -bleed, y: y, width: bounds.width + bleed * 2, height: hairline)
         }
         topRule.isHidden = !row || rowSeparators.top == .none
         bottomRule.isHidden = !row || rowSeparators.bottom == .none
-        topRule.frame = frame(rowSeparators.top, y: -offset - hairline / 2)
-        bottomRule.frame = frame(rowSeparators.bottom, y: bounds.height + offset - hairline / 2)
+        topRule.frame = frame(y: -offset - hairline / 2)
+        bottomRule.frame = frame(y: bounds.height + offset - hairline / 2)
         // The wash spans the row and half the gap either side, so two
         // neighbours' washes would meet on their hairline.
         pressWash.frame = bounds.insetBy(dx: -bleed, dy: -offset)
