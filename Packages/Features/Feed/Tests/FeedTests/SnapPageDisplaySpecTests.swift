@@ -224,7 +224,7 @@ struct SnapPageDisplaySpecTests {
 
     /// ⚠️ A TEXT PAGE AFTER THE FIRST PAGES BACK (#2058, the owner
     /// 2026-11-02): its downward drag is the drive's — the composer, the
-    /// header band, the stream's top edge — and the screen's close stands
+    /// header band, the pull past the stream's top (#2298) — and the close stands
     /// aside. The first text page keeps its close.
     @Test func aLaterTextPagePagesBackAndTheFirstKeepsItsClose() {
         let panels = Panels()
