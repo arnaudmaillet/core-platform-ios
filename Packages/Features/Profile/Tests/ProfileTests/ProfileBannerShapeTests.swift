@@ -40,7 +40,7 @@ struct ProfileBannerShapeTests {
             avatarURL: Self.pictureURL, websiteURL: URL(string: "https://kenji.example"), isVerified: false,
             followerCount: .exact(4), followingCount: .exact(4), reactionCount: .exact(1_000)
         )))
-        header.configureAction(.following)
+        header.configureAction(.following, bell: ProfileHeaderView.Bell(scopes: .none))
         header.frame = CGRect(x: 0, y: 0, width: 402, height: 1)
         header.frame.size.height = header.systemLayoutSizeFitting(
             CGSize(width: 402, height: UIView.layoutFittingCompressedSize.height),

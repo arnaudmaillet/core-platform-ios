@@ -272,6 +272,12 @@ extension ProfileViewController {
     /// What the header's relationship capsule says, nil while it is the blank
     /// placeholder — for tests and QA probes.
     var debugFollowTitle: String? { headerView.debugFollowTitle }
+    /// The header's row reads "followed" (#2302): the bell, or Message alone
+    /// where there is no bell — never Following, never Follow.
+    var debugShowsFollowed: Bool {
+        followButtonState == .following
+            && [[.bell, .message, .qr, .more], [.message, .qr, .more]].contains(headerView.debugTrayItems)
+    }
     var debugFollowIsProminent: Bool { headerView.debugFollowIsProminent }
     var debugIsHeaderRedacted: Bool { headerView.debugIsRedacted }
     var debugHasAvatarPicture: Bool { headerView.debugHasAvatarPicture }

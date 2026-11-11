@@ -3,8 +3,8 @@ import PostGrid
 import UIKit
 
 /// Builds the profile screen's menus from plain inputs (#846): the see-more
-/// menu, its Map submenu and rows, the nav bar's mute bell menu, and a gallery
-/// card's "..." rows.
+/// menu, its Map submenu and rows, the mute bell's menu, and a gallery card's
+/// "..." rows.
 ///
 /// Every input is a value the controller reads off the view model at OPEN time
 /// (the menus are deferred, uncached elements), and every action is a handler
@@ -30,6 +30,9 @@ enum ProfileMenuBuilder {
         var isBlocked: Bool
         /// The own profile with a viewing history to clear (#1344).
         var canClearHistory = false
+        /// Someone else's profile the viewer follows: Unfollow leads the
+        /// menu (#2302), as on the card (#1562) — Following has left the row.
+        var isFollowing = false
     }
 
     /// What the see-more menu's rows do.
@@ -42,12 +45,24 @@ enum ProfileMenuBuilder {
         var unblock: () -> Void
         var confirmBlock: () -> Void
         var clearHistory: () -> Void = {}
+        var unfollow: () -> Void = {}
     }
 
     static func moreMenuElements(_ state: MoreMenuState, handlers: MoreMenuHandlers) -> [UIMenuElement] {
+        var groups: [UIMenuElement] = []
+        // ⚠️ UNFOLLOW LEADS, ONCE FOLLOWED (#2302, the owner 2026-11-11): the
+        // header's Following became the bell, so the way back out of a follow
+        // is here, first and red — the card's rule (#1562), one builder for
+        // both. Withdrawing a request stays on Requested.
+        if state.isFollowing {
+            groups.append(UIMenu(options: .displayInline, children: [UIAction(
+                title: "Unfollow",
+                image: UIImage(systemName: "person.badge.minus"),
+                attributes: .destructive
+            ) { _ in handlers.unfollow() }]))
+        }
         // Sharing needs a loaded handle; until then the menu is honestly empty
         // rather than offering an action that would no-op.
-        var groups: [UIMenuElement] = []
         if state.canShare {
             groups.append(UIMenu(options: .displayInline, children: [
                 UIAction(title: "Share", image: UIImage(systemName: "square.and.arrow.up")) { _ in
@@ -89,7 +104,8 @@ enum ProfileMenuBuilder {
             return groups
         }
 
-        // Mute is the nav bar's bell now (#689, `muteMenuElements`).
+        // Mute is the bell's (#689, `muteMenuElements`), in the header's row
+        // since #2302.
         if state.canRestrict {
             let restricted = state.isRestricted
             // Restrict (#416): their comments on your posts are seen only

@@ -388,17 +388,17 @@ final class ProfileCardViewController: UIViewController {
     private var gateSource: UIResponder { navigationController?.presentingViewController ?? self }
     private var isGuest: Bool { MemberGates.isGuest(gateSource) }
 
-    /// The bell stands while the viewer follows, for a member, as on the
-    /// profile (`ProfileViewController.showsMuteBell`).
+    /// The bell stands while the viewer follows, for a member — the one
+    /// rule the profile's header reads too (`ProfileRelationControl`, #2302).
     var showsMuteBell: Bool {
         Self.showsMuteBell(followButton: followButtonState, canMute: viewModel.canMute, isGuest: isGuest)
     }
 
-    /// Pure, for tests.
+    /// `ProfileRelationControl.showsMuteBell`. Pure, for tests.
     nonisolated static func showsMuteBell(
         followButton: ProfileViewModel.FollowButton, canMute: Bool, isGuest: Bool
     ) -> Bool {
-        followButton == .following && canMute && !isGuest
+        ProfileRelationControl.showsMuteBell(followButton: followButton, canMute: canMute, isGuest: isGuest)
     }
 
     /// The toolbar's items for a relationship. Pure, for tests.
@@ -411,15 +411,24 @@ final class ProfileCardViewController: UIViewController {
     /// mute bell down from the top bar, Following gone (Unfollow is in the
     /// ••• menu, now top left). `showsBell`: a member who can mute;
     /// `showsQR`: a share card to show (or the profile not loaded yet).
+    ///
+    /// The relationship's control is the ONE RULE the profile's header reads
+    /// too (`ProfileRelationControl.control`, #2302): the card and the page
+    /// show one relationship the same way.
     nonisolated static func toolbarItems(
         for followButton: ProfileViewModel.FollowButton, showsBell: Bool = true, showsQR: Bool = true
     ) -> [ToolbarItem] {
         let qr: [ToolbarItem] = showsQR ? [.qr] : []
         switch followButton {
-        case .follow: return [.follow, .message] + qr
-        case .following: return (showsBell ? [.bell] : []) + [.message] + qr
         // A private profile asked: its request is withdrawn from its item.
-        case .requested: return [.requested, .message] + qr
+        case .follow, .following, .requested:
+            let control: [ToolbarItem] = switch ProfileRelationControl.control(for: followButton, showsBell: showsBell) {
+            case .follow?: [.follow]
+            case .requested?: [.requested]
+            case .bell?: [.bell]
+            case nil: []
+            }
+            return control + [.message] + qr
         // Not followable (#726), or unknown yet: what does not depend on it.
         case .unavailable, .hidden: return [.message] + qr
         // The viewer's own profile, reached by id: nothing to do here but
@@ -587,7 +596,7 @@ final class ProfileCardViewController: UIViewController {
     private func makeMuteBellItem() -> UIBarButtonItem {
         let scopes = viewModel.muteScopes
         let item = UIBarButtonItem(
-            image: UIImage(systemName: scopes.isEmpty ? "bell" : "bell.slash"),
+            image: UIImage(systemName: ProfileRelationControl.bellSymbol(for: scopes)),
             menu: UIMenu(children: [UIDeferredMenuElement.uncached { [weak self] completion in
                 guard let self else { return completion([]) }
                 completion(ProfileMenuBuilder.muteMenuElements(viewModel.muteScopes) { [weak self] scope in
@@ -596,7 +605,7 @@ final class ProfileCardViewController: UIViewController {
             }])
         )
         item.accessibilityLabel = "Notifications"
-        item.accessibilityValue = scopes.isEmpty ? "Nothing muted" : "Muted: " + scopes.summary
+        item.accessibilityValue = ProfileRelationControl.bellAccessibilityValue(for: scopes)
         return item
     }
 
@@ -629,11 +638,9 @@ final class ProfileCardViewController: UIViewController {
     #endif
 
     private func moreMenuElements() -> [UIMenuElement] {
-        // Following has left the toolbar (#1562): Unfollow leads the menu.
-        let unfollow: [UIMenuElement] = followButtonState == .following
-            ? PostCardMenu.sections(for: [.unfollow { [weak self] in self?.followTapped() }], author: nil)
-            : []
-        return unfollow + ProfileMenuBuilder.moreMenuElements(
+        // Following has left the toolbar (#1562): Unfollow leads the menu —
+        // the profile's builder, so the card and the page say it alike (#2302).
+        ProfileMenuBuilder.moreMenuElements(
             ProfileMenuBuilder.MoreMenuState(
                 canShare: viewModel.shareCard != nil,
                 mapPin: viewModel.mapPinButton,
@@ -642,7 +649,8 @@ final class ProfileCardViewController: UIViewController {
                 canRestrict: viewModel.canRestrict,
                 isRestricted: viewModel.isRestricted,
                 isBlocked: viewModel.isBlocked,
-                canClearHistory: false
+                canClearHistory: false,
+                isFollowing: followButtonState == .following
             ),
             handlers: ProfileMenuBuilder.MoreMenuHandlers(
                 share: { [weak self] in self?.presentShareSheet() },
@@ -652,7 +660,13 @@ final class ProfileCardViewController: UIViewController {
                 toggleRestrict: { [weak self] in self?.viewModel.toggleRestrict() },
                 unblock: { [weak self] in self?.viewModel.unblock() },
                 confirmBlock: { [weak self] in self?.confirmBlock() },
-                clearHistory: {}
+                clearHistory: {},
+                unfollow: { [weak self] in
+                    // Only while still followed: a menu opened before a
+                    // change must not follow back.
+                    guard self?.followButtonState == .following else { return }
+                    self?.followTapped()
+                }
             )
         )
     }

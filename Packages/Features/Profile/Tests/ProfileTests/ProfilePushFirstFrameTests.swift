@@ -11,7 +11,8 @@ import UIKit
 ///
 /// Filmed on device, 1 October 2026: from a chat, the author's profile slid in
 /// as its loading self — initials, bones, a BLUE "Follow" — and turned into the
-/// real page ("Following", the face, the cards) as the slide ended. The push
+/// real page ("Following" then — the bell or Message alone since #2302 — the
+/// face, the cards) as the slide ended. The push
 /// was then held for the data (charter P12a); since #778 (the owner's rule,
 /// 2026-10-10) it never waits: the screen slides in on its loading state and
 /// the data lands in place. What stays is the honesty — an unknown
@@ -121,11 +122,14 @@ struct ProfilePushFirstFrameTests {
         screen.loadViewIfNeeded()
         #expect(screen.debugIsHeaderRedacted, "a cold profile's first frame claimed data it did not have")
 
+        // Followed, the Follow capsule morphs into the bell (#2302): settle
+        // on the morph's end too, not on its first frame.
         await settle(until: {
-            !screen.debugIsHeaderRedacted && screen.debugFollowTitle == "Following" && screen.debugHasAvatarPicture
+            !screen.debugIsHeaderRedacted && screen.debugShowsFollowed && screen.debugHasAvatarPicture
+                && !screen.debugFollowIsProminent
         })
         #expect(!screen.debugIsHeaderRedacted)
-        #expect(screen.debugFollowTitle == "Following")
+        #expect(screen.debugShowsFollowed)
         #expect(!screen.debugFollowIsProminent, "Following is a state, not the blue call to action")
         #expect(screen.debugHasAvatarPicture)
     }
@@ -168,7 +172,7 @@ struct ProfilePushFirstFrameTests {
             stub: ProfileIdentityStub(handle: "kenji.dev", displayName: "Kenji Tanaka", isFollowing: true)
         )
         screen.loadViewIfNeeded()
-        #expect(screen.debugFollowTitle == "Following")
+        #expect(screen.debugShowsFollowed)
     }
 
     // MARK: - A revisit is ready at once
@@ -211,7 +215,7 @@ struct ProfilePushFirstFrameTests {
         )
         second.loadViewIfNeeded()
         #expect(!second.debugIsHeaderRedacted, "a fully cached profile opened on its bones")
-        #expect(second.debugFollowTitle == "Following")
+        #expect(second.debugShowsFollowed)
     }
 
     /// A follow made elsewhere reaches the cached answer, so the next visit

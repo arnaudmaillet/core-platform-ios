@@ -132,20 +132,12 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
 
     /// The own-profile settings gear; pushes `AccountSettingsViewController`.
     private var settingsItem: UIBarButtonItem?
-    /// The mute bell, on someone else's profile (#689): the scoped Mute menu
-    /// that used to sit in the see-more menu. `bell`, or `bell.slash` once
-    /// anything is muted. Kept: the trailing run is compared by reference
-    /// (the bar's identical-group guard), so a fresh item is a rebuild — made
-    /// when its glyph changes (#1679, R3: under the same identifier, the bar
-    /// morphs one into the other).
-    private lazy var muteBellItem = makeMuteBellItem()
-    /// Whether the bell on the bar shows `bell.slash`.
-    private var muteBellShowsMuted = false
-    /// Keeps the corner item — the bell, or Follow / Requested (#2248) — and
-    /// the shell's balance two bubbles: iOS 26 groups adjacent bar items into
-    /// one platter (the feed's note on `setEngagedChrome`). One space for
-    /// all three, since only one of them stands at a time. Kept for the same
-    /// by-reference reason.
+    /// Keeps the corner item — Follow or Requested (#2248) — and the shell's
+    /// balance two bubbles: iOS 26 groups adjacent bar items into one platter
+    /// (the feed's note on `setEngagedChrome`). One space for both, since
+    /// only one of them stands at a time, and none with the corner empty.
+    /// Kept: the trailing run is compared by reference (the bar's
+    /// identical-group guard), so a fresh item is a rebuild.
     private let cornerSpacer = UIBarButtonItem.fixedSpace(Spacing.sm)
     /// Keeps History's Select / Done its own bubble, apart from the gear.
     private let historySelectSpacer = UIBarButtonItem.fixedSpace(Spacing.sm)
@@ -406,30 +398,28 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
             guard let self else { return }
             HeroScreenCost.measure("landing.relationship") {
                 self.followButtonState = state
-                self.headerView.configureAction(state)
+                // Follow ⇄ the bell is the tray's morph (#2302): the
+                // optimistic flip and its rollback both animate it.
+                self.applyHeaderAction()
                 self.applyRelationMark()
                 // Whose posts these are just changed: on the viewer's own
                 // profile the rows gain Edit and Delete, drawn now rather
                 // than once each row is configured again.
                 self.galleryPager.refreshAuthorMenus()
-                // A bell that has to go leaves the way it came (#1903).
-                if self.isShowingMuteBell, !self.showsMuteBell {
-                    self.removeMuteBell()
-                } else {
-                    // The relationship usually resolves while the push/present
-                    // is still animating; bind the bar inside the transition so
-                    // the toolbar composes during the animation, not after it.
-                    self.alongsideTransition { $0.applyNavigationState(animated: $1) }
-                }
+                // The relationship usually resolves while the push/present
+                // is still animating; bind the bar inside the transition so
+                // the toolbar composes during the animation, not after it.
+                self.alongsideTransition { $0.applyNavigationState(animated: $1) }
                 self.noteLandingMilestone()
             }
         }
         viewModel.onRelationshipSettled = { [weak self] in
             guard let self else { return }
             // The button moves before the read counts as settled, so the
-            // bar it recomposed could still presume someone else: a bell the
-            // answer rules out (the viewer's own handle, #800) goes now.
-            if self.isShowingMuteBell, !self.showsMuteBell { self.removeMuteBell() }
+            // tray could still presume someone else: a bell the answer rules
+            // out (the viewer's own handle, #800) goes now, and one a lookup
+            // has just resolved becomes usable.
+            self.applyHeaderAction()
             self.noteLandingMilestone()
         }
         headerView.onPicturesSettled = { [weak self] in self?.noteLandingMilestone() }
@@ -444,8 +434,10 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         viewModel.onMuteScopesChange = { [weak self] _ in
             // The bell changes at once — on the tap, and back on a refusal or
             // an Undo — beside its toast, never under it (#2143).
-            self?.refreshMuteBell()
+            self?.applyHeaderAction()
         }
+        // The tray's bell opens the scoped Mute menu (#689, #2302).
+        headerView.setBellMenu(makeMuteMenu())
         headerView.onFollowTapped = { [weak self] in
             guard let self else { return }
             MemberGates.perform(.follow(handle: viewModel.profile?.handle), from: self) { [weak self] in
@@ -568,7 +560,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         configureFilterTray()
         // Mirror the (possibly stub-seeded) relationship into the header's
         // tray, so Message visibility agrees with the toolbar from the start.
-        headerView.configureAction(followButtonState)
+        applyHeaderAction()
         applyRelationMark()
         render(.loading)
         viewModel.viewDidLoad()
@@ -582,8 +574,10 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         let isTabRoot = navigationController?.viewControllers.first === self
         galleryPager.leadingPullTarget = isTabRoot ? DrawerPull.shared : nil
         galleryPager.reservesLeadingEdge = !isTabRoot
-        // A guest is known only once a gate is up the chain (#2014).
+        // A guest is known only once a gate is up the chain (#2014): their
+        // tray has no bell (#2302).
         applyRelationMark()
+        applyHeaderAction()
         Task { [weak self] in await self?.viewModel.refreshShareToken() }
         // Back from a channel's thread or the new channel's sheet (#2232):
         // a join there, or a channel just created, shows on the rows. Only
@@ -659,7 +653,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         if !hasLoggedFirstFrame, ProcessInfo.processInfo.arguments.contains("-profile-first-frame-log") {
             hasLoggedFirstFrame = true
             print("[profile-first-frame] settled=\(isSettled) "
-                  + "redacted=\(debugIsHeaderRedacted) follow=\(debugFollowTitle ?? "placeholder") "
+                  + "redacted=\(debugIsHeaderRedacted) follow=\(debugFollowTitle ?? (debugMuteBell != nil ? "bell" : "placeholder")) "
                   + "avatar=\(debugHasAvatarPicture ? "picture" : "initials") "
                   + "banner=\(headerView.bannerFormat) gallerySettled=\(isGallerySettled)")
         }
@@ -1309,9 +1303,12 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
 
     // MARK: - Mute bell
 
-    /// Whether the bell stands in the bar: a profile the viewer FOLLOWS, in
-    /// a composition that can mute, for a member. The same rule the see-more
-    /// menu's Mute submenu had (#689): a guest has no account to mute from.
+    /// Whether the bell stands — in the header's row, where Follow was, since
+    /// #2302 (the owner, 2026-11-11; it stood in the bar's corner before):
+    /// a profile the viewer FOLLOWS, in a composition that can mute, for a
+    /// member — the card's rule (`ProfileRelationControl.showsMuteBell`). The
+    /// same rule the see-more menu's Mute submenu had (#689): a guest has no
+    /// account to mute from.
     ///
     /// ⚠️ NO BELL UNTIL THE READ SAYS FOLLOWING (the owner, 2026-10-18,
     /// #1398). It used to be presumed from frame 0 on someone else's profile
@@ -1319,12 +1316,23 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     /// profile the viewer does not follow showed a bell for the whole push,
     /// then lost it. There is nothing of theirs to mute until they are
     /// followed (2026-10-15), and an unknown relationship is not "followed".
-    /// The bell ARRIVES once the push has settled, animated
-    /// (`updateActionBarItem`): an item added mid-push lands unanimated at
-    /// its end on device (#756).
     private var showsMuteBell: Bool {
-        guard !viewModel.namesNoOne, followButtonState == .following else { return false }
-        return viewModel.canMute && MemberGates.gate(from: self)?.isMember != false
+        guard !viewModel.namesNoOne else { return false }
+        return ProfileRelationControl.showsMuteBell(
+            followButton: followButtonState, canMute: viewModel.canMute,
+            isGuest: MemberGates.gate(from: self)?.isMember == false
+        )
+    }
+
+    /// The header's row for the relationship (#2302): Follow or Requested,
+    /// the bell once followed — its glyph, its enabling — or Message alone.
+    /// On every change of the relationship, the scopes (on the tap, a
+    /// refusal, an Undo, #2143), and the lookup's answer.
+    private func applyHeaderAction() {
+        let bell = showsMuteBell
+            ? ProfileHeaderView.Bell(scopes: viewModel.muteScopes, isEnabled: isMuteBellEnabled)
+            : nil
+        headerView.configureAction(followButtonState, bell: bell)
     }
 
     /// Whether the bell can be used yet: a handle or link route has no one to
@@ -1356,50 +1364,12 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         }
     }
 
-    static let muteBellID = "profile.mute-bell"
-
-    private func makeMuteBellItem() -> UIBarButtonItem {
-        let item = BarItems.icon(
-            id: Self.muteBellID, image: UIImage(systemName: "bell"), label: "Notifications", menu: makeMuteMenu()
-        )
-        item.tintColor = .label
-        return item
-    }
-
-    /// The spoken value follows the scopes in place; a new glyph is a new
-    /// item under the same identifier, set animated — the bar morphs the
-    /// bell (#1679, R3), never an image swapped on the item it shows.
-    private func refreshMuteBell() {
-        let muted = !viewModel.muteScopes.isEmpty
-        guard muted != muteBellShowsMuted, isShowingMuteBell else {
-            applyMuteLook(to: muteBellItem)
-            return
-        }
-        // Never mid-push: an item swapped then lands unanimated at its end (#756).
-        if transitionCoordinator != nil, let navigationController {
-            navigationController.whenAtRest { [weak self] in self?.refreshMuteBell() }
-            return
-        }
-        let item = makeMuteBellItem()
-        applyMuteLook(to: item)
-        muteBellItem = item
-        updateActionBarItem(followButtonState, animated: view.window != nil)
-    }
-
-    private func applyMuteLook(to item: UIBarButtonItem) {
-        let scopes = viewModel.muteScopes
-        item.image = UIImage(systemName: scopes.isEmpty ? "bell" : "bell.slash")
-        item.accessibilityValue = scopes.isEmpty ? "Nothing muted" : "Muted: " + scopes.summary
-        muteBellShowsMuted = !scopes.isEmpty
-    }
-
     // MARK: - Follow in the corner (#2248)
 
     static let followItemID = "profile.follow"
     static let requestedItemID = "profile.follow-requested"
 
-    /// The item the bar's corner wears for the relation, or nil: the bell
-    /// once followed (`showsMuteBell`, its own rule — always), Follow or
+    /// The item the bar's corner wears for the relation, or nil: Follow or
     /// Requested only once the tray has scrolled away (the owner,
     /// 2026-11-10), where the identity pill came in before (#1451) — so the
     /// page never shows the tray's Follow and the bar's at once.
@@ -1408,13 +1378,17 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     /// |-----------------|-------------|
     /// | not followed    | Follow      |
     /// | requested       | Requested   |
-    /// | followed        | the bell    |
+    /// | followed        | nothing     |
     /// | blocked, nobody, the viewer's own, not read yet | nothing |
+    ///
+    /// ⚠️ NEVER THE BELL (#2302, the owner 2026-11-11): once followed, the
+    /// header's Follow becomes the bell, and the corner stays empty, scrolled
+    /// or not. A follow from the bar's Follow takes it out, animated
+    /// (`updateActionBarItem`).
     ///
     /// A guest reads as not followed, so Follow — behind the member gate,
     /// as the tray's Follow is (`headerView.onFollowTapped`).
     private var cornerItem: UIBarButtonItem? {
-        if showsMuteBell { return muteBellItem }
         guard showsRelationshipItem else { return nil }
         switch followButtonState {
         case .follow: return followBarItem
@@ -1470,13 +1444,11 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         ownTrailingBarItems.first { $0 === followBarItem || $0 === requestedBarItem }
     }
     /// Every write of the bar's trailing group, in order: whether it was
-    /// animated, so UIKit could morph it (#1903). A test reads how the bell
+    /// animated, so UIKit could morph it (#1903). A test reads how Follow
     /// left.
     var debugBarWrites: [Bool] = []
-    /// The bell, if the bar shows it.
-    var debugMuteBellItem: UIBarButtonItem? {
-        ownTrailingBarItems.first { $0 === muteBellItem }
-    }
+    /// The bell, if the header's row shows it (#2302).
+    var debugMuteBell: AppButton? { headerView.debugBell }
     /// What picking the bell menu's `scope` does. Tests.
     func debugToggleMute(_ scope: MuteScope) { viewModel.toggleMute(scope) }
     func debugMuteMenuElements() -> [UIMenuElement] { muteMenuElements() }
@@ -1516,7 +1488,8 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
                 canRestrict: viewModel.canRestrict,
                 isRestricted: viewModel.isRestricted,
                 isBlocked: viewModel.isBlocked,
-                canClearHistory: viewModel.isOwnProfile && viewModel.hasHistory
+                canClearHistory: viewModel.isOwnProfile && viewModel.hasHistory,
+                isFollowing: followButtonState == .following && !viewModel.namesNoOne
             ),
             handlers: ProfileMenuBuilder.MoreMenuHandlers(
                 share: { [weak self] in self?.presentShareSheet() },
@@ -1526,9 +1499,19 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
                 toggleRestrict: { [weak self] in self?.viewModel.toggleRestrict() },
                 unblock: { [weak self] in self?.viewModel.unblock() },
                 confirmBlock: { [weak self] in self?.confirmBlock() },
-                clearHistory: { [weak self] in self?.confirmClearHistory() }
+                clearHistory: { [weak self] in self?.confirmClearHistory() },
+                unfollow: { [weak self] in self?.unfollowTapped() }
             )
         )
+    }
+
+    /// The "…" menu's Unfollow (#2302): the tray's own path — the member
+    /// gate, the optimistic flip, the silent off (#1886) — only while the
+    /// viewer still follows: a menu opened before a change must not follow
+    /// back.
+    private func unfollowTapped() {
+        guard followButtonState == .following else { return }
+        headerView.onFollowTapped?()
     }
 
     /// "Clear History" asks once (#1344): the list cannot be brought back.
@@ -2042,30 +2025,6 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         heroPager.setSoftTopEdge(title != nil)
     }
 
-    /// Whether the bar wears the bell right now.
-    private var isShowingMuteBell: Bool {
-        ownTrailingBarItems.contains { $0 === muteBellItem }
-    }
-
-    /// The bell leaves (#1903).
-    ///
-    /// ⚠️ **WHAT THE AT-REST PATH GUARDS IS A REMOVAL MID-TRANSITION, NOT A
-    /// BELL THAT HAS TO GO.** A bar item removed while a push runs pops
-    /// unanimated at its end on device (#756). That is #800's case: a handle
-    /// route whose read lands mid-push and names the viewer. But the bell
-    /// also goes on every unfollow (#1398: no bell unless followed), and that
-    /// went at rest too, through `performWithoutAnimation`. The owner filmed
-    /// it vanishing between two frames while the balance pill jumped to the
-    /// corner. On a bar at rest it now leaves animated, through the path it
-    /// arrived by, so UIKit morphs it back into the balance pill.
-    private func removeMuteBell() {
-        if transitionCoordinator != nil {
-            applyNavigationStateAtRest()
-        } else {
-            applyNavigationState(animated: view.window != nil)
-        }
-    }
-
     /// Recomposes the bar once no transition runs, without animation — for an
     /// item that leaves mid-transition (#800, #756).
     private func applyNavigationStateAtRest() {
@@ -2099,8 +2058,8 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     }
 
     /// Composes the trailing group per the current state: the own profile's
-    /// gear, the corner item (`cornerItem` — the bell, or Follow / Requested
-    /// once the tray has scrolled away, #2248), the shell's balance, and
+    /// gear, the corner item (`cornerItem` — Follow / Requested once the
+    /// tray has scrolled away, #2248; never the bell, #2302), the shell's balance, and
     /// History's day. Nothing relational until the relationship is known.
     /// Native items only (the bar contract, #1679): iOS 26 wraps each in the
     /// bar's own Liquid Glass capsule, and a glass-configured custom button
@@ -2116,11 +2075,11 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         // — and the one thing in this slot that UIKit could not animate across
         // a transition. An absent item is the honest native answer for "no
         // relationship applies".
-        // Follow / Following lives in the header's tray beside Message — see
+        // Follow / the bell lives in the header's tray beside Message — see
         // `ProfileHeaderView.configureAction`. The bar takes Follow (or
         // Requested) over only once that tray has scrolled out of sight
-        // (#2248), and never Following: once followed, the corner is the
-        // bell's. `state` still arrives, because a rebuild is keyed on it and
+        // (#2248), and never the bell (#2302): once followed, the corner is
+        // empty. `state` still arrives, because a rebuild is keyed on it and
         // the guard below decides whether anything actually changed.
         _ = state
         // The switcher sits in the LEADING slot, opposite the gear.
@@ -2157,23 +2116,20 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         // Relationship action for other users; the gear for own profile (where
         // `action` is nil).
         var items: [UIBarButtonItem] = []
-        // A page for no one (#800, #1406) acts on no one: no bell, no
-        // relationship, no balance. A pushed one keeps only its back button;
+        // A page for no one (#800, #1406) acts on no one: no relationship,
+        // no balance. A pushed one keeps only its back button;
         // the viewer's own tab root keeps the gear and the switcher, its only
         // way to settings and to another profile.
         let namesNoOne = viewModel.namesNoOne
         if let settingsItem { items.append(settingsItem) }
         // The corner, someone else's profile only: `[0]`, as the gear is on
-        // your own. The bell once followed (#689, #1398), always; Follow or
-        // Requested before, once the tray has scrolled away (#2248, where the
-        // identity pill came in before, #1451) — `[coins][Follow]`, then
-        // `[coins][bell]`. Each its own item under its own identifier, so a
-        // follow from the bar is UIKit's morph of one into the other (R3).
+        // your own. Follow or Requested, once the tray has scrolled away
+        // (#2248, where the identity pill came in before, #1451) —
+        // `[coins][Follow]`, then `[coins]` once followed: the bell is the
+        // header's now (#2302). Each its own item under its own identifier,
+        // so UIKit morphs one into the other (R3).
         let corner = namesNoOne ? nil : cornerItem
-        if let corner {
-            if corner === muteBellItem { muteBellItem.isEnabled = isMuteBellEnabled }
-            items.append(corner)
-        }
+        if let corner { items.append(corner) }
         // The shell's accessory next: the gear keeps the corner and the
         // balance sits inboard — the Explore header's arrangement ([coins]
         // [search]). On a pushed profile, which has neither the gear nor the
@@ -2202,9 +2158,8 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
             return
         }
         // ⚠️ THE CORNER CHANGING waits for rest, then comes in animated
-        // (#1398, #2248): the bell or Follow added mid-push would pop in
-        // unanimated at the end (#756) — and so would Follow taken away (a
-        // removal of the bell has its own path, `removeMuteBell`).
+        // (#2248): Follow added mid-push would pop in unanimated at the end
+        // (#756) — and so would Follow taken away.
         let cornerArrives = corner.map { item in !ownTrailingBarItems.contains { $0 === item } } ?? false
         let relationshipLeaves = isShowingRelationshipItem && corner !== followBarItem && corner !== requestedBarItem
         if cornerArrives || relationshipLeaves, transitionCoordinator != nil {

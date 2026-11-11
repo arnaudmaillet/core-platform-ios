@@ -10,15 +10,16 @@ import Testing
 import UIKit
 @testable import Profile
 
-/// **Mute is a bell in the bar; the map star is a "Map" submenu of see-more
-/// (#689, the owner's call 2026-10-08).**
+/// **Mute is a bell; the map star is a "Map" submenu of see-more (#689, the
+/// owner's call 2026-10-08).**
 ///
-/// On someone else's profile the bar reads `[coins][bell]` (the bell in the
-/// corner), the bell opens
-/// the scoped Mute menu and wears `bell.slash` once anything is muted; the
-/// see-more menu loses Mute and gains Map — Map Dock / Following Filter, and
-/// Friends Filter for a mutual — on a followed profile only. The header's row
-/// reads Follow · Message · QR · ⋯.
+/// ⚠️ THE BELL IS THE HEADER'S SINCE #2302 (the owner, 2026-11-11): on
+/// someone else's profile, once followed, the header's Follow becomes the
+/// bell — `[bell][——Message——][QR][…]`, the card's row (#1562) — and the bar's
+/// corner stays empty. The bell opens the scoped Mute menu and wears
+/// `bell.slash` once anything is muted; Unfollow leads the see-more menu; the
+/// see-more menu has no Mute and gains Map — Map Dock / Following Filter, and
+/// Friends Filter for a mutual — on a followed profile only.
 @MainActor
 struct ProfileBellAndMapMenuTests {
     private struct SilentFetcher: ImageFetching {
@@ -117,17 +118,47 @@ struct ProfileBellAndMapMenuTests {
         #expect(screen.galleryPager.verticalOffset <= 0.5)
     }
 
-    @Test func aFollowedProfileShowsTheBellInTheCorner() async throws {
+    /// Followed: `[bell][——Message——][QR][…]` in the header, nothing but the
+    /// balance in the bar (#2302).
+    @Test func aFollowedProfileShowsTheBellInTheHeadersRow() async throws {
         let (screen, _, _) = makeScreen(relationship: .other(isFollowing: true, isBlocked: false))
-        try #require(await settle { screen.debugMuteBellItem != nil })
-        let items = try #require(screen.navigationItem.rightBarButtonItems)
-        #expect(items.first === screen.debugMuteBellItem, "the bell lost the corner")
-        #expect(items.last?.accessibilityLabel == "Balance")
-        #expect(items.count == 3, "no space between the bell and the balance")
-        #expect(screen.debugMuteBellItem?.accessibilityLabel == "Notifications")
+        let bell = try #require(await settle { screen.debugMuteBell != nil } ? screen.debugMuteBell : nil)
+        #expect(screen.headerView.debugTrayItems == [.bell, .message, .qr, .more])
+        #expect(bell.content.symbol == "bell")
+        #expect(bell.content.title == nil, "the bell has words")
+        #expect(bell.accessibilityLabel == "Notifications")
+        #expect(bell.showsMenuAsPrimaryAction && bell.menu != nil, "the bell's tap is not its menu")
+        #expect(!bell.accessibilityTraits.contains(.toggleButton), "the bell reads as a toggle")
+        #expect(screen.navigationItem.rightBarButtonItems?.map(\.accessibilityLabel) == ["Balance"],
+                "the bar kept a corner item once followed")
     }
 
-    // MARK: - The bell leaves the way it came (#1903)
+    /// The bell is a bubble the QR's size and Message takes the width
+    /// Following left (#2302), as on the card.
+    @Test func theBellIsTheQRsSizeAndMessageTakesTheRest() throws {
+        let header = ProfileHeaderView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()))
+        header.configure(with: ProfileDisplayModel(profile: subject))
+        header.configureAction(.follow)
+        header.frame = CGRect(x: 0, y: 0, width: 402, height: 1)
+        header.frame.size.height = header.systemLayoutSizeFitting(
+            CGSize(width: 402, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required, verticalFittingPriority: .fittingSizeLevel
+        ).height
+        header.setNeedsLayout()
+        header.layoutIfNeeded()
+        let buttons = header.debugTrayButtons
+        let (follow, message, qr) = (buttons[0], buttons[1], buttons[3])
+        #expect(abs(follow.bounds.width - message.bounds.width) < 1, "Follow and Message are not halves")
+
+        header.configureAction(.following, bell: ProfileHeaderView.Bell(scopes: .none))
+        header.setNeedsLayout()
+        header.layoutIfNeeded()
+        #expect(abs(follow.bounds.width - qr.bounds.width) < 1, "the bell is \(follow.bounds.width) wide, the QR \(qr.bounds.width)")
+        #expect(abs(follow.bounds.height - qr.bounds.height) < 1)
+        #expect(message.bounds.width > 2 * follow.bounds.width, "Message did not take the free width")
+    }
+
+    // MARK: - Follow ⇄ the bell is the button's morph (#2302)
 
     /// The screen at the root of a stack in a visible window, so the bar is
     /// on screen and its writes can animate.
@@ -144,81 +175,68 @@ struct ProfileBellAndMapMenuTests {
         return (screen, viewModel, repository, navigation, window)
     }
 
-    /// An unfollow on a bar at rest takes the bell out ANIMATED, through the
-    /// path it arrived by, so UIKit morphs it back into the balance pill. It
-    /// went through `performWithoutAnimation`, and the owner filmed it
-    /// vanishing between two frames.
-    @Test func anUnfollowAtRestTakesTheBellOutAnimated() async throws {
+    /// Follow → the bell, and an unfollow back to Follow: the SAME button's
+    /// content change (the morph, #1665), never a pop — and the bar is never
+    /// part of it.
+    @Test func followAndUnfollowMorphTheButtonBothWays() async throws {
         let (screen, viewModel, _, _, window) = hostedOnScreen(
-            relationship: .other(isFollowing: true, isBlocked: false)
+            relationship: .other(isFollowing: false, isBlocked: false)
         )
         defer { window.isHidden = true }
-        try #require(await settle { screen.debugMuteBellItem != nil && screen.transitionCoordinator == nil })
-        let before = screen.debugBarWrites.count
+        try #require(await settle { screen.followButtonState == .follow && viewModel.profile != nil })
+        let button = screen.headerView.debugFollowButton
+        button.reducesMotion = { false }
 
         viewModel.toggleFollow()
+        #expect(screen.debugMuteBell === button, "Follow did not become the bell")
+        #expect(button.events.last == .blurMorph, "Follow → the bell did not morph")
+        #expect(!button.events.contains(.scaleOut), "Follow popped out")
 
-        #expect(screen.debugMuteBellItem == nil, "the bell stayed after the unfollow")
-        #expect(screen.debugBarWrites.count > before, "the bar was never written")
-        #expect(screen.debugBarWrites.last == true, "the bell left unanimated")
+        try #require(await settle { !viewModel.followInFlight })
+        viewModel.toggleFollow()
+        #expect(screen.debugMuteBell == nil, "the bell stayed after the unfollow")
+        #expect(screen.headerView.debugFollowTitle == "Follow")
+        #expect(button.events.last == .blurMorph, "the bell → Follow did not morph")
+        #expect(!button.isHidden)
+        #expect(screen.navigationItem.rightBarButtonItems?.map(\.accessibilityLabel) == ["Balance"])
     }
 
-    /// A refused unfollow rolls the optimistic flip back, and the bell comes
-    /// back, animated as on a follow.
-    @Test func aRefusedUnfollowBringsTheBellBack() async throws {
+    /// A refused unfollow rolls the optimistic flip back: Follow morphs back
+    /// into the bell.
+    @Test func aRefusedUnfollowMorphsBackIntoTheBell() async throws {
         let (screen, viewModel, repository, _, window) = hostedOnScreen(
             relationship: .other(isFollowing: true, isBlocked: false)
         )
         defer { window.isHidden = true }
-        try #require(await settle { screen.debugMuteBellItem != nil && screen.transitionCoordinator == nil })
+        try #require(await settle { screen.debugMuteBell != nil && viewModel.profile != nil })
+        let button = screen.headerView.debugFollowButton
+        button.reducesMotion = { false }
         repository.refusesFollowChange = true
 
         viewModel.toggleFollow()
-        #expect(screen.debugMuteBellItem == nil, "guard: the flip is optimistic")
+        #expect(screen.debugMuteBell == nil, "guard: the flip is optimistic")
+        #expect(button.events.last == .blurMorph)
+        let morphs = button.events.filter { $0 == .blurMorph }.count
 
-        #expect(await settle { screen.debugMuteBellItem != nil }, "the bell never came back")
-        #expect(screen.debugBarWrites.last == true, "the bell came back unanimated")
-    }
-
-    /// ⚠️ A REMOVAL MID-TRANSITION STILL WAITS FOR REST, UNANIMATED (#756):
-    /// an item removed while a push runs pops at its end on device. Here the
-    /// unfollow lands while a child is being pushed over the profile.
-    @Test func aBellLeavingMidPushWaitsForRestUnanimated() async throws {
-        let (screen, viewModel, _, navigation, window) = hostedOnScreen(
-            relationship: .other(isFollowing: true, isBlocked: false)
-        )
-        defer { window.isHidden = true }
-        try #require(await settle { screen.debugMuteBellItem != nil && screen.transitionCoordinator == nil })
-
-        navigation.pushViewController(UIViewController(), animated: true)
-        try #require(screen.transitionCoordinator != nil, "guard: the push is running")
-        viewModel.toggleFollow()
-        #expect(screen.debugMuteBellItem != nil, "the bell left mid-push")
-
-        try #require(await settle { screen.debugMuteBellItem == nil }, "the bell never left")
-        #expect(screen.debugBarWrites.last == false, "a removal mid-push was animated")
+        #expect(await settle { screen.debugMuteBell != nil }, "the bell never came back")
+        #expect(button.events.filter { $0 == .blurMorph }.count > morphs, "the bell came back without a morph")
     }
 
     /// The glyph follows the scopes: `bell.slash` once one is muted, `bell`
-    /// again when none is — and the menu's checkmarks with it. A new glyph
-    /// is a NEW item under the same identifier (#1679, R3): the bar morphs
-    /// it, never an image swapped in place.
+    /// again when none is — and the menu's checkmarks with it.
     @Test func theBellsGlyphFollowsTheMutedScopes() async throws {
         let (screen, viewModel, repository) = makeScreen(relationship: .other(isFollowing: true, isBlocked: false))
         // The bell comes once the read says the viewer follows (#1398).
         let bell = try #require(
-            await settle { screen.debugMuteBellItem != nil && viewModel.canModerate } ? screen.debugMuteBellItem : nil
+            await settle { screen.debugMuteBell != nil && viewModel.canModerate } ? screen.debugMuteBell : nil
         )
-        #expect(bell.image == UIImage(systemName: "bell"))
-        #expect(bell.identifier == ProfileViewController.muteBellID)
+        #expect(bell.content.symbol == "bell")
+        #expect(bell.accessibilityValue == "Nothing muted")
 
         viewModel.toggleMute(.posts)
-        try #require(await settle { screen.debugMuteBellItem?.image == UIImage(systemName: "bell.slash") })
-        let muted = try #require(screen.debugMuteBellItem)
-        #expect(muted !== bell, "the glyph was swapped on the item the bar shows")
-        #expect(muted.identifier == bell.identifier)
-        #expect(bell.image == UIImage(systemName: "bell"), "the old item was restyled")
-        #expect(muted.accessibilityValue == "Muted: Posts")
+        try #require(await settle { screen.debugMuteBell?.content.symbol == "bell.slash" })
+        #expect(screen.debugMuteBell === bell, "the bell is not the row's own button")
+        #expect(bell.accessibilityValue == "Muted: Posts")
         let menu = try #require(screen.debugMuteMenuElements().first as? UIMenu)
         #expect(menu.title == "Muted")
         #expect(menu.subtitle == "Posts")
@@ -230,10 +248,19 @@ struct ProfileBellAndMapMenuTests {
         // Wait for the first write to land before the second toggle: one at a time.
         try #require(await settle { !viewModel.muteInFlight })
         viewModel.toggleMute(.posts)
-        try #require(await settle { screen.debugMuteBellItem?.image == UIImage(systemName: "bell") })
-        #expect(screen.debugMuteBellItem?.accessibilityValue == "Nothing muted")
-        #expect(screen.debugMuteBellItem?.identifier == ProfileViewController.muteBellID)
+        try #require(await settle { screen.debugMuteBell?.content.symbol == "bell" })
+        #expect(screen.debugMuteBell?.accessibilityValue == "Nothing muted")
         #expect((screen.debugMuteMenuElements().first as? UIMenu)?.title == "Mute")
+    }
+
+    /// The bell's glyph and spoken state from the scopes — one mapping, the
+    /// page's and the card's.
+    @Test func theBellsGlyphComesFromTheScopes() {
+        #expect(ProfileRelationControl.bellSymbol(for: .none) == "bell")
+        #expect(ProfileRelationControl.bellSymbol(for: MuteScopes(stories: true)) == "bell.slash")
+        #expect(ProfileRelationControl.bellAccessibilityValue(for: .none) == "Nothing muted")
+        #expect(ProfileRelationControl.bellAccessibilityValue(for: MuteScopes(posts: true, messages: true))
+                == "Muted: Posts, Messages")
     }
 
     /// The bell changes AT ONCE, beside its toast (#2143): no toast takes
@@ -247,17 +274,17 @@ struct ProfileBellAndMapMenuTests {
         window.rootViewController = navigation
         window.isHidden = false
         defer { window.isHidden = true }
-        try #require(await settle { screen.debugMuteBellItem != nil && viewModel.canModerate })
+        try #require(await settle { screen.debugMuteBell != nil && viewModel.canModerate })
         let isToast: (UIBarButtonItem) -> Bool = { $0.customView is ToastView }
 
         screen.debugToggleMute(.posts)
-        try #require(await settle { screen.debugMuteBellItem?.image == UIImage(systemName: "bell.slash") },
+        try #require(await settle { screen.debugMuteBell?.content.symbol == "bell.slash" },
                      "the bell waited")
         #expect(!(screen.navigationItem.rightBarButtonItems ?? []).contains(where: isToast), "a toast took the bar")
         // ⚠️ THE TOAST'S ARRIVAL, NOT ITS PRESENCE (#1951): counted, it
         // cannot be missed between two looks on a starved runner.
         try #require(await settle { screen.debugUndoToastsShown == 1 }, "no toast for the mute")
-        #expect(screen.debugMuteBellItem?.isEnabled != false, "the bell is not tappable beside its toast")
+        #expect(screen.debugMuteBell?.isEnabled != false, "the bell is not tappable beside its toast")
 
         // Let the Undo run out (if its time has not already): the mute is sent.
         screen.debugLastUndoToast?.debugDismiss()
@@ -268,18 +295,20 @@ struct ProfileBellAndMapMenuTests {
         // server answered and leaves after a few seconds; on a starved runner
         // a poll gap outlasted it. Counted, it cannot be missed.
         try #require(await settle { screen.debugMuteToastsShown == 1 }, "no toast for the unmute")
-        #expect(screen.debugMuteBellItem?.image == UIImage(systemName: "bell"))
+        #expect(screen.debugMuteBell?.content.symbol == "bell")
     }
 
     /// Not followed: NO bell (the owner, 2026-10-15 — nothing of theirs to
-    /// mute yet; the corner goes to the bar's Follow), and see-more has no
-    /// Map submenu.
+    /// mute yet; the header's Follow stands in its place), and see-more has
+    /// no Map submenu and no Unfollow.
     @Test func anUnfollowedProfileHasNoBellAndNoMapSubmenu() async throws {
         let (screen, _, _) = makeScreen(relationship: .other(isFollowing: false, isBlocked: false))
         try #require(await settle { screen.followButtonState == .follow })
-        #expect(screen.debugMuteBellItem == nil, "a bell on a profile the viewer does not follow")
+        #expect(screen.debugMuteBell == nil, "a bell on a profile the viewer does not follow")
+        #expect(screen.headerView.debugTrayItems == [.follow, .message, .qr, .more])
         #expect(screen.navigationItem.rightBarButtonItems?.map(\.accessibilityLabel) == ["Balance"])
         #expect(mapSubmenu(screen) == nil)
+        #expect(!titles(screen.debugMoreMenuElements()).contains("Unfollow"))
     }
 
     /// No bell before the relationship is read (#1398): an unknown
@@ -288,36 +317,79 @@ struct ProfileBellAndMapMenuTests {
     @Test func noBellBeforeTheRelationshipIsRead() {
         let (screen, _, _) = makeScreen(relationship: .other(isFollowing: false, isBlocked: false))
         #expect(screen.followButtonState == .hidden)
-        #expect(screen.debugMuteBellItem == nil, "a bell presumed before the read")
+        #expect(screen.debugMuteBell == nil, "a bell presumed before the read")
     }
 
     /// Following from the profile brings the bell; unfollowing takes it.
     @Test func followingBringsTheBellAndUnfollowingTakesIt() async throws {
         let (screen, viewModel, _) = makeScreen(relationship: .other(isFollowing: false, isBlocked: false))
         try #require(await settle { screen.followButtonState == .follow })
-        #expect(screen.debugMuteBellItem == nil)
+        #expect(screen.debugMuteBell == nil)
         viewModel.toggleFollow()
-        try #require(await settle { screen.debugMuteBellItem != nil }, "following brought no bell")
+        try #require(await settle { screen.debugMuteBell != nil }, "following brought no bell")
         try #require(await settle { !viewModel.followInFlight })
         viewModel.toggleFollow()
-        #expect(await settle { screen.debugMuteBellItem == nil }, "unfollowing left the bell")
+        #expect(await settle { screen.debugMuteBell == nil }, "unfollowing left the bell")
     }
 
     /// Your own profile: no bell, the bar as it was.
     @Test func yourOwnProfileHasNoBell() async {
         let (screen, viewModel, _) = makeScreen(relationship: .me, own: true)
         await settle { viewModel.isRelationshipSettled }
-        #expect(screen.debugMuteBellItem == nil)
+        #expect(screen.debugMuteBell == nil)
     }
 
     /// A composition that cannot mute shows no bell.
     @Test func noMutingNoBell() async {
         let (screen, viewModel, _) = makeScreen(relationship: .other(isFollowing: true, isBlocked: false), muting: false)
         await settle { viewModel.canModerate }
-        #expect(screen.debugMuteBellItem == nil)
+        #expect(screen.debugMuteBell == nil)
+        #expect(screen.headerView.debugTrayItems == [.message, .qr, .more], "Following came back")
+    }
+
+    /// A guest: no bell, whatever the relationship reads (#2302) — a guest
+    /// has no account to mute from. Message alone across the free width.
+    @Test func aGuestHasNoBell() async throws {
+        let (screen, viewModel, _) = makeScreen(relationship: .other(isFollowing: true, isBlocked: false))
+        let navigation = GuestNavigation(root: screen)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        window.rootViewController = navigation
+        window.isHidden = false
+        defer { window.isHidden = true }
+        window.layoutIfNeeded()
+        try #require(MemberGates.isGuest(screen), "guard: the gate is not up the chain")
+        try #require(await settle { screen.followButtonState == .following && viewModel.canModerate })
+        #expect(screen.debugMuteBell == nil, "a guest has a bell")
+        #expect(screen.headerView.debugTrayItems == [.message, .qr, .more])
     }
 
     // MARK: - The see-more menu
+
+    /// ⚠️ UNFOLLOW LEADS SEE-MORE ONCE FOLLOWED (#2302): first, red, and it
+    /// unfollows — the tray's path, the optimistic flip; the bell morphs back
+    /// into Follow and Unfollow leaves the menu.
+    @Test func unfollowLeadsSeeMoreAndUnfollows() async throws {
+        let (screen, viewModel, _) = makeScreen(relationship: .other(isFollowing: true, isBlocked: false))
+        try #require(await settle { screen.followButtonState == .following && viewModel.profile != nil })
+        let elements = screen.debugMoreMenuElements()
+        let first = try #require((elements.first as? UIMenu)?.children.first as? UIAction, "no row at the head")
+        #expect(first.title == "Unfollow")
+        #expect(first.attributes.contains(.destructive), "Unfollow is not red")
+        #expect(first.image == UIImage(systemName: "person.badge.minus"))
+
+        first.performWithSender(nil, target: nil)
+        #expect(screen.followButtonState == .follow, "Unfollow did not unfollow")
+        #expect(screen.headerView.debugTrayItems == [.follow, .message, .qr, .more])
+        #expect(!titles(screen.debugMoreMenuElements()).contains("Unfollow"), "Unfollow stayed once unfollowed")
+    }
+
+    /// Requested: no Unfollow — withdrawing a request stays on Requested.
+    @Test func aRequestedProfileHasNoUnfollow() async throws {
+        let (screen, _, _) = makeScreen(relationship: .requested)
+        try #require(await settle { screen.followButtonState == .requested })
+        #expect(!titles(screen.debugMoreMenuElements()).contains("Unfollow"))
+        #expect(screen.headerView.debugTrayItems == [.requested, .message, .qr, .more])
+    }
 
     /// See-more has no Mute entry any more; Restrict, Block and Report stay.
     @Test func seeMoreLostMute() async throws {
@@ -363,10 +435,64 @@ struct ProfileBellAndMapMenuTests {
 
     // MARK: - The header's row
 
+    /// ⚠️ THE ROW PER RELATION (#2302), the card's rule (#1562): the
+    /// relationship's control comes from the one rule both read.
+    @Test func theRowPerRelation() {
+        typealias Header = ProfileHeaderView
+        #expect(Header.trayItems(for: .follow, showsBell: true) == [.follow, .message, .qr, .more])
+        #expect(Header.trayItems(for: .requested, showsBell: true) == [.requested, .message, .qr, .more])
+        #expect(Header.trayItems(for: .following, showsBell: true) == [.bell, .message, .qr, .more])
+        #expect(Header.trayItems(for: .following, showsBell: false) == [.message, .qr, .more])
+        #expect(Header.trayItems(for: .unavailable, showsBell: true) == [.message, .qr, .more])
+        #expect(Header.trayItems(for: .hidden, showsBell: true) == [.placeholder, .message, .qr, .more])
+        #expect(Header.trayItems(for: .edit, showsBell: true) == [.edit, .qr, .more])
+    }
+
+    /// The page's row and the card's toolbar lead with the same control for
+    /// every relation (#2302): they can no longer drift.
+    @Test(arguments: [true, false])
+    func thePagesRowAndTheCardsToolbarAgree(showsBell: Bool) {
+        let states: [ProfileViewModel.FollowButton] = [.follow, .requested, .following, .unavailable, .hidden]
+        for state in states {
+            let page = ProfileHeaderView.trayItems(for: state, showsBell: showsBell).compactMap { item -> String? in
+                switch item {
+                case .follow: "follow"
+                case .requested: "requested"
+                case .bell: "bell"
+                default: nil
+                }
+            }
+            let card = ProfileCardViewController.toolbarItems(for: state, showsBell: showsBell).compactMap { item -> String? in
+                switch item {
+                case .follow: "follow"
+                case .requested: "requested"
+                case .bell: "bell"
+                default: nil
+                }
+            }
+            #expect(page == card, "\(state): the page leads with \(page), the card with \(card)")
+        }
+    }
+
+    /// The header drawn per relation: what the rule says is what shows.
+    @Test func theHeaderDrawsTheRowPerRelation() {
+        let header = ProfileHeaderView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()))
+        let bell = ProfileHeaderView.Bell(scopes: .none)
+        let cases: [(ProfileViewModel.FollowButton, ProfileHeaderView.Bell?)] = [
+            (.hidden, bell), (.follow, bell), (.requested, bell), (.following, bell), (.following, nil),
+            (.unavailable, bell), (.edit, nil),
+        ]
+        for (state, bell) in cases {
+            header.configureAction(state, bell: bell)
+            #expect(header.debugTrayItems == ProfileHeaderView.trayItems(for: state, showsBell: bell != nil),
+                    "\(state), bell: \(bell != nil)")
+        }
+    }
+
     /// Follow · Message · QR · ⋯ — no star.
     @Test func theRowHasNoStar() {
         let header = ProfileHeaderView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()))
-        header.configureAction(.following)
+        header.configureAction(.following, bell: ProfileHeaderView.Bell(scopes: .none))
         let symbols = header.debugTrayButtons.filter { !$0.isHidden }
             .compactMap { $0.configuration?.image?.description }
         #expect(header.debugTrayButtons.count == 5)
@@ -380,10 +506,10 @@ struct ProfileBellAndMapMenuTests {
 /// replacing #1451 / #1590): someone else's pushed profile reads
 /// `[‹ @handle] … [coins][Follow]` once the header's tray has scrolled away,
 /// `… [coins][Requested]` on a private profile the viewer asked to follow,
-/// and `… [coins][bell]` once followed — the bell always, Follow and
-/// Requested only where the pill came in. Each corner item native, under its
-/// own identifier, its tap the tray's own path. The tab root keeps
-/// `[bell] … [day][coins][gear]` and no title.
+/// and `… [coins]` once followed — the bell is the header's since #2302,
+/// never the bar's. Each corner item native, under its own identifier, its
+/// tap the tray's own path. The tab root keeps `[bell] … [day][coins][gear]`
+/// and no title.
 extension ProfileBellAndMapMenuTests {
     /// Not followed: nothing in the corner while the tray is on screen;
     /// once it has gone, `[Follow][space][coins]` — Follow in the corner, its
@@ -404,7 +530,7 @@ extension ProfileBellAndMapMenuTests {
         #expect(follow.customView == nil, "Follow is a hosted view, not a native item")
         #expect(follow.identifier == ProfileViewController.followItemID)
         #expect((screen.navigationItem.leftBarButtonItems ?? []).isEmpty, "a leading item beside the chevron")
-        #expect(screen.debugMuteBellItem == nil)
+        #expect(screen.debugMuteBell == nil)
 
         screen.debugSetTrayScrolledAway(false)
         #expect(screen.debugBarRelationshipItem == nil, "Follow stayed with the tray back")
@@ -426,32 +552,31 @@ extension ProfileBellAndMapMenuTests {
         #expect(requested.title == "Requested")
         #expect(requested.identifier == ProfileViewController.requestedItemID)
         #expect(requested.accessibilityHint == "Withdraws your follow request.")
-        #expect(screen.debugMuteBellItem == nil)
+        #expect(screen.debugMuteBell == nil)
     }
 
-    /// Followed: `[bell][space][coins]`, scrolled or not — never Follow nor
-    /// Following up here: once followed, the corner is the bell's.
-    @Test func aFollowedProfileKeepsTheBellInTheCorner() async throws {
+    /// ⚠️ THE CORNER NEVER WEARS THE BELL (#2302, the owner 2026-11-11):
+    /// followed, the bar is `[coins]` alone, scrolled or not — no bell, no
+    /// Follow, no Following up here: the bell is the header's.
+    @Test func aFollowedProfilesCornerIsEmpty() async throws {
         let (screen, viewModel, _) = makeScreen(relationship: .other(isFollowing: true, isBlocked: false))
         try #require(await settle { screen.followButtonState == .following && viewModel.canModerate })
-        try #require(await settle { screen.debugMuteBellItem != nil })
+        try #require(await settle { screen.debugMuteBell != nil }, "guard: the header has its bell")
         for away in [false, true] {
             screen.debugSetTrayScrolledAway(away)
-            let items = try #require(screen.navigationItem.rightBarButtonItems)
-            #expect(items.count == 3, "away=\(away)")
-            #expect(items[0] === screen.debugMuteBellItem, "the bell lost the corner, away=\(away)")
-            #expect(items[2].accessibilityLabel == "Balance")
+            let items = screen.navigationItem.rightBarButtonItems ?? []
+            #expect(items.map(\.accessibilityLabel) == ["Balance"], "away=\(away): \(items.map(\.accessibilityLabel))")
+            #expect(!items.contains { $0.image == UIImage(systemName: "bell") || $0.image == UIImage(systemName: "bell.slash") },
+                    "a bell in the bar, away=\(away)")
             #expect(screen.debugBarRelationshipItem == nil, "a Follow item on a followed profile, away=\(away)")
             #expect(!items.contains { $0.title == "Following" }, "a Following item in the bar")
         }
     }
 
-    /// Three items, three identifiers: UIKit tells them apart and morphs one
+    /// Two items, two identifiers: UIKit tells them apart and morphs one
     /// into the other (#1679, R3).
     @Test func theCornerItemsHaveTheirOwnIdentifiers() {
-        let ids = [ProfileViewController.followItemID, ProfileViewController.requestedItemID,
-                   ProfileViewController.muteBellID]
-        #expect(Set(ids).count == ids.count, "\(ids)")
+        #expect(ProfileViewController.followItemID != ProfileViewController.requestedItemID)
     }
 
     /// No Follow where following is impossible or meaningless: blocked, a
@@ -465,7 +590,7 @@ extension ProfileBellAndMapMenuTests {
         try #require(await settle { viewModel.isRelationshipSettled })
         screen.debugSetTrayScrolledAway(true)
         #expect(screen.debugBarRelationshipItem == nil, "\(relationship)")
-        #expect(screen.debugMuteBellItem == nil, "\(relationship)")
+        #expect(screen.debugMuteBell == nil, "\(relationship)")
     }
 
     /// The bar's Follow is the tray's Follow — `headerView.onFollowTapped`,
@@ -484,13 +609,14 @@ extension ProfileBellAndMapMenuTests {
         follow.primaryAction?.performWithSender(nil, target: nil)
         #expect(trayCalls == 1, "the bar's Follow went around the tray's path")
         try #require(await settle { screen.followButtonState == .following }, "the bar's Follow did not follow")
-        #expect(screen.headerView.debugFollowTitle == "Following", "the tray was left behind")
+        #expect(screen.headerView.debugTrayItems.first == .bell, "the tray was left behind")
         #expect(screen.debugBarRelationshipItem == nil, "Follow stayed once followed")
     }
 
-    /// Follow from the bar → the bell: one ANIMATED write of the group, so
-    /// UIKit morphs Follow into the bell (R3), on a bar at rest.
-    @Test func followFromTheBarMorphsIntoTheBell() async throws {
+    /// Follow from the bar: one ANIMATED write of the group takes it out —
+    /// no bell comes in its place (#2302) — on a bar at rest; the header's
+    /// Follow is the bell now.
+    @Test func followFromTheBarLeavesTheCornerAnimated() async throws {
         let (screen, viewModel, _, _, window) = hostedOnScreen(
             relationship: .other(isFollowing: false, isBlocked: false)
         )
@@ -504,11 +630,12 @@ extension ProfileBellAndMapMenuTests {
         // The optimistic flip recomposes the bar on this same turn.
         follow.primaryAction?.performWithSender(nil, target: nil)
 
-        let bell = try #require(screen.debugMuteBellItem, "following from the bar brought no bell")
-        #expect(screen.navigationItem.rightBarButtonItems?.first === bell, "the bell is not in the corner")
-        #expect(screen.debugBarRelationshipItem == nil, "Follow stayed beside the bell")
+        #expect(screen.debugMuteBell != nil, "following from the bar brought no bell to the header")
+        #expect(screen.navigationItem.rightBarButtonItems?.map(\.accessibilityLabel) == ["Balance"],
+                "the corner is not empty once followed")
+        #expect(screen.debugBarRelationshipItem == nil, "Follow stayed once followed")
         #expect(screen.debugBarWrites.count > before, "the bar was never written")
-        #expect(screen.debugBarWrites.last == true, "Follow did not morph into the bell")
+        #expect(screen.debugBarWrites.last == true, "Follow left the corner unanimated")
     }
 
     /// ⚠️ NEVER MID-PUSH (#756): Follow coming in while a child is being
@@ -740,8 +867,8 @@ extension ProfileBellAndMapMenuTests {
     }
 
     /// THE AVATAR'S "+" IS THE TRAY'S FOLLOW (#2050): the check comes, and
-    /// the tray's capsule turns to Following with it — one relationship,
-    /// two places.
+    /// the tray's Follow turns into the bell with it (#2302) — one
+    /// relationship, two places.
     @Test func theAvatarsPlusFollows() async throws {
         let (screen, _, _) = makeScreen(relationship: .other(isFollowing: false, isBlocked: false))
         try #require(await settle { screen.followButtonState == .follow })
@@ -750,7 +877,7 @@ extension ProfileBellAndMapMenuTests {
         badge.sendActions(for: .primaryActionTriggered)
         try #require(await settle { screen.followButtonState == .following }, "the avatar's + did not follow")
         #expect(screen.headerView.relationMark == .following)
-        #expect(screen.headerView.debugFollowTitle == "Following", "the tray was left behind")
+        #expect(screen.headerView.debugTrayItems.first == .bell, "the tray was left behind")
         #expect(!badge.isUserInteractionEnabled, "the check takes touches")
     }
 
@@ -793,6 +920,20 @@ extension ProfileBellAndMapMenuTests {
 }
 
 // MARK: - Stubs
+
+/// A stack whose shell says the viewer is a guest.
+private final class GuestNavigation: UINavigationController, MemberGateProviding {
+    let memberGate: any MemberGating
+
+    init(root: UIViewController) {
+        memberGate = MemberGate(isMember: false)
+        super.init(nibName: nil, bundle: nil)
+        setViewControllers([root], animated: false)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+}
 
 private let subject = UserProfile(
     id: ProfileID("prof-7"),
