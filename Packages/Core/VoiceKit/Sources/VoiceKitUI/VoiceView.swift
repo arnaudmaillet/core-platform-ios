@@ -51,6 +51,8 @@ import UIKit
 ///   speed chip while it plays, the time reached when paused mid-way, the
 ///   total again at the end. One size for all of them (`slotSize`), so the
 ///   waveform is binned once and never moves; a change cross-fades in place.
+/// - **The timer's format is the voice's (#2294, `timerStyle`):** a post's
+///   seconds, "30″"; a message's clock, "0:30".
 /// - **Under a finger on the waveform the whole panel swells (#2274),** as
 ///   the app's buttons do: its ground grows (`PressFeedback.swelledScale`),
 ///   round at every frame, and what it holds scales by one factor on both
@@ -210,9 +212,16 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
         didSet {
             guard role != oldValue else { return }
             updateTrailingEnd()
+            // A post's seconds or a message's clock (#2294): the slot is
+            // measured again for the other format.
+            refreshSlotSize()
+            showTimerText()
             updateAccessibility()
         }
     }
+    /// How the timer writes the length (#2294): the role's — a voice
+    /// post's seconds ("30″"), a voice message's clock ("0:30").
+    public var timerStyle: TimerStyle { TimerStyle(role: role) }
     public var inks: Inks = .standard {
         didSet { applyInks() }
     }
@@ -395,6 +404,33 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
         return UInt8(max(3, min(31, (envelope * ripple * 31).rounded())))
     }
 
+    /// How a voice's length is written (#2294, the owner 2026-11-11): what
+    /// the voice is decides it, and nothing writes a voice's length by hand —
+    /// `timerText(_:style:)` for the eyes, `spokenTime(_:style:)` for
+    /// VoiceOver.
+    public enum TimerStyle: Equatable, Sendable {
+        /// A voice message, up to five minutes: the clock, "0:30", "4:59".
+        case clock
+        /// A voice post, up to a minute: whole seconds and the seconds sign,
+        /// "30″" — never "0:30", and "60″" at the limit, never a minute. A
+        /// longer one (from before the limit) still says "75″": one format
+        /// per kind of voice.
+        case seconds
+
+        /// The style of the voice `role` says: a message's clock, a post's
+        /// seconds.
+        public init(role: Role) {
+            switch role {
+            case .message: self = .clock
+            case .post: self = .seconds
+            }
+        }
+    }
+
+    /// The seconds sign (#2294): the double prime, U+2033 — not a straight
+    /// quote nor a curly one — right after the digits.
+    public static let secondsSign = "\u{2033}"
+
     /// A length as the timer shows it: "0:12", "12:04", "1:02:03".
     public static func clock(_ seconds: TimeInterval) -> String {
         let whole = max(0, Int(seconds.rounded(.down)))
@@ -402,6 +438,32 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
         return hours > 0
             ? String(format: "%d:%02d:%02d", hours, minutes, rest)
             : String(format: "%d:%02d", minutes, rest)
+    }
+
+    /// A voice post's length as its timer shows it (#2294): whole seconds,
+    /// rounded down as `clock` rounds them, and the seconds sign — "0″",
+    /// "7″", "60″", "75″".
+    public static func seconds(_ length: TimeInterval) -> String {
+        "\(max(0, Int(length.rounded(.down))))\(secondsSign)"
+    }
+
+    /// A length as a timer in `style` shows it: `clock` or `seconds`.
+    public static func timerText(_ length: TimeInterval, style: TimerStyle) -> String {
+        switch style {
+        case .clock: clock(length)
+        case .seconds: seconds(length)
+        }
+    }
+
+    /// A timer's length as VoiceOver reads it (#2294): a post's "30 seconds"
+    /// (never "30 double prime"); a message's clock, as it always read.
+    public static func spokenTime(_ length: TimeInterval, style: TimerStyle) -> String {
+        switch style {
+        case .clock: return clock(length)
+        case .seconds:
+            let whole = max(0, Int(length.rounded(.down)))
+            return whole == 1 ? "1 second" : "\(whole) seconds"
+        }
     }
 
     // MARK: - Callbacks
@@ -443,8 +505,9 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
     private let slot = UILayoutGuide()
     private var slotWidth: NSLayoutConstraint?
     private var slotHeight: NSLayoutConstraint?
-    /// What the slot was last sized for: the voice's length, the text size.
-    private var slotSizedFor: (duration: TimeInterval, category: UIContentSizeCategory)?
+    /// What the slot was last sized for: the voice's length, its timer's
+    /// format (#2294), the text size.
+    private var slotSizedFor: (duration: TimeInterval, style: TimerStyle, category: UIContentSizeCategory)?
     /// The speed chip's size for the widest speed, per text size.
     private var widestChip: (category: UIContentSizeCategory, size: CGSize)?
     /// The panel's content ends at the slot (a post) or at the unplayed
@@ -807,11 +870,7 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
         // The slot holds the widest timer this voice can show: its total
         // length's format (#2274).
         if state.duration != previous.duration { refreshSlotSize() }
-        // The total at rest and at the end; the time reached mid-way — the
-        // one a pause resumes from (the owner, 2026-11-10).
-        timerLabel.text = state.isUnderway
-            ? Self.clock(state.duration * state.progress)
-            : Self.clock(state.duration)
+        showTimerText()
         // Only on a change: written every frame of playback, it restyled the
         // chip under a finger trying to press it.
         if speedChip.content.title != state.speedLabel {
@@ -872,18 +931,34 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
     // MARK: - The slot (#2274)
 
     /// The slot's one size: as wide as the wider of the widest timer this
-    /// voice can show — its total length's format, the digits monospaced —
-    /// and the chip at its widest speed; as tall as that chip. Re-measured
-    /// for a new voice or a new text size, never for a state.
+    /// voice can show — its total length in its own format (a post's
+    /// seconds, a message's clock, #2294), the digits monospaced — and the
+    /// chip at its widest speed; as tall as that chip. Re-measured for a new
+    /// voice, a new format or a new text size, never for a state.
     private func refreshSlotSize() {
         let category = traitCollection.preferredContentSizeCategory
-        if let sized = slotSizedFor, sized.duration == state.duration, sized.category == category { return }
-        slotSizedFor = (state.duration, category)
+        let style = timerStyle
+        if let sized = slotSizedFor, sized.duration == state.duration, sized.style == style, sized.category == category {
+            return
+        }
+        slotSizedFor = (state.duration, style, category)
         let chip = widestChipSize(for: category)
         let font = timerLabel.font ?? .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
-        let timer = (Self.clock(state.duration) as NSString).size(withAttributes: [.font: font])
+        let timer = (Self.timerText(state.duration, style: style) as NSString).size(withAttributes: [.font: font])
         slotWidth?.constant = ceil(max(chip.width, timer.width))
         slotHeight?.constant = ceil(chip.height)
+    }
+
+    /// The length the timer says now: the total at rest and at the end; the
+    /// time reached mid-way — the one a pause resumes from (the owner,
+    /// 2026-11-10).
+    private var shownTime: TimeInterval {
+        state.isUnderway ? state.duration * state.progress : state.duration
+    }
+
+    /// The timer's text, in the voice's own format (#2294).
+    private func showTimerText() {
+        timerLabel.text = Self.timerText(shownTime, style: timerStyle)
     }
 
     private func widestChipSize(for category: UIContentSizeCategory) -> CGSize {
@@ -1103,8 +1178,8 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
             role: role, senderName: senderName, duration: state.duration, unplayed: state.unplayed
         )
         // The play button's value: the time the slot's timer says, and the
-        // speed (#2274).
-        let time = state.isUnderway ? Self.clock(state.duration * state.progress) : Self.clock(state.duration)
+        // speed (#2274) — a post's "12 seconds", never its sign (#2294).
+        let time = Self.spokenTime(shownTime, style: timerStyle)
         let value = "\(time), speed \(state.speedLabel)"
         let playing: Bool = if case .playing = state.playback { true } else { false }
         var actions = [

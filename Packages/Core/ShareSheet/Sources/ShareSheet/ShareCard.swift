@@ -18,7 +18,7 @@ public struct ShareCard: Equatable, @unchecked Sendable {
     public let avatarImage: UIImage?
     public let url: URL
     /// What the shared thing says, when it is a post that has no picture to
-    /// say it (#2208): a voice post's "🎙 Voice post · 0:32", or its words
+    /// say it (#2208): a voice post's "🎙 Voice post · 32″", or its words
     /// marked; a channel's showcase's "📣 Film stock club · " and its words
     /// (#2216, `PostEmbed.previewText`). The system sheet's title and Mail's
     /// subject carry it.

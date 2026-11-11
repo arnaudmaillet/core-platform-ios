@@ -125,7 +125,7 @@ struct VoiceComponentTests {
         mark.configure(duration: 32, levels: nil)
         #expect(!mark.isUserInteractionEnabled, "a tap on a tile's mark must open the post")
         #expect(!mark.isAccessibilityElement, "the mark is read as part of its tile")
-        #expect(mark.debugDurationText == "0:32")
+        #expect(mark.debugDurationText == "32\u{2033}", "a voice post's seconds (#2294)")
         #expect(mark.debugBarCount == VoiceMarkView.barCount)
         #expect(mark.accessibilityDescription == "Voice post, 32 seconds")
         #expect(mark.subviews.allSatisfy { !($0 is UIControl) })

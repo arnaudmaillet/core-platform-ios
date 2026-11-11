@@ -31,7 +31,7 @@ public struct NotificationDisplayModel: Equatable, Sendable, Identifiable {
     /// The subject post's still, drawn at the trailing edge.
     public let thumbnailURL: URL?
     /// A text post's opening, drawn under the sentence — for a voice post
-    /// (#2208), "🎙 Voice post · 0:32" or its words marked; for a channel's
+    /// (#2208), "🎙 Voice post · 32″" or its words marked; for a channel's
     /// showcase (#2216), "📣 Harbour notes · " and its words.
     public let excerpt: String?
     public let isRead: Bool
