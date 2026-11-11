@@ -18,6 +18,7 @@ struct PersonOpeningGuardTests {
         "ConversationViewModel.swift": "the conversation's correspondent pill: `PersonOpening.openCard` → `didTapIdentityPill`",
         "AppCoordinator.swift": "the DEBUG `-open-profile-card` launch argument",
         "ProfileViewModel.swift": "a History row's author (#2170): `PersonOpening.openCard` → `galleryAuthorCardTapped`",
+        "ForYouViewController.swift": "a list card's or a shelf text card's author band (#2300): `PersonOpening.openCard` → `openAuthorCard`",
     ]
 
     private static var root: URL {

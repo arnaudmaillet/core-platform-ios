@@ -45,6 +45,9 @@ struct RowActionsTests {
             // The glyph-only controls: the band's "..." and the line's save
             // and repost (counts are the line's other two buttons).
             if let button = view as? AppIconButton { return button.content.count == nil ? [button] : [] }
+            // The face's relation badge is the author's mark, not a card
+            // control (#2300): it takes a touch only as the "+".
+            if view is RelationBadgeView { return [] }
             if let button = view as? UIButton { return [button] }
             return view.subviews.flatMap(walk)
         }

@@ -26,7 +26,9 @@ import UIKit
 /// built once. It is removed once the real panel has been mounted over it.
 final class RestingCommentsPlaceholderView: UIView {
     private let stack = UIStackView()
-    private let caption = CommentRowView(installsContextMenu: false)
+    /// The caption's row as the panel's is: its author's face wearing the
+    /// relation mark (#2300), so the swap to the real panel changes nothing.
+    private let caption = CommentRowView(installsContextMenu: false, marksAuthor: true)
     private var rows: [CommentSkeletonRowView] = []
     /// The held top-level comments, drawn once the viewport is known.
     private let held: [CommentDisplayModel]
@@ -39,7 +41,7 @@ final class RestingCommentsPlaceholderView: UIView {
 
     init(
         model: FeedItemDisplayModel, imagePipeline: ImagePipeline, safeAreaTop: CGFloat,
-        heldComments: [CommentEntry] = []
+        heldComments: [CommentEntry] = [], authorMark: PersonPill.Badge = .none
     ) {
         knownComments = model.cardMetrics?.comments
         let now = Date()
@@ -74,6 +76,8 @@ final class RestingCommentsPlaceholderView: UIView {
                 likeCount: model.cardMetrics?.reactions ?? model.likeCount,
                 imagePipeline: imagePipeline
             )
+            // What the screen's binding knows of the author now (#2300).
+            caption.setAuthorMark(authorMark, animated: false)
             stack.addArrangedSubview(Self.gapped(caption))
         }
     }

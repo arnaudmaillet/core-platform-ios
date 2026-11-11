@@ -781,6 +781,15 @@ final class CommentStream: NSObject {
     /// re-read would inherit the presenter's own depth scale as well, which has
     /// already been measured once on this transition: a 343x145 row came back
     /// as 325.85x137.75 mid-drag.
+    /// The caption's cell on screen, bound again by the panel's host (#2300)
+    /// — a binding set after the row was configured.
+    func rebindCaptionAuthor() {
+        guard let bind = host.bindCaptionAuthor,
+              let indexPath = streamDataSource?.indexPath(for: .caption),
+              let cell = collectionView.cellForItem(at: indexPath) as? CaptionBubbleCell else { return }
+        bind(cell)
+    }
+
     func revealCaptionAnchor(in space: UICoordinateSpace) -> CGRect? {
         guard let indexPath = streamDataSource?.indexPath(for: .caption),
               let attributes = collectionView.layoutAttributesForItem(at: indexPath)
@@ -1216,6 +1225,8 @@ final class CommentStream: NSObject {
                 return
             }
             cell.onAvatarTap = { [weak self] in self?.viewModel.didTapAuthor() }
+            // The screen's binding, where it binds the face (#2300).
+            self.host.bindCaptionAuthor?(cell)
         }
         let tierEndCell = UICollectionView.CellRegistration<UICollectionViewCell, StreamItem> { cell, _, _ in
             guard cell.contentView.constraints.isEmpty else { return }

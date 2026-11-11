@@ -196,3 +196,22 @@ private struct StoreRecordingAvatars: PeerAvatarProviding {
         await base.handles(for: ids)
     }
 }
+
+extension PersonPill.Badge {
+    /// The mark for a relation (#2049): the author pill's mapping — "+" for
+    /// someone not followed (a follower included: following back makes a
+    /// friend), the clock for a request, the check, friends — nothing for
+    /// the viewer or someone blocked, and the skeleton's badge for a relation
+    /// not known yet (#2098), never nothing. Stayed in Chat when the marked
+    /// face moved to MediaCore (#2300): MediaCore knows no `FollowRelation`.
+    init(relation: FollowRelation?) {
+        self = switch relation {
+        case .notFollowing, .followedBy: .follow
+        case .following: .following
+        case .mutual: .friends
+        case .requested: .pending
+        case .viewer, .blocked: .none
+        case nil: .loading
+        }
+    }
+}

@@ -89,14 +89,18 @@ final class ForYouPostPreviewViewController: UIViewController {
     ///   top-level ones that fit. Ignored for a picture.
     init(
         post: GalleryPost, imagePipeline: ImagePipeline, width: CGFloat,
-        videoPlayback: VideoPlaybackController? = nil, comments: [CommentEntry] = []
+        videoPlayback: VideoPlaybackController? = nil, comments: [CommentEntry] = [],
+        authorMark: PersonPill.Badge = .none
     ) {
         self.post = post
+        self.authorMark = authorMark
         self.imagePipeline = imagePipeline
         self.videoPlayback = videoPlayback
         super.init(nibName: nil, bundle: nil)
         if post.kind == .text {
-            textCard = TextCardPreview(post: post, comments: comments, width: width, imagePipeline: imagePipeline)
+            textCard = TextCardPreview(
+                post: post, comments: comments, width: width, imagePipeline: imagePipeline, authorMark: authorMark
+            )
             preferredContentSize = textCard?.size ?? Self.preferredSize(for: post, width: width)
         } else {
             preferredContentSize = Self.preferredSize(for: post, width: width)
@@ -105,6 +109,9 @@ final class ForYouPostPreviewViewController: UIViewController {
 
     /// A text post's preview — see the note on this type.
     private var textCard: TextCardPreview?
+    /// The author's relation mark as the card that lifted knew it (#2300):
+    /// the band in small wears what the card's does.
+    private let authorMark: PersonPill.Badge
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -211,7 +218,9 @@ final class ForYouPostPreviewViewController: UIViewController {
         // The card's band, drawn in the dark style over the picture: its
         // `.label` / `.secondaryLabel` ink reads white on the scrim.
         band.overrideUserInterfaceStyle = .dark
-        band.configure(with: PostAuthorBandView.Model(post: post), imagePipeline: imagePipeline)
+        band.configure(
+            with: PostAuthorBandView.Model(post: post).withRelationMark(authorMark), imagePipeline: imagePipeline
+        )
         band.isUserInteractionEnabled = false
         view.addSubview(band)
 
@@ -325,13 +334,16 @@ final class TextCardPreview {
     init(
         post: GalleryPost, comments: [CommentEntry], width: CGFloat, imagePipeline: ImagePipeline,
         showsVoice: Bool = VoicePosts.areDrawn, voiceHub: VoicePlaybackHub? = nil,
-        showsEmbed: Bool = PostEmbeds.areDrawn
+        showsEmbed: Bool = PostEmbeds.areDrawn, authorMark: PersonPill.Badge = .none
     ) {
         let inset = Self.inset
         let inner = max(0, width - 2 * inset)
         var y = inset
 
-        band.configure(with: PostAuthorBandView.Model(post: post), imagePipeline: imagePipeline)
+        // The author's relation mark, as the card wears it (#2300).
+        band.configure(
+            with: PostAuthorBandView.Model(post: post).withRelationMark(authorMark), imagePipeline: imagePipeline
+        )
         band.isUserInteractionEnabled = false
         likes.setCount(post.reactionCount)
         let bandHeight = PostAuthorBandView.height(showsIdentity: true)

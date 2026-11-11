@@ -105,6 +105,11 @@ final class ForYouGridPage: UIView {
     /// (`PostCardStaking.bindReadout`).
     var staking: PostCardStaking?
 
+    /// Where the rows' author bands get their relation mark and their "+"
+    /// (#2300): the composition root's one binding. Nil (a host with no
+    /// follow, a test): the bands wear no mark.
+    var authorMarks: PostAuthorMarks?
+
     /// Whether this page's MOSAIC tiles wear their post's author and caption
     /// when they are large enough (the rule is `PostTileInfo`). For You's own
     /// surfaces set it — Discover's chunks and the Discover gallery, where the
@@ -2568,7 +2573,11 @@ final class ForYouGridPage: UIView {
             ageText: (cell(for: postID) as? PostGridListRowCell)?.renderedAgeText,
             // The ROW's own height when it is realized — see the profile's
             // twin, and `RevealDismissCardView.init`.
-            height: cell(for: postID)?.bounds.height
+            height: cell(for: postID)?.bounds.height,
+            // The row's relation mark (#2300): a badge changing in the
+            // landing frame is the pop.
+            authorMark: (cell(for: postID) as? PostGridListRowCell)?.authorRelationMark
+                ?? authorMarks?.badge(for: post.authorID) ?? .none
         )
     }
 
@@ -4127,7 +4136,18 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
             // handler is captured by post: the row that asked can have moved by
             // the time the answer is applied.
             if let authorID = post.authorID {
-                cell.onAuthorTapped = { [weak self] in self?.onAuthorTapped?(post) }
+                // A person beside content (#2145, role 1; #2300): a tap the
+                // card where the host has one, a hold the profile.
+                cell.onAuthorTapped = { [weak self] in
+                    guard let self else { return }
+                    (onAuthorCardTapped ?? onAuthorTapped)?(post)
+                }
+                cell.onAuthorHeld = onAuthorTapped == nil ? nil : { [weak self] in self?.onAuthorTapped?(post) }
+                // The face's "+" (#2300): the shared follow.
+                cell.onAuthorFollowTapped = { [weak self] in
+                    guard let self else { return }
+                    authorMarks?.follow(authorID, handle: post.authorHandle, name: post.authorName, from: self)
+                }
                 // ONE menu with the long press's (#1498): the palette, the
                 // post's rows, then the author's.
                 cell.authorMenuActions = { [weak self, weak cell] in
@@ -4137,6 +4157,10 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
                     )
                 }
             }
+            // The band's face wears its author's relation mark (#2300), bound
+            // like a feed page's author row: redrawn on every answer, on
+            // screen or not. A bare band names nobody, and is bound to no one.
+            authorMarks?.bind(cell, to: cell.authorBandModel?.showsIdentity == true ? post.authorID : nil)
             Self.applyHeroConcealment(isFlying, to: cell)
             return cell
         case .tile:
@@ -4404,6 +4428,10 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
         // A showcase's card keeps its button's press (#2216): a hold on Join
         // lifts nothing, a hold anywhere else on the card lifts the post.
         if Self.holdIsCardButtons(at: point, in: collectionView, indexPath: indexPath) { return nil }
+        // A list card lifts from anywhere but its author, whose hold is the
+        // profile's (#2145, #2300).
+        if let row = collectionView.cellForItem(at: indexPath) as? PostGridListRowCell,
+           row.holdIsAuthors(at: collectionView.convert(point, to: row)) { return nil }
         if let row = collectionView.cellForItem(at: indexPath) as? PostGridListRowCell, post.kind != .text {
             guard let media = row.mediaHeroRect,
                   media.contains(collectionView.convert(point, to: row)) else { return nil }
@@ -4418,11 +4446,15 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
         let pipeline = imagePipeline
         let pool = videoPool
         let comments = post.kind == .text ? topComments?(post.id) ?? [] : []
+        // The band in small wears the card's relation mark (#2300).
+        let authorMark = (collectionView.cellForItem(at: indexPath) as? PostGridListRowCell)?.authorRelationMark
+            ?? authorMarks?.badge(for: post.authorID) ?? .none
         return UIContextMenuConfiguration(
             identifier: post.id.rawValue as NSString,
             previewProvider: {
                 ForYouPostPreviewViewController(
-                    post: post, imagePipeline: pipeline, width: width, videoPlayback: pool, comments: comments
+                    post: post, imagePipeline: pipeline, width: width, videoPlayback: pool, comments: comments,
+                    authorMark: authorMark
                 )
             },
             actionProvider: { [weak self] _ in self?.tileMenu(for: post, at: indexPath) }

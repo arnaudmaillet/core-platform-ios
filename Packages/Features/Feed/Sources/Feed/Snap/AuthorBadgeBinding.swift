@@ -1,9 +1,11 @@
 import CoreModels
 import MediaCore
+import PostGrid
 import UIKit
 
 /// Something that draws an author's relation badge: the page's author row,
-/// the bar's pill (#1972).
+/// the bar's pill (#1972), a text page's caption row and a list card's author
+/// band (#2300).
 @MainActor
 protocol AuthorBadgeDrawing: AnyObject {
     /// Draws `badge`; `animated` is the binding's answer to "can it be seen
@@ -118,4 +120,24 @@ final class AuthorBadgeBinding {
         weak var pill: (any AuthorBadgeDrawing)?
         let author: ProfileID
     }
+}
+
+/// A text page's author face (#2300): its caption's row, as the screen's
+/// binding draws it — bound at configure, redrawn on every answer.
+extension CaptionBubbleCell: AuthorBadgeDrawing {
+    func drawAuthorBadge(_ badge: PersonPill.Badge, animated: Bool) {
+        setAuthorMark(badge, animated: animated)
+    }
+
+    var drawsAuthorBadgeOnScreen: Bool { window != nil }
+}
+
+/// A list card's author band (#2300): the flat rows and a shelf's text card,
+/// bound by their host through `PostAuthorMarks`.
+extension PostGridListRowCell: AuthorBadgeDrawing {
+    func drawAuthorBadge(_ badge: PersonPill.Badge, animated: Bool) {
+        setAuthorRelationMark(badge, animated: animated)
+    }
+
+    var drawsAuthorBadgeOnScreen: Bool { window != nil }
 }

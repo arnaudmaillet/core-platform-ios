@@ -1593,6 +1593,35 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         set { authorBand.onAuthorTapped = newValue }
     }
 
+    /// Fired when the viewer HOLDS the band's identity (#2145, role 1): the
+    /// profile, pushed. Nil: no hold.
+    public var onAuthorHeld: (() -> Void)? {
+        get { authorBand.onAuthorHeld }
+        set { authorBand.onAuthorHeld = newValue }
+    }
+
+    /// Fired when the band's face shows the "+" and it is tapped (#2300):
+    /// the HOST follows — the cell cannot see the follow.
+    public var onAuthorFollowTapped: (() -> Void)? {
+        get { authorBand.onFollowTapped }
+        set { authorBand.onFollowTapped = newValue }
+    }
+
+    /// Whether a long press at `point` (in the cell) is the band's author's
+    /// hold (#2145): the card's lift leaves it to the profile.
+    public func holdIsAuthors(at point: CGPoint) -> Bool {
+        authorBand.takesHold(at: convert(point, to: authorBand))
+    }
+
+    /// The relation mark the band's face wears (#2300).
+    public var authorRelationMark: PersonPill.Badge { authorBand.relationMark }
+
+    /// Draws the author's relation mark on the band's face (#2300): what the
+    /// host's binding answers for the post's author. A bare band draws none.
+    public func setAuthorRelationMark(_ mark: PersonPill.Badge, animated: Bool) {
+        authorBand.setRelationMark(mark, animated: animated)
+    }
+
     /// The rows the band's "..." offers, asked for when it is pressed. Nil
     /// hides the control — see `PostAuthorBandView.menuActions`.
     public var authorMenuActions: (() -> [PostCardMenuAction])? {
@@ -1612,6 +1641,12 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     #if DEBUG
     /// Whether the band's "..." is drawn.
     public var debugShowsAuthorMenu: Bool { authorBand.debugShowsMenu }
+    /// The band face's badge (#2300). Tests.
+    public var debugAuthorBadge: RelationBadgeView { authorBand.debugBadge }
+    /// A tap on the band's identity, as a finger's would land (#2145). Tests.
+    public func debugTapAuthor() { authorBand.debugOpening.debugTap() }
+    /// A hold on the band's identity, recognised. Tests.
+    public func debugHoldAuthor() { authorBand.debugOpening.debugHold() }
     #endif
 
     /// The closing row's repost control. Nil HIDES it — visibility tracks the
@@ -1868,6 +1903,8 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// The band's trailing end: on the caption's column on a card, hung out
     /// by the "..."'s air on a row (#2289) — see `bandTrailingInset`.
     private var bandTrailing: NSLayoutConstraint!
+    /// The author the band was last configured for — whose mark it wears.
+    private var bandAuthorID: ProfileID?
     /// The caption hangs off the band — at the band's gap when the band draws
     /// something, and flush when it has collapsed to nothing.
     private var captionFollowsBand: NSLayoutConstraint!
@@ -2421,7 +2458,12 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     private func bindAuthorBand(
         to post: GalleryPost, imagePipeline: ImagePipeline, showsIdentity: Bool
     ) {
+        // The same author again keeps the mark the host drew (#2300): a
+        // reconfigure is not a new person, and the binding draws a new one.
+        let keepsMark = post.authorID != nil && post.authorID == bandAuthorID
+        bandAuthorID = post.authorID
         let model = PostAuthorBandView.Model(post: post, showsIdentity: showsIdentity)
+            .withRelationMark(keepsMark ? authorBand.relationMark : .none)
         authorBand.configure(with: model, imagePipeline: imagePipeline)
         // A bare band says nothing about WHEN; the closing line does.
         closingAgeLabel.text = model.age
@@ -2643,6 +2685,11 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         // the previous post's author, and the identity would push their
         // profile.
         onAuthorTapped = nil
+        onAuthorHeld = nil
+        onAuthorFollowTapped = nil
+        // The previous author's mark never rides a recycled row (#2300).
+        bandAuthorID = nil
+        authorBand.setRelationMark(.none, animated: false)
         authorMenuActions = nil
         onMediaTapped = nil
         onCommentsTapped = nil

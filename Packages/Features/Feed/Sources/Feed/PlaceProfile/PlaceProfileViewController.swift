@@ -749,6 +749,15 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
         shelf.staking = staking
     }
 
+    /// The cards' author bands' relation mark and "+" (#2300): the app's one
+    /// binding, as For You's cards wear it.
+    var authorMarks: PostAuthorMarks? {
+        didSet {
+            activityPage.authorMarks = authorMarks
+            shelf.authorMarks = authorMarks
+        }
+    }
+
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 

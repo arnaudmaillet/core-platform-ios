@@ -96,6 +96,15 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
         }
     }
 
+    /// The cards' author bands' relation mark and "+" (#2300): For You's
+    /// own binding, the app's one.
+    var authorMarks: PostAuthorMarks? {
+        didSet {
+            page.authorMarks = authorMarks
+            shelf?.authorMarks = authorMarks
+        }
+    }
+
     /// See `PostSetSurface.onNearEnd`.
     var onNearEnd: (() -> Void)?
     /// See `PostSetSurface.onRetry`.

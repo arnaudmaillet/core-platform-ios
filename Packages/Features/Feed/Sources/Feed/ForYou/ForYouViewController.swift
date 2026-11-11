@@ -69,6 +69,9 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     let lead: GridLeadStack
     /// The cards' stakes — see `PostCardStaking`.
     private let staking: PostCardStaking?
+    /// The cards' author bands' relation mark and "+" (#2300) — the app's one
+    /// binding (`PostAuthorMarks`).
+    private let authorMarks: PostAuthorMarks?
     /// The feed over a window of posts and, with a continuation, past it.
     private let makeSnapFeed: ([PostID], SnapFeedContinuation?) -> UIViewController
     /// The builder's shared flight (`presentSnapFeedHero`): the rows' opens,
@@ -210,9 +213,11 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         makeWalletSheet: (@MainActor () -> UIViewController)? = nil,
         showsBalance: @escaping @MainActor () -> Bool = { true },
         entities: EntityStore? = nil,
-        presence: SectionPresenceStore = .shared
+        presence: SectionPresenceStore = .shared,
+        authorMarks: PostAuthorMarks? = nil
     ) {
         self.presence = presence
+        self.authorMarks = authorMarks
         self.wallet = wallet
         self.makeWalletSheet = makeWalletSheet
         self.showsBalance = showsBalance
@@ -239,6 +244,8 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         super.init(nibName: nil, bundle: nil)
         page.staking = staking
         shelf.staking = staking
+        page.authorMarks = authorMarks
+        shelf.authorMarks = authorMarks
         // Its title over skeleton cards until the first snapshot (#1296) —
         // only if the shelf was there last time (#1756); the Friends row's
         // faces likewise. The bones wait for the gate.
@@ -389,9 +396,11 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // "For you ›" and a chunk's "View all" are one way in to one screen.
         lead.onListTitleTapped = { [weak self] in self?.pushDiscoverGallery() }
         friendsRow.storyMenuElements = { [weak self] story in self?.storyMenuElements(for: story) ?? [] }
-        // A text card is the list's card: its band opens the author and its
-        // "..." offers the list's rows.
-        shelf.onCardAuthorTapped = { [weak self] post in self?.openAuthor(of: post) }
+        // A text card is the list's card: its band opens the author — a tap
+        // the card, a hold the profile (#2145, role 1; #2300) — and its "..."
+        // offers the list's rows.
+        shelf.onCardAuthorTapped = { [weak self] post in self?.openAuthorCard(of: post) }
+        shelf.onCardAuthorHeld = { [weak self] post in self?.openAuthor(of: post) }
         shelf.cardAuthorMenuActions = { [weak self] post, anchor in
             guard let self, let authorID = post.authorID else { return [] }
             return authorMenuActions(
@@ -438,6 +447,9 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // one profile destination, reached the way every other author tap
         // reaches it. The screen names the route; it never builds the profile.
         page.onAuthorTapped = { [weak self] post in self?.openAuthor(of: post) }
+        // A card's band is a person beside content (#2145, role 1; #2300):
+        // a tap the profile card, the hold `onAuthorTapped`.
+        page.onAuthorCardTapped = { [weak self] post in self?.openAuthorCard(of: post) }
         // A text card's long press shows its top comments (#1498).
         page.topComments = cachedTopComments
         // The Following shelf's text cards too (the owner, 2026-10-22).
@@ -608,6 +620,14 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     private func openAuthor(of post: GalleryPost) {
         guard let id = post.authorID else { return }
         router?.route(to: .profile(id, stub: post.authorIdentityStub))
+    }
+
+    /// A card's band tapped (#2145, role 1; #2300): the author's profile
+    /// CARD — `PersonOpening.openCard`. The viewer's own card resolves to
+    /// their profile (`profileCardResolution`).
+    private func openAuthorCard(of post: GalleryPost) {
+        guard let id = post.authorID else { return }
+        router?.route(to: .profileCard(id, stub: post.authorIdentityStub))
     }
 
     /// Opens the full-screen feed on the tapped post, with the hero zoom.
@@ -2302,6 +2322,8 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         list.hasMore = { [weak self] in self?.viewModel.hasMoreFollowingPages ?? false }
         list.onRefresh = { [weak self] in self?.viewModel.refresh() }
         list.onAuthorTapped = { [weak self] post in self?.openAuthor(of: post) }
+        list.onAuthorCardTapped = { [weak self] post in self?.openAuthorCard(of: post) }
+        list.authorMarks = authorMarks
         list.onWarmRequested = { [weak self] posts in self?.warmVisible(posts) }
         list.authorMenuActions = { [weak self] context in
             self?.authorMenuActions(for: context) ?? []

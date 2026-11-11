@@ -2540,6 +2540,30 @@ final class SnapFeedViewController: UIViewController {
         model.authorHandle.map { "@" + $0 } ?? model.authorName
     }
 
+    /// A TEXT page's author face — its caption's row (#2300) — bound as the
+    /// media page's author row is: one more face of `authorBadges`, redrawn
+    /// on every answer for its author and on a viewer change, a page built
+    /// ahead included; the "+" is `followAuthor`'s; the face's tap is the
+    /// card and its hold the profile, the author pill's routes (#2145).
+    ///
+    /// A media page's caption row is never bound: its author row wears the
+    /// mark.
+    private func bindCaptionAuthor(of content: UIViewController?, for id: PostID) {
+        guard let detail = content as? PostDetailViewController else { return }
+        let author = isTextPage(id) ? modelsByID[id]?.authorID : nil
+        detail.bindCaptionAuthor = { [weak self] cell in
+            guard let self else { return }
+            authorBadges.bind(cell, to: author)
+            guard let author else { return }
+            cell.onAvatarTap = { [weak self] in
+                guard let self else { return }
+                viewModel.didTapAuthorPill(author, isViewer: followStore.relation(for: author) == .viewer)
+            }
+            cell.onAvatarHold = { [weak self] in self?.viewModel.didTapAuthor(author) }
+            cell.onAuthorFollowTap = { [weak self] in self?.followAuthor(author) }
+        }
+    }
+
 
     private func configureNavigationItem() {
         // Fully transparent bar over the full-bleed media, identical for every
@@ -3902,6 +3926,9 @@ final class SnapFeedViewController: UIViewController {
               let makeCommentsPanelContent else { return }
         let content = (makeRestingCommentsPanelContent ?? makeCommentsPanelContent)(id)
         applyRailSlot(to: content)
+        // Bound before its first layout: a page built ahead wears its
+        // author's mark from its first frame (#2300).
+        bindCaptionAuthor(of: content, for: id)
         content.view.backgroundColor = .clear
         // ⚠️ IN THE DEVICE'S THEME, not `.unspecified`.
         //
@@ -4082,7 +4109,9 @@ final class SnapFeedViewController: UIViewController {
         let placeholder = RestingCommentsPlaceholderView(
             model: model, imagePipeline: imagePipeline, safeAreaTop: view.safeAreaInsets.top,
             // What the warm already holds flies in as real rows (#2002).
-            heldComments: viewModel.heldTopComments(for: id)
+            heldComments: viewModel.heldTopComments(for: id),
+            // The caption's face wears what the panel's will (#2300).
+            authorMark: followStore.badge(for: model.authorID)
         )
         cell.installRestingPlaceholder(placeholder)
         deferredResting = (id, cell, placeholder)
@@ -4283,6 +4312,8 @@ final class SnapFeedViewController: UIViewController {
         content.view.backgroundColor = .clear
         // Inherited, exactly like the media panel — the cell decides.
         content.overrideUserInterfaceStyle = .unspecified
+        // The caption's author face, one more face of the binding (#2300).
+        bindCaptionAuthor(of: content, for: id)
         addChild(content)
         cell.installComments(content.view)
         content.didMove(toParent: self)
@@ -6949,6 +6980,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
 
         let panel = (makeRestingCommentsPanelContent ?? makeCommentsPanelContent)(id)
         applyRailSlot(to: panel, hostedByPage: false)
+        bindCaptionAuthor(of: panel, for: id)
         // Transparent, so the lent ground is still what is on screen — and so a
         // flight that clears both floors is not lidded by this.
         panel.view.backgroundColor = .clear

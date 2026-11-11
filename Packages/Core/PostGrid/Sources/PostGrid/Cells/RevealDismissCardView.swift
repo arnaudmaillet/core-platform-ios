@@ -120,7 +120,8 @@ public final class RevealDismissCardView: UIView, RevealStandInShaping {
         actions: RowActions = .none,
         ageText: String? = nil,
         height: CGFloat? = nil,
-        captionLines: Int? = nil
+        captionLines: Int? = nil,
+        authorMark: PersonPill.Badge = .none
     ) {
         card = PostGridListRowCell(frame: CGRect(x: 0, y: 0, width: width, height: 200))
         super.init(frame: .zero)
@@ -153,6 +154,9 @@ public final class RevealDismissCardView: UIView, RevealStandInShaping {
         // `PostGridListRowCell.renderedAgeText`: a compact age is a function of
         // the clock, and the row worked its own out when it was configured.
         if let ageText { card.overrideAgeText(ageText) }
+        // The ROW's relation mark (#2300), on the same terms: a badge that
+        // appears or changes in the landing frame is the pop.
+        card.setAuthorRelationMark(authorMark, animated: false)
         let attributes = UICollectionViewLayoutAttributes(
             forCellWith: IndexPath(item: 0, section: 0)
         )

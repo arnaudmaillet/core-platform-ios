@@ -1395,9 +1395,12 @@ struct SnapCommentsPresentationTests {
 
         // …while the avatar keeps exactly its own. (The cell's contentView is
         // not asserted: UIKit puts its own recognizers there.)
-        // The app's avatar (#943) carries the tap, around its initials.
-        let avatar = try #require(Self.firstView(AvatarView.self, in: cell))
-        #expect(avatar.gestureRecognizers?.count == 1)
+        // The author's face carries the tap: the relation-marked face on a
+        // post's caption row (#2300, through `PersonOpening`), else the app's
+        // avatar (#943) around its initials.
+        let carrier: UIView = try Self.firstView(RelationMarkedAvatarView.self, in: cell)
+            ?? #require(Self.firstView(AvatarView.self, in: cell))
+        #expect(carrier.gestureRecognizers?.isEmpty == false, "the author's face carries no tap")
 
         var profiles = 0
         cell.onAvatarTap = { profiles += 1 }
