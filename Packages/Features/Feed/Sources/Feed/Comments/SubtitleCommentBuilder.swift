@@ -123,6 +123,8 @@ public struct SubtitleCommentBuilder: Sendable {
         var seenBodies = Set<String>()
         var cues: [SubtitleCue] = []
         for entry in entries {
+            // TODO(#2309, piece 2): a voice with no words speaks as
+            // "🎙 12″"; until then its empty body keeps it out of the zone.
             let body = Self.flattened(entry.body)
             guard !body.isEmpty,
                   !requiringSemanticShape || Self.isSemanticShaped(body),
