@@ -192,26 +192,28 @@ struct AppLoaderTests {
         #expect(view.debugAnimationCount == 1, "the dots do not pulse")
     }
 
-    /// The icon's gradient (#2147, the owner 2026-11-05): one layer across
-    /// the mark, the theme's colours at the icon's opacities, in the icon's
-    /// direction — the pills its mask, so the left one is raspberry, the
-    /// middle violet, the right mint.
-    @Test func thePillsMaskTheIconsGradient() {
+    /// The signature (#2147, the owner 2026-11-05; violet → mint since
+    /// #2282): one layer across the mark, the theme's colours at the
+    /// loader's own opacities — today's softness — the pills its mask, so
+    /// the left one is violet, the middle sky blue, the right mint.
+    @Test func thePillsMaskTheSignature() {
         let (view, window) = loader()
         defer { window.isHidden = true }
         let theme = BrandTheme.current
         let gradient = view.debugPillGradient
         #expect(view.debugPillsMaskTheGradient, "the pills do not mask the gradient")
         let drawn = (gradient.colors as? [CGColor] ?? []).map(Self.rgba)
-        let expected = zip(theme.signatureGradient, theme.signatureOpacities).map { ($0, $1) }
+        #expect(drawn.map(\.hex) == [0x7235FF, 0x16FFCB], "not the signature, violet → mint")
+        let expected = zip(theme.signatureGradient, theme.loaderOpacities).map { ($0, $1) }
         #expect(drawn.count == expected.count)
         for (stop, (colour, opacity)) in zip(drawn, expected) {
             #expect(stop.hex == colour)
-            #expect(abs(stop.alpha - opacity) < 0.01, "real alpha, as the icon: \(stop.alpha) vs \(opacity)")
+            #expect(abs(stop.alpha - opacity) < 0.01, "real alpha: \(stop.alpha) vs \(opacity)")
         }
+        #expect(theme.loaderOpacities == [0.75, 0.55], "the loader's softness changed")
         #expect(gradient.locations?.map(\.doubleValue) == theme.signatureLocations)
         #expect(gradient.startPoint == CGPoint(x: 0, y: 0.2) && gradient.endPoint == CGPoint(x: 1, y: 1.03),
-                "not the icon's direction (circle.svg)")
+                "not the loader's direction")
         #expect(gradient.frame.size == view.bounds.size, "the gradient does not span the mark")
     }
 
@@ -225,15 +227,16 @@ struct AppLoaderTests {
                 == (view.debugPillGradient.colors as? [CGColor])?.map(Self.rgba).map(\.hex))
     }
 
-    /// Increased Contrast: the stops opaque, the mint deepened past 3:1 on
-    /// the light page — the icon's own mint is 1.3:1 there.
+    /// Increased Contrast: the stops opaque, the mint end deepened past 3:1
+    /// on the light page — the mint itself is 1.16:1 there (#2282).
     @Test func increasedContrastMakesTheStopsOpaqueAndTheMintLegible() {
         let (view, window) = loader()
         defer { window.isHidden = true }
         view.traitOverrides.accessibilityContrast = .high
         view.layoutIfNeeded()
         let stops = (view.debugPillGradient.colors as? [CGColor] ?? []).map(Self.rgba)
-        #expect(stops.map(\.hex) == BrandTheme.current.loaderContrastStops)
+        #expect(stops.map(\.hex) == BrandTheme.current.signatureContrastStops)
+        #expect(stops.map(\.hex) == [0x7235FF, 0x009E7B], "not the signature with its deep mint end")
         #expect(stops.allSatisfy { $0.alpha > 0.99 }, "not opaque")
         let mint = stops.last?.hex ?? 0
         #expect(Self.contrast(mint, 0xF2F2F7) >= 3, "the mint is \(Self.contrast(mint, 0xF2F2F7)):1 on the light page")

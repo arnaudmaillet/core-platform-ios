@@ -3,7 +3,7 @@ import Foundation
 /// THE BRAND'S RAW COLOURS, IN ONE PLACE (#2062). Every hex the app draws
 /// its brand in is here and nowhere else: `Palette`'s roles derive from
 /// `BrandTheme.current`, and the assets that hold a colour outside the code
-/// (`AccentColor`, the launch logo, the app icon) are checked against it by
+/// (`AccentColor`, the launch logo, the app icon) are checked by
 /// `BrandAssetsGuardTests`.
 ///
 /// **Changing the theme** (`dev/BRAND_PALETTE.md`, "Changing the theme"):
@@ -38,12 +38,18 @@ public struct BrandTheme: Sendable, Equatable {
 
     // MARK: - The primary
 
-    /// The app's tint, the accent's text, the primary fill — with its
-    /// Increased Contrast pair. `AccentColor` carries these four values.
+    /// The app's tint and glyphs, with its Increased Contrast pair (deeper
+    /// in the light, lifted in the dark). `AccentColor` carries these four
+    /// values.
     public let primary: Shade
+    /// The primary as TEXT (#2282): a "See all", a text button. Deeper than
+    /// `primary` in the light only, where the primary itself is under 4.5:1
+    /// on white; the same hue. Increased Contrast deepens it further in the
+    /// light and lifts it in the dark, as `primary`.
+    public let primaryText: Shade
     /// The primary filled button's ground: the primary, deepened under
     /// Increased Contrast in BOTH appearances, so its white label reads —
-    /// the tint's lifted dark IC value would carry it at 3.1:1.
+    /// the tint's lifted dark IC value would carry it under 3:1.
     public let primaryFill: Shade
     /// The same colour as a solid ground with no contrast step: the
     /// prominent fill and the prominent glass's tint.
@@ -55,6 +61,19 @@ public struct BrandTheme: Sendable, Equatable {
     /// A soft selected ground, and its text.
     public let primaryContainer: Shade
     public let onPrimaryContainer: Shade
+
+    // MARK: - The accent (the mint, #2282)
+
+    /// The brand's second colour, as a GLYPH: the mint on dark grounds, a
+    /// deep mint on light ones, where the mint itself is 1.16:1 on the
+    /// page. ⚠️ Not a UI colour by default (the owner, #2282 § 3): no
+    /// `Palette` role reads it. It is the signature gradient's end, and the
+    /// icon's echo; a place that wants it is a follow-up the owner names.
+    public let accent: Shade
+    /// The mint as TEXT: a deeper mint in the light, for 4.5:1 on white.
+    /// Never white text on the mint (1.30:1). Not a UI colour by default
+    /// either.
+    public let accentText: Shade
 
     // MARK: - Marks
 
@@ -88,64 +107,54 @@ public struct BrandTheme: Sendable, Equatable {
     // MARK: - Brand moments
 
     /// The brand's signature gradient, first stop to last, and where each
-    /// stop sits (0…1): the launch logo and the app icon, as baked assets
-    /// (`BrandAssetsGuardTests`); no code draws it since #2089.
+    /// stop sits (0…1), interpolated in sRGB: the violet to the mint
+    /// (#2282, the owner 2026-11-11), without the primary — a gradient from
+    /// the primary to the mint goes grey in the middle. The unseen-story
+    /// ring (#2089) and the loader (#2147) wear it. ⚠️ The violet appears
+    /// only inside it, never as a UI colour on its own.
     public let signatureGradient: [UInt32]
     public let signatureLocations: [Double]
-    /// Each stop's opacity in the app icon's blob (`circle.svg`): what makes
-    /// the icon soft, the colours mixing into the ground under them. The
-    /// loader wears the signature at these (#2147).
-    public let signatureOpacities: [Double]
-    /// The unseen-story ring's gradient (#2089, the owner 2026-11-03): the
-    /// raspberry to the violet, no mint — the signature's first two colours,
-    /// at 0 and 1.
-    public let storyRingGradient: [UInt32]
-    public let storyRingLocations: [Double]
-    /// The loader's stops with Increased Contrast (#2147): the signature
-    /// opaque, its mint deepened to reach 3:1 on the light page (`F2F2F7`) —
-    /// the icon's own mint is 1.3:1 there. The crown's precedent (#2071).
-    public let loaderContrastStops: [UInt32]
-
-    // MARK: - The assets (checked by `BrandAssetsGuardTests`)
-
-    /// `LaunchLogo.svg`'s gradient stops, first to last: the signature's,
-    /// made pale.
-    public let launchLogoStops: [UInt32]
-    /// The app icon's blob gradient, first stop to last: drawn by
-    /// `AppIcon.icon/Assets/circle.svg` itself — Icon Composer's layer fill
-    /// takes two colours only — with the layer's own fill removed.
-    public let iconStops: [UInt32]
+    /// The signature with Increased Contrast, for the ring and the loader
+    /// alike: opaque, its mint end deepened to reach 3:1 on the light page
+    /// (`F2F2F7`) — the mint itself is 1.16:1 there. The crown's precedent
+    /// (#2071), as #2147 did.
+    public let signatureContrastStops: [UInt32]
+    /// Each stop's opacity in the loader (#2147): what makes it soft, the
+    /// colours mixing into the ground under them — pastel on the light page,
+    /// deeper on the dark one. The loader's own since #2282 (it was read
+    /// from the old icon's blob, which had the same softness).
+    public let loaderOpacities: [Double]
 
     /// The theme the app draws in.
-    public static let current = raspberry
+    public static let current = coral
 
-    /// Raspberry (#2062, the owner 2026-11-02): the primary almost
-    /// everywhere, the yellow for the gems' crown (#2071), the signature
-    /// running raspberry → violet → mint.
-    public static let raspberry = BrandTheme(
-        name: "raspberry",
-        primary: Shade(0xEC1C75, 0xEC1C75, ic: (0xC2105F, 0xF25C9A)),
-        primaryFill: Shade(0xEC1C75, 0xEC1C75, ic: (0xC2105F, 0xC2105F)),
-        primarySolid: Shade(0xEC1C75, 0xEC1C75),
+    /// Coral (#2282, the owner 2026-11-11): the primary `FF1358` almost
+    /// everywhere, a deeper shade of it for text in the light, the yellow
+    /// for the gems' crown (#2071), and the signature running violet → mint.
+    /// It replaced the raspberry `EC1C75` (#2062).
+    public static let coral = BrandTheme(
+        name: "coral",
+        primary: Shade(0xFF1358, 0xFF1358, ic: (0xC6003A, 0xFF5C8C)),
+        primaryText: Shade(0xEB0045, 0xFF1358, ic: (0xC6003A, 0xFF5C8C)),
+        primaryFill: Shade(0xFF1358, 0xFF1358, ic: (0xC6003A, 0xC6003A)),
+        primarySolid: Shade(0xFF1358, 0xFF1358),
         onPrimary: Shade(0xFFFFFF, 0xFFFFFF),
-        primaryPressed: Shade(0xD41868, 0xD41868, ic: (0xA80D52, 0xD41868)),
-        primaryContainer: Shade(0xFDE3EE, 0x3D0A20),
-        onPrimaryContainer: Shade(0xB00E57, 0xF57BAE),
-        counter: Shade(0xEC1C75, 0xEC1C75, ic: (0xC2105F, 0xC2105F)),
+        primaryPressed: Shade(0xDA0040, 0xDA0040, ic: (0xAA0032, 0xDA0040)),
+        primaryContainer: Shade(0xFFE3EB, 0x3D0515),
+        onPrimaryContainer: Shade(0xB20034, 0xFF7DA3),
+        accent: Shade(0x009E7B, 0x16FFCB, ic: (0x008567, 0x16FFCB)),
+        accentText: Shade(0x008567, 0x16FFCB, ic: (0x007157, 0x16FFCB)),
+        counter: Shade(0xFF1358, 0xFF1358, ic: (0xC6003A, 0xC6003A)),
         entityInk: Shade(0x5E5E66, 0xAEAEB4, ic: (0x48484F, 0xC8C8CD)),
-        likes: Shade(0xEC1C75, 0xEC1C75, ic: (0xC2105F, 0xF25C9A)),
+        likes: Shade(0xFF1358, 0xFF1358, ic: (0xC6003A, 0xFF5C8C)),
         gem: Shade(0xF5C000, 0xFFE600, ic: (0xA87C00, 0xFFE600)),
         gemText: Shade(0x8A6400, 0xFFE600, ic: (0x7A5800, 0xFFE600)),
         gemGround: Shade(0xFFE600, 0xFFE600),
         saveGold: 0xFFC53D,
-        signatureGradient: [0xEC1C75, 0x9B5CFF, 0x2EF0A8],
-        signatureLocations: [0, 0.5, 1],
-        signatureOpacities: [0.75, 0.6, 0.55],
-        storyRingGradient: [0xEC1C75, 0x9B5CFF],
-        storyRingLocations: [0, 1],
-        loaderContrastStops: [0xEC1C75, 0x9B5CFF, 0x0E9E6E],
-        launchLogoStops: [0xF699C1, 0xD2B6FF, 0xA1F8D8],
-        iconStops: [0xEC1C75, 0x9B5CFF, 0x2EF0A8]
+        signatureGradient: [0x7235FF, 0x16FFCB],
+        signatureLocations: [0, 1],
+        signatureContrastStops: [0x7235FF, 0x009E7B],
+        loaderOpacities: [0.75, 0.55]
     )
 }
 

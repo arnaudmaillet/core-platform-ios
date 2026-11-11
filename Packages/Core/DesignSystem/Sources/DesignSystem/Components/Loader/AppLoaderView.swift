@@ -30,8 +30,8 @@ import UIKit
 /// wave — three dots, fading in with the pull and pulsing slowly while loading.
 ///
 /// ⚠️ **ONE GRADIENT, MASKED BY THE PILLS (#2147, the owner 2026-11-05).** The
-/// app icon's gradient, raspberry → violet → mint at the icon's opacities,
-/// spans the whole mark; the pills are its mask, so a pill growing in the
+/// brand's signature, violet → mint since #2282, at the loader's own
+/// opacities, spans the whole mark; the pills are its mask, so a pill growing in the
 /// wave shows more of it along its height, as a cut through the logo would.
 /// The leads mask the same gradient at a lower opacity. It replaced one solid
 /// colour per pill (#2083), too loud.
@@ -140,7 +140,8 @@ public final class AppLoaderView: UIView {
         CATransaction.commit()
     }
 
-    /// The gradient's stops: the icon's, or opaque with Increased Contrast.
+    /// The gradient's stops: the signature's, or opaque with Increased
+    /// Contrast.
     private func applyTones() {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
