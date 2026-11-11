@@ -90,10 +90,10 @@ Three assets hold the brand outside the code. `BrandAssetsGuardTests` (DesignSys
 | Asset | Holds | Checked against |
 |---|---|---|
 | `App/Resources/Assets.xcassets/AccentColor.colorset` | the app's tint: light, dark and the Increased Contrast pair (Xcode's "accent" is the **tint**: it carries the primary, not the mint) | `BrandTheme.primary` |
-| `App/Resources/Assets.xcassets/LaunchLogo.imageset/LaunchLogo.svg` | the launch logo's pale gradient | ⚠️ the old values, pinned in the test (`UntilTheNewIcon`) |
-| `App/Resources/AppIcon.icon/Assets/circle.svg` | the icon's blob gradient (the layer has no fill of its own in `icon.json`: Icon Composer's fill takes two colours) | ⚠️ the old values, pinned in the test (`UntilTheNewIcon`) |
+| `App/Resources/Assets.xcassets/LaunchLogo.imageset/LaunchLogo.svg` | the launch logo: the mark in the primary, its echo in the mint, at the icon's offset and scale. One SVG for both appearances: the echo sits on the primary mark, where the mint stands out (2.95:1 against `FF1358`) and the deep mint would not (1.13:1) | `BrandTheme.primary`, then `accent` (the mint, its dark value) |
+| `App/Resources/AppIcon.icon/icon.json` | the icon's solid ground, and the fill of its mint glass layer (the mark's echo). Both layers draw the one mark, `Assets/mark.svg` | the ground: `primary`; the mint layer: `accent` (the mint), each within one unit per sRGB channel once converted from `srgb:` or `display-p3:` |
 
-⚠️ **#2282 lands in two pull requests.** The first moved the theme; the icon and the launch logo still wear #2062's raspberry signature until the second redraws them (the new mark on a solid `FF1358` ground, with its mint echo), and rewrites the guard: the icon's ground is `primary`, its mint layer `accent`, the launch logo's colours the theme's.
+The icon's mint layer is written in display-p3 (`0.46658, 0.98557, 0.80754`), the mint `16FFCB` within 0.4 of a unit. Its strength (0.4 fill alpha, 0.6 opacity) is the owner's: over the white mark it renders a pale grey (#2282, problem 1).
 
 ## Changing the theme
 1. **Write the new values** in `BrandTheme.swift`: a new `BrandTheme` value, then point `current` at it. Call sites do not change, because they read `Palette`'s roles.
