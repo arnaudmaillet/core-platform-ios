@@ -67,23 +67,30 @@ struct ToastStackTests {
         hosting { container, _ in
             let muted = toast("Notifications muted", undoable: .init(commit: {}, undo: {}), in: container)
             container.layoutIfNeeded()
+            let width = muted.bounds.width
             let on = toast("Notifications on", in: container)
             #expect(muted.superview == nil, "the replaced capsule is still there")
             #expect(on.tookOver)
-            #expect(on.entranceTravel == 0, "the replacement slid in")
+            // The width on screen: the model's here, or where the unfold has it.
+            let startWidth = on.takeOverWidth ?? 0
+            #expect(startWidth > 0, "the replacement did not start from the capsule")
+            #expect(startWidth <= width + 0.5, "the replacement did not start from the capsule")
+            #expect(on.unfoldedFrom == nil, "the replacement unfolded again")
             #expect(ToastView.stack(in: container) == [on])
         }
     }
 
     /// An update by `id` flows like a replacement: the old content blurs
     /// away and the new one comes out of a blur, centred, in the same capsule
-    /// (the owner, 2026-11-06: the change was a cut, the text sliding).
+    /// (the owner, 2026-11-06: the change was a cut, the text sliding) —
+    /// one capsule, never a second one (#2285).
     @Test func anUpdateFlowsItsContent() {
         hosting { container, _ in
             let loading = toast("Posting…", style: .loading, id: "post", in: container)
             container.layoutIfNeeded()
             let posted = toast("Posted", id: "post", in: container)
             #expect(posted === loading)
+            #expect(container.subviews.compactMap { $0 as? ToastView }.count == 1, "a second capsule")
             #expect(posted.debugIsFlowing, "the words were cut in, not opened from the middle")
             // The old words leave from where they stand, about the middle.
             let words = posted.debugLeaving.filter { !($0 is ToastBadge) && !($0 is AppLoaderView) }
@@ -91,10 +98,11 @@ struct ToastStackTests {
         }
     }
 
-    /// A disc in both states is ONE disc: its glyph and colour change in
-    /// place; the mark keeps the leading end and the action the trailing one
-    /// while they leave.
-    @Test func aChangeKeepsItsDiscAndPinsItsEnds() {
+    /// The disc is never repainted through the symbol transition (#2285:
+    /// it left the disc empty): the old disc leaves, holding the leading
+    /// end, as a new one arrives; the action leaves holding the trailing
+    /// one.
+    @Test func aChangeLeavesItsOldDiscAndPinsItsEnds() {
         hosting { container, _ in
             let muted = ToastView.present(
                 "Notifications muted", symbol: "bell.slash.fill", style: .confirmation,
@@ -104,9 +112,60 @@ struct ToastStackTests {
             let disc = muted.debugMark
             #expect(disc is ToastBadge)
             let on = ToastView.present("Notifications on", symbol: "bell.fill", style: .confirmation, in: container)
-            #expect(on.debugMark === disc, "the disc was swapped for another")
+            #expect(on.debugMark is ToastBadge)
+            #expect(on.debugMark !== disc, "the old disc was repainted in place")
+            let leavingDisc = on.debugLeaving.first { $0 === disc }
+            #expect(leavingDisc?.autoresizingMask.contains(.flexibleRightMargin) == true, "the old disc does not keep the leading end")
             let control = on.debugLeaving.first { $0 is ToastActionButton }
             #expect(control?.autoresizingMask.contains(.flexibleLeftMargin) == true, "the action does not keep the trailing end")
+        }
+    }
+
+    // MARK: - A close turned around (#2285)
+
+    /// A result arriving while the one up is folding away takes that
+    /// capsule over where the fold has it: one `ToastView` in the
+    /// container, never two on the line. The one closing was committed when
+    /// its close began.
+    @Test func aResultTakesOverACapsuleThatIsClosing() {
+        hosting { container, _ in
+            var commits = 0
+            let muted = ToastView.present(
+                "Notifications muted", symbol: "bell.slash.fill", style: .confirmation,
+                undoable: .init(commit: { commits += 1 }, undo: {}), in: container
+            )
+            container.layoutIfNeeded()
+            let restingWidth = muted.bounds.width
+            muted.dismiss(animated: true)
+            #expect(muted.isDismissing)
+            #expect(muted.superview === container, "guard: the close ended at once, the test proves nothing")
+            #expect(commits == 1)
+            let on = ToastView.present("Notifications on", symbol: "bell.fill", style: .confirmation, in: container)
+            #expect(muted.superview == nil, "the closing capsule is still there")
+            #expect(container.subviews.compactMap { $0 as? ToastView } == [on], "two capsules on the line")
+            #expect(on.tookOver)
+            // From where the fold has it: between its circle and its width.
+            let turnedAt = on.takeOverWidth ?? 0
+            let circle = ToastView.Metrics.minimumHeight - 0.5
+            #expect(turnedAt >= circle, "turned around at \(turnedAt)")
+            #expect(turnedAt <= restingWidth + 0.5, "turned around at \(turnedAt)")
+            #expect(on.unfoldedFrom == nil, "it unfolded from scratch")
+            #expect(commits == 1, "the closed undo was settled again")
+        }
+    }
+
+    /// A condition closing is never taken over: a result arriving then
+    /// unfolds on its own.
+    @Test func aClosingConditionIsNeverTakenOver() {
+        hosting { container, _ in
+            let offline = ToastView.present(
+                "Offline", symbol: "wifi.slash", style: .confirmation, id: "connectivity", isCondition: true, in: container
+            )
+            container.layoutIfNeeded()
+            offline.dismiss(animated: true)
+            let saved = ToastView.present("Saved", symbol: "checkmark.circle.fill", style: .confirmation, in: container)
+            #expect(offline.superview === container, "the condition's close was turned around")
+            #expect(!saved.tookOver)
         }
     }
 

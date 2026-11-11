@@ -399,6 +399,44 @@ struct ToastOverlayTests {
         window.layoutIfNeeded()
     }
 
+    /// A toast fired while the one up is closing turns its close around
+    /// (#2285): one toast in the overlay, and the window stays up through
+    /// the turn after — the closing one was removed first.
+    @Test func aCloseTurnedAroundKeepsOneToastAndTheWindowUp() async {
+        let screen = UIViewController()
+        let window = UIWindow(frame: bounds)
+        window.rootViewController = screen
+        window.isHidden = false
+        window.layoutIfNeeded()
+        let overlay = ToastOverlay(window: ToastOverlayWindow(frame: bounds), appWindow: window)
+        // Its own clock, as above.
+        let previousMake = ToastOverlay.makeForTests
+        let previousClock = ToastClock.current
+        ToastOverlay.makeForTests = { _ in overlay }
+        ToastClock.current = ToastClock.manual().0
+        var closing: ToastView?
+        _ = HapticRecorder.recording {
+            closing = Feedback.info("Notifications muted", symbol: "bell.slash.fill", from: screen)
+            overlay.window.layoutIfNeeded()
+            closing?.dismiss(animated: true)
+            _ = Feedback.info("Notifications on", symbol: "bell.fill", from: screen)
+        }
+        ToastOverlay.makeForTests = previousMake
+        ToastClock.current = previousClock
+        let messages = overlay.toasts.map(\.message)
+        let closingGone = closing?.superview == nil
+        for _ in 0..<10 { await Task.yield() }
+        let hiddenAfter = overlay.window.isHidden
+        #expect(messages == ["Notifications on"], "on the line: \(messages)")
+        #expect(closingGone, "the closing toast is still there")
+        #expect(!hiddenAfter, "the window hid with the close it turned around")
+        overlay.toasts.forEach { $0.dismiss(animated: false) }
+        overlay.window.isHidden = true
+        window.rootViewController = nil
+        window.isHidden = true
+        window.layoutIfNeeded()
+    }
+
     // MARK: - Touches
 
     /// Only a toast takes a touch; the band around it hands every touch to

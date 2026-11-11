@@ -245,13 +245,124 @@ struct ToastBehaviourTests {
 
     // MARK: - Motion and glass
 
-    /// Under Reduce Motion it does not slide: the glass materialises in place.
-    @Test func reduceMotionRemovesTheSlide() {
-        hosting(reducesMotion: true) { container, _ in
-            #expect(toast(in: container).entranceTravel == 0)
+    /// THE UNFOLD (#2285): the capsule starts as a circle round its mark,
+    /// as tall as it will be, centred where it will stand — and with no
+    /// transform on the row or on anything in it: the content is never
+    /// scaled, and the capsule never slides.
+    @Test func theUnfoldStartsAtTheMarksCircle() throws {
+        try hosting { container, _ in
+            let shown = ToastView.present(
+                "Notifications muted", symbol: "bell.slash.fill", style: .confirmation,
+                action: .init("View") {}, in: container
+            )
+            let start = try #require(shown.unfoldedFrom, "no unfold")
+            let height = shown.bounds.height
+            #expect(abs(start.capsule.width - height) < 0.5, "not a circle: \(start.capsule.size)")
+            #expect(abs(start.capsule.height - height) < 0.5, "the height changed: \(start.capsule.height) → \(height)")
+            #expect(abs(height - ToastView.Metrics.minimumHeight) < 0.5)
+            #expect(abs(start.capsule.midX - container.bounds.midX) < 0.5, "not centred")
+            #expect(abs(start.capsule.minY - shown.frame.minY) < 0.5, "it slid")
+            let mark = try #require(start.mark)
+            let offCentre = abs(mark.midX - start.capsule.width / 2)
+            let offMiddle = abs(mark.midY - height / 2)
+            #expect(offCentre < 0.5, "the mark is off the circle's middle: \(mark)")
+            #expect(offMiddle < 0.5, "the mark is off the circle's middle: \(mark)")
+            #expect(shown.bounds.width > start.capsule.width + 50, "it did not open to its width")
+            #expect(shown.debugRow.transform == .identity)
+            #expect(shown.debugRow.arrangedSubviews.allSatisfy { $0.transform == .identity }, "a piece was scaled")
         }
-        hosting(reducesMotion: false) { container, _ in
-            #expect(toast(in: container).entranceTravel > 0)
+    }
+
+    /// A loader's toast unfolds round its loader, centred in the circle.
+    @Test func aLoadingToastUnfoldsRoundItsLoader() throws {
+        try hosting { container, _ in
+            let shown = ToastView.present("Posting…", symbol: nil, style: .loading, id: "post", in: container)
+            let start = try #require(shown.unfoldedFrom)
+            let mark = try #require(start.mark)
+            #expect(abs(mark.midX - start.capsule.width / 2) < 0.5, "the loader is off the circle's middle")
+            #expect(shown.debugMark is AppLoaderView)
+        }
+    }
+
+    /// THE FOLD (#2285): the way back — the capsule ends as the circle round
+    /// its mark, in the same place; then it is removed.
+    @Test func theFoldEndsAtTheMarksCircle() throws {
+        try hosting { container, _ in
+            let shown = ToastView.present(
+                "Couldn't send", symbol: "exclamationmark.circle.fill", style: .failure,
+                action: .init("Retry") {}, in: container
+            )
+            container.layoutIfNeeded()
+            let resting = shown.frame
+            shown.dismiss(animated: true)
+            #expect(shown.isDismissing)
+            #expect(shown.superview === container, "removed before its fold")
+            let end = try #require(shown.foldedTo, "no fold")
+            let side = resting.height
+            #expect(abs(end.capsule.width - side) < 0.5, "not the circle: \(end.capsule.size)")
+            #expect(abs(end.capsule.height - side) < 0.5, "not the circle: \(end.capsule.size)")
+            #expect(abs(end.capsule.midX - resting.midX) < 0.5, "it moved sideways")
+            #expect(abs(end.capsule.minY - resting.minY) < 0.5, "it slid")
+            let mark = try #require(end.mark)
+            #expect(abs(mark.midX - end.capsule.width / 2) < 0.5, "the mark did not slide back to the middle")
+            #expect(shown.glassView.effect == nil, "the glass did not dissolve")
+            #expect(shown.debugRow.transform == .identity)
+        }
+    }
+
+    /// THE WHOLE CONTENT BLURS (#2285): a change blurs the old mark, words
+    /// and action away and the new ones in — the disc and the action too,
+    /// not only the words.
+    @Test func aChangeBlursTheMarkTheWordsAndTheAction() throws {
+        try hosting { container, _ in
+            _ = ToastView.present(
+                "Notifications muted", symbol: "bell.slash.fill", style: .confirmation,
+                undoable: .init(commit: {}, undo: {}), in: container
+            )
+            container.layoutIfNeeded()
+            let failed = ToastView.present(
+                "Couldn't follow @ava", symbol: "exclamationmark.circle.fill", style: .failure,
+                action: .init("Retry") {}, in: container
+            )
+            let motion = try #require(failed.lastChangeMotion)
+            #expect(!motion.crossFades)
+            #expect(motion.blurredOut == [.mark, .text, .control], "blurred away: \(motion.blurredOut)")
+            #expect(motion.blurredIn == [.mark, .text, .control], "blurred in: \(motion.blurredIn)")
+        }
+    }
+
+    /// An update by `id` (loading → done) keeps the capsule and uses the
+    /// same blur: the loader blurs away, the disc comes out of the blur.
+    @Test func anUpdateByIDBlursInTheSameCapsule() throws {
+        try hosting { container, _ in
+            let loading = ToastView.present("Posting…", symbol: nil, style: .loading, id: "post", in: container)
+            container.layoutIfNeeded()
+            let posted = ToastView.present("Posted", symbol: "checkmark.circle.fill", style: .confirmation, id: "post", in: container)
+            #expect(posted === loading)
+            #expect(container.subviews.compactMap { $0 as? ToastView } == [posted])
+            let motion = try #require(posted.lastChangeMotion)
+            #expect(motion.blurredOut.contains(.mark), "the loader did not blur away: \(motion)")
+            #expect(motion.blurredIn.contains(.mark), "the disc did not blur in: \(motion)")
+            #expect(motion.blurredIn.contains(.text))
+        }
+    }
+
+    /// Under Reduce Motion: no unfold — no width animation, the capsule at
+    /// its width from the start, the glass materialising in place — and a
+    /// change is a cross-fade, not a blur.
+    @Test func reduceMotionHasNoUnfoldAndCrossFades() throws {
+        try hosting(reducesMotion: true) { container, _ in
+            let first = ToastView.present("Notifications muted", symbol: "bell.slash.fill", style: .confirmation, in: container)
+            #expect(first.unfoldedFrom == nil, "it unfolded under Reduce Motion")
+            #expect(first.bounds.width > first.bounds.height + 50, "not at its width from the start")
+            container.layoutIfNeeded()
+            let second = ToastView.present("Notifications on", symbol: "bell.fill", style: .confirmation, in: container)
+            let motion = try #require(second.lastChangeMotion)
+            #expect(motion.crossFades)
+            #expect(motion.blurredIn.isEmpty, "it blurred under Reduce Motion")
+            #expect(motion.blurredOut.isEmpty, "it blurred under Reduce Motion")
+            second.dismiss(animated: true)
+            #expect(second.foldedTo == nil, "it folded under Reduce Motion")
         }
     }
 

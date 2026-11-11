@@ -248,6 +248,25 @@ struct FeedbackTests {
         }
     }
 
+    /// A result fired while the one before is closing turns that close
+    /// around (#2285, the owner's pick): one capsule in the screen, never a
+    /// second one arriving beside the one leaving.
+    @Test func aResultFiredDuringACloseTakesItsCapsule() {
+        let (root, screen) = shell()
+        hosting(root) {
+            _ = recordingHaptics {
+                let copied = Feedback.success("Copied", from: screen)
+                screen.view.layoutIfNeeded()
+                copied.dismiss(animated: true)
+                let failed = Feedback.failure("Couldn't copy", from: screen)
+                #expect(failed.tookOver, "it arrived as a capsule of its own")
+            }
+            let capsules = screen.view.subviews.compactMap { $0 as? ToastView }
+            #expect(capsules.map(\.message) == ["Couldn't copy"], "on the line: \(capsules.map(\.message))")
+            capsules.forEach { $0.dismiss(animated: false) }
+        }
+    }
+
     /// The same toast twice is one toast (#954): its time restarts.
     @Test func theSameToastTwiceIsOne() {
         let (root, screen) = shell()

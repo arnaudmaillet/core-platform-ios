@@ -91,16 +91,26 @@ import UIKit
 ///   `effect` inside the animation block, which is how UIKit interpolates
 ///   glass; only the content row, which is ordinary content, uses alpha.
 ///
-/// So the "scale" in and out (#1034) is a MORPH through layout: the capsule
-/// arrives at `Metrics.morphScale` of its size and springs to it (a slight
-/// overshoot) while it slides in, the glass materialises and the content —
-/// ordinary content, where a transform is fine — fades and scales up from
-/// `contentScale`. It leaves the same way back, shorter and without the
-/// bounce. The content keeps its own size during the morph (centred, clipped
-/// by the capsule), so the text never re-wraps or truncates mid-flight.
+/// So the toast UNFOLDS FROM ITS MARK (#2285, after the map's bubble,
+/// `MapFeaturedHalo`, #2203): it starts as a circle round its mark (the
+/// disc, or the loader), as tall as it will be, centred where it will
+/// stand, and widens both ways to its width through its width constraint;
+/// the mark slides to the capsule's leading end, the glass materialises
+/// with the shadow, and the words and the action fade in on its right at
+/// their own size — never scaled — held from the leading end and revealed
+/// by the widening capsule. It folds back the same way: the words and the
+/// action go, the capsule narrows to the circle round its mark as the glass
+/// dissolves, then it is removed. No slide and no scale (the morph and the
+/// slide of #1034 went with #2285). A swipe up carries it off and dissolves
+/// it on the way.
 ///
-/// Under Reduce Motion (`MotionPreference`) there is no slide, no morph and
-/// no scale: the glass materialises and the row fades, in place.
+/// A new result while one is up takes over its capsule where it stands, and
+/// the WHOLE content blurs — the mark, the words and the action (#2285,
+/// `flowContent`); a new one while one is folding turns the fold around
+/// into the new toast.
+///
+/// Under Reduce Motion (`MotionPreference`) there is no unfold: the glass
+/// materialises and the row fades, in place; a content change cross-fades.
 @MainActor
 public final class ToastView: UIView {
 
@@ -132,21 +142,29 @@ public final class ToastView: UIView {
     enum Metrics {
         /// Gap between the capsule and the anchor it hangs from (#2143).
         static let topGap: CGFloat = Spacing.sm
-        /// How far the capsule travels on entrance/exit.
-        static let travel: CGFloat = 24
+        /// Under Reduce Motion, the fade in and out, in place.
         static let transitionDuration: TimeInterval = 0.32
-        /// The entrance's spring (#1034): the capsule grows from
-        /// `morphScale` of its size and overshoots a little.
-        static let entranceDuration: TimeInterval = 0.55
-        static let entranceDamping: CGFloat = 0.72
-        /// The exit: shorter, no bounce.
+        /// THE UNFOLD (#2285): the capsule widens from the circle round its
+        /// mark on a spring. The map's bubble (#2203) takes 0.6 s; a toast is
+        /// brief, so a touch quicker, with the same bounce.
+        static let unfoldDuration: TimeInterval = 0.5
+        static let unfoldBounce: CGFloat = 0.15
+        /// The words and the action fade in on the capsule's right as it
+        /// opens (the map's: 0.3 s from 0.18 s, a touch quicker too).
+        static let contentInDelay: TimeInterval = 0.15
+        static let contentInDuration: TimeInterval = 0.25
+        /// The mark comes in with the glass, at the start.
+        static let markInDuration: TimeInterval = 0.2
+        /// THE FOLD, the unfold backwards (the map's): the words and the
+        /// action go first, while the capsule narrows back to its circle on
+        /// a spring with no bounce, the glass dissolving; the mark goes last,
+        /// once the capsule is nearly round it.
+        static let foldDuration: TimeInterval = 0.5
+        static let contentOutDuration: TimeInterval = 0.15
+        static let markOutDelay: TimeInterval = 0.15
+        static let markOutDuration: TimeInterval = 0.3
+        /// A swipe's exit: the glass dissolving as the throw carries it off.
         static let exitDuration: TimeInterval = 0.26
-        /// The capsule's size before it arrives and as it leaves, against its
-        /// own — reached through its CONSTRAINTS, never a transform on glass.
-        static let morphScale = CGSize(width: 0.7, height: 0.85)
-        /// The content's scale on the way in and out (ordinary content: a
-        /// transform is fine there).
-        static let contentScale: CGFloat = 0.9
         /// Resting shadow strength. Soft and low-contrast: the glass already
         /// separates itself; the shadow only grounds it.
         static let shadowOpacity: Float = 0.22
@@ -308,16 +326,15 @@ public final class ToastView: UIView {
     private(set) var countdown: ToastCountdown?
 
     private let backdrop = UIVisualEffectView(effect: nil)
-    /// Hangs the capsule from the ceiling. Driven instead of a transform (see
-    /// the type doc): `offConstant` while off — `travel` above its resting
-    /// place — and `restConstant` at rest. The swipe moves it too.
+    /// Hangs the capsule from the ceiling, at `restConstant`. Driven instead
+    /// of a transform (see the type doc): the swipe moves it, and a swell
+    /// hangs it up by half its growth.
     private var slide: NSLayoutConstraint?
     /// The slide's resting constant on the top line…
     private var baseConstant: CGFloat = 0
     /// …and for this toast on its own line (`restack`): under a condition,
     /// a result hangs lower.
     private var restConstant: CGFloat = 0
-    private var offConstant: CGFloat = 0
     /// Centres the capsule; a sideways pull stretches it.
     private var along: NSLayoutConstraint?
     /// Keep it between the container's margins; off while a swipe moves it.
@@ -332,14 +349,37 @@ public final class ToastView: UIView {
     private var textSlot: ToastWords?
     /// The text's own vertical inset, rebuilt with the label (#1034).
     private var textInset: NSLayoutConstraint?
-    /// Below required: the entrance/exit morph squeezes the capsule past it.
+    /// Below required, as it always was; the unfold never squeezes the
+    /// height (#2285: as tall as it will be from the first frame).
     private lazy var minimumHeightConstraint: NSLayoutConstraint = {
         let constraint = heightAnchor.constraint(greaterThanOrEqualToConstant: Metrics.minimumHeight)
         constraint.priority = .required - 1
         return constraint
     }()
-    /// The capsule's size and the content's while it morphs in or out.
-    private var morphConstraints: [NSLayoutConstraint] = []
+    /// While it unfolds or folds (#2285): the capsule's width, the side of
+    /// the circle round its mark (`fold(_:)`)…
+    private var foldWidth: NSLayoutConstraint?
+    /// …and the row held at its own width from the leading end, its
+    /// trailing edge let go, so the capsule reveals it as it widens.
+    private var rowHeld: NSLayoutConstraint?
+    /// The row's leading inset at rest (`apply`).
+    private var restLeading: CGFloat = Spacing.lg
+    /// Bumped by each entrance, exit and change: a completion from an older
+    /// one does nothing.
+    private var motionGeneration = 0
+    /// How the glass is coming or going, to tell how much of it shows mid-
+    /// way (`glassLevel`) — what a toast taking this capsule over starts
+    /// its glass from (#2285).
+    private var glassRamp: GlassRamp?
+    /// The glass coming back from where a taken-over capsule had it
+    /// (`materialiseGlass(from:)`).
+    private var glassAnimator: UIViewPropertyAnimator?
+    /// It leaves through the fold (or Reduce Motion's fade), not a swipe nor
+    /// at once: a new result may still turn it around (#2285).
+    private var leavesByFolding = false
+    /// A new toast took its capsule over: it is gone, whatever its exit was
+    /// doing.
+    private var isTakenOver = false
     private let row = UIStackView()
     private(set) var closeButton: UIButton?
     private(set) var actionButton: UIButton?
@@ -352,9 +392,6 @@ public final class ToastView: UIView {
 
     /// The glass view (tests).
     var glassView: UIVisualEffectView { backdrop }
-    /// How far the capsule slides on its way in: zero under Reduce Motion
-    /// (tests, here and in the packages that show toasts).
-    public var entranceTravel: CGFloat { abs(offConstant - restConstant) }
     /// Whether it is on its way out — what a stake surface reads to know its
     /// undo window is still open (#1375), and tests.
     public var isDismissing: Bool { isLeaving }
@@ -420,20 +457,28 @@ public final class ToastView: UIView {
         }
         // One result at a time, and ONE CAPSULE (#2143, the owner's device
         // check): a result that has arrived hands its place to this one,
-        // which takes over its capsule where it stands — glass on, at its
-        // width — and only the content and the width change. Two capsules
-        // crossing on the same line (one leaving, one arriving) read as a
-        // glitch on a fast toggle. A result still arriving leaves the usual
-        // way. A condition replaces nothing.
-        var takenOver: (width: CGFloat, content: [Leaving], changedAt: CFTimeInterval)?
+        // which takes over its capsule where it stands — at its width on
+        // screen, unfolding or up — and only the content and the width
+        // change. Two capsules crossing on the same line (one leaving, one
+        // arriving) read as a glitch on a fast toggle. A result not laid out
+        // yet leaves the usual way. A condition replaces nothing, and is
+        // never taken over.
+        var takenOver: Handover?
         if !isCondition {
             for toast in shown where !toast.holdsOwnLine {
                 if takenOver == nil, toast.hasArrived, toast.bounds.width > 0 {
-                    takenOver = (toast.widthOnScreen, toast.takeContentOut(), toast.lastChange)
-                    toast.dismiss(animated: false)
+                    takenOver = toast.handOver()
                 } else {
                     toast.dismiss(animated: true)
                 }
+            }
+            // ⚠️ A CLOSE TURNS AROUND INTO THE NEW TOAST (the owner, 2026-11-11,
+            // #2285): a result folding away is out of the lines (`stack(in:)`),
+            // but still on screen — this one takes its capsule over from where
+            // the fold has it, rather than arriving as a second capsule on the
+            // same line. It was committed when its close began.
+            if takenOver == nil, let closing = closingCapsule(in: container) {
+                takenOver = closing.handOver()
             }
         }
 
@@ -464,65 +509,120 @@ public final class ToastView: UIView {
             keepsLeading
             keepsTrailing
         }
-        // Its line first (under a condition, lower), then where it comes
-        // from: `travel` above it — or right there under Reduce Motion.
+        // Its line (under a condition, lower), where it unfolds — no slide.
         restack(in: container, animated: true)
+        slide.constant = toast.restConstant
         if let takenOver {
-            toast.offConstant = toast.restConstant
-            slide.constant = toast.restConstant
             toast.lastChange = takenOver.changedAt
-            toast.takeOver(fromWidth: takenOver.width, replacing: takenOver.content)
+            toast.takeOver(takenOver)
             return toast
         }
-        toast.offConstant = MotionPreference.reducesMotion ? toast.restConstant : toast.restConstant - Metrics.travel
-        slide.constant = toast.offConstant
         toast.animateIn()
         return toast
     }
 
-    /// Arrives in the capsule of the result toast it replaced: already there,
-    /// glass on, at that toast's `width`, holding its content; then the
-    /// content changes the way one capsule's does (`flowContent`).
-    private func takeOver(fromWidth width: CGFloat, replacing old: [Leaving]) {
+    /// What a toast taking a capsule over starts from: its width on screen,
+    /// its content where it stands, when its content last changed, and how
+    /// much of its glass shows.
+    struct Handover {
+        let width: CGFloat
+        let content: [Leaving]
+        let changedAt: CFTimeInterval
+        let glass: CGFloat
+    }
+
+    /// A result folding away in `container` that a new result may turn
+    /// around (#2285): still on screen, leaving by its fold (or Reduce
+    /// Motion's fade) — never a swipe, never a condition.
+    private static func closingCapsule(in container: UIView) -> ToastView? {
+        container.subviews.compactMap { $0 as? ToastView }.last { toast in
+            toast.isLeaving && toast.leavesByFolding && !toast.isTakenOver
+                && !toast.holdsOwnLine && toast.bounds.width > 0
+        }
+    }
+
+    /// Hands this toast's capsule over to the toast replacing it, and goes
+    /// at once: up, it leaves as any replaced toast does (an undo commits);
+    /// folding, its close had already settled it.
+    private func handOver() -> Handover {
+        let handed = Handover(
+            width: widthOnScreen, content: takeContentOut(), changedAt: lastChange, glass: glassLevel
+        )
+        isTakenOver = true
+        if isLeaving {
+            finish()
+        } else {
+            dismiss(animated: false)
+        }
+        return handed
+    }
+
+    /// Arrives in the capsule of the result toast it replaced: already
+    /// there, at that toast's width on screen, holding its content, its
+    /// glass coming back from wherever that one's was; then the content
+    /// changes the way one capsule's does (`flowContent`).
+    private func takeOver(_ handover: Handover) {
         tookOver = true
-        // Off a window, the glass waits for one (`didMoveToWindow`).
-        if window != nil { backdrop.effect = Self.makeGlass() }
-        layer.shadowOpacity = Metrics.shadowOpacity
+        takeOverWidth = handover.width
         row.alpha = 1
         hasArrived = true
-        apply(content, reusingMark: old.lazy.compactMap { $0.view as? ToastBadge }.first)
-        flowContent(fromWidth: width, leaving: old)
+        apply(content)
+        materialiseGlass(from: handover.glass)
+        flowContent(fromWidth: handover.width, leaving: handover.content)
         countdown?.start()
     }
 
     /// A piece of the content on its way out of a change: the very view, out
-    /// of the row, where it stood — pinned to its end of the capsule.
+    /// of the row, where it stood — pinned to its end of the capsule — and
+    /// how much of it still showed.
     struct Leaving {
-        enum Role { case mark, text, control }
+        enum Role: Hashable { case mark, text, control }
         let view: UIView
         let role: Role
+        var opacity: Float = 1
+    }
+
+    /// The role a piece of the row plays in a change.
+    private static func role(of view: UIView) -> Leaving.Role {
+        if view is ToastWords { return .text }
+        return (view is ToastBadge || view is AppLoaderView) ? .mark : .control
+    }
+
+    /// How a piece keeps its end of the capsule as the capsule resizes about
+    /// its centre: the mark the leading end, the control the trailing one,
+    /// the words the middle.
+    private static func pinning(_ role: Leaving.Role) -> UIView.AutoresizingMask {
+        switch role {
+        case .mark: [.flexibleRightMargin, .flexibleTopMargin, .flexibleBottomMargin]
+        case .control: [.flexibleLeftMargin, .flexibleTopMargin, .flexibleBottomMargin]
+        case .text: [.flexibleLeftMargin, .flexibleRightMargin, .flexibleTopMargin, .flexibleBottomMargin]
+        }
     }
 
     /// Takes the content out of the row for a change: each piece stays
-    /// where it stands, the mark pinned to the capsule's leading end, the
-    /// control to its trailing end, the words to its middle — so as the
-    /// capsule resizes about its centre, none of them travels sideways.
+    /// WHERE IT SHOWS — mid-unfold or mid-fold, where the animation has it,
+    /// not where it will land — pinned to its end of the capsule
+    /// (`pinning`), so as the capsule resizes about its centre, none of
+    /// them travels sideways.
     func takeContentOut() -> [Leaving] {
-        row.arrangedSubviews.map { view in
-            let frame = view.convert(view.bounds, to: backdrop.contentView)
-            let role: Leaving.Role = view === textSlot ? .text
-                : (view is ToastBadge || view is AppLoaderView) ? .mark : .control
+        let rowShown = row.layer.presentation()
+        let rowOrigin = rowShown?.frame.origin ?? row.frame.origin
+        let rowOpacity = rowShown?.opacity ?? Float(row.alpha)
+        return row.arrangedSubviews.map { view in
+            let shown = view.layer.presentation()
+            let shownFrame = (shown?.frame ?? view.frame).offsetBy(dx: rowOrigin.x, dy: rowOrigin.y)
+            let opacity = (shown?.opacity ?? Float(view.alpha)) * rowOpacity
+            let pieceRole = Self.role(of: view)
+            // Whatever was carrying it (its fade, its slide) ends here.
+            view.layer.removeAllAnimations()
+            view.transform = .identity
             row.removeArrangedSubview(view)
             view.removeFromSuperview()
             view.translatesAutoresizingMaskIntoConstraints = true
-            view.frame = frame
-            view.autoresizingMask = switch role {
-            case .mark: [.flexibleRightMargin, .flexibleTopMargin, .flexibleBottomMargin]
-            case .control: [.flexibleLeftMargin, .flexibleTopMargin, .flexibleBottomMargin]
-            case .text: [.flexibleLeftMargin, .flexibleRightMargin, .flexibleTopMargin, .flexibleBottomMargin]
-            }
+            view.frame = shownFrame
+            view.autoresizingMask = Self.pinning(pieceRole)
             view.isUserInteractionEnabled = false
-            return Leaving(view: view, role: role)
+            return Leaving(view: view, role: pieceRole, opacity: opacity)
         }
     }
 
@@ -530,25 +630,43 @@ public final class ToastView: UIView {
 
     /// The pieces of a change still on their way out.
     private var flowLeaving: [UIView] = []
+    /// The pictures standing in for pieces while they blur (`blurPiece`).
+    private var flowStands: [UIView] = []
     private var flowGeneration = 0
+
+    /// What the last content change did to each piece (tests): blurred away
+    /// and in — or, under Reduce Motion, cross-faded.
+    struct ChangeMotion: Equatable {
+        var crossFades = false
+        var blurredOut: Set<Leaving.Role> = []
+        var blurredIn: Set<Leaving.Role> = []
+        /// How far the new mark slid to the leading end, from where the
+        /// old one stood.
+        var markSlide: CGFloat = 0
+    }
+
+    private(set) var lastChangeMotion: ChangeMotion?
 
     /// ONE CAPSULE CHANGING ITS MIND, THE DYNAMIC ISLAND'S WAY (the owner,
     /// 2026-11-06, after a fast toggle filmed twice): the mark stays at the
     /// leading end and the action at the trailing one, each going with its
-    /// end as the capsule springs from `width` to its own; the words open
-    /// FROM THE MIDDLE outward, behind a soft-edged mask, as the old ones
-    /// close toward it and fade.
+    /// end as the capsule springs from `width` to its own.
     ///
-    /// - A disc in both states is ONE disc (`apply(_:reusingMark:)`): its
-    ///   glyph is replaced in place (the symbol transition), its colour
-    ///   eased — never two discs cross-fading through a dip.
-    /// - A control that comes or goes, or changes, fades where it stands.
-    /// - Only real views move, inside the glass: a picture of them, taken
-    ///   out of the glass, lost the glass's own ink (white words), and its
-    ///   hand-over to the real content jumped a few points (filmed).
-    /// - A change mid-change starts from the width on screen, and what was
-    ///   still leaving keeps leaving.
-    /// - Under Reduce Motion: the same fades, no reveal, no spring.
+    /// - THE WHOLE CONTENT BLURS (#2285): the mark (the disc with its glyph,
+    ///   or the loader), the words and the action. The old ones blur away
+    ///   first, the new ones come out of a blur just after, so the two are
+    ///   never sharp on each other. Each is blurred from a picture of it in
+    ///   its own ink (`ToastPictured`): a render inside the glass comes out
+    ///   in its vibrant white (#2166).
+    /// - The disc never goes through the symbol transition (it left the disc
+    ///   empty between two unrelated glyphs, #2166): the old disc blurs out,
+    ///   the new one in, and a change of colour happens inside the blur.
+    /// - The mark slides from where the old one stood to the leading end —
+    ///   a fold turned around, an unfold taken over, a loader becoming a
+    ///   disc.
+    /// - Only real views and their pictures move, inside the glass.
+    /// - A change mid-change starts from the width on screen (`lastChange`).
+    /// - Under Reduce Motion: a cross-fade, no blur, no spring.
     private func flowContent(fromWidth width: CGFloat, leaving: [Leaving]) {
         flowGeneration += 1
         // ⚠️ THE LATEST WINS, FROM WHAT IS ON SCREEN (the owner, 2026-11-06,
@@ -564,6 +682,7 @@ public final class ToastView: UIView {
         lastChange = now
         flowLeaving.forEach { $0.removeFromSuperview() }
         flowLeaving = []
+        dropStands()
         stopSwell()
         superview?.layoutIfNeeded()
         let reduces = MotionPreference.reducesMotion
@@ -576,17 +695,22 @@ public final class ToastView: UIView {
         let startsAt = widthAnchor.constraint(equalToConstant: width)
         startsAt.isActive = true
         superview?.layoutIfNeeded()
-        let kept = row.arrangedSubviews.first { view in leaving.contains { $0.view === view } }
-        let leavingViews = leaving.map(\.view).filter { $0 !== kept }
-        leavingViews.forEach { backdrop.contentView.addSubview($0) }
-        flowLeaving.append(contentsOf: leavingViews)
-        let arriving = row.arrangedSubviews.filter { $0 !== kept && $0 !== textSlot }
-        arriving.forEach { $0.alpha = 0 }
-        startsAt.isActive = false
-        if midChange {
-            leavingViews.forEach { $0.removeFromSuperview() }
-            flowLeaving.removeAll()
+        // What leaves: what still showed of it, where it stood — none of it
+        // mid-change.
+        let glassContent = backdrop.contentView
+        let shown = midChange ? [] : leaving.filter { $0.opacity > 0.02 }
+        for piece in shown {
+            piece.view.alpha = CGFloat(piece.opacity)
+            glassContent.addSubview(piece.view)
         }
+        flowLeaving = shown.map(\.view)
+        let arriving = row.arrangedSubviews.filter { $0 !== words }
+        // Where the mark slides from: where the old one stood.
+        let mark = leadingMark
+        let markLands = mark.map { $0.convert($0.bounds, to: glassContent).midX }
+        let oldMark = leaving.first { $0.role == .mark }?.view.frame.midX
+        let markShift = (oldMark ?? markLands ?? 0) - (markLands ?? 0)
+        startsAt.isActive = false
 
         // The capsule: its width on a spring, swelling as it goes (`swell`),
         // through its constraints frame by frame — never a transform on glass.
@@ -598,41 +722,151 @@ public final class ToastView: UIView {
             startSwell(from: width, to: finalSize.width, height: finalSize.height, swells: !midChange)
         }
 
-        // The words: the old ones blur away first, the new ones come out of a
-        // blur just after — the two never stand sharp on each other.
-        let scale = max(1, window?.screen.scale ?? traitCollection.displayScale)
-        let peak = Self.flowBlurRadius * scale
-        let closing = leaving.compactMap { $0.role == .text ? $0.view as? ToastWords : nil }
-        if !reduces, midChange {
-            words?.blur(appearing: true, peak: peak, delay: 0, duration: 0.24)
-        } else if !reduces {
-            closing.forEach { $0.blur(appearing: false, peak: peak, delay: 0, duration: 0.18) }
-            words?.blur(appearing: true, peak: peak, delay: 0.1, duration: 0.3)
+        var motion = ChangeMotion()
+        if reduces {
+            motion.crossFades = true
+            crossFadeContent(out: shown.map(\.view), in: arriving + [words].compactMap { $0 })
         } else {
-            words?.alpha = 0
+            let scale = max(1, window?.screen.scale ?? traitCollection.displayScale)
+            let peak = Self.flowBlurRadius * scale
+            // Out first (0.18 s); in just after (0.3 s from 0.1 s) — at once,
+            // a touch quicker, mid-change.
+            let inDelay: TimeInterval = midChange ? 0 : 0.1
+            let inDuration: TimeInterval = midChange ? 0.24 : 0.3
+            var markStands: (old: UIView?, new: UIView?) = (nil, nil)
+            for piece in shown where blurAway(piece, peak: peak) {
+                motion.blurredOut.insert(piece.role)
+                if piece.role == .mark { markStands.old = flowStands.last }
+            }
+            if words?.blur(appearing: true, peak: peak, delay: inDelay, duration: inDuration) == true {
+                motion.blurredIn.insert(.text)
+            } else {
+                words?.alpha = 1
+            }
+            for view in arriving {
+                let arrivingRole = Self.role(of: view)
+                if let stand = blurPiece(
+                    view, role: arrivingRole, appearing: true, peak: peak, delay: inDelay, duration: inDuration
+                ) {
+                    motion.blurredIn.insert(arrivingRole)
+                    if view === mark { markStands.new = stand }
+                } else {
+                    view.alpha = 1
+                }
+            }
+            // The mark slides from where the old one stood to the leading
+            // end, the old one's picture with it as it blurs away.
+            if abs(markShift) > 0.5, let mark {
+                motion.markSlide = markShift
+                let oldMarkView = shown.first { $0.role == .mark }?.view
+                let arrivingMovers = [mark, markStands.new].compactMap { $0 }
+                let leavingMovers = [oldMarkView, markStands.old].compactMap { $0 }
+                arrivingMovers.forEach { $0.transform = CGAffineTransform(translationX: markShift, y: 0) }
+                UIView.animate(
+                    springDuration: Self.flowDuration, bounce: 0.1,
+                    options: [.allowUserInteraction, .beginFromCurrentState]
+                ) {
+                    arrivingMovers.forEach { $0.transform = .identity }
+                    leavingMovers.forEach { $0.transform = CGAffineTransform(translationX: -markShift, y: 0) }
+                }
+            }
         }
-        // A control on its way out goes quickly: pinned to the trailing end
-        // of a capsule that may be shrinking, it must be gone before the new
-        // words reach it.
-        let leavingControls = leaving.filter { $0.role == .control }.map(\.view)
-        UIView.animate(withDuration: 0.1, delay: 0, options: [.curveEaseIn, .allowUserInteraction]) {
-            leavingControls.forEach { $0.alpha = 0 }
-        }
-        UIView.animate(withDuration: 0.2, delay: 0, options: [.curveEaseIn, .allowUserInteraction]) {
-            leavingViews.forEach { $0.alpha = 0 }
-        } completion: { [weak self] _ in
-            leavingViews.forEach { $0.removeFromSuperview() }
-            self?.flowLeaving.removeAll { view in leavingViews.contains { $0 === view } }
-        }
-        UIView.animate(withDuration: 0.24, delay: 0.08, options: [.curveEaseOut, .allowUserInteraction]) {
-            arriving.forEach { $0.alpha = 1 }
-            words?.alpha = 1
-        }
+        lastChangeMotion = motion
         let generation = flowGeneration
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.flowSettle) { [weak self, weak words] in
             guard let self, flowGeneration == generation else { return }
             words?.settle()
         }
+    }
+
+    /// Blurs a leaving piece away from what still showed of it (0.18 s),
+    /// and takes it out once it has gone. False when it could not be
+    /// drawn: it fades instead.
+    private func blurAway(_ piece: Leaving, peak: CGFloat) -> Bool {
+        let view = piece.view
+        let gone: @MainActor () -> Void = { [weak self, weak view] in
+            view?.removeFromSuperview()
+            self?.flowLeaving.removeAll { $0 === view }
+        }
+        let blurred: Bool
+        if let words = view as? ToastWords {
+            blurred = words.blur(
+                appearing: false, peak: peak, delay: 0, duration: 0.18, from: piece.opacity, completion: gone
+            )
+        } else {
+            blurred = blurPiece(
+                view, role: piece.role, appearing: false, peak: peak, delay: 0, duration: 0.18,
+                from: piece.opacity, completion: gone
+            ) != nil
+        }
+        if !blurred {
+            UIView.animate(withDuration: 0.18, delay: 0, options: [.curveEaseIn, .allowUserInteraction]) {
+                view.alpha = 0
+            } completion: { _ in gone() }
+        }
+        return blurred
+    }
+
+    /// Blurs `view` — a mark or a control, in the row or leaving — in or
+    /// away, from a picture of it in its own ink (`ToastPictured`) standing
+    /// over it in the glass's content, pinned to its end of the capsule as
+    /// the piece is (`pinning`); the piece hidden under it. Arriving, the
+    /// piece takes its place back as it clears; leaving, `completion` runs
+    /// once it has gone. Nil when it could not be drawn.
+    @discardableResult
+    private func blurPiece(
+        _ view: UIView, role: Leaving.Role, appearing: Bool, peak: CGFloat, delay: TimeInterval,
+        duration: TimeInterval, from opacity: Float = 1, completion: (@MainActor () -> Void)? = nil
+    ) -> UIImageView? {
+        let glassContent = backdrop.contentView
+        let scale = max(1, window?.screen.scale ?? traitCollection.displayScale)
+        let pad = peak / scale * 3
+        guard let image = ToastBlur.picture(of: view, scale: scale, pad: pad) else { return nil }
+        let standFrame = view.convert(view.bounds, to: glassContent).insetBy(dx: -pad, dy: -pad)
+        let standIn = ToastBlur.stand(
+            image, scale: scale, frame: standFrame, in: glassContent, appearing: appearing,
+            peak: peak, delay: delay, duration: duration, opacity: opacity
+        ) { [weak self, weak view] finished in
+            // Dropped meanwhile (a newer change): nothing more to do.
+            guard let self, finished.superview != nil else { return }
+            flowStands.removeAll { $0 === finished }
+            if appearing, let view {
+                ToastBlur.handOver(from: finished, to: view)
+            } else {
+                finished.removeFromSuperview()
+            }
+            completion?()
+        }
+        standIn.autoresizingMask = Self.pinning(role)
+        flowStands.append(standIn)
+        view.alpha = 0
+        return standIn
+    }
+
+    /// Reduce Motion's change: the old content fades where it stands, the
+    /// new one fades in.
+    private func crossFadeContent(out leaving: [UIView], in arriving: [UIView]) {
+        arriving.forEach { $0.alpha = 0 }
+        UIView.animate(withDuration: 0.2, delay: 0, options: [.curveEaseIn, .allowUserInteraction]) {
+            leaving.forEach { $0.alpha = 0 }
+        } completion: { [weak self] _ in
+            leaving.forEach { $0.removeFromSuperview() }
+            self?.flowLeaving.removeAll { view in leaving.contains { $0 === view } }
+        }
+        UIView.animate(withDuration: 0.24, delay: 0.08, options: [.curveEaseOut, .allowUserInteraction]) {
+            arriving.forEach { $0.alpha = 1 }
+        }
+    }
+
+    /// The pictures of a change go at once, and what they stood over shows.
+    private func dropStands() {
+        flowStands.forEach { $0.removeFromSuperview() }
+        flowStands = []
+    }
+
+    /// The leading mark in the row: the disc, or the loader.
+    private var leadingMark: UIView? {
+        row.arrangedSubviews.first { $0 is ToastBadge || $0 is AppLoaderView }
     }
 
     /// The blur's peak, in points, as the system's bubbles.
@@ -743,16 +977,22 @@ public final class ToastView: UIView {
     private func endFlow() {
         flowLeaving.forEach { $0.removeFromSuperview() }
         flowLeaving = []
+        dropStands()
         textSlot?.settle()
         textSlot?.alpha = 1
-        row.arrangedSubviews.forEach { $0.alpha = 1 }
+        row.arrangedSubviews.forEach { view in
+            view.alpha = 1
+            view.transform = .identity
+        }
     }
 
     /// The capsule's width as it shows — mid-spring, where the spring is.
     private var widthOnScreen: CGFloat { layer.presentation()?.bounds.width ?? bounds.width }
 
-    /// It arrived in the capsule of the toast it replaced (tests).
+    /// It arrived in the capsule of the toast it replaced (tests)…
     private(set) var tookOver = false
+    /// …at that one's width on screen (tests).
+    private(set) var takeOverWidth: CGFloat?
 
     /// Replaces this toast's content in place: a loading toast becomes its
     /// outcome, a repeat restarts its time.
@@ -766,10 +1006,12 @@ public final class ToastView: UIView {
         if content.undoable != nil { Self.pendingUndo = self }
         superview?.bringSubviewToFront(self)
         // The same flow as a replacement: one capsule changing its mind.
+        // Mid-unfold, from where the unfold has it.
         let width = widthOnScreen
         if hasArrived, width > 0 {
             let old = takeContentOut()
-            apply(content, reusingMark: old.lazy.compactMap { $0.view as? ToastBadge }.first)
+            settleUnfold()
+            apply(content)
             flowContent(fromWidth: width, leaving: old)
         } else {
             apply(content)
@@ -848,6 +1090,7 @@ public final class ToastView: UIView {
 
     /// The capsule shown or dissolved: its glass, its content and its shadow.
     private func showGlass(_ shown: Bool) {
+        glassRamp = nil
         backdrop.effect = shown ? Self.makeGlass() : nil
         row.alpha = shown ? 1 : 0
         layer.shadowOpacity = shown ? Metrics.shadowOpacity : 0
@@ -963,9 +1206,9 @@ public final class ToastView: UIView {
         rowLeading = leading
         // Thin: the height is the toast's own (44/48 pt, #1034), and the
         // trailing control must not push it — the TEXT keeps its own inset
-        // (`textInset`), which matters at large text sizes. Below required,
-        // so the morph can hold the content at its size inside a smaller
-        // capsule (`morph(to:)`).
+        // (`textInset`), which matters at large text sizes. Below required;
+        // the unfold lets the trailing edge go and holds the row at its own
+        // width from the leading end (`fold(_:)`).
         let edges = [
             row.topAnchor.constraint(equalTo: backdrop.contentView.topAnchor, constant: Spacing.xs / 2),
             row.bottomAnchor.constraint(equalTo: backdrop.contentView.bottomAnchor, constant: -Spacing.xs / 2),
@@ -1013,10 +1256,9 @@ public final class ToastView: UIView {
     }
 
     /// Builds the row, the trailing control, VoiceOver's element and the
-    /// countdown for `content` — at birth, and again for an update by `id`.
-    /// - Parameter reusingMark: a disc a change keeps (`flowContent`): it
-    ///   takes this content's glyph and colour in place.
-    private func apply(_ content: Content, reusingMark reused: ToastBadge? = nil) {
+    /// countdown for `content` — at birth, and again for an update by `id`
+    /// (a new mark every time: a change blurs the old one out, #2285).
+    private func apply(_ content: Content) {
         self.content = content
         row.arrangedSubviews.forEach { $0.removeFromSuperview() }
 
@@ -1051,14 +1293,7 @@ public final class ToastView: UIView {
             arranged.append(spinner)
         } else if let symbol = content.symbol, let image = UIImage.symbol(named: symbol) {
             let colours = Self.badgeColours(symbol: symbol, style: content.style)
-            if let reused {
-                reused.update(image: image, fill: colours.fill, ink: colours.ink, animated: true)
-                reused.translatesAutoresizingMaskIntoConstraints = false
-                reused.autoresizingMask = []
-                arranged.append(reused)
-            } else {
-                arranged.append(ToastBadge(image: image, fill: colours.fill, ink: colours.ink))
-            }
+            arranged.append(ToastBadge(image: image, fill: colours.fill, ink: colours.ink))
             leadsWithDisc = true
         }
         arranged.append(texts)
@@ -1094,6 +1329,7 @@ public final class ToastView: UIView {
         // from its top and foot; text alone keeps a wider margin.
         let leading = leadsWithDisc ? Metrics.inset : Spacing.lg
         let trailing = hasControl ? Metrics.inset : Spacing.lg
+        restLeading = leading
         rowLeading?.constant = leading
         rowTrailing?.constant = -trailing
         rowInsets = leading + trailing
@@ -1266,6 +1502,9 @@ public final class ToastView: UIView {
     func debugSettle() { superview?.layoutIfNeeded() }
     /// Whether it is crossing to its anchor's new place. Tests.
     var debugIsCrossFading: Bool { isCrossFading }
+    /// The content row: never scaled, never moved by a transform (#2285).
+    /// Tests.
+    var debugRow: UIStackView { row }
     #endif
 
     // MARK: - The whole message (#1449)
@@ -1448,78 +1687,244 @@ public final class ToastView: UIView {
 
     // MARK: - Arrival and departure
 
+    /// Where an unfold started, or a fold ends (tests): the capsule's frame
+    /// and its mark's, in the capsule.
+    struct Fold: Equatable {
+        let capsule: CGRect
+        let mark: CGRect?
+    }
+
+    /// The circle the last unfold started from (tests); nil for Reduce
+    /// Motion's fade, which has none.
+    private(set) var unfoldedFrom: Fold?
+
+    /// THE UNFOLD (#2285, the map's bubble, `MapFeaturedHalo`, #2203): the
+    /// capsule starts as a circle round its mark, as tall as it will be,
+    /// centred where it will stand, and widens both ways to its width on a
+    /// spring — its width constraint, never a transform on glass. The mark
+    /// goes with the leading end; the words and the action fade in on its
+    /// right at their own size, held from the leading end and revealed as
+    /// it widens; the glass materialises (`effect` set in the animation),
+    /// the shadow with it. No slide, no scale.
+    ///
+    /// Under Reduce Motion: no unfold — the glass materialises and the row
+    /// fades in, in place.
     private func animateIn() {
-        // Land the pre-entrance state before animating: the capsule sits one
-        // `travel` out, with no glass and no shadow to inherit — and, laid
-        // out at its real size first, squeezed to its morph size.
+        // Land the resting layout first: what the unfold opens to, and what
+        // the circle is measured from.
         superview?.layoutIfNeeded()
-        let reduces = MotionPreference.reducesMotion
-        if !reduces {
-            morph(to: Metrics.morphScale)
-            row.transform = CGAffineTransform(scaleX: Metrics.contentScale, y: Metrics.contentScale)
-            superview?.layoutIfNeeded()
-        }
-        slide?.constant = restConstant
         hasArrived = true
-        let arrive = {
-            // Layout drives the slide and the morph, so the material
-            // re-renders in place each frame instead of being carried as a
-            // stale image.
-            self.morph(to: nil)
+        motionGeneration += 1
+        // Off a window, the glass waits for one (`didMoveToWindow`): built
+        // off-screen it stalls a headless simulator.
+        let glass = window == nil ? nil : Self.makeGlass()
+        if glass != nil { backdrop.effect = nil }
+        layer.shadowOpacity = 0
+        let now = CACurrentMediaTime()
+        if MotionPreference.reducesMotion {
+            unfoldedFrom = nil
+            row.alpha = 0
+            glassRamp = GlassRamp(from: 0, to: 1, start: now, duration: Metrics.transitionDuration, bounce: 0)
+            UIView.animate(
+                withDuration: Metrics.transitionDuration, delay: 0, options: [.curveEaseOut, .allowUserInteraction]
+            ) {
+                if let glass { self.backdrop.effect = glass }
+                self.row.alpha = 1
+                // A CALayer property set inside a UIView animation block
+                // adopts that block's timing: the shadow arrives with the glass.
+                self.layer.shadowOpacity = Metrics.shadowOpacity
+            }
+            countdown?.start()
+            return
+        }
+        let mark = leadingMark
+        let others = row.arrangedSubviews.filter { $0 !== mark }
+        row.alpha = 1
+        fold(true)
+        superview?.layoutIfNeeded()
+        unfoldedFrom = Fold(capsule: frame, mark: mark.map { $0.convert($0.bounds, to: self) })
+        mark?.alpha = 0
+        others.forEach { $0.alpha = 0 }
+        glassRamp = GlassRamp(from: 0, to: 1, start: now, duration: Metrics.unfoldDuration, bounce: Metrics.unfoldBounce)
+        unfoldEnds = now + Metrics.unfoldDuration
+        let options: UIView.AnimationOptions = [.allowUserInteraction, .beginFromCurrentState]
+        UIView.animate(springDuration: Metrics.unfoldDuration, bounce: Metrics.unfoldBounce, options: options) {
+            // The row is let go at once: it lands at the very width it was
+            // held at, so it keeps that width all the way — only the hold's
+            // first layout, the circle, needed it.
+            self.fold(false)
+            self.releaseRow()
             self.superview?.layoutIfNeeded()
-            self.backdrop.effect = Self.makeGlass()
-            self.row.alpha = 1
-            self.row.transform = .identity
-            // A CALayer property set inside a UIView animation block adopts
-            // that block's timing, so the shadow arrives with the capsule
-            // instead of snapping on at frame 0.
+            if let glass { self.backdrop.effect = glass }
             self.layer.shadowOpacity = Metrics.shadowOpacity
         }
-        if reduces {
-            UIView.animate(
-                withDuration: Metrics.transitionDuration, delay: 0, options: [.curveEaseOut, .allowUserInteraction],
-                animations: arrive
-            )
-        } else {
-            UIView.animate(
-                withDuration: Metrics.entranceDuration, delay: 0, usingSpringWithDamping: Metrics.entranceDamping,
-                initialSpringVelocity: 0, options: [.allowUserInteraction], animations: arrive
-            )
+        UIView.animate(withDuration: Metrics.markInDuration, delay: 0, options: [.curveEaseOut, .allowUserInteraction]) {
+            mark?.alpha = 1
+        }
+        UIView.animate(
+            withDuration: Metrics.contentInDuration, delay: Metrics.contentInDelay,
+            options: [.curveEaseOut, .allowUserInteraction]
+        ) {
+            others.forEach { $0.alpha = 1 }
         }
         countdown?.start()
     }
 
-    /// Squeezes the capsule to `scale` of its current size through its
-    /// constraints — never a transform on glass (see the type doc) — with the
-    /// content held at its own size, centred and clipped; nil lets both go.
-    private func morph(to scale: CGSize?) {
-        NSLayoutConstraint.deactivate(morphConstraints)
-        morphConstraints = []
-        guard let scale, bounds.width > 0 else { return }
-        let content = backdrop.contentView
-        morphConstraints = [
-            widthAnchor.constraint(equalToConstant: bounds.width * scale.width),
-            heightAnchor.constraint(equalToConstant: bounds.height * scale.height),
-            row.widthAnchor.constraint(equalToConstant: row.bounds.width),
-            row.heightAnchor.constraint(equalToConstant: row.bounds.height),
-            row.centerXAnchor.constraint(equalTo: content.centerXAnchor),
-            row.centerYAnchor.constraint(equalTo: content.centerYAnchor),
-        ]
-        NSLayoutConstraint.activate(morphConstraints)
+    /// Folds the capsule to the circle round its mark (`true`), or lets it
+    /// go back to its width (`false`) — through its width constraint, never
+    /// a transform on glass. Folded, the row is held at its own width from
+    /// the leading end (`holdRow`), the mark centred in the circle: the
+    /// disc sits `inset` from the end as at rest, the smaller loader moves
+    /// in to the middle. The side is the capsule's resting height: a circle
+    /// as tall as the toast, from the first frame (#2285).
+    private func fold(_ folded: Bool) {
+        foldWidth?.isActive = false
+        foldWidth = nil
+        guard folded else {
+            rowLeading?.constant = restLeading
+            return
+        }
+        holdRow()
+        let side = max(bounds.height, Metrics.minimumHeight)
+        let width = widthAnchor.constraint(equalToConstant: side)
+        width.isActive = true
+        foldWidth = width
+        if let mark = leadingMark, mark.bounds.width > 0 {
+            rowLeading?.constant = (side - mark.bounds.width) / 2
+        }
     }
 
-    /// Takes the toast away — animated: it slides back out (none under
-    /// Reduce Motion) while the glass dissolves.
+    /// Holds the row at its laid-out width from the capsule's leading end,
+    /// its trailing edge let go: the capsule clips what it does not reach.
+    private func holdRow() {
+        guard rowHeld == nil, row.bounds.width > 0 else { return }
+        let held = row.widthAnchor.constraint(equalToConstant: row.bounds.width)
+        rowTrailing?.isActive = false
+        held.isActive = true
+        rowHeld = held
+    }
+
+    /// The row back between the capsule's ends, at rest.
+    private func releaseRow() {
+        rowHeld?.isActive = false
+        rowHeld = nil
+        rowTrailing?.isActive = true
+    }
+
+    /// When the unfold under way settles.
+    private var unfoldEnds: CFTimeInterval = 0
+
+    /// An unfold under way ends where it stands — for a change, which takes
+    /// the capsule on from its width on screen (`update`).
+    private func settleUnfold() {
+        guard CACurrentMediaTime() < unfoldEnds else { return }
+        unfoldEnds = 0
+        motionGeneration += 1
+        for view in [self, backdrop, backdrop.contentView, row] {
+            view.layer.removeAllAnimations()
+        }
+        fold(false)
+        releaseRow()
+        layer.shadowOpacity = Metrics.shadowOpacity
+    }
+
+    // MARK: - The glass
+
+    /// How the glass is coming or going: from one level to another, on a
+    /// spring of `duration` and `bounce` from `start` — UIKit's model for
+    /// its own animation, so the level can be told mid-way.
+    private struct GlassRamp {
+        let from: CGFloat
+        let to: CGFloat
+        let start: CFTimeInterval
+        let duration: TimeInterval
+        let bounce: CGFloat
+    }
+
+    /// How much of the glass shows now, 0 → 1 — mid-unfold or mid-fold,
+    /// as far as its animation has gone.
+    var glassLevel: CGFloat {
+        guard let ramp = glassRamp else { return backdrop.effect == nil ? 0 : 1 }
+        let elapsed = CACurrentMediaTime() - ramp.start
+        let progress = AppButtonBlur.springProgress(at: elapsed, duration: ramp.duration, bounce: ramp.bounce)
+        let level = ramp.from + (ramp.to - ramp.from) * progress
+        return min(1, max(0, level))
+    }
+
+    /// The glass back, from `level` — what the capsule this toast took over
+    /// still showed of its own (#2285: a fold turned around, an unfold taken
+    /// over) — never dipping to nothing first: an animator set to that point
+    /// of the materialisation, then let go on the unfold's spring.
+    private func materialiseGlass(from level: CGFloat) {
+        // Off a window, the glass waits for one (`didMoveToWindow`).
+        guard window != nil else {
+            layer.shadowOpacity = Metrics.shadowOpacity
+            return
+        }
+        let reduces = MotionPreference.reducesMotion
+        let rampTime = reduces ? Metrics.transitionDuration : Metrics.unfoldDuration
+        let glass = Self.makeGlass()
+        guard level < 0.98 else {
+            glassRamp = nil
+            backdrop.effect = glass
+            layer.shadowOpacity = Metrics.shadowOpacity
+            return
+        }
+        let start = max(0, level)
+        glassRamp = GlassRamp(
+            from: start, to: 1, start: CACurrentMediaTime(), duration: rampTime * Double(1 - start), bounce: 0
+        )
+        backdrop.effect = nil
+        layer.shadowOpacity = Metrics.shadowOpacity * Float(start)
+        let animator = reduces
+            ? UIViewPropertyAnimator(duration: rampTime, curve: .easeOut)
+            : UIViewPropertyAnimator(duration: rampTime, dampingRatio: 1)
+        animator.addAnimations { [weak self] in self?.backdrop.effect = glass }
+        animator.pauseAnimation()
+        animator.fractionComplete = start
+        animator.continueAnimation(withTimingParameters: nil, durationFactor: 1 - start)
+        glassAnimator = animator
+        let shadowTime = rampTime * Double(1 - start)
+        UIView.animate(withDuration: shadowTime, delay: 0, options: [.curveEaseOut, .allowUserInteraction]) {
+            self.layer.shadowOpacity = Metrics.shadowOpacity
+        }
+    }
+
+    /// A glass still coming back lands now, so what follows starts from it.
+    private func landGlass() {
+        guard let animator = glassAnimator else { return }
+        glassAnimator = nil
+        guard animator.state == .active else { return }
+        animator.stopAnimation(false)
+        animator.finishAnimation(at: .end)
+    }
+
+    // MARK: - Leaving
+
+    /// Takes the toast away — animated: it folds back into the circle
+    /// round its mark (it fades in place under Reduce Motion) while the
+    /// glass dissolves.
     func dismiss(animated: Bool) {
         leave(animated: animated, moving: true)
     }
 
+    /// Where the last fold ends (tests): the circle round its mark.
+    var foldedTo: Fold? {
+        guard foldWidth != nil else { return nil }
+        return Fold(capsule: frame, mark: leadingMark.map { $0.convert($0.bounds, to: self) })
+    }
+
+    /// - Parameter moving: false for a swipe, which carries the toast off
+    ///   itself (`leaveBySwipe`): the glass dissolves on the way.
     private func leave(animated: Bool, moving: Bool) {
         guard !isLeaving else { return }
         // A change under way gives way to the real content, which leaves.
         stopSwell()
         endFlow()
+        landGlass()
+        let glassNow = glassLevel
         isLeaving = true
+        leavesByFolding = animated && moving
         // Any way out but Undo commits: time, close, swipe, a replacement,
         // a second undoable toast, the background.
         resolve(.committed)
@@ -1531,7 +1936,8 @@ public final class ToastView: UIView {
         if let container = superview {
             Self.restack(in: container, animated: animated)
         }
-        guard animated else {
+        // Never laid out, it never showed: nothing to fold.
+        guard animated, bounds.width > 0 else {
             finish()
             return
         }
@@ -1540,34 +1946,69 @@ public final class ToastView: UIView {
         // from a timer, on whatever the container holds by then, and a view
         // installed in the meantime that has not had its first pass would take
         // it inside the block below, growing out of the top-left corner.
-        if moving {
-            superview?.layoutIfNeeded()
-            slide?.constant = offConstant
+        if moving { superview?.layoutIfNeeded() }
+        motionGeneration += 1
+        let generation = motionGeneration
+        let gone: (Bool) -> Void = { [weak self] _ in
+            // Turned around into the next toast meanwhile: that one has it.
+            guard let self, motionGeneration == generation, !isTakenOver else { return }
+            finish()
         }
-        let reduces = MotionPreference.reducesMotion
+        let now = CACurrentMediaTime()
+        guard moving, !MotionPreference.reducesMotion else {
+            // A swipe's throw, or Reduce Motion's fade in place.
+            let exitTime = moving ? Metrics.transitionDuration : Metrics.exitDuration
+            glassRamp = GlassRamp(from: glassNow, to: 0, start: now, duration: exitTime, bounce: 0)
+            let away = {
+                self.superview?.layoutIfNeeded()
+                self.dissolve()
+                self.row.alpha = 0
+            }
+            UIView.animate(
+                withDuration: exitTime, delay: 0, options: [.curveEaseIn, .beginFromCurrentState],
+                animations: away, completion: gone
+            )
+            return
+        }
+        // THE FOLD (#2285): the words and the action go, the capsule narrows
+        // back to the circle round its mark — the mark sliding back to its
+        // middle — as the glass dissolves; the mark goes last; then it is
+        // removed. From where it stands: a fold can begin mid-unfold.
+        let mark = leadingMark
+        let others = row.arrangedSubviews.filter { $0 !== mark }
+        glassRamp = GlassRamp(from: glassNow, to: 0, start: now, duration: Metrics.foldDuration, bounce: 0)
         UIView.animate(
-            withDuration: reduces ? Metrics.transitionDuration : Metrics.exitDuration, delay: 0,
+            withDuration: Metrics.contentOutDuration, delay: 0, options: [.curveEaseIn, .beginFromCurrentState]
+        ) {
+            others.forEach { $0.alpha = 0 }
+        }
+        UIView.animate(
+            withDuration: Metrics.markOutDuration, delay: Metrics.markOutDelay,
             options: [.curveEaseIn, .beginFromCurrentState]
         ) {
-            // The way it came, back: squeezed, its content shrinking.
-            if !reduces {
-                self.morph(to: Metrics.morphScale)
-                self.row.transform = CGAffineTransform(scaleX: Metrics.contentScale, y: Metrics.contentScale)
-            }
-            self.superview?.layoutIfNeeded()
-            // Dissolving the effect is how glass leaves; fading the view would
-            // put group opacity on the effect view (see the type doc).
-            self.backdrop.effect = nil
-            self.row.alpha = 0
-            // Without this the capsule dissolves and leaves its shadow behind
-            // as a grey smear for the length of the exit.
-            self.layer.shadowOpacity = 0
-        } completion: { _ in
-            self.finish()
+            mark?.alpha = 0
         }
+        let folds = {
+            self.fold(true)
+            self.superview?.layoutIfNeeded()
+            self.dissolve()
+        }
+        UIView.animate(
+            springDuration: Metrics.foldDuration, bounce: 0, options: [.beginFromCurrentState],
+            animations: folds, completion: gone
+        )
+    }
+
+    /// The glass dissolving — how glass leaves; fading the view would put
+    /// group opacity on the effect view (see the type doc) — and its shadow
+    /// with it, or the shadow stays behind as a grey smear.
+    private func dissolve() {
+        backdrop.effect = nil
+        layer.shadowOpacity = 0
     }
 
     private func finish() {
+        landGlass()
         removeFromSuperview()
         let removed = onRemoved
         onRemoved = nil
