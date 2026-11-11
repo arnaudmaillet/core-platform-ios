@@ -36,7 +36,10 @@ final class CommentStreamLinkCell: UICollectionViewCell {
 
     private let label = UILabel()
     private let chevron = UIImageView()
-    private let spinner = UIActivityIndicatorView(style: .medium)
+    /// The branded loader (never the stock spinner, `StockSpinnerGuardTests`),
+    /// shown through the kit's gate past the loader's grace (#1768).
+    private let spinner = AppLoaderView(size: .medium)
+    private lazy var loaderGate = LoaderGate(loader: spinner)
     private(set) var content: Content?
 
     override init(frame: CGRect) {
@@ -48,7 +51,6 @@ final class CommentStreamLinkCell: UICollectionViewCell {
         chevron.tintColor = .secondaryLabel
         chevron.contentMode = .center
         chevron.setContentHuggingPriority(.required, for: .horizontal)
-        spinner.hidesWhenStopped = true
         spinner.transform = CGAffineTransform(scaleX: 0.7, y: 0.7)
         // ⚠️ ONE HEIGHT IN EVERY STATE: the spinner stands OVER the chevron,
         // out of the layout. In the row it was taller than the footnote line
@@ -91,7 +93,11 @@ final class CommentStreamLinkCell: UICollectionViewCell {
         )
         // Hidden by alpha, never `isHidden`: the stack keeps its place.
         chevron.alpha = content.state == .loading ? 0 : 1
-        if content.state == .loading { spinner.startAnimating() } else { spinner.stopAnimating() }
+        if content.state == .loading {
+            loaderGate.begin { [weak self] in self?.content?.state == .loading }
+        } else {
+            loaderGate.end()
+        }
         accessibilityIdentifier = content.identifier
         accessibilityLabel = label.text
         accessibilityTraits = content.state == .loading ? [.button, .notEnabled] : .button
