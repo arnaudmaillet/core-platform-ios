@@ -145,6 +145,18 @@ enum SnapActionColumn {
     /// line, so this is the glass drop short of the gap (and may be negative).
     static var inputRestingGap: CGFloat { glassGap - toolbarGlassDrop }
 
+    /// ⚠️ THE STRIP'S SEAT (#2301, the owner 2026-11-11): the page strip's
+    /// line stands this far above the top of the bottom bar's glass, the
+    /// toolbar's or the tab bar's alike — it belongs to the bottom of the
+    /// screen, as TikTok's progress bar does. No longer the midpoint between
+    /// the caption and the glass (#2252).
+    static let stripAboveGlass: CGFloat = 10
+
+    /// The caption's letters end this far above the strip's top (#2301): a
+    /// 2 pt line ~10 pt under a line of text read as its underline. Measured
+    /// from the letters (`captionLetterDrop`), so it holds at every size.
+    static let captionAboveStrip: CGFloat = 16
+
     /// The breath over the bottom bar (#1722, the owner): every feed's whole
     /// bottom block — strip, cover, caption, column — stands this much higher
     /// over its toolbar, and the comments' composer rises by it too, so the
