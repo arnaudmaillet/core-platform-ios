@@ -329,8 +329,10 @@ struct SnapForYouRootTests {
         let plain = laidOut(pages: 9, shots: false)
         let bar = frame(shots.debugPageBar, in: shots)
         let sound = frame(shots.debugSoundBubble, in: shots)
-        #expect(abs(bar.maxX - shots.debugCaptionFrame.maxX) < 0.5, "the strip does not end with the caption")
-        #expect(bar.maxX < sound.minX, "the strip runs under the cover")
+        // The strip runs the content's full width (#2291): under the cover,
+        // to the column's outer edge, and below the cover's bottom.
+        #expect(abs(bar.maxX - sound.maxX) < 0.5, "the strip does not end at the column's edge")
+        #expect(bar.minY > sound.maxY, "the strip meets the cover")
 
         // The cover's bottom: the bar's line, less the breath and the rest gap
         // — Shots' 12 pt, another feed's 6 (#1722).

@@ -183,17 +183,6 @@ final class SnapChromeView: UIView {
     /// changes (`applyPageBarPlacement`).
     private var pageBarCenterConstraint: NSLayoutConstraint?
 
-    /// (#2252) DEBUG `-strip-full-width`: the strip runs on to the action
-    /// column's trailing edge instead of stopping with the caption — it now
-    /// lies below the cover's bottom, so it can. The issue asks for both to be
-    /// shown; the owner picks. Off, it ends with the caption (#1716).
-    static var stripRunsToColumnEdge: Bool {
-        #if DEBUG
-        return ProcessInfo.processInfo.arguments.contains("-strip-full-width")
-        #else
-        return false
-        #endif
-    }
 
     /// The card a thumb dragging a clip's bar points with — the frame it would
     /// land on and the time it would land at. Frame-managed and out of the
@@ -682,8 +671,26 @@ final class SnapChromeView: UIView {
            let words = captionLabel.hitTest(convert(point, to: captionLabel), with: event) {
             return words
         }
+        // ⚠️ AND THE COLUMN BEFORE THE STRIP (#2291). The strip now runs under
+        // the column, and its 44 pt area reaches up over the sound cover's
+        // bottom: a touch that starts on a column item is that item's.
+        if !mediaPageBar.isHidden, mediaPageBar.alpha > 0.01, let item = columnItemHit(at: point, with: event) {
+            return item
+        }
         let hit = super.hitTest(point, with: event)
         return hit === self ? nil : hit
+    }
+
+    /// The column item (the sound cover, the actions, the like) under
+    /// `point`, if one takes touches there.
+    private func columnItemHit(at point: CGPoint, with event: UIEvent?) -> UIView? {
+        for item in [soundBubble, postActions, boostButton] as [UIView] {
+            guard !item.isHidden, item.alpha > 0.01, item.isUserInteractionEnabled, item.window != nil else { continue }
+            let local = convert(point, to: item)
+            guard item.point(inside: local, with: event), let hit = item.hitTest(local, with: event) else { continue }
+            return hit
+        }
+        return nil
     }
 
     private func buildLayout() {
@@ -861,8 +868,8 @@ final class SnapChromeView: UIView {
         )
         pageBarCenterConstraint = pageBarCenter
         pageBarCenter.isActive = true
-        // Its trailing edge: see `installSoundBubble` (the caption's, or the
-        // column's under `-strip-full-width`).
+        // Its trailing edge: the column's outer edge, see `installSoundBubble`
+        // (#2291).
 
 
         // The shortcut rail owns the trailing column, layered OVER the
@@ -1064,14 +1071,14 @@ final class SnapChromeView: UIView {
         captionLabel.trailingAnchor.constraint(
             equalTo: soundStation.leadingAnchor, constant: -Spacing.md
         ).isActive = true
-        // The strip's trailing edge: the caption's, left of the sound cover,
-        // on every feed (#1716). Under `-strip-full-width` (#2252, for the
-        // owner to compare) it runs on under the cover to the column's edge:
-        // the strip now lies below the cover's bottom.
-        let stripEnd: NSLayoutXAxisAnchor = Self.stripRunsToColumnEdge
-            ? soundStation.trailingAnchor
-            : captionLabel.trailingAnchor
-        mediaPageBar.trailingAnchor.constraint(equalTo: stripEnd).isActive = true
+        // ⚠️ THE STRIP RUNS THE CONTENT'S FULL WIDTH (#2291, the owner
+        // 2026-11-11, the width #2252 left open): from the caption's first
+        // letter to the action column's outer edge, under the sound cover —
+        // it lies below the cover's bottom (#2252), so they never meet. Not
+        // edge to edge: TikTok's line lies on the video's bottom edge; ours
+        // floats between the caption and a glass bar, inside the content's
+        // column.
+        mediaPageBar.trailingAnchor.constraint(equalTo: soundStation.trailingAnchor).isActive = true
         // The post's actions (#1681): one bubble wide, two tall, `gap` over
         // the sound bubble.
         postActionsStation.isUserInteractionEnabled = false
@@ -1932,8 +1939,9 @@ final class SnapChromeView: UIView {
 
     /// Puts the card over the thumb and tells the host what to fetch.
     ///
-    /// ⚠️ CLAMPED TO THE COLUMN, not to the screen: the card is a label on the
-    /// strip, and one that ran past the strip's own ends would point at nothing.
+    /// ⚠️ CLAMPED TO THE STRIP'S ENDS, not to the screen: the card is a label
+    /// on the strip, and one that ran past them would point at nothing. The
+    /// strip ends 12 pt in on both sides (#2291), so the card stays on screen.
     private func showScrubPreview(_ preview: (fraction: Double, x: CGFloat)?) {
         guard let preview else {
             scrubPreview.hide()

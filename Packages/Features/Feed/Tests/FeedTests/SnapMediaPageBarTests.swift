@@ -1290,7 +1290,12 @@ struct SnapMediaPageBarTests {
         #expect(strip.minY > caption.maxY)
         #expect(strip.maxY < glassTop(overTabBar: false), "the strip reaches the toolbar's glass")
         #expect(abs(strip.minX - caption.minX) < 0.5)
-        #expect(abs(strip.maxX - caption.maxX) < 0.5)
+        // ⚠️ THE CONTENT'S FULL WIDTH (#2291): on to the column's outer edge,
+        // under the sound cover, not stopping with the caption.
+        // The sound's station: the cover stands on it whether shown or not.
+        let sound = view.debugSoundStationFrame
+        #expect(abs(strip.maxX - sound.maxX) < 0.5, "the strip ends at \(strip.maxX), the column at \(sound.maxX)")
+        #expect(strip.maxX > caption.maxX + SnapActionColumn.bubbleSize)
         // The 2 pt line is the whole footprint (#2252).
         #expect(strip.height == SnapMediaPageBarView.thickness)
     }
@@ -1353,6 +1358,26 @@ struct SnapMediaPageBarTests {
         #expect(view.hitTest(gap, with: nil) === view.debugPageBar)
     }
 
+    /// ⚠️ AND A TOUCH ON THE SOUND COVER IS THE COVER'S (#2291): the strip
+    /// runs under the column now, and its 44 pt area reaches up over the
+    /// cover's bottom; a touch that starts on the cover never scrubs.
+    @Test func aTouchOnTheSoundCoverIsTheCoversOverTheStripsTouchArea() throws {
+        let view = chrome(pages: 3)
+        view.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true))
+        view.layoutIfNeeded()
+        let strip = view.debugPageBarFrame
+        let sound = view.debugFrame(of: view.debugSoundBubble)
+        let reach: CGFloat = strip.midY - SnapMediaPageBarView.minimumTouchHeight / 2
+        try #require(reach < sound.maxY - 1, "the premise: the strip's touch area reaches the cover (\(reach) vs \(sound.maxY))")
+        let overlap = CGPoint(x: sound.midX, y: (max(reach, sound.minY) + sound.maxY) / 2)
+        let hit = try #require(view.hitTest(overlap, with: nil))
+        #expect(hit === view.debugSoundBubble || hit.isDescendant(of: view.debugSoundBubble),
+                "the strip took a touch on the cover: \(type(of: hit))")
+        // Under the cover, on the line itself, the strip has it.
+        let line = CGPoint(x: sound.midX, y: strip.maxY + 2)
+        #expect(view.hitTest(line, with: nil) === view.debugPageBar)
+    }
+
     /// ⚠️ THE CARD POINTS FROM ABOVE THE STRIP, AND STAYS INSIDE THE COLUMN.
     /// It is a label on the strip: one that ran past the strip's own ends would
     /// point at nothing, and one that pushed anything else around would make
@@ -1383,6 +1408,9 @@ struct SnapMediaPageBarTests {
         let far = view.debugScrubPreviewFrame()
         #expect(far.maxX <= strip.maxX + 0.5)
         #expect(far.minX > middle.minX)
+        // The strip ends at the column's edge now (#2291): the card still
+        // stays on screen, inside the margins.
+        #expect(far.maxX <= view.bounds.width - SnapActionColumn.trailingInset + 0.5)
 
         // …and the caption has not moved for any of it.
         #expect(view.debugCaptionFrame == caption)
