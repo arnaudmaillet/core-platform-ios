@@ -4,6 +4,7 @@ import DesignSystem
 import FeedInterface
 import Foundation
 import HeroPage
+import MediaCore
 
 // A group's and a channel's info screens (#2237) read like a profile and a
 // place: the hero header (`HeroHeaderView`), the lists behind its counters
@@ -132,6 +133,10 @@ struct ConversationInfoHeader: Equatable, Sendable {
     /// The capsules, leading; they share what the bubbles leave.
     var capsules: [ConversationInfoAction]
     var bubbles: [ConversationInfoAction]
+    /// A group's picture (#2233): its photo, else its members' faces, else
+    /// its initials — drawn in the header's disc in place of the person's
+    /// avatar. Nil for a channel.
+    var groupAvatar: GroupAvatarContent? = nil
 
     /// The figures in `captions`' order, compact ("12.4K"), nil where hidden.
     func counterValues(_ captions: [ConversationInfoList]) -> [String?] {

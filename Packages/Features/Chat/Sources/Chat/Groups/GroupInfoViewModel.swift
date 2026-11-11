@@ -238,7 +238,8 @@ final class GroupInfoViewModel {
             linkText: ConversationInfoHeader.linkText(link), linkURL: link,
             photoURL: state.photoURL, monogram: MonogramAvatarView.monogram(name: state.name, handle: ""),
             counters: counters, openable: openable, capsules: capsules,
-            bubbles: link == nil ? [] : [.share]
+            bubbles: link == nil ? [] : [.share],
+            groupAvatar: state.groupAvatar
         )
     }
 
@@ -336,9 +337,12 @@ final class GroupInfoViewModel {
             ? ConversationIdentity.memberName(others, total: max(0, next.memberCount - 1))
             : identity.name
         next.photoURL = identity.photoURL
+        // The members read so far — the admins and the first page — each once.
+        var seen = Set<ProfileID>()
+        let readMembers = (adminList + firsts).filter { seen.insert($0.profileID).inserted }
         next.groupAvatar = GroupAvatarContent(
             name: next.name, photoURL: identity.photoURL,
-            faces: ConversationMember.groupFaces(talkers, viewer: viewer) { id in
+            faces: ConversationMember.groupFaces(readMembers, viewer: viewer) { id in
                 let profile = profiles[id]
                 let name = profile?.name ?? ""
                 return (name: name.isEmpty ? profile?.handle ?? "" : name, avatarURL: profile?.avatarURL)

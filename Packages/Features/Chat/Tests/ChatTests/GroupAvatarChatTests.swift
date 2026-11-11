@@ -204,7 +204,7 @@ struct GroupAvatarChatTests {
     // MARK: - The info screen and the name step
 
     /// The info screen's header draws the group's picture.
-    @Test func theInfoHeaderDrawsTheGroupsPicture() {
+    @Test func theInfoHeaderDrawsTheGroupsPicture() throws {
         var state = GroupInfoViewModel.State()
         state.name = "Sofía Reyes and Tom Okafor"
         state.groupAvatar = GroupAvatarContent(
@@ -212,10 +212,16 @@ struct GroupAvatarChatTests {
             faces: [GroupAvatarFace(name: "Sofía Reyes", avatarURL: nil), GroupAvatarFace(name: "Tom Okafor", avatarURL: nil)],
             memberCount: 3
         )
-        let cell = GroupIdentityCell(frame: CGRect(x: 0, y: 0, width: 390, height: 300))
-        cell.configure(with: state, pipeline: nil)
-        #expect(cell.debugGroupAvatar.drawnFaceCount == 2)
-        #expect(cell.debugGroupAvatar.isAccessibilityElement == false, "the cell is the element")
+        // The header's content carries the picture (#2259's profile-style
+        // header), and the page draws it in the disc.
+        let header = GroupInfoViewModel.header(for: state, id: ConversationID("g-1"))
+        #expect(header.groupAvatar == state.groupAvatar)
+        let page = ConversationInfoPageViewController(channel: false, postsPage: ConversationStatusPage(), imagePipeline: nil)
+        page.loadViewIfNeeded()
+        page.apply(header)
+        let disc = try #require(page.groupAvatarView)
+        #expect(disc.drawnFaceCount == 2)
+        #expect(disc.isAccessibilityElement == false, "the header is the element")
     }
 
     /// The name step shows the picked members' faces, skeletons while their
