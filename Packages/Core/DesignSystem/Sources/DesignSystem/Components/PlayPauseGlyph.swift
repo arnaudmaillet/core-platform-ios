@@ -93,7 +93,9 @@ public enum PlayPauseGlyph {
     /// in place, nothing scales or moves.
     public static let crossFadeDuration: TimeInterval = 0.2
     /// The cross-fade's key on the swapped view's layer.
-    public static let crossFadeKey = "playPause.crossFade"
+    /// ⚠️ A `CATransition` is always stored under `kCATransition`, whatever
+    /// key it is added with — so that is the key to read it back by.
+    public static let crossFadeKey = kCATransition
 
     /// The view's content, just changed, dissolves in from what it showed.
     private static func crossFade(_ view: UIView) {

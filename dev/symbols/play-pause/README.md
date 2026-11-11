@@ -5,7 +5,7 @@ Every play and pause in the app is drawn from the owner's two drawings (`source/
 | Symbol | `AppSymbol` | VoiceOver | Drawing |
 |---|---|---|---|
 | `core.play.fill` | `.play` | "Play" | the owner's rounded triangle, its full back |
-| `core.pause.fill` | `.pause` | "Pause" | the owner's two tall ovals, **as drawn** |
+| `core.pause.fill` | `.pause` | "Pause" | the owner's two tall ovals, **widened** (the owner's pick, 2026-11-11) |
 | `core.play.circle.fill` | `.playCircle` | "Play" | `play.circle.fill`'s disc, the owner's play knocked out of it |
 | `core.pause.fill.wide` | none (previews only) | | the widened pause the owner may pick (below) |
 
@@ -27,7 +27,7 @@ Every play and pause in the app is drawn from the owner's two drawings (`source/
 ## ⚠️ The pause's gap: the owner picks
 On the grid, the drawn ovals stand 2.42 units apart, about 6 % of the glyph's width (SF's `pause.fill` leaves about a quarter). At 13 pt that gap is about 0.6 pt, one or two pixels, and it reads as one blob.
 
-- **Shipped: the pause as drawn** (`core.pause.fill`).
+- **Shipped: the widened pause** (`core.pause.fill`, generated with `PAUSE=wide`): the owner picked it on 2026-11-11 from the comparisons below — as drawn, its 2.4-unit gap read as one blob at 13–16 pt.
 - **Widened** (`core.pause.fill.wide`, `source/Widened.xcassets`, previews only): each oval is narrowed about its **outer** edge (×0.883, 19.58 → 17.29 units). The glyph keeps its width, and the gap opens to **7 units**.
 
 Both are in every comparison below, in the last two columns. To ship the widened one, regenerate with `PAUSE=wide` (see below). The name stays `core.pause.fill`, so no code changes.

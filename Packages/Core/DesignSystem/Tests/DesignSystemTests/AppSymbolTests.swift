@@ -80,7 +80,10 @@ struct AppSymbolTests {
             let configuration = AppSymbol.fixed(size, weight: .semibold)
             let play = try #require(AppSymbol.play.image(configuration))
             let pause = try #require(AppSymbol.pause.image(configuration))
-            #expect(abs(play.size.width - pause.size.width) < 0.01, "at \(size) pt: \(play.size) vs \(pause.size)")
+            // Within one device pixel: the bitmaps round each glyph's box to
+            // the pixel grid on its own (12.67 vs 12.33 pt at 13 pt, 3×) —
+            // a sixth of a point at the centre, not a jump.
+            #expect(abs(play.size.width - pause.size.width) <= 0.34, "at \(size) pt: \(play.size) vs \(pause.size)")
             #expect(abs(play.size.height - pause.size.height) <= 1, "at \(size) pt: \(play.size) vs \(pause.size)")
             #expect(abs(play.alignmentRectInsets.left - pause.alignmentRectInsets.left) < 0.01)
             #expect(abs(play.alignmentRectInsets.right - pause.alignmentRectInsets.right) < 0.01)
