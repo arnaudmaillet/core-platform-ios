@@ -109,25 +109,13 @@ struct PaletteTests {
         }
     }
 
-    /// A row action's words in the dark (#2231), in both looks, on the
-    /// grounds its rows stand on — the plain list's black, the inset-grouped
-    /// card's grey: 4.5:1, body-size text's. Bare, the tint missed it on the
-    /// card (4.04:1), so it wears the primary's lift there; tinted, the
-    /// container's words on the wash.
+    /// A tinted row action's words in the dark (#2231): the container's
+    /// words on the wash, 4.5:1, body-size text's.
     @Test func aRowActionsWordsReadInTheDark() {
         for traits in [Self.dark, Self.traits(.dark, high: true)] {
-            for ground in [UIColor.systemBackground, .secondarySystemGroupedBackground] {
-                let bare = Self.contrast(Palette.rowActionText, on: ground, traits)
-                #expect(bare >= 4.5, "bare row-action words are \(bare):1 in the dark")
-            }
             let tinted = Self.contrast(Palette.onPrimaryContainer, on: Palette.primaryContainer, traits)
             #expect(tinted >= 4.5, "tinted row-action words are \(tinted):1 in the dark")
         }
-        // The light keeps the tint itself; the dark lifts it, from the theme.
-        let theme = BrandTheme.current
-        #expect(Self.hex(Palette.rowActionText, Self.light) == theme.primary.light)
-        #expect(Self.hex(Palette.rowActionText, Self.dark) == theme.primary.darkIC)
-        #expect(Self.hex(Palette.rowActionText, Self.traits(.light, high: true)) == theme.primary.lightIC)
     }
 
     /// Every role resolves to `BrandTheme.current`'s values, per appearance

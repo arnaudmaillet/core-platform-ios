@@ -79,7 +79,7 @@ final class RelationshipListCell: UICollectionViewListCell {
             let actions: [ProfileRelationshipsViewModel.RowAction] = [.follow, .followBack, .following, .requested]
             // ⚠️ TYPED BY HAND: Xcode 26 (CI) inferred the closure's result as
             // Double and would not convert it into the cache's CGFloat tuple.
-            // Either look measures the same (#2231): the probe's is the rows'.
+            // The probe is the rows' own button (#2231): it measures as they do.
             let probe = AppButton(aspect: .rowAction, size: .row, content: .title("Follow"))
             let widths: [CGFloat] = actions.compactMap(RelationshipListCell.buttonState(for:)).map { state in
                 let fitted: CGFloat = probe.fittingSize(for: .title(state.title)).width

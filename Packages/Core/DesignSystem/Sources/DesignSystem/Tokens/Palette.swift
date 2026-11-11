@@ -91,19 +91,6 @@ public enum Palette {
     /// Text on `primaryContainer`.
     public static let onPrimaryContainer = dynamic(theme.onPrimaryContainer)
 
-    /// A row action drawn as bare words (`AppButton.RowActionStyle.text`,
-    /// #2231): the tint in the light, and in the dark the primary's own
-    /// Increased Contrast lift. The tint itself is 4.99:1 on black but
-    /// 4.04:1 on a dark inset-grouped row (`secondarySystemGroupedBackground`,
-    /// where a channel's join requests stand), under the 4.5:1 body-size
-    /// words need; the lift is 6.8:1 on black and 5.5:1 on that row. In the
-    /// light it stays the tint, 4.21:1 on white, as every text button of
-    /// the app (Increased Contrast deepens it past 4.5:1).
-    public static let rowActionText = dynamic(
-        light: theme.primary.light, dark: theme.primary.darkIC,
-        lightIC: theme.primary.lightIC, darkIC: theme.primary.darkIC
-    )
-
     /// Every unread mark, pill and badge — the tab bar's badges, the Messages
     /// selector's, the bell's dot, the inbox's unread pills, the profile
     /// switcher's counts (#2062: solid, never a gradient): the raspberry, the
