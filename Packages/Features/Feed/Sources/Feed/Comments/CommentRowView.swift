@@ -73,7 +73,18 @@ final class CommentRowView: UIView {
     /// The app's avatar (#943): the initials, then the picture over them, on
     /// the loading ladder — which cancels and identity-guards a recycled
     /// row's late picture by itself.
-    private let avatarView = AvatarView(diameter: CommentRowView.avatarSize, size: .avatar)
+    private let avatarView: AvatarView
+    /// The POST's author's face, wearing the relation mark (#2300, the
+    /// owner's rule of 2026-11-02): a text page's author is the caption's row,
+    /// and it was the one author face without the badge. The shared marked
+    /// face (`RelationMarkedAvatarView`), its `avatar` being `avatarView`.
+    /// Nil on a comment's row: commenters stay bare, as on a media post.
+    private let markedFace: RelationMarkedAvatarView?
+    /// The caption face's tap and hold — a person beside content (#2145,
+    /// role 1). Nil on a comment's row, whose avatar keeps its own tap.
+    private let captionOpening: PersonOpening?
+    /// What the row's avatar column holds: the marked face, or the avatar.
+    private var faceView: UIView { markedFace ?? avatarView }
     /// Whether this row is a reply — kept so a Dynamic Type change can restate
     /// the indent, which is sized from the same type as the avatar.
     private var isReplyRow = false
@@ -96,8 +107,17 @@ final class CommentRowView: UIView {
     /// under the rail.
     private let likeButton = UIButton(configuration: .plain())
 
-    /// Avatar tapped — push the author's profile.
-    var onAvatarTap: (() -> Void)?
+    /// Avatar tapped — push the author's profile. On the caption's marked
+    /// face it is `PersonOpening`'s tap (#2145): the profile card where the
+    /// host binds the face, the profile otherwise.
+    var onAvatarTap: (() -> Void)? {
+        didSet { captionOpening?.openCard = onAvatarTap }
+    }
+    /// The caption's face HELD (#2145, role 1): the profile, pushed. Nil: no
+    /// hold. Never on a comment's row.
+    var onAvatarHold: (() -> Void)? {
+        didSet { captionOpening?.openProfile = onAvatarHold }
+    }
     /// The header's ♥ tapped. Like state is the HOST's affair (session-
     /// local optimistic toggle — the bookmark posture; comment.v1 carries
     /// no like API yet).
@@ -121,7 +141,20 @@ final class CommentRowView: UIView {
     /// belongs to the stream there, which lifts the pressed row itself
     /// (`ThreadRowContextMenu`), so a row-level interaction would only compete
     /// with it.
-    init(installsContextMenu: Bool = true) {
+    ///
+    /// `marksAuthor: true` is `CaptionBubbleCell`'s row (#2300): the post's
+    /// author's face, wearing the relation mark its host binds.
+    init(installsContextMenu: Bool = true, marksAuthor: Bool = false) {
+        if marksAuthor {
+            let face = RelationMarkedAvatarView(diameter: CommentRowView.avatarSize, size: .avatar)
+            markedFace = face
+            avatarView = face.avatar
+            captionOpening = PersonOpening(on: face)
+        } else {
+            markedFace = nil
+            avatarView = AvatarView(diameter: CommentRowView.avatarSize, size: .avatar)
+            captionOpening = nil
+        }
         super.init(frame: .zero)
         buildLayout()
         // The disc and the reply indent are sized from the type, so they are
@@ -132,10 +165,13 @@ final class CommentRowView: UIView {
 
         // The avatar's tap outranks the row's (recognizers resolve to the
         // deepest view); everything else on the row is the reply trigger.
+        // The caption's marked face has the contract's tap and hold instead.
         avatarView.isUserInteractionEnabled = true
-        avatarView.addGestureRecognizer(
-            UITapGestureRecognizer(target: self, action: #selector(avatarTapped))
-        )
+        if markedFace == nil {
+            avatarView.addGestureRecognizer(
+                UITapGestureRecognizer(target: self, action: #selector(avatarTapped))
+            )
+        }
         // The row's reply tap is FILTERED (see the gesture delegate):
         // touches on the avatar or any control (the like button) keep
         // their own actions exclusive — without the filter the row tap
@@ -192,6 +228,31 @@ final class CommentRowView: UIView {
     var headerTextLabel: UILabel { headerLabel }
     /// The avatar's picture on show, nil while the monogram shows. Tests.
     var debugAvatarImage: UIImage? { avatarView.shownPicture }
+
+    // MARK: - The post's author's mark (#2300)
+
+    /// The relation mark the caption's face wears — `.none` on a comment's
+    /// row, which wears none.
+    var authorMark: PersonPill.Badge { markedFace?.mark ?? .none }
+
+    /// Wears `mark` on the caption's face, as the host's binding draws it.
+    /// A comment's row has no mark to wear.
+    func setAuthorMark(_ mark: PersonPill.Badge, animated: Bool) {
+        markedFace?.setMark(mark, animated: animated)
+    }
+
+    /// The caption face's "+" tapped: the host follows (#2300).
+    var onAuthorFollowTap: (() -> Void)? {
+        get { markedFace?.onFollowTapped }
+        set { markedFace?.onFollowTapped = newValue }
+    }
+
+    #if DEBUG
+    /// The caption face's badge, nil on a comment's row. Tests.
+    var debugAuthorBadge: RelationBadgeView? { markedFace?.badge }
+    /// The caption face's tap and hold, nil on a comment's row. Tests.
+    var debugCaptionOpening: PersonOpening? { captionOpening }
+    #endif
 
     // MARK: - Variant and effect (#920)
 
@@ -292,7 +353,8 @@ final class CommentRowView: UIView {
     /// reply's indent.
     private func refreshTypeDrivenGeometry() {
         let side = Self.avatarSize(for: traitCollection)
-        avatarView.setDiameter(side)
+        // The marked face restates its badge with the disc (#2300).
+        if let markedFace { markedFace.setDiameter(side) } else { avatarView.setDiameter(side) }
         // Decoded at the avatar's own size (it follows Dynamic Type), not at
         // 1200 px (#894).
         avatarView.pictureSize = ImageBucket(fitting: CGSize(width: side, height: side), scale: traitCollection.displayScale)
@@ -373,6 +435,11 @@ final class CommentRowView: UIView {
     /// identity it belonged to. Called from `CommentCell.prepareForReuse`.
     func prepareForReuse() {
         avatarView.reset()
+        // The previous post's author's mark never rides a recycled row: the
+        // host binds the next one (#2300).
+        markedFace?.setMark(.none, animated: false)
+        markedFace?.onFollowTapped = nil
+        onAvatarHold = nil
         setBodyAccessory(nil)
         setBodyFooter(nil)
         // ⚠️ BACK TO A COMMENT. A row that stood in for a caption has its reply
@@ -903,7 +970,7 @@ final class CommentRowView: UIView {
         textStack.axis = .vertical
         textStack.spacing = Metrics.lineSpacing
 
-        let row = UIStackView(arrangedSubviews: [avatarView, textStack])
+        let row = UIStackView(arrangedSubviews: [faceView, textStack])
         row.axis = .horizontal
         row.alignment = .top
         row.spacing = Metrics.avatarGap
@@ -948,7 +1015,8 @@ final class CommentRowView: UIView {
 /// What it does not share is a comment's affordances — see
 /// `CommentRowView.configureAsPostCaption`.
 final class CaptionBubbleCell: UICollectionViewCell {
-    private let row = CommentRowView()
+    /// The post's author's face wears the relation mark (#2300).
+    private let row = CommentRowView(marksAuthor: true)
     /// A voice post's caption (#2207): the shared voice component, full size,
     /// under the author line — the caption's words under it. The neutral
     /// panel takes the text column's whole width (#2241): the post's page
@@ -968,11 +1036,42 @@ final class CaptionBubbleCell: UICollectionViewCell {
     /// The embed shown, if any.
     private(set) var shownEmbed: PostEmbed?
 
-    /// The avatar was tapped — the host pushes the author's profile.
+    /// The avatar was tapped — the host pushes the author's profile, or,
+    /// where the screen binds the face (a text page in the feed, #2300), opens
+    /// the profile card: a person beside content (#2145).
     var onAvatarTap: (() -> Void)? {
         get { row.onAvatarTap }
         set { row.onAvatarTap = newValue }
     }
+
+    /// The avatar was held (#2145, role 1): the profile, pushed. Nil: no hold.
+    var onAvatarHold: (() -> Void)? {
+        get { row.onAvatarHold }
+        set { row.onAvatarHold = newValue }
+    }
+
+    /// The face's "+" was tapped (#2300): the host follows the author.
+    var onAuthorFollowTap: (() -> Void)? {
+        get { row.onAuthorFollowTap }
+        set { row.onAuthorFollowTap = newValue }
+    }
+
+    /// The relation mark the author's face wears now.
+    var authorMark: PersonPill.Badge { row.authorMark }
+
+    /// Wears `mark` on the author's face — the screen's binding's answer.
+    func setAuthorMark(_ mark: PersonPill.Badge, animated: Bool) {
+        row.setAuthorMark(mark, animated: animated)
+    }
+
+    #if DEBUG
+    /// The author face's badge. Tests.
+    var debugAuthorBadge: RelationBadgeView? { row.debugAuthorBadge }
+    /// A tap on the author's face, as a finger's would land. Tests.
+    func debugTapAuthor() { row.debugCaptionOpening?.debugTap() }
+    /// A hold on the author's face, recognised. Tests.
+    func debugHoldAuthor() { row.debugCaptionOpening?.debugHold() }
+    #endif
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -1184,7 +1283,8 @@ extension CommentRowView: UIGestureRecognizerDelegate {
         guard gestureRecognizer.view === self else { return true }
         var view = touch.view
         while let current = view, current !== self {
-            if current is UIControl || current === avatarView || current === headerAccessory { return false }
+            if current is UIControl || current === avatarView || current === markedFace
+                || current === headerAccessory { return false }
             view = current.superview
         }
         return true

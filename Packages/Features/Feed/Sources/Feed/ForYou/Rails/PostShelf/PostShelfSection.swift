@@ -253,9 +253,16 @@ final class PostShelfSection: UIView {
     /// A card was tapped, on a shelf with no hero context (`openCard`): its
     /// index into `cards`.
     var onCardTapped: ((Int) -> Void)?
-    /// A TEXT card's author band was tapped — the host opens their profile,
-    /// as the list's cards do.
+    /// A TEXT card's author band was tapped — a person beside content
+    /// (#2145, role 1): the host opens their profile card, as the list's
+    /// cards do.
     var onCardAuthorTapped: ((GalleryPost) -> Void)?
+    /// A TEXT card's author band was held (#2145): the host pushes their
+    /// profile. Nil: no hold.
+    var onCardAuthorHeld: ((GalleryPost) -> Void)?
+    /// Where a TEXT card's band gets its relation mark and its "+" (#2300):
+    /// the list's own binding. Nil: no mark.
+    var authorMarks: PostAuthorMarks?
     /// What a TEXT card's "..." offers (Unfollow, Report) — the list's rows,
     /// from the same host; `anchor` is what a sheet raised from it points at.
     /// Nil, or nothing to offer, and the card draws no "...".
@@ -488,13 +495,22 @@ final class PostShelfSection: UIView {
         // Captured by POST, never by index path — the list's rule: the row
         // can have changed by the time the finger arrives.
         cell.onCommentsTapped = { [weak self] in self?.open(post.id) }
-        if post.authorID != nil {
+        if let authorID = post.authorID {
             cell.onAuthorTapped = { [weak self] in self?.onCardAuthorTapped?(post) }
+            cell.onAuthorHeld = onCardAuthorHeld == nil ? nil : { [weak self] in self?.onCardAuthorHeld?(post) }
+            // The face's "+" (#2300): the list's follow.
+            cell.onAuthorFollowTapped = { [weak self] in
+                guard let self else { return }
+                authorMarks?.follow(authorID, handle: post.authorHandle, name: post.authorName, from: self)
+            }
             cell.authorMenuActions = { [weak self, weak cell] in
                 guard let self, let cell else { return [] }
                 return menuActions(for: post, anchor: cell.authorMenuAnchor)
             }
         }
+        // The band's face wears its author's relation mark (#2300), bound
+        // as the list's rows are.
+        authorMarks?.bind(cell, to: cell.authorBandModel?.showsIdentity == true ? post.authorID : nil)
         cell.isHidden = post.id == concealedCard
     }
 
@@ -1086,9 +1102,13 @@ final class PostShelfSection: UIView {
         let pipeline = imagePipeline
         let pool = videoPool
         let comments = post.kind == .text ? topComments?(post.id) ?? [] : []
+        // The band in small wears the card's relation mark (#2300).
+        let authorMark = textCardCell(for: post.id)?.authorRelationMark
+            ?? authorMarks?.badge(for: post.authorID) ?? .none
         return {
             ForYouPostPreviewViewController(
-                post: post, imagePipeline: pipeline, width: width, videoPlayback: pool, comments: comments
+                post: post, imagePipeline: pipeline, width: width, videoPlayback: pool, comments: comments,
+                authorMark: authorMark
             )
         }
     }
@@ -1310,6 +1330,10 @@ extension PostShelfSection: UICollectionViewDelegate {
         guard let indexPath = indexPaths.first,
               let id = cardID(in: collectionView, at: indexPath),
               let post = cards.first(where: { $0.id == id }) else { return nil }
+        // A text card lifts from anywhere but its author, whose hold is the
+        // profile's (#2145, #2300).
+        if let card = collectionView.cellForItem(at: indexPath) as? PostGridListRowCell,
+           card.holdIsAuthors(at: collectionView.convert(point, to: card)) { return nil }
         let makePreview = previewMaker(for: post)
         return UIContextMenuConfiguration(
             identifier: RowMenuTarget.card(id).identifier,

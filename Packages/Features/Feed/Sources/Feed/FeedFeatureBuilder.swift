@@ -76,6 +76,12 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     /// the viewer's relation to an author from it, so a follow on one feed
     /// is the badge of all of them.
     private let entities: EntityStore
+
+    /// The lists' author bands' relation mark and "+" (#2300): ONE binding
+    /// for every surface this root builds — For You, the place page, a post
+    /// set, a profile's page — over the same store and follow as the feed's
+    /// author rows. A reference, so every copy of this builder shares it.
+    private let authorMarks: PostAuthorMarks
     /// The posts the server withholds from this viewer, learnt on any feed
     /// (#2048): every feed and the For You grid drop the ones not on show.
     private let unavailablePosts = UnavailablePosts.shared
@@ -156,6 +162,9 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         self.followRelations = followRelations
         self.moderation = moderation
         self.followEvents = followEvents
+        authorMarks = PostAuthorMarks(
+            writer: socialGraph, reader: followRelations, entities: self.entities, followEvents: followEvents
+        )
         self.makeProfileSwitcher = makeProfileSwitcher
         self.repository = repository
         self.engagementProvider = engagementProvider
@@ -506,7 +515,8 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             // the shell's, the same one the root header's badge presents.
             makeWalletSheet: makeWalletSheet,
             showsBalance: showsBalance,
-            entities: entities
+            entities: entities,
+            authorMarks: authorMarks
         )
         forYou.onTabPresentationChange = onTabPresentationChange
         return forYou
@@ -782,10 +792,13 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
 
     public func makePostGridPage(style: PostGridPageStyle, savesPosts: Bool) -> any PostGridPage {
         // The app's one pool, the same instance For You's tabs borrow from.
-        PostGridPages.make(
+        let page = PostGridPages.make(
             style: style, imagePipeline: imagePipeline, videoPlayback: videoPlayback, savesPosts: savesPosts,
             postOpenWarm: postOpenWarm
         )
+        // A card's author band wears its relation mark (#2300).
+        (page as? ForYouGridPage)?.authorMarks = authorMarks
+        return page
     }
 
     public func makePostSetSurface(style: PostSetSurfaceStyle) -> any PostSetSurface {
@@ -837,6 +850,8 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         // stake from the app's one wallet (#896) — For You's cards' binding.
         let staking = wallet.map { PostCardStaking(wallet: $0, entities: entities) }
         surface.staking = staking
+        // …and their author bands wear the relation mark (#2300).
+        surface.authorMarks = authorMarks
         // "View all" on a discover page: For You's own media gallery, with the
         // header For You's pushed screens wear (#629).
         surface.makeGallery = { [self] in
@@ -948,6 +963,8 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         // (`installMapReturnIfTop`): hero to the marker, slide as fallback.
         gallery.mapReturn = mapReturn
         gallery.markerClose = markerClose
+        // The cards' author bands wear the relation mark (#2300).
+        gallery.authorMarks = authorMarks
         // The titles' pushes — For You's own pushed screens, with the header
         // they wear there (`PushedScreenHeader`).
         let staking = wallet.map { PostCardStaking(wallet: $0, entities: entities) }
@@ -962,6 +979,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                 openPost: openHero
             )
             list.postOpenWarm = postOpenWarm
+            list.authorMarks = authorMarks
             return list
         }
         gallery.makeGallery = { [self] in

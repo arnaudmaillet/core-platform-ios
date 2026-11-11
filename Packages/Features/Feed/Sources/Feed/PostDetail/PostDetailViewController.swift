@@ -129,6 +129,20 @@ final class PostDetailViewController: UIViewController {
     /// The pager, for a selector that scrubs it.
     var streamPager: HorizontalPagerView { pager }
 
+    /// THE CAPTION ROW'S AUTHOR FACE, bound by the screen hosting the panel
+    /// (#2300). A text page's author is its caption's row — the chrome's
+    /// author row shows only on a media page — so that face is one more of
+    /// the feed's `AuthorBadgeBinding` faces: its relation mark, its "+", its
+    /// tap and hold. Called with the caption's cell at every configure, and
+    /// at once for one already on screen. Nil (a media page's sheet, a pushed
+    /// post): the face stays bare and its tap pushes the profile.
+    var bindCaptionAuthor: ((CaptionBubbleCell) -> Void)? {
+        didSet {
+            guard isViewLoaded else { return }
+            streams.forEach { $0.rebindCaptionAuthor() }
+        }
+    }
+
     /// The count reached the threshold: the Popular tab comes in. Opened on
     /// it when the opening tab is still to choose.
     private func popularBecameAvailable() {

@@ -1,5 +1,6 @@
 import CoreModels
 import Foundation
+import MediaCore
 import Testing
 import UIKit
 @testable import Chat

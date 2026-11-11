@@ -105,6 +105,17 @@ final class ForYouPostListViewController: UIViewController {
     var onRefresh: (() -> Void)?
     /// A row's author was tapped.
     var onAuthorTapped: ((GalleryPost) -> Void)?
+    /// A row's author was tapped where the host opens the profile card
+    /// (#2145, #2300) — `ForYouGridPage.onAuthorCardTapped`; the hold is then
+    /// `onAuthorTapped`. Nil: a tap is `onAuthorTapped`.
+    var onAuthorCardTapped: ((GalleryPost) -> Void)? {
+        didSet { page.onAuthorCardTapped = onAuthorCardTapped }
+    }
+    /// The rows' author bands' relation mark and "+" (#2300).
+    var authorMarks: PostAuthorMarks? {
+        get { page.authorMarks }
+        set { page.authorMarks = newValue }
+    }
     /// What a row's "..." offers — the host's, so this screen offers exactly
     /// what For You's own list does.
     var authorMenuActions: ((ForYouGridPage.AuthorMenuContext) -> [PostCardMenuAction])? {

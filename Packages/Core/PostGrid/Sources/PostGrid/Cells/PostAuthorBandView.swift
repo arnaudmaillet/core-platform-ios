@@ -97,6 +97,11 @@ public final class PostAuthorBandView: UIView {
         /// rather than derived at draw time: a compact age is a function of
         /// the clock, and the row and the prop that copies it must agree.
         public let age: String
+        /// The relation mark the face wears (#2300): the author's, as the
+        /// host's binding drew it — `.none` from a post alone. Carried on the
+        /// model so a reveal's prop, configured from the row's reading, wears
+        /// the row's mark and nothing pops in at the landing.
+        public private(set) var relationMark: PersonPill.Badge = .none
 
         /// Whether the band draws a person at all.
         public var showsIdentity: Bool { name != nil }
@@ -130,7 +135,17 @@ public final class PostAuthorBandView: UIView {
         /// The same band with a different date — what a stand-in does to show
         /// the row's own reading rather than this instant's.
         public func withAge(_ age: String) -> Model {
-            Model(name: name, handle: handle, avatarURL: avatarURL, monogram: monogram, age: age)
+            var model = Model(name: name, handle: handle, avatarURL: avatarURL, monogram: monogram, age: age)
+            model.relationMark = relationMark
+            return model
+        }
+
+        /// The same band wearing `mark` (#2300) — nothing for a bare band,
+        /// which draws no face.
+        public func withRelationMark(_ mark: PersonPill.Badge) -> Model {
+            var model = self
+            model.relationMark = showsIdentity ? mark : .none
+            return model
         }
 
         private init(name: String?, handle: String, avatarURL: URL?, monogram: String, age: String) {
@@ -145,7 +160,33 @@ public final class PostAuthorBandView: UIView {
     /// Fired when the viewer taps the identity — the disc, the name or the
     /// handle. `nil` on the reveal's prop, which is scenery and takes no
     /// touches.
-    public var onAuthorTapped: (() -> Void)?
+    ///
+    /// A person beside content (#2145, role 1; #2300): the tap is the
+    /// profile CARD where the host has one, through `PersonOpening`.
+    public var onAuthorTapped: (() -> Void)? {
+        didSet { opening.openCard = onAuthorTapped }
+    }
+
+    /// Fired when the viewer HOLDS the identity (0.4 s, #2145): the profile,
+    /// pushed, after `PersonHold`'s haptic. Nil: the band takes no hold.
+    public var onAuthorHeld: (() -> Void)? {
+        didSet { opening.openProfile = onAuthorHeld }
+    }
+
+    /// Fired when the face's "+" is tapped (#2300): the host follows, through
+    /// the same follow every "+" uses. Never for a state mark.
+    public var onFollowTapped: (() -> Void)? {
+        get { face.onFollowTapped }
+        set { face.onFollowTapped = newValue }
+    }
+
+    /// The tap and the hold on the identity — the shared contract (#2145).
+    private lazy var opening: PersonOpening = {
+        let opening = PersonOpening(on: identityControl)
+        // No person on a bare band, nor on one not configured yet.
+        opening.hasPerson = { [weak self] in self?.model?.showsIdentity == true }
+        return opening
+    }()
 
     /// The rows the "..." offers, asked for at the moment it is pressed.
     ///
@@ -182,7 +223,7 @@ public final class PostAuthorBandView: UIView {
     /// with the face it draws.
     var menuAuthor: PostCardMenuAuthor? {
         guard let model, model.showsIdentity, !model.handle.isEmpty else { return nil }
-        return PostCardMenuAuthor(handle: model.handle, face: avatar.shownPicture)
+        return PostCardMenuAuthor(handle: model.handle, face: face.shownPicture)
     }
 
     #if DEBUG
@@ -220,8 +261,11 @@ public final class PostAuthorBandView: UIView {
 
     /// The app's avatar (#943, #1750): the picture with its skeleton, the
     /// initials without one; an animated avatar plays by the rounds and
-    /// rests on its still (#1358, #1424).
-    private let avatar = AvatarView(diameter: PostAuthorBandView.avatarDiameter, size: .avatar)
+    /// rests on its still (#1358, #1424) — wearing the relation mark
+    /// (#2300): the shared marked face, at the band's 40 pt, its badge from
+    /// `RelationMarkMetrics`. Only its "+" takes a touch; the rest of the
+    /// face is the identity control's.
+    private let face = RelationMarkedAvatarView(diameter: PostAuthorBandView.avatarDiameter, size: .avatar)
     private let nameLabel = UILabel()
     private let handleLabel = UILabel()
     private let menuButton = PostActionPillView.makeGlyphControl(systemName: menuSymbol, label: "More actions")
@@ -266,7 +310,10 @@ public final class PostAuthorBandView: UIView {
         // touch handling, and both would fire, opening the post *and* pushing
         // the profile. A `UIControl` consumes the touch, which is the same
         // reason an ordinary button inside a cell has never selected its row.
-        identityControl.addTarget(self, action: #selector(authorPressed), for: .touchUpInside)
+        //
+        // Its tap and hold are the shared contract's (`opening`, #2145): a
+        // tap the card, a hold the profile. Recognizers on the control, so
+        // the control stays the hit view.
         // The contents are made INERT so the control itself is the hit view.
         //
         // Forwarding up the responder chain from a hit subview is not enough
@@ -275,7 +322,9 @@ public final class PostAuthorBandView: UIView {
         // the hit view IS — a control gets the touch immediately, anything else
         // is held and can be cancelled out from under it. This is the same
         // reason `UIButton` disables interaction on its own image and title.
-        avatar.isUserInteractionEnabled = false
+        // The face keeps its "+" alone (`takesOnlyBadgeTouches`): the one
+        // control inside the identity that is not the identity's.
+        face.takesOnlyBadgeTouches = true
         identity.isUserInteractionEnabled = false
         nameLabel.isUserInteractionEnabled = false
         handleLabel.isUserInteractionEnabled = false
@@ -307,11 +356,11 @@ public final class PostAuthorBandView: UIView {
         nameLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         handleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        identityControl.addSubview(avatar)
+        identityControl.addSubview(face)
         identityControl.addSubview(identity)
         addSubview(identityControl)
         addSubview(menuButton)
-        avatar.translatesAutoresizingMaskIntoConstraints = false
+        face.translatesAutoresizingMaskIntoConstraints = false
         identity.translatesAutoresizingMaskIntoConstraints = false
         identityControl.translatesAutoresizingMaskIntoConstraints = false
         identityHeightConstraints = [
@@ -328,12 +377,12 @@ public final class PostAuthorBandView: UIView {
                 lessThanOrEqualTo: menuButton.leadingAnchor, constant: -Spacing.sm
             ),
 
-            avatar.leadingAnchor.constraint(equalTo: identityControl.leadingAnchor),
-            avatar.topAnchor.constraint(equalTo: identityControl.topAnchor),
-            avatar.bottomAnchor.constraint(equalTo: identityControl.bottomAnchor),
+            face.leadingAnchor.constraint(equalTo: identityControl.leadingAnchor),
+            face.topAnchor.constraint(equalTo: identityControl.topAnchor),
+            face.bottomAnchor.constraint(equalTo: identityControl.bottomAnchor),
 
-            identity.leadingAnchor.constraint(equalTo: avatar.trailingAnchor, constant: Spacing.sm),
-            identity.centerYAnchor.constraint(equalTo: avatar.centerYAnchor),
+            identity.leadingAnchor.constraint(equalTo: face.trailingAnchor, constant: Spacing.sm),
+            identity.centerYAnchor.constraint(equalTo: face.centerYAnchor),
             identity.trailingAnchor.constraint(equalTo: identityControl.trailingAnchor),
 
             menuButton.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -348,14 +397,60 @@ public final class PostAuthorBandView: UIView {
         ])
         NSLayoutConstraint.activate(identityHeightConstraints)
         menuButton.isHidden = true
+        _ = opening
     }
 
     @available(*, unavailable)
     public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    @objc private func authorPressed() {
-        onAuthorTapped?()
+    /// ⚠️ THE "+" IS ASKED FIRST (#2300). Its touch area reaches past the
+    /// 40 pt disc and below the band's own bounds, which would refuse the
+    /// touch before the badge saw it — Chat's rows' rule.
+    public override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        if let badge = face.tappableBadge, !isHidden, alpha > 0.01, isUserInteractionEnabled,
+           !identityControl.isHidden, badge.point(inside: convert(point, to: badge), with: event) {
+            return badge
+        }
+        return super.hitTest(point, with: event)
     }
+
+    public override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        if let badge = face.tappableBadge, !identityControl.isHidden,
+           badge.point(inside: convert(point, to: badge), with: event) { return true }
+        return super.point(inside: point, with: event)
+    }
+
+    /// Whether a long press at `point` (in the band) is the author's hold
+    /// (#2145): on the identity, with a hold to give. The card's own long
+    /// press (its lift) leaves it alone, as a Rows row's does (#2170).
+    public func takesHold(at point: CGPoint) -> Bool {
+        guard onAuthorHeld != nil, model?.showsIdentity == true, !identityControl.isHidden else { return false }
+        return identityControl.bounds.contains(convert(point, to: identityControl))
+    }
+
+    // MARK: - The relation mark (#2300)
+
+    /// The mark the face wears: the author's relation, as the host's binding
+    /// draws it. `.none` for a bare band, the viewer's own post, a blocked
+    /// author, or a host with no follow.
+    public var relationMark: PersonPill.Badge { face.mark }
+
+    /// Wears `mark` on the face — through the badge's replace when
+    /// `animated` and on screen. A bare band draws no face, and no mark.
+    public func setRelationMark(_ mark: PersonPill.Badge, animated: Bool) {
+        let shown = model?.showsIdentity == true ? mark : .none
+        model = model?.withRelationMark(shown)
+        face.setMark(shown, animated: animated)
+    }
+
+    #if DEBUG
+    /// The face's badge. Tests.
+    var debugBadge: RelationBadgeView { face.badge }
+    /// Whether the face has the badge's cutout taken out. Tests.
+    var debugFaceIsCutOut: Bool { face.faceIsCutOut }
+    /// The identity's tap and hold. Tests.
+    var debugOpening: PersonOpening { opening }
+    #endif
 
     public func configure(with model: Model, imagePipeline: ImagePipeline?) {
         self.model = model
@@ -373,12 +468,16 @@ public final class PostAuthorBandView: UIView {
 
         nameLabel.text = model.name
         renderHandleLine()
-        avatar.setMonogram(model.monogram)
+        face.setMonogram(model.monogram)
         // Decoded at the avatar's bucket, not at 1200 px (#894); a post card's
         // author is large enough to play an animated avatar when the rounds
         // pick it (#1358, #1424). The same face again (a re-dated stand-in
         // with no pipeline) keeps the picture it has.
-        avatar.setPicture(showsIdentity ? model.avatarURL : nil, pipeline: imagePipeline)
+        face.setPicture(showsIdentity ? model.avatarURL : nil, pipeline: imagePipeline)
+        // The mark the model carries (#2300) — a prop copying the row's
+        // reading wears the row's; a row from a post alone, none until its
+        // host binds it.
+        face.setMark(showsIdentity ? model.relationMark : .none, animated: false)
     }
 
     /// Swaps the age on the band's second line, and nothing else.
@@ -407,7 +506,7 @@ public final class PostAuthorBandView: UIView {
 
     /// Whether the band is drawing the author's picture (rather than their
     /// initials) — for tests.
-    var isShowingPicture: Bool { avatar.shownPicture != nil }
+    var isShowingPicture: Bool { face.shownPicture != nil }
 
     /// Draws the "..." without wiring it.
     ///
@@ -423,6 +522,6 @@ public final class PostAuthorBandView: UIView {
 
     /// Drops any in-flight picture load. Called from the row's reuse.
     public func cancelPendingWork() {
-        avatar.reset()
+        face.avatar.reset()
     }
 }
