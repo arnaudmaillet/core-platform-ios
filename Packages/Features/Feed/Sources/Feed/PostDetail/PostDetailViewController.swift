@@ -132,8 +132,9 @@ final class PostDetailViewController: UIViewController {
     /// The count reached the threshold: the Popular tab comes in. Opened on
     /// it when the opening tab is still to choose.
     private func popularBecameAvailable() {
-        // A showcase has no comments to rank (#2216).
-        guard !showsPopular, takesComments else { return }
+        // A showcase has no comments to rank (#2216), nor a draft — the text
+        // composer counts its zero comments, which is no threshold now (#2287).
+        guard !showsPopular, takesComments, !viewModel.isDraft else { return }
         showsPopular = true
         let opensOnPopular = !hasChosenOpeningTab
         hasChosenOpeningTab = true
@@ -363,6 +364,12 @@ final class PostDetailViewController: UIViewController {
         self.groupsByDay = threadChrome || groupsByDay
         self.profileSwitcher = profileSwitcher
         self.wallet = wallet
+        // A post's panel has its two tabs from birth (#2287: no threshold),
+        // so it is BUILT on Popular — the pager's first page, mounted — and
+        // never shows Recent first, waiting for a count. A draft (the text
+        // composer) has no comments to rank until it is published; a
+        // showcase gives its tabs back (`setTakesComments`).
+        self.showsPopular = !viewModel.isDraft
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -746,6 +753,11 @@ final class PostDetailViewController: UIViewController {
         composeBar.railFace = publishedRailFace
         refreshBoostTotal()
         onPostPublished?(entry)
+        // A post now: it has its two tabs and opens on Popular, the caption
+        // first (#2287, no threshold) — the draft had none. Whatever the
+        // writer scrolled while drafting, the post opens on Popular.
+        hasChosenOpeningTab = false
+        popularBecameAvailable()
     }
 
     /// The post did not go out. The composer cleared itself when the text was

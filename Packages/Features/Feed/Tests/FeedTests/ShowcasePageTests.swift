@@ -120,10 +120,19 @@ struct ShowcasePageTests {
         window.rootViewController = controller
         window.isHidden = false
         controller.seedCaption("Come aboard", timestamp: "2h", authorName: "Ava Moreau", embed: embed)
-        let stream = try #require(Self.firstView(UICollectionView.self, in: controller.view))
-        // Give the comments time to land: a plain post shows them.
+        // The stream the page opens on: Popular for a post (#2287), whose
+        // skeleton rows stand in until its first page lands — not the first
+        // collection view in the hierarchy, which depends on the pager.
+        // A showcase takes none and shows its caption alone, as before.
+        let opening: UICollectionView = controller.showsPopular
+            ? controller.popular.collectionView : controller.recent.collectionView
+        let stream: UICollectionView = embed == nil
+            ? opening : try #require(Self.firstView(UICollectionView.self, in: controller.view))
+        // Give the comments time to land: a plain post shows them. A slow
+        // runner keeps the skeleton longer (17 rows on CI after 1 s): wait
+        // for the exact count, up to 10 s.
         var attempts = 0
-        while attempts < 100, embed == nil, stream.numberOfItems(inSection: 0) < 4 {
+        while attempts < 1000, embed == nil, stream.numberOfItems(inSection: 0) != 4 {
             attempts += 1
             try await Task.sleep(for: .milliseconds(10))
         }

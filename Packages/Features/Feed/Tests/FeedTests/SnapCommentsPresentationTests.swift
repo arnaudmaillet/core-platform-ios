@@ -781,8 +781,9 @@ struct SnapCommentsPresentationTests {
 
         #expect((feed.navigationItem.leftBarButtonItems ?? []).count == resting.count, "the edge item alone")
         #expect(!(feed.navigationItem.leftBarButtonItems ?? []).contains { $0.customView is PagedTabBar })
-        #expect(CommentSortPolicy.isAvailable(commentCount: 9) == false)
-        #expect(CommentSortPolicy.isAvailable(commentCount: 10))
+        // No threshold any more (#2287): any thread is "available"; this host
+        // just hasn't been told of one.
+        #expect(CommentSortPolicy.isAvailable(commentCount: 0))
     }
 
     /// A count reaching the threshold while the bar is RESTING — a text page

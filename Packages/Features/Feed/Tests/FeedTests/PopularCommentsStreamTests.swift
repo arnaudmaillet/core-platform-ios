@@ -144,8 +144,9 @@ struct PopularCommentsStreamTests {
         #expect(shown.recent.contains(mine ?? ""), "it is not in Recent")
     }
 
-    /// Below the threshold there is no Popular tab, and nothing is asked.
-    @Test func belowTheThresholdNothingIsRanked() async {
+    /// ⚠️ NO THRESHOLD (#2287): a short thread has its Popular tab too, so
+    /// its ranked page is asked for, once.
+    @Test func aShortThreadIsRankedToo() async {
         let provider = FewComments()
         let viewModel = PostDetailViewModel(postID: PostID("post-1"), repository: PopularFeedProvider(), commentsProvider: provider)
         var recent: [String] = []
@@ -154,9 +155,8 @@ struct PopularCommentsStreamTests {
         viewModel.onPopularCommentsChange = { _ in popularEmitted = true }
         viewModel.viewDidLoad()
         #expect(await settle { recent.count == 2 })
-        try? await Task.sleep(for: .milliseconds(100))
-        #expect(!popularEmitted)
-        #expect(await provider.rankedAsks == 0)
+        #expect(await settle { popularEmitted }, "the short thread's Popular never came")
+        #expect(await provider.rankedAsks == 1)
         withExtendedLifetime(viewModel) {}
     }
 

@@ -77,6 +77,14 @@ private actor PagedComments: CommentsProviding {
         try await loadCommentsPage(for: postID, after: nil).entries
     }
 
+    /// Popular's ranked pages are asked for every post now (#2287: no
+    /// threshold): these cases are about Recent's paging, so a ranked ask is
+    /// answered empty and never counted among `requests`.
+    func loadCommentsPage(for postID: PostID, after pageToken: String?, order: CommentSortOrder) async throws -> CommentPage {
+        guard order == .recent else { return CommentPage(entries: [], nextPageToken: nil) }
+        return try await loadCommentsPage(for: postID, after: pageToken)
+    }
+
     func loadCommentsPage(for postID: PostID, after pageToken: String?) async throws -> CommentPage {
         requests.append(pageToken)
         if pageToken == nil {
