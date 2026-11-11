@@ -342,4 +342,141 @@ struct PressFeedbackTests {
         }
         #expect(PressFeedback.releaseDampingRatio(travel: 0.005) == 1, "a travel smaller than the overshoot rang")
     }
+
+    // MARK: - The swell: the ground grows, the content scales evenly (#2284)
+
+    /// A swelling control drawn as a button is: a capsule ground (with a fill
+    /// laid on all of it, and something smaller inside it) under a label.
+    private func swellingButton(
+        width: CGFloat, height: CGFloat, reduced: Bool = false
+    ) -> (button: UIControl, ground: UIView, fill: CALayer, inner: CALayer, label: UILabel, feedback: PressFeedback) {
+        let button = control(width: width, height: height)
+        let ground = UIView(frame: button.bounds)
+        ground.layer.cornerRadius = height / 2
+        let fill = CALayer()
+        fill.frame = ground.bounds
+        fill.cornerRadius = height / 2
+        ground.layer.addSublayer(fill)
+        let inner = CALayer()
+        inner.frame = ground.bounds.insetBy(dx: 10, dy: 10)
+        ground.layer.addSublayer(inner)
+        button.addSubview(ground)
+        let label = UILabel(frame: button.bounds.insetBy(dx: 20, dy: 14))
+        button.addSubview(label)
+        let feedback = PressFeedback.attach(to: button, style: .swell, sound: nil, reducesMotion: { reduced })
+        feedback.grounds = { [ground.layer] }
+        return (button, ground, fill, inner, label, feedback)
+    }
+
+    /// The split: the content's one factor is the ground's across factor,
+    /// and the ground's growth under it brings the ground drawn to the
+    /// swell's two factors — the same few points whatever the width.
+    @Test(arguments: [
+        CGSize(width: 361, height: 52), CGSize(width: 329, height: 50), CGSize(width: 96, height: 32),
+        CGSize(width: 80, height: 36), CGSize(width: 44, height: 44),
+    ])
+    func theSwellSplitsIntoAnEvenContentAndAGrowingGround(_ size: CGSize) {
+        let swell = PressFeedback.swell(for: size)
+        let ground = PressFeedback.swelledScale(for: size)
+        #expect(swell.content == ground.x, "the content's factor is the across one")
+        let drawn = CGSize(
+            width: (size.width + swell.groundGrowth.width) * swell.content,
+            height: (size.height + swell.groundGrowth.height) * swell.content
+        )
+        #expect(abs(drawn.width - size.width * ground.x) < 0.001)
+        #expect(abs(drawn.height - size.height * ground.y) < 0.001)
+        #expect(abs((drawn.width - size.width) - 2 * PressFeedback.Metrics.swellAcross * size.height) < 0.001
+                || size.width == size.height, "\(size): not the same points across")
+        #expect(abs((drawn.height - size.height) - 2 * PressFeedback.Metrics.swellDown * size.height) < 0.001)
+        #expect(swell.groundGrowth.width == 0, "the even scale already takes the ground across")
+    }
+
+    /// At the crest, a wide button's content is held at ONE factor on both
+    /// axes, and its ground — the fill laid on it with it — has grown by the
+    /// swell's points across and down, a capsule still; what sits inside the
+    /// ground is not stretched to it. Released, the growth springs back.
+    @Test func aWideButtonsContentScalesEvenlyWhileItsGroundGrows() throws {
+        let (button, ground, fill, inner, label, feedback) = swellingButton(width: 361, height: 52)
+        button.sendActions(for: .touchDown)
+
+        let held = try #require(PressFeedback.debugHeldScale(on: button.layer))
+        #expect(held.x == held.y, "the content is stretched: \(held)")
+        #expect(abs(held.x - (1 + 2 * PressFeedback.Metrics.swellAcross * 52 / 361)) < 0.0001)
+        #expect(feedback.scale == held.x)
+
+        let grown = try #require(PressFeedback.debugHeldGround(on: ground.layer))
+        let drawn = CGSize(width: grown.size.width * held.x, height: grown.size.height * held.y)
+        #expect(abs((drawn.width - 361) - 2 * PressFeedback.Metrics.swellAcross * 52) < 0.01, "across: \(drawn)")
+        #expect(abs((drawn.height - 52) - 2 * PressFeedback.Metrics.swellDown * 52) < 0.01, "down: \(drawn)")
+        #expect(abs(grown.cornerRadius - grown.size.height / 2) < 0.001, "the capsule's ends turned oval")
+        let filled = try #require(PressFeedback.debugHeldGround(on: fill))
+        #expect(filled.size == grown.size && filled.cornerRadius == grown.cornerRadius, "the fill did not grow with its ground")
+        #expect(PressFeedback.debugHeldGround(on: inner) == nil, "what sits inside the ground was stretched to it")
+        #expect(PressFeedback.debugHeldGround(on: label.layer) == nil, "the content's size grew")
+        #expect(ground.bounds.size == CGSize(width: 361, height: 52), "the swell wrote the model")
+
+        button.sendActions(for: .touchUpInside)
+        #expect(PressFeedback.debugHeldGround(on: ground.layer) == nil, "the growth outlived the press")
+        #expect(PressFeedback.debugHeldGround(on: fill) == nil)
+        #expect(feedback.debugEvents.last == .released(tap: false, sprang: true))
+    }
+
+    /// A bubble is square: its ground and its content scale alike, by the
+    /// swell's one factor, and nothing grows on top — it swells as it did.
+    @Test func aBubblesGroundAndContentScaleAlike() throws {
+        let (button, ground, _, _, _, feedback) = swellingButton(width: 44, height: 44)
+        button.sendActions(for: .touchDown)
+        let held = try #require(PressFeedback.debugHeldScale(on: button.layer))
+        let swelled = PressFeedback.swelledScale(for: CGSize(width: 44, height: 44))
+        #expect(held.x == swelled.x && held.y == swelled.y && held.x == held.y)
+        #expect(PressFeedback.debugHeldGround(on: ground.layer) == nil, "a square's ground grew past its content")
+        #expect(feedback.debugGrownGrounds.isEmpty)
+    }
+
+    /// A stand-in taking the button's place (`AppButton`'s content change)
+    /// follows the content's factor, not the ground's — whether it is there
+    /// when the finger lands or takes over mid-press — and its own layer, the
+    /// ground's shape, grows as the ground does.
+    @Test func aStandInFollowsTheContentsFactor() throws {
+        let (button, ground, _, _, _, feedback) = swellingButton(width: 329, height: 50)
+        let early = CALayer()
+        early.frame = button.bounds
+        early.cornerRadius = 25
+        feedback.mirrors = [early]
+        button.sendActions(for: .touchDown)
+        let late = CALayer()
+        late.frame = button.bounds
+        late.cornerRadius = 25
+        feedback.copyPress(to: late)
+
+        let held = try #require(PressFeedback.debugHeldScale(on: button.layer))
+        let grown = try #require(PressFeedback.debugHeldGround(on: ground.layer))
+        for (name, mirror) in [("early", early), ("late", late)] {
+            let scale = try #require(PressFeedback.debugHeldScale(on: mirror), "\(name): not scaled")
+            #expect(scale.x == held.x && scale.y == held.y, "\(name): \(scale) against \(held)")
+            let mirrored = try #require(PressFeedback.debugHeldGround(on: mirror), "\(name): its ground did not grow")
+            #expect(mirrored.size == grown.size && mirrored.cornerRadius == grown.cornerRadius, "\(name)")
+        }
+        button.sendActions(for: .touchUpInside)
+        #expect(PressFeedback.debugHeldGround(on: late) == nil, "the stand-in's growth outlived the press")
+    }
+
+    /// Under Reduce Motion a swell moves nothing: no scale, no growth.
+    @Test func underReduceMotionASwellMovesNothing() {
+        let (button, ground, fill, _, _, feedback) = swellingButton(width: 361, height: 52, reduced: true)
+        button.sendActions(for: .touchDown)
+        #expect(!feedback.debugIsHeldOnTheLayer)
+        #expect(PressFeedback.debugHeldGround(on: ground.layer) == nil && PressFeedback.debugHeldGround(on: fill) == nil)
+        #expect(feedback.scale == 1)
+    }
+
+    /// A corner rule: a capsule stays a capsule as it grows; a card keeps
+    /// its corner.
+    @Test func aCapsuleStaysACapsuleAndACardKeepsItsCorner() {
+        let size = CGSize(width: 300, height: 50)
+        let growth = CGSize(width: 0, height: 7)
+        #expect(PressFeedback.grownCornerRadius(25, of: size, by: growth) == 28.5)
+        #expect(PressFeedback.grownCornerRadius(12, of: size, by: growth) == 12)
+        #expect(PressFeedback.grownCornerRadius(0, of: size, by: growth) == 0)
+    }
 }

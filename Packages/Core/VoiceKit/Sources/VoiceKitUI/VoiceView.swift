@@ -52,8 +52,10 @@ import UIKit
 ///   total again at the end. One size for all of them (`slotSize`), so the
 ///   waveform is binned once and never moves; a change cross-fades in place.
 /// - **Under a finger on the waveform the whole panel swells (#2274),** as
-///   the app's buttons do (`PressFeedback.swelledScale`): a transform, never
-///   a layout, and the seek is read on the panel at rest.
+///   the app's buttons do: its ground grows (`PressFeedback.swelledScale`),
+///   round at every frame, and what it holds scales by one factor on both
+///   axes (#2284) — never a layout, and the seek is read on the panel at
+///   rest.
 /// - **Its drags are its own:** one that starts on the play button or the
 ///   waveform goes before the list's scroll and the screen's swipes.
 /// - **It draws; the screen plays** (`VoicePlayer`, one for the app): every
@@ -282,12 +284,22 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
         }
     }
 
-    /// The scale the panel swells to under a finger on its waveform (#2274):
-    /// the app's press swell (`PressFeedback.swelledScale`) on the panel's
-    /// size — about 9 pt across and 5 pt up and down on a full panel.
+    /// The scale the panel's content swells to under a finger on its
+    /// waveform (#2274): the app's press swell on the panel's size, ONE
+    /// factor on both axes (`PressFeedback.swell(for:)`, #2284) — the glyph,
+    /// the bars, the slot grow without stretching. The ground grows the rest
+    /// (`swelledGroundSize(for:)`).
     public static func swelledScale(for panelSize: CGSize) -> CGAffineTransform {
-        let scale = PressFeedback.swelledScale(for: panelSize)
-        return CGAffineTransform(scaleX: scale.x, y: scale.y)
+        let even = PressFeedback.swell(for: panelSize).content
+        return CGAffineTransform(scaleX: even, y: even)
+    }
+
+    /// The panel's ground swollen (#2284), in the panel's own points — under
+    /// the content's scale: drawn, it reaches the app's swell, about 9 pt
+    /// across and 5 pt up and down on a full panel.
+    public static func swelledGroundSize(for panelSize: CGSize) -> CGSize {
+        let growth = PressFeedback.swell(for: panelSize).groundGrowth
+        return CGSize(width: panelSize.width + growth.width, height: panelSize.height + growth.height)
     }
 
     /// The bars' ink and the mark's — the played bars: a dark grey, not the
@@ -404,10 +416,15 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
 
     // MARK: - Parts
 
-    /// The panel (#2241): its neutral ground, its concentric corner, and
-    /// everything the voice draws inside it. It is what swells under a
-    /// finger on the waveform (#2274) — its transform, never its frame.
+    /// The panel (#2241): its ground and everything the voice draws inside
+    /// it. Under a finger on the waveform (#2274) it scales by the content's
+    /// one factor (#2284) — its transform, never its frame.
     private let frameView = UIView()
+    /// The panel's neutral ground and its concentric corner, filling the
+    /// panel: what GROWS under the finger (#2284) — its size, round at every
+    /// frame — while the panel's transform scales the rest evenly. Laid by
+    /// hand (`layoutGround`), never by a constraint.
+    private let panelGround = UIView()
     /// The panel's line: the glyph's frame's height, or the timer's (or the
     /// chip's) when larger text makes it taller — centred in the panel.
     private let line = UILayoutGuide()
@@ -480,9 +497,11 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
         self.dragsAreOwn = dragsAreOwn
         super.init(frame: .zero)
         frameView.translatesAutoresizingMaskIntoConstraints = false
-        frameView.layer.cornerRadius = Self.panelCornerRadius(for: size)
-        frameView.layer.cornerCurve = .continuous
         addSubview(frameView)
+        panelGround.isUserInteractionEnabled = false
+        panelGround.layer.cornerRadius = Self.panelCornerRadius(for: size)
+        panelGround.layer.cornerCurve = .continuous
+        frameView.addSubview(panelGround)
 
         // ⚠️ NO PRESSED DIMMING (`dims: false`; the owner's device check,
         // 2026-11-06, filmed): the glyph greyed under the finger kept that
@@ -688,7 +707,28 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
 
     public override func layoutSubviews() {
         super.layoutSubviews()
+        layoutGround()
         playElement.accessibilityFrameInContainerSpace = frameView.frame
+    }
+
+    /// The ground on the panel's middle: the panel's size, or swollen
+    /// (#2284). The bars are drawn as finely as the content's swell needs.
+    private func layoutGround() {
+        let resting = frameView.bounds.size
+        let grown = isSwollen ? Self.swelledGroundSize(for: resting) : resting
+        panelGround.bounds = CGRect(origin: .zero, size: grown)
+        panelGround.center = CGPoint(x: resting.width / 2, y: resting.height / 2)
+        panelGround.layer.cornerRadius = isSwollen ? swollenCornerRadius(resting: resting, grown: grown) : Self.panelCornerRadius(for: size)
+        frameView.sendSubviewToBack(panelGround)
+        waveform.swellFactor = PressFeedback.swell(for: resting).content
+    }
+
+    /// The ground's corner grown to `grown`: a capsule kept a capsule, a
+    /// concentric corner (larger text) kept as it is.
+    private func swollenCornerRadius(resting: CGSize, grown: CGSize) -> CGFloat {
+        let radius = Self.panelCornerRadius(for: size)
+        let growth = CGSize(width: grown.width - resting.width, height: grown.height - resting.height)
+        return PressFeedback.grownCornerRadius(radius, of: resting, by: growth)
     }
 
     // MARK: - Showing
@@ -906,7 +946,7 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
         waveform.unplayedInk = inks.unplayed
         // The bare glyph in the played bars' ink (#2274).
         playButton.inkColor = inks.played
-        frameView.backgroundColor = inks.panel
+        panelGround.backgroundColor = inks.panel
         dot.backgroundColor = Self.dotInk
     }
 
@@ -923,9 +963,11 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
     }
 
     /// Under a finger on the waveform — from its landing, through a scrub,
-    /// to its lift — the whole panel swells as one, with everything in it:
-    /// the app's press swell on the panel's size, with its springs
-    /// (`PressFeedback.Metrics.swellIn` / `swellOut`). A transform: it goes
+    /// to its lift — the whole panel swells as one, as the app's buttons
+    /// do, with their springs (`PressFeedback.Metrics.swellIn` /
+    /// `swellOut`): its ground grows to the app's swell on the panel's size,
+    /// a capsule at every frame, and everything in it — the glyph, the
+    /// bars, the slot — scales by one factor on both axes (#2284). It goes
     /// over what surrounds the panel and moves nothing in the list. Never
     /// under Reduce Motion, as for the app's buttons; never on a message
     /// still on its way.
@@ -936,6 +978,7 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
         let target: CGAffineTransform = swollen ? Self.swelledScale(for: frameView.bounds.size) : .identity
         guard animated else {
             frameView.transform = target
+            layoutGround()
             return
         }
         let curve = swollen ? PressFeedback.Metrics.swellIn : PressFeedback.Metrics.swellOut
@@ -944,6 +987,7 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
             options: [.allowUserInteraction, .beginFromCurrentState]
         ) {
             self.frameView.transform = target
+            self.layoutGround()
         }
     }
 
@@ -1197,14 +1241,20 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
     public var debugPanelFrame: CGRect { frameView.frame }
     /// The panel's size at rest — its bounds, which the swell never changes.
     public var debugPanelRestingSize: CGSize { frameView.bounds.size }
-    /// The panel's transform: the swell (#2274).
+    /// The panel's transform: the content's even swell (#2274, #2284).
     public var debugPanelTransform: CGAffineTransform { frameView.transform }
+    /// The ground's size in the panel's own points, under its transform —
+    /// the panel's at rest, grown under a finger (#2284) — and drawn.
+    public var debugGroundSize: CGSize { panelGround.bounds.size }
+    public var debugDrawnGroundSize: CGSize { panelGround.bounds.size.applying(frameView.transform) }
+    /// How finely the bars are drawn: the content's swell (#2284).
+    public var debugWaveformSwellFactor: CGFloat { waveform.swellFactor }
     /// The transforms of what the panel holds — none of them swells alone.
     public var debugPartTransforms: [CGAffineTransform] {
         [playButton.transform, waveform.transform, scrubber.transform, timerLabel.transform, speedChip.transform, dot.transform]
     }
-    public var debugPanelFill: UIColor? { frameView.backgroundColor }
-    public var debugPanelCornerRadius: CGFloat { frameView.layer.cornerRadius }
+    public var debugPanelFill: UIColor? { panelGround.backgroundColor }
+    public var debugPanelCornerRadius: CGFloat { panelGround.layer.cornerRadius }
     public var debugDotFill: UIColor? { dot.backgroundColor }
     public var debugTimerInk: UIColor? { timerLabel.textColor }
     /// The seek fraction a finger at `point` (own coordinates) reads (#2274).
@@ -1308,9 +1358,19 @@ public final class WaveformBars: UIView, UIGestureRecognizerDelegate {
     private var waiting = true
     private var rise: CGFloat = 1
 
-    /// How much finer than the screen the bars are drawn, so they stay
-    /// sharp in a swollen panel (#2274): the app's swell at its tallest.
+    /// How much finer than the screen bars are drawn by default, so they
+    /// stay sharp scaled by a swell (#2274): the most a swell's content
+    /// scales by — a square's (`PressFeedback.swell(for:)`).
     public static let drawnFiner: CGFloat = 1 + 2 * PressFeedback.Metrics.swellDown
+    /// The factor a host swells these bars by, and so how much finer than
+    /// the screen they are drawn (#2284): the voice panel's content factor,
+    /// set as it is laid out; `drawnFiner` otherwise.
+    public var swellFactor: CGFloat = WaveformBars.drawnFiner {
+        didSet {
+            guard swellFactor != oldValue else { return }
+            applyContentScale()
+        }
+    }
 
     public override init(frame: CGRect) {
         super.init(frame: frame)
@@ -1442,8 +1502,14 @@ public final class WaveformBars: UIView, UIGestureRecognizerDelegate {
     /// Drawn finer than the screen, so the bars stay sharp swollen.
     public override func didMoveToWindow() {
         super.didMoveToWindow()
+        applyContentScale()
+    }
+
+    /// The screen's scale times the swell's (`swellFactor`).
+    private func applyContentScale() {
         let screen = traitCollection.displayScale > 0 ? traitCollection.displayScale : 3
-        contentScaleFactor = screen * Self.drawnFiner
+        contentScaleFactor = screen * max(1, swellFactor)
+        setNeedsDisplay()
     }
 
     public override func draw(_ rect: CGRect) {

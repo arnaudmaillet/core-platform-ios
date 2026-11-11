@@ -705,8 +705,10 @@ open class AppButton: AppControl {
         mask.add(handoff(from: 0, to: 1, between: handoffStart, and: handoffMiddle), forKey: "appButton.morph.handoff")
         layer.mask = mask
         // The press goes on over the stand-in: its swell now, its spring
-        // back when the finger lifts.
-        PressFeedback.copyPress(from: layer, to: frame.layer)
+        // back when the finger lifts — the content's even scale on the whole
+        // stand-in, the ground's growth on its frame and the stretched
+        // grounds filling it (#2284).
+        pressFeedback?.copyPress(to: frame.layer)
         pressFeedback?.mirrors = [frame.layer]
         host.insertSubview(frame, aboveSubview: self)
         blurOverlays = [frame]
