@@ -70,11 +70,36 @@ final class CommentsDiskTier: Sendable {
         /// Absent from a record written before #943: decodes as none.
         var authorAvatarFrameID: String?
         var body: String
+        /// Absent from a record written before #2309: decodes as none. One
+        /// this build can't read is none too — the comment keeps its words,
+        /// and the page is not lost for it.
+        var attachment: CommentAttachment?
         var createdAt: Date
         var parentID: String?
         var isHeld: Bool
         /// Absent from a record written before #637: decodes as unknown.
         var replyCount: Int?
+
+        private enum CodingKeys: String, CodingKey {
+            case id, authorID, authorName, authorHandle, authorAvatarURL, authorAvatarFrameID
+            case body, attachment, createdAt, parentID, isHeld, replyCount
+        }
+
+        init(from decoder: any Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            id = try container.decode(String.self, forKey: .id)
+            authorID = try container.decode(String.self, forKey: .authorID)
+            authorName = try container.decode(String.self, forKey: .authorName)
+            authorHandle = try container.decode(String.self, forKey: .authorHandle)
+            authorAvatarURL = try container.decodeIfPresent(URL.self, forKey: .authorAvatarURL)
+            authorAvatarFrameID = try container.decodeIfPresent(String.self, forKey: .authorAvatarFrameID)
+            body = try container.decode(String.self, forKey: .body)
+            attachment = (try? container.decodeIfPresent(CommentAttachment.self, forKey: .attachment)) ?? nil
+            createdAt = try container.decode(Date.self, forKey: .createdAt)
+            parentID = try container.decodeIfPresent(String.self, forKey: .parentID)
+            isHeld = try container.decode(Bool.self, forKey: .isHeld)
+            replyCount = try container.decodeIfPresent(Int.self, forKey: .replyCount)
+        }
 
         init(_ entry: CommentEntry) {
             id = entry.id
@@ -84,6 +109,7 @@ final class CommentsDiskTier: Sendable {
             authorAvatarURL = entry.authorAvatarURL
             authorAvatarFrameID = entry.authorAvatarFrameID
             body = entry.body
+            attachment = entry.attachment
             createdAt = entry.createdAt
             parentID = entry.parentID
             isHeld = entry.isHeld
@@ -94,7 +120,7 @@ final class CommentsDiskTier: Sendable {
             CommentEntry(
                 id: id, authorID: ProfileID(authorID), authorName: authorName, authorHandle: authorHandle,
                 authorAvatarURL: authorAvatarURL, authorAvatarFrameID: authorAvatarFrameID, body: body,
-                createdAt: createdAt, parentID: parentID, isHeld: isHeld,
+                attachment: attachment, createdAt: createdAt, parentID: parentID, isHeld: isHeld,
                 replyCount: replyCount
             )
         }

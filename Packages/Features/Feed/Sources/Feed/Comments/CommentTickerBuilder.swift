@@ -58,6 +58,8 @@ public struct CommentTickerBuilder: Sendable {
         var seenBodies = Set<String>()
         var qualifying: [TickerCommentModel] = []
         for entry in entries {
+            // TODO(#2309, piece 2): a voice with no words rides as
+            // "🎙 12″"; until then its empty body keeps it off the band.
             let body = entry.body.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !body.isEmpty,
                   body.count <= Self.maxCharacterCount,
