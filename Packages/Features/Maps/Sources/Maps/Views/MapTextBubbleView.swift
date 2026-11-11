@@ -90,8 +90,9 @@ final class MapTextBubbleView: UIView {
     let authorLabel = UILabel()
     let label = UILabel()
     /// A voice post's voice, between the author and the words: the compact
-    /// panel (#2241, the issue's table) across the column — a sideways drag
-    /// on it stays the map's.
+    /// panel (#2241, the issue's table) across the column — its drags are
+    /// its own (#2275): a sideways drag on it scrubs, and the map's pan
+    /// waits for it.
     let voiceCaption = VoicePostCaptionView()
     /// A showcase's card, full size, under the words (#2216).
     let embedCard = PostEmbedView()
@@ -151,7 +152,8 @@ final class MapTextBubbleView: UIView {
         if let voice = content.voice {
             voiceCaption.show(
                 postID: content.postID.rawValue, url: voice.url, duration: voice.duration, levels: voice.waveform,
-                author: content.authorName.isEmpty ? nil : content.authorName, size: Self.voiceDisplaySize
+                author: content.authorName.isEmpty ? nil : content.authorName, size: Self.voiceDisplaySize,
+                dragsAreOwn: Self.voiceDragsAreOwn
             )
         } else {
             voiceCaption.clear()
@@ -220,6 +222,11 @@ final class MapTextBubbleView: UIView {
 
     /// The size the bubble gives a voice (#2241's table).
     static let voiceDisplaySize: VoicePostDisplay.Size = .compact
+    /// ⚠️ ITS DRAGS ARE ITS OWN, compact as it is (#2275): a sideways drag
+    /// on the panel scrubs and the map doesn't pan (`WaveformBars.yields`:
+    /// the map's pan waits for the panel's); a vertical one, or one off the
+    /// panel, still pans the map.
+    static let voiceDragsAreOwn = true
 
     /// The voice's size, zero without one: the column's whole width — the
     /// panel is one width whatever the length (#2241) — at its panel's
@@ -268,9 +275,13 @@ final class MapTextBubbleView: UIView {
         embedCard.frame = CGRect(x: 0, y: cardTop, width: text.width, height: card)
     }
 
-    /// Only the voice's play button and waveform take a touch — and only
+    /// Only the voice takes a touch — its play button, its waveform, its
+    /// speed chip, and (its drags being its own, #2275) the rest of its
+    /// panel, so a sideways drag anywhere on it is the panel's — and only
     /// while the words show; anywhere else the marker under it takes it and
-    /// opens the post (#2208).
+    /// opens the post (#2208). A tap on the panel's ground still opens the
+    /// post: the marker's tap leaves only the voice's own presses alone
+    /// (`VoicePostCaptionView.keepsTouch`).
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
         guard column.alpha > 0.01 else { return nil }
         // A showcase's card: its action button alone (#2216).
@@ -280,7 +291,8 @@ final class MapTextBubbleView: UIView {
         }
         guard let player = voiceCaption.voiceView, !voiceCaption.isHidden else { return nil }
         let local = convert(point, to: player)
-        guard player.keepsPress(at: local) else { return nil }
+        let onPanel = player.dragsAreOwn && player.keepsDrag(at: local)
+        guard player.keepsPress(at: local) || onPanel else { return nil }
         return player.hitTest(local, with: event)
     }
 

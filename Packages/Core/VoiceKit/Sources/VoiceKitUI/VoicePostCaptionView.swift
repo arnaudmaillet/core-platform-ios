@@ -17,9 +17,11 @@ public enum VoicePostDisplay {
         /// Play / pause, the waveform (tap and drag to seek), the timer: a
         /// post's page, For You's card preview, list cards.
         case full
-        /// The same panel a little shorter, and no drag on the waveform — it
-        /// would fight what scrolls or pans under it: cards in horizontal
-        /// shelves, history rows, the map's text bubble (#2241's table).
+        /// The same panel a little shorter: cards in horizontal shelves,
+        /// history rows, the map's text bubble (#2241's table). Its drags
+        /// are its own, as at `.full`, unless the host says otherwise
+        /// (`VoicePostCaptionView.show(…dragsAreOwn:)`, #2275): only a
+        /// shelf's card gives them to its scroll.
         case compact
         /// A mic, a still waveform, the length; not interactive — a tap is
         /// the tile's: grid tiles, map pins.
@@ -36,6 +38,10 @@ public enum VoicePostDisplay {
 ///   button and waveform take their own taps; the rest of the card keeps its
 ///   action (a host's tap recognizer asks `keepsTouch(_:)`). Its panel takes
 ///   this view's whole width (#2241): a host sizes the view, not the voice.
+/// - **Its drags are its own** (`dragsAreOwn`, #2275), at both sizes: the
+///   screen's pans — a list's, a pager's, a map's — wait for the panel's
+///   sideways drag. Off only in a horizontal shelf's card: a tap seeks, a
+///   drag scrolls the shelf.
 /// - **`.mark`:** a `VoiceMarkView`; no binding, no taps.
 /// - **It stops when its card leaves the screen** — out of the window,
 ///   reused (`clear()`), or a list's `didEndDisplaying` (`leftScreen()`) —
@@ -46,6 +52,8 @@ public enum VoicePostDisplay {
 public final class VoicePostCaptionView: UIView {
     /// The size shown; nil while nothing is.
     public private(set) var size: VoicePostDisplay.Size?
+    /// Whether the player's drags are its own (#2275), as last shown.
+    public private(set) var dragsAreOwn = true
     /// The id the voice plays under, while a player shows.
     public private(set) var playbackID: String?
     /// The player (`.full`, `.compact`) or the mark (`.mark`) shown.
@@ -71,9 +79,14 @@ public final class VoicePostCaptionView: UIView {
 
     /// Shows post `postID`'s voice at `size`. A view shown again (a reused
     /// cell) lets its last voice go first.
+    ///
+    /// - Parameter dragsAreOwn: whether the panel's drags are its own
+    ///   (`VoiceView.dragsAreOwn`, #2275): yes at both sizes, but in a
+    ///   horizontal shelf's card. Every show says it again, so a reused
+    ///   cell never keeps the last host's rule.
     public func show(
         postID: String, url: URL?, duration: TimeInterval, levels: [UInt8], author: String?,
-        size: VoicePostDisplay.Size
+        size: VoicePostDisplay.Size, dragsAreOwn: Bool = true
     ) {
         let id = VoicePlaybackHub.postID(postID)
         if let shownID = playbackID, shownID != id || size != self.size { release() }
@@ -95,11 +108,13 @@ public final class VoicePostCaptionView: UIView {
             if let shown = voiceView, shown.size != playerSize { removePlayer() }
             let player = voiceView ?? install(VoiceView(size: playerSize))
             voiceView = player
+            player.dragsAreOwn = dragsAreOwn
             player.role = .post(author: author)
             hub.bind(player, id: id, url: url, duration: duration, levels: waveform)
             playbackID = id
         }
         self.size = size
+        self.dragsAreOwn = dragsAreOwn
         applyInks()
     }
 

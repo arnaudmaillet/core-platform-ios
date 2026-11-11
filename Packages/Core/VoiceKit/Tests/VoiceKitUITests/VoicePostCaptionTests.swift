@@ -38,6 +38,29 @@ struct VoicePostCaptionTests {
         #expect(full.isHidden && full.size == nil)
     }
 
+    /// A caption's drags are its own by default, at both sizes (#2275); a
+    /// host turns them off (a shelf's card), and the next show says it again
+    /// — a reused cell never keeps the last host's rule.
+    @Test func theDragsAreThePanelsUnlessTheHostSaysOtherwise() throws {
+        let hub = VoicePlaybackHub.silentForTests()
+        for size in [VoicePostDisplay.Size.full, .compact] {
+            let shown = caption(size, hub: hub)
+            let player = try #require(shown.voiceView)
+            #expect(shown.dragsAreOwn && player.dragsAreOwn, "\(size): the default gave the drags away")
+            #expect(player.debugSideHoldEnabled && player.waveform.scrubs)
+        }
+        let card = VoicePostCaptionView()
+        card.hub = hub
+        card.show(postID: "p1", url: url, duration: 32, levels: [], author: nil, size: .compact, dragsAreOwn: false)
+        let player = try #require(card.voiceView)
+        #expect(!card.dragsAreOwn && !player.dragsAreOwn)
+        #expect(!player.debugSideHoldEnabled && !player.waveform.scrubs)
+        card.show(postID: "p2", url: url, duration: 10, levels: [], author: nil, size: .compact)
+        #expect(card.voiceView === player, "the same size kept its player")
+        #expect(player.dragsAreOwn && player.debugSideHoldEnabled && player.waveform.scrubs,
+                "a reused card kept the shelf's rule")
+    }
+
     @Test func theInkIsTheGrounds() {
         let hub = VoicePlaybackHub.silentForTests()
         let inks = VoiceView.Inks(played: .white, unplayed: .gray, timer: .lightGray)

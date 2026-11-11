@@ -8,8 +8,12 @@ import UIKit
 ///
 /// - **`.full`:** play / pause, the waveform (tap and drag to seek), the
 ///   slot at the trailing end — the timer, or the speed chip while it plays.
-/// - **`.compact`:** the same, but a tap seeks and a drag is NOT the
-///   waveform's — a horizontal shelf scrolls under it.
+/// - **`.compact`:** the same, a little shorter.
+/// - **Its drags are its own at both sizes** (`dragsAreOwn`, #2275): a drag
+///   that starts on the play button is the button's, a sideways drag on the
+///   panel is the panel's (on the waveform it scrubs), and the screen's pans
+///   wait for them. Off only where something scrolls sideways under it — a
+///   horizontal shelf's card: a tap seeks, a drag is the shelf's.
 /// - **The ink follows its ground** (`inks`), set by the host.
 ///
 /// **A neutral panel (#2241, the owner 2026-11-10),** the same on every
@@ -113,9 +117,11 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
 
     /// How much room the host gives it (#2205).
     public enum Size: Sendable, Equatable {
-        /// The thread's bubble: the waveform scrubs.
+        /// The thread's bubble, a post's page, a list's card.
         case full
-        /// A card in a horizontal shelf: a tap seeks, no drag.
+        /// A little shorter: a shelf's card, a history row, the map's
+        /// bubble. Whether its drags are its own is the host's
+        /// (`dragsAreOwn`), not the size's (#2275).
         case compact
     }
 
@@ -185,6 +191,19 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
     /// it doesn't stretch across an iPad-wide or landscape column. Nil: the
     /// panel takes whatever width its host gives.
     public let maxPanelWidth: CGFloat?
+    /// Whether the panel's drags are its own (#2275) — the host's call, not
+    /// the size's: the play button's hold (any direction), the panel's
+    /// sideways hold and the waveform's scrub, every other pan waiting for
+    /// them (`WaveformBars.yields`): a list's, a pager's, a map's, the
+    /// screen's swipes. A vertical drag still goes to the list or the pager.
+    /// Off only inside a horizontal shelf's card, whose scroll takes the
+    /// drag: a tap still seeks.
+    public var dragsAreOwn: Bool {
+        didSet {
+            guard dragsAreOwn != oldValue else { return }
+            applyDragRule()
+        }
+    }
     public var role: Role = .message {
         didSet {
             guard role != oldValue else { return }
@@ -431,6 +450,8 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
     private var scrubSteps = -1
     private var pendingLoader: DispatchWorkItem?
     private let sideHold = UIPanGestureRecognizer()
+    /// The play button's hold: a drag that starts on the button is its own.
+    private let playHold = UIPanGestureRecognizer()
     /// What the slot shows; nil until first shown.
     private var shownSlot: SlotContent?
     /// A finger is down on the waveform — a tap or a drag, until it lifts
@@ -446,10 +467,15 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
     /// - Parameters:
     ///   - leadingInset: where the panel starts — a conversation's text column.
     ///   - maxPanelWidth: the panel's widest (#2241); nil fills the host.
-    public init(size: Size = .full, leadingInset: CGFloat = 0, maxPanelWidth: CGFloat? = nil) {
+    ///   - dragsAreOwn: whether its drags are its own (#2275) — at both
+    ///     sizes, but in a horizontal shelf's card.
+    public init(
+        size: Size = .full, leadingInset: CGFloat = 0, maxPanelWidth: CGFloat? = nil, dragsAreOwn: Bool = true
+    ) {
         self.size = size
         self.leadingInset = leadingInset
         self.maxPanelWidth = maxPanelWidth
+        self.dragsAreOwn = dragsAreOwn
         super.init(frame: .zero)
         frameView.translatesAutoresizingMaskIntoConstraints = false
         frameView.layer.cornerRadius = Self.panelCornerRadius(for: size)
@@ -477,22 +503,20 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
         // list's scroll nor the screen's swipes take it (the owner's device
         // check, 2026-11-06). It leaves the button its touches, so a press
         // that drifts is still a press.
-        let hold = UIPanGestureRecognizer()
-        hold.cancelsTouchesInView = false
-        hold.delegate = self
-        playButton.addGestureRecognizer(hold)
-        // Compact: a drag is the shelf's (#2205) — on the button, the panel
-        // and the bars alike.
-        hold.isEnabled = size == .full
+        playHold.cancelsTouchesInView = false
+        playHold.delegate = self
+        playButton.addGestureRecognizer(playHold)
         // ⚠️ AND A SIDEWAYS DRAG ANYWHERE ON THE PANEL IS THE PANEL'S (the
         // owner's device check, 2026-11-06, filmed): one from the speed chip
         // went to the screen's back swipe. The screen's pans wait for this
         // one; the panel's own run alongside it; a vertical drag scrolls.
         sideHold.cancelsTouchesInView = false
         sideHold.delegate = self
-        sideHold.isEnabled = size == .full
         frameView.addGestureRecognizer(sideHold)
-        waveform.scrubs = size == .full
+        // ⚠️ AT BOTH SIZES (#2275, the owner's recording): a compact panel
+        // in a history row gave its sideways drag to the profile's pager.
+        // Off only in a shelf's card, where a drag is the shelf's (#2205).
+        applyDragRule()
         // Across the whole width, the bars re-binned to it, drawn with the
         // voice's own contrast (#2241).
         waveform.fillsWidth = true
@@ -996,6 +1020,14 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
         return abs(velocity.x) > abs(velocity.y)
     }
 
+    /// The play button's hold, the panel's sideways hold and the
+    /// waveform's scrub, on or off together (`dragsAreOwn`).
+    private func applyDragRule() {
+        playHold.isEnabled = dragsAreOwn
+        sideHold.isEnabled = dragsAreOwn
+        waveform.scrubs = dragsAreOwn
+    }
+
     /// Whether a drag at `point` (own coordinates) starts on the bubble
     /// itself — not on the row's room beside it.
     public func keepsDrag(at point: CGPoint) -> Bool {
@@ -1140,6 +1172,10 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
     public var debugPlayButtonHold: UIGestureRecognizer? {
         playButton.gestureRecognizers?.first { $0 is UIPanGestureRecognizer && $0.delegate === self }
     }
+    /// The waveform's scrub, which every other pan waits on while it is on.
+    public var debugScrub: UIGestureRecognizer? {
+        waveform.gestureRecognizers?.first { $0 is UIPanGestureRecognizer }
+    }
     public func debugLoaderWaitEnds() {
         pendingLoader?.perform()
     }
@@ -1211,7 +1247,8 @@ private final class VoicePlayElement: UIAccessibilityElement {
 /// the count they ask for.
 public final class WaveformBars: UIView, UIGestureRecognizerDelegate {
     public var onSeek: ((_ fraction: Double, _ scrubbing: Bool) -> Void)?
-    /// Whether a horizontal drag scrubs (`.full`); a tap always seeks.
+    /// Whether a horizontal drag scrubs (the panel's `dragsAreOwn`); a tap
+    /// always seeks.
     public var scrubs = true {
         didSet { scrub?.isEnabled = scrubs }
     }

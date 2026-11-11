@@ -48,21 +48,62 @@ struct VoiceComponentTests {
 
     // MARK: - Sizes
 
-    /// Full scrubs; compact keeps the tap and gives every drag to its
-    /// shelf; both play.
-    @Test func fullScrubsCompactOnlyTaps() {
+    /// The drags are the panel's at both sizes (#2275): the play button's
+    /// hold, the panel's sideways hold, the waveform's scrub; both play.
+    @Test func theDragsAreThePanelsAtBothSizes() {
         let full = VoiceView(size: .full)
         let compact = VoiceView(size: .compact)
-        #expect(full.waveform.scrubs && full.debugSideHoldEnabled && full.debugPlayHoldEnabled)
-        #expect(!compact.waveform.scrubs, "a drag on a compact waveform would fight the shelf's scroll")
-        #expect(!compact.debugSideHoldEnabled && !compact.debugPlayHoldEnabled)
-        let taps = compact.waveform.gestureRecognizers?.filter { $0 is UITapGestureRecognizer && $0.isEnabled } ?? []
-        #expect(!taps.isEmpty, "a compact waveform no longer seeks on a tap")
         for view in [full, compact] {
+            #expect(view.dragsAreOwn, "\(view.size): the default gave the drags away")
+            #expect(view.waveform.scrubs, "\(view.size): a sideways drag on the waveform doesn't scrub")
+            #expect(view.debugSideHoldEnabled && view.debugPlayHoldEnabled, "\(view.size)")
             view.configure(VoiceView.State(levels: VoiceView.genericLevels, duration: 32))
             #expect(view.debugPlayEnabled)
             #expect(view.debugTimerText == "0:32")
         }
+    }
+
+    /// Off (a horizontal shelf's card), a tap still seeks and every drag is
+    /// the shelf's; on again (a reused card), the drags are the panel's.
+    @Test func aShelfsPanelOnlyTaps() {
+        let compact = VoiceView(size: .compact, dragsAreOwn: false)
+        #expect(!compact.dragsAreOwn)
+        #expect(!compact.waveform.scrubs, "a drag on a shelf card's waveform would fight the shelf's scroll")
+        #expect(!compact.debugSideHoldEnabled && !compact.debugPlayHoldEnabled)
+        let taps = compact.waveform.gestureRecognizers?.filter { $0 is UITapGestureRecognizer && $0.isEnabled } ?? []
+        #expect(!taps.isEmpty, "a shelf card's waveform no longer seeks on a tap")
+        compact.dragsAreOwn = true
+        #expect(compact.waveform.scrubs && compact.debugSideHoldEnabled && compact.debugPlayHoldEnabled)
+        compact.dragsAreOwn = false
+        #expect(!compact.waveform.scrubs && !compact.debugSideHoldEnabled && !compact.debugPlayHoldEnabled)
+    }
+
+    /// With its drags its own, a pager's pan and a map's wait for the
+    /// panel's — at both sizes (`WaveformBars.yields`): the sideways hold,
+    /// the button's hold and the scrub are each required to fail first. The
+    /// panel's own gestures never wait on one another.
+    @Test(arguments: [VoiceView.Size.full, .compact])
+    func aPagersAndAMapsPanWaitForThePanel(_ size: VoiceView.Size) throws {
+        let pager = UIScrollView(frame: CGRect(x: 0, y: 0, width: 360, height: 640))
+        let map = UIView(frame: pager.bounds)
+        let mapPan = UIPanGestureRecognizer()
+        map.addGestureRecognizer(mapPan)
+        pager.addSubview(map)
+        let voice = VoiceView(size: size)
+        voice.frame = CGRect(x: 16, y: 100, width: 320, height: 56)
+        map.addSubview(voice)
+        voice.layoutIfNeeded()
+        let side = voice.debugSideHold
+        let hold = try #require(voice.debugPlayButtonHold)
+        let scrub = try #require(voice.debugScrub)
+        for other in [pager.panGestureRecognizer, mapPan] {
+            #expect(voice.gestureRecognizer(side, shouldBeRequiredToFailBy: other), "\(size): didn't wait for the side hold")
+            #expect(voice.gestureRecognizer(hold, shouldBeRequiredToFailBy: other), "\(size): didn't wait for the button")
+            #expect(voice.waveform.gestureRecognizer(scrub, shouldBeRequiredToFailBy: other), "\(size): didn't wait for the scrub")
+        }
+        #expect(side.isEnabled && hold.isEnabled && scrub.isEnabled, "\(size): a hold that is off holds nothing")
+        #expect(!voice.waveform.gestureRecognizer(scrub, shouldBeRequiredToFailBy: side), "the scrub waits on its own hold")
+        #expect(!voice.gestureRecognizer(side, shouldBeRequiredToFailBy: UITapGestureRecognizer()))
     }
 
     /// A tap on a compact waveform seeks: its seek reaches the host.

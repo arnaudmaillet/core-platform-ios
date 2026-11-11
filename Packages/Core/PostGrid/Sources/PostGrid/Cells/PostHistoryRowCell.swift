@@ -545,8 +545,7 @@ public final class PostHistoryRowCell: UICollectionViewListCell {
 
     /// The size a row gives a voice post's caption, for a text post that
     /// speaks with the switch on: compact (#2241, the issue's table) — the
-    /// shorter panel keeps a history row a list row, and a sideways drag
-    /// stays the list's. Pure.
+    /// shorter panel keeps a history row a list row. Pure.
     public static func voiceSize(for post: GalleryPost, showsVoice: Bool) -> VoicePostDisplay.Size? {
         showsVoice && post.kind == .text && post.voice != nil ? .compact : nil
     }
@@ -554,11 +553,19 @@ public final class PostHistoryRowCell: UICollectionViewListCell {
     /// Whether the first line is a voice now.
     private var speaks: Bool { !voiceCaption.isHidden }
 
+    /// ⚠️ ITS DRAGS ARE ITS OWN, compact as it is (#2275, the owner's
+    /// recording): nothing scrolls sideways under a history row, so a
+    /// sideways drag on the panel scrubs and the pager around the list (the
+    /// profile's Posts | Saved | History) waits for it; a vertical drag
+    /// still scrolls the list, and one beside the panel still pages.
+    static let voiceDragsAreOwn = true
+
     private func applyVoice(_ post: GalleryPost?) {
         if let post, let voice = post.voice {
             voiceCaption.show(
                 postID: post.id.rawValue, url: voice.url, duration: voice.duration, levels: voice.waveform,
-                author: post.authorName, size: Self.voiceSize(for: post, showsVoice: true) ?? .compact
+                author: post.authorName, size: Self.voiceSize(for: post, showsVoice: true) ?? .compact,
+                dragsAreOwn: Self.voiceDragsAreOwn
             )
         } else {
             voiceCaption.clear()
