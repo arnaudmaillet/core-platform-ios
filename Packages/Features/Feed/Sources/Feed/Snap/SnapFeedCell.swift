@@ -1604,14 +1604,18 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// collapsed size to its smallest — its preview's size: its corners go
     /// the same way, to `previewCornerRadius`, so the preview takes it over
     /// as it stands (the owner, 2026-11-03).
+    ///
+    /// `interface` (0…1) is how far the page's interface has gone — the
+    /// progress when nil; on the way back it waits for the media (#2287).
     func setCommentsSheetLayout(
         progress: CGFloat, mediaRegion: CGRect, sheetCornerRadius: CGFloat, out: CGFloat = 0,
-        towardsPreview: CGFloat = 0, previewCornerRadius: CGFloat = 0
+        towardsPreview: CGFloat = 0, previewCornerRadius: CGFloat = 0, interface: CGFloat? = nil
     ) {
         let t = min(max(0, progress), 1)
+        let hidden = min(max(0, interface ?? t), 1)
         // The interface, and the action column riding above it (#695).
-        chrome.alpha = 1 - t
-        columnStage.alpha = 1 - t
+        chrome.alpha = 1 - hidden
+        columnStage.alpha = 1 - hidden
         guard let stage = mediaCard.superview else { return }
         let mediaRegion = stage.convert(mediaRegion, from: nil)
         guard mediaRegion.width > 0, mediaRegion.height > 0 else { return }
@@ -1699,6 +1703,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         let radius = min(from + (settled - from) * t, shownSide / 2)
         commentsSheetPictureWindow.frame = window
         commentsSheetPictureFrame = mediaCard.convert(window.offsetBy(dx: bounds.minX, dy: bounds.minY), to: nil)
+        commentsSheetWholePictureFrame = mediaCard.convert(whole, to: nil)
         commentsSheetPictureRadius = radius
         let unshrink = 1 / max(shrink, 0.01)
         commentsSheetPictureWindow.layer.cornerRadius = radius * unscale * unshrink
@@ -1739,6 +1744,32 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             band.alpha = 1 - t
             band.layer.cornerRadius = screenRadius * (1 - t) * unscale
         }
+    }
+
+    /// The page under the comments sheet as `pose` stands (#2287):
+    /// `setCommentsSheetLayout`, from one value.
+    func setCommentsSheetLayout(
+        _ pose: CommentsSheetPose, sheetCornerRadius: CGFloat, previewCornerRadius: CGFloat
+    ) {
+        setCommentsSheetLayout(
+            progress: pose.progress, mediaRegion: pose.region, sheetCornerRadius: sheetCornerRadius,
+            out: pose.out, towardsPreview: pose.towardsPreview, previewCornerRadius: previewCornerRadius,
+            interface: pose.interface
+        )
+    }
+
+    /// Where the page shows the picture at rest, in the window's
+    /// coordinates — the card untransformed, unspread: what the media's way
+    /// back to full screen lands on (#2287). Nil before the card has a size.
+    var commentsSheetRestingPictureFrame: CGRect? {
+        guard let stage = mediaCard.superview else { return nil }
+        let bounds = mediaCard.bounds
+        let page = bounds.insetBy(dx: commentsSheetSpread.width, dy: commentsSheetSpread.height)
+        let picture = mediaCard.wholePictureRect(in: page).intersection(page)
+        guard !picture.isNull, picture.width > 0, picture.height > 0 else { return nil }
+        let center = mediaCard.center
+        let onStage = picture.offsetBy(dx: center.x - bounds.midX, dy: center.y - bounds.midY)
+        return stage.convert(onStage, to: nil)
     }
 
     /// `from` at 0, `to` at 1, edge by edge.
@@ -1825,7 +1856,16 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     }
 
     /// The page at rest again: identity media, its interface back.
+    ///
+    /// ⚠️ ONLY FROM REST (#2287): called over a media still on its way back,
+    /// it put the page back in one frame — the jump the owner filmed. The
+    /// sheet's session calls it once the media has landed
+    /// (`CommentsSheetLanding`), where it changes nothing on the screen.
     func clearCommentsSheetLayout() {
+        #if DEBUG
+        debugCommentsSheetClears += 1
+        #endif
+        commentsSheetMediaFade = 1
         chrome.alpha = 1
         columnStage.alpha = 1
         mediaCard.transform = .identity
@@ -1836,6 +1876,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         commentsSheetMask = nil
         commentsSheetEdge?.removeFromSuperview()
         commentsSheetPictureFrame = nil
+        commentsSheetWholePictureFrame = nil
         // Whatever the last frame left of a scale-out goes with the sheet.
         commentsSheetMediaOut = 0
         setCommentsSheetMediaHidden(false)
@@ -1848,6 +1889,31 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// preview flies from and back to.
     private(set) var commentsSheetPictureFrame: CGRect?
     private(set) var commentsSheetPictureRadius: CGFloat = 0
+    /// The whole picture the card draws, in the window's coordinates, as the
+    /// last layout placed it — the shrunk window above shows a part of it:
+    /// what a stand-in drawn over the sheet places its picture by (#2287).
+    private(set) var commentsSheetWholePictureFrame: CGRect?
+    #if DEBUG
+    /// How many times the page was put back at rest (`clearCommentsSheetLayout`).
+    private(set) var debugCommentsSheetClears = 0
+    /// The card as the sheet's layout leaves it: its transform, its opacity,
+    /// and the interface's.
+    var debugCommentsSheetCardTransform: CGAffineTransform { mediaCard.transform }
+    var debugCommentsSheetCardAlpha: CGFloat { mediaCard.alpha }
+    var debugCommentsSheetInterfaceAlpha: CGFloat { chrome.alpha }
+    /// A clip of `aspect` on the card, for the sheet's tests.
+    func debugFrameClip(aspect: CGSize) {
+        mediaCard.configure(kind: .video)
+        mediaCard.setDeclaredAspect(aspect)
+        layoutIfNeeded()
+    }
+    #endif
+
+    /// The media's opacity on top of the rest (`applyCommentsSheetMediaAlpha`):
+    /// Reduce Motion's way back cross-fades it in place (#2287).
+    var commentsSheetMediaFade: CGFloat = 1 {
+        didSet { applyCommentsSheetMediaAlpha() }
+    }
 
     /// The picture out of sight in place while its preview is out — the
     /// card's alpha only: it keeps its frame, its surface and its playback.
@@ -1863,7 +1929,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     private static let commentsSheetOutShrink: CGFloat = 0.4
 
     private func applyCommentsSheetMediaAlpha() {
-        let alpha = isCommentsSheetMediaHidden ? 0 : 1 - commentsSheetMediaOut
+        let alpha = (isCommentsSheetMediaHidden ? 0 : 1 - commentsSheetMediaOut) * min(max(0, commentsSheetMediaFade), 1)
         mediaCard.alpha = alpha
         commentsSheetEdge?.isHidden = alpha == 0
     }

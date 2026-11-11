@@ -73,10 +73,14 @@ final class CommentStream: NSObject {
     }
 
     let kind: Kind
+    /// Where it rests in the room its host gives it (#2287 § 3): the
+    /// panel's one contract, never a host's.
+    let resting: CommentStreamResting
 
     init(host: PostDetailViewController, kind: Kind = .recent) {
         self.host = host
         self.kind = kind
+        resting = CommentStreamResting(kind)
         super.init()
     }
 
@@ -92,8 +96,8 @@ final class CommentStream: NSObject {
     private var engagedStreamInsets: (top: CGFloat, bottom: CGFloat)? { host.engagedStreamInsets }
     private var keyboardHeightFromBottom: CGFloat? { host.keyboardHeightFromBottom }
     /// A short Recent starts from the bottom (#1799); a short Popular rests
-    /// at its top, as a ranking does (#2007).
-    private var anchorsShortStream: Bool { kind == .recent && host.anchorsShortStream }
+    /// at its top, as a ranking does (#2007) — `resting` says.
+    private var anchorsShortStream: Bool { resting.anchorsShortStream && host.anchorsShortStream }
     private typealias EmptyPageCopy = PostDetailViewController.EmptyPageCopy
     private var keyboardLift: CGFloat { host.keyboardLift }
     private var composerTracksKeyboard: Bool { host.composerTracksKeyboard }
@@ -577,7 +581,7 @@ final class CommentStream: NSObject {
         // behind the chrome, are not part of it (`tierOverscan`).
         let slack = standsAlone
             ? 0
-            : StreamBottomAnchor.slack(viewport: room, contentHeight: collectionView.contentSize.height - tierOverscan)
+            : resting.slack(room: room, contentHeight: collectionView.contentSize.height - tierOverscan)
         let top = engaged.top + slack - topOverscan
         guard abs(slack - bottomAnchorSlack) > 0.5 || abs(collectionView.contentInset.top - top) > 0.5
         else { return }
@@ -628,7 +632,7 @@ final class CommentStream: NSObject {
     }
 
     /// Whether the way back points down: Recent's start is its end (#2007).
-    var returnsDown: Bool { kind == .recent }
+    var returnsDown: Bool { resting == .bottom }
 
     // MARK: - Where the stream rests (#2007)
 
@@ -638,10 +642,13 @@ final class CommentStream: NSObject {
         return max(-insets.top, collectionView.contentSize.height + insets.bottom - collectionView.bounds.height)
     }
 
-    /// Where the stream rests: Popular at its top, Recent at its end.
-    private var restingOffset: CGFloat {
-        kind == .recent ? tailOffset : -collectionView.adjustedContentInset.top
-    }
+    /// Where the stream rests: Popular at its top, Recent at its end —
+    /// `resting`, the panel's contract (#2287 § 3).
+    private var restingOffset: CGFloat { resting.restingOffset(of: collectionView) }
+
+    /// How far the stream stands from where its contract rests it: 0 at
+    /// rest. Tests.
+    var debugDistanceFromRest: CGFloat { collectionView.contentOffset.y - restingOffset }
 
     /// Whether the stream is at its resting end now.
     private var isAtRest: Bool { abs(collectionView.contentOffset.y - restingOffset) <= 0.5 }
@@ -661,7 +668,7 @@ final class CommentStream: NSObject {
     /// until the content stops moving (bounded), as a conversation's tail pin
     /// does (`ConversationThreadViewController.pinToTail`).
     private func pinToTail(animated: Bool = false) {
-        guard kind == .recent, collectionView.bounds.height > 0 else { return }
+        guard resting.pinsItsEnd, collectionView.bounds.height > 0 else { return }
         suppressesPaging = true
         defer { suppressesPaging = false }
         guard !animated else {
@@ -710,7 +717,7 @@ final class CommentStream: NSObject {
     }
 
     func keepRestingEnd() {
-        guard kind == .recent, holdsRest, !isAtRest, !collectionView.isTracking,
+        guard resting.pinsItsEnd, holdsRest, !isAtRest, !collectionView.isTracking,
               !collectionView.isDecelerating, !isScrollingProgrammatically else { return }
         pinToTail()
     }
