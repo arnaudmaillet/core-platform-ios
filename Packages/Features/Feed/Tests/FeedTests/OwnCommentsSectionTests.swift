@@ -126,7 +126,10 @@ struct OwnCommentsSectionTests {
         window.rootViewController = controller
         window.isHidden = false
         controller.seedCaption("A text post", timestamp: "2h", authorName: "Ava Moreau")
-        // The tab on screen: Popular for a long thread, Recent for a short one.
+        // Grouping by day is Recent's (the conversation): every panel opens
+        // on Popular now (#2287), so Recent is chosen first when grouped.
+        controller.loadViewIfNeeded()
+        if groupsByDay { controller.showStream(.recent, animated: false) }
         for _ in 0..<Self.looks
         where controller.stream.collectionView.visibleCells.compactMap(PostDetailViewController.commentRow(in:)).isEmpty {
             try await Task.sleep(for: .milliseconds(10))

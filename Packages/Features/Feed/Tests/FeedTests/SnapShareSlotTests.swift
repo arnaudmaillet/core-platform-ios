@@ -43,6 +43,8 @@ struct SnapShareSlotTests {
         #expect(shares == 1)
         #expect(sheets == 0, "Share opened the sound sheet")
 
+        // Recent's way back: every panel opens on Popular now (#2287).
+        panel.showStream(.recent, animated: false)
         panel.debugScroll(to: 3000, userScroll: true)
         // Recent's way back points to its newest (#2007).
         #expect(panel.debugRailFace == .returnTo(down: true))

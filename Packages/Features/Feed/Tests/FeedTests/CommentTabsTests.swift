@@ -122,21 +122,22 @@ struct CommentTabsTests {
 
     // MARK: - The threshold
 
-    /// Below `CommentSortPolicy`'s threshold: one Recent stream, no Popular
-    /// tab — nothing mounted, nothing to swipe to.
-    @Test func belowTheThresholdThereIsOneStream() async {
+    /// ⚠️ NO THRESHOLD (#2287, the owner 2026-11-11: "Popular toujours"):
+    /// a short thread has both tabs from the start, opens on Popular, and
+    /// pages — no Recent first, waiting for a count.
+    @Test func aShortThreadHasBothTabsAndOpensOnPopular() async {
         let (controller, window) = panel(PagedComments(count: 5, pageSize: 20))
         defer { window.isHidden = true }
         #expect(await settle { Self.loaded(controller.recent) })
-        #expect(!controller.showsPopular)
-        #expect(controller.visibleStreamKind == .recent)
-        #expect(!controller.streamPager.isPagingEnabled, "a single stream pages")
-        #expect(controller.popular.pageView.superview == nil, "Popular is mounted with no tab")
+        #expect(controller.showsPopular)
+        #expect(controller.visibleStreamKind == .popular)
+        #expect(controller.streamPager.isPagingEnabled, "the tabs don't page")
+        #expect(controller.popular.pageView.superview != nil, "Popular isn't mounted")
     }
 
-    /// At the threshold, the first answer opens the panel on Popular.
-    @Test func atTheThresholdThePanelOpensOnPopular() async {
-        let (controller, window) = panel(PagedComments(count: CommentSortPolicy.minimumComments, pageSize: 20))
+    /// A thread opens the panel on Popular, its first answer loaded there.
+    @Test func aThreadOpensThePanelOnPopular() async {
+        let (controller, window) = panel(PagedComments(count: 10, pageSize: 20))
         defer { window.isHidden = true }
         #expect(await settle { Self.loaded(controller.popular) })
         #expect(controller.showsPopular)
@@ -384,13 +385,13 @@ struct CommentTabsTests {
         #expect(Self.takes(controller, velocity: Self.rightward), "the pager gave away the drag to Popular")
     }
 
-    /// One stream (below the threshold): no tabs to page, every horizontal
-    /// drag the screen's, as before the tabs.
-    @Test func oneStreamTakesNoDrag() async {
+    /// A short thread's tabs take the swipe too (#2287): leftward from
+    /// Popular to Recent; past Popular's end the drag stays the screen's.
+    @Test func aShortThreadsTabsTakeTheSwipe() async {
         let (controller, window) = panel(PagedComments(count: 5, pageSize: 20))
         defer { window.isHidden = true }
         #expect(await settle { Self.loaded(controller.recent) })
-        #expect(!Self.takes(controller, velocity: Self.rightward))
-        #expect(!Self.takes(controller, velocity: Self.leftward))
+        #expect(Self.takes(controller, velocity: Self.leftward), "the swipe to Recent went to the screen")
+        #expect(!Self.takes(controller, velocity: Self.rightward), "the pager kept a drag past Popular")
     }
 }

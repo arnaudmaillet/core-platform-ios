@@ -71,7 +71,12 @@ struct PostDetailStreamShapeTests {
         window.rootViewController = controller
         window.isHidden = false
         controller.seedCaption("A text post", timestamp: "2h", authorName: "Ava Moreau")
-        let stream = try #require(Self.firstView(UICollectionView.self, in: controller.view))
+        // These are RECENT's shapes (the conversation, anchored to the
+        // composer): every panel opens on Popular now (#2287), so the tab is
+        // chosen, and its own collection view read.
+        controller.loadViewIfNeeded()
+        controller.showStream(.recent, animated: false)
+        let stream = controller.recent.collectionView
         // Comments land through a task; wait for the rows, not for a clock.
         let expected = 1 + entries.count
         var attempts = 0
@@ -242,7 +247,10 @@ struct PostDetailStreamShapeTests {
         window.isHidden = false
         defer { window.isHidden = true }
         controller.seedCaption("A text post", timestamp: "2h", authorName: "Ava Moreau")
-        let stream = try #require(Self.firstView(UICollectionView.self, in: controller.view))
+        // Recent's empty page (the conversation's anchor): every panel opens
+        // on Popular now (#2287).
+        controller.showStream(.recent, animated: false)
+        let stream = controller.recent.collectionView
         engage(controller, stream, anchored: true)
         for _ in 0..<300 where controller.bottomAnchorSlack == 0 {
             try await Task.sleep(for: .milliseconds(10))

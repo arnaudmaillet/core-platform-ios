@@ -19,7 +19,11 @@ public enum CommentSortOrder: Sendable, Equatable {
 /// threshold there is one Recent stream, no selector, and the bar's width
 /// stays the author's. The owner can lower it to zero, here.
 enum CommentSortPolicy {
-    static let minimumComments = 10
+    /// ⚠️ NO THRESHOLD (#2287, the owner 2026-11-11: "Popular toujours"): both
+    /// tabs are live whatever the count, so every panel opens on Popular and
+    /// a swipe changes tab. Until then it was 10, and a post with fewer
+    /// comments showed Popular greyed and opened on Recent.
+    static let minimumComments = 0
 
     static func isAvailable(commentCount: Int) -> Bool {
         commentCount >= minimumComments

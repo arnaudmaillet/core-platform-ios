@@ -136,6 +136,8 @@ struct SnapSoundReturnTests {
         panel.setRailSoundFace(Self.face)
         panel.setRailSoundActions(tap: { sheets += 1 }, hold: nil)
 
+        // Recent's way back: every panel opens on Popular now (#2287).
+        panel.showStream(.recent, animated: false)
         panel.debugScroll(to: 3000, userScroll: true)
         #expect(panel.debugRailFace == .returnTo(down: true))
         let hold = try #require(panel.debugRailSoundHold)
