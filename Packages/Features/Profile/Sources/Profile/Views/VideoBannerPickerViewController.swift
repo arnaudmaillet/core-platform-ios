@@ -178,7 +178,7 @@ extension VideoBannerPickerViewController: UICollectionViewDataSource, UICollect
 private final class VideoBannerTileCell: UICollectionViewCell {
     static let reuseID = "VideoBannerTileCell"
     private let cover = UIImageView()
-    private let mark = UIImageView(image: UIImage(systemName: "play.fill"))
+    private let mark = UIImageView(image: AppSymbol.play.image())
     private let check = UIImageView(image: UIImage(systemName: "checkmark.circle.fill"))
     /// The cover on the media slot (#1505): the cache first, drawn in the
     /// configure pass; else the bone, then dissolved in. One per cell, so a

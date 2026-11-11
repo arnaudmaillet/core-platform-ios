@@ -67,6 +67,19 @@ public enum AppSymbol: String, CaseIterable, Sendable {
     case chatsBadge = "core.chats.badge"
     case chatsBadgeFill = "core.chats.badge.fill"
 
+    // Play and pause (#2276): the owner's two drawings, everywhere a play or
+    // a pause is drawn — in ONE box, so a swap between them
+    // (`PlayPauseGlyph`) never moves the glyph; the play's image centred on
+    // its optical centre, as SF centres its play in a disc
+    // (`dev/symbols/play-pause`).
+    /// Play: the owner's rounded triangle with a full back.
+    case play = "core.play.fill"
+    /// Pause: the owner's two tall ovals.
+    case pause = "core.pause.fill"
+    /// Play on a disc, knocked out of it — `play.circle.fill`'s look (a
+    /// video in a conversation).
+    case playCircle = "core.play.circle.fill"
+
     /// The glyph as a template image, sized by `configuration` (a text style
     /// for a glyph beside text, a point size for fixed chrome — see
     /// `textStyle(_:)` and `fixed(_:)`).
@@ -91,6 +104,8 @@ public enum AppSymbol: String, CaseIterable, Sendable {
         case .paperplane, .paperplaneFill, .paperplaneBadge, .paperplaneBadgeFill: "Explore"
         case .squarePlay, .squarePlayFill, .squarePlayBadge, .squarePlayBadgeFill: "For You"
         case .chats, .chatsFill, .chatsBadge, .chatsBadgeFill: "Messages"
+        case .play, .playCircle: "Play"
+        case .pause: "Pause"
         }
     }
 

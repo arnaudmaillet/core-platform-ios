@@ -743,7 +743,7 @@ open class AppControl: UIButton {
         case bounceIn, fadeIn, scaleOut, fadeOut
         case blurMorph, crossFade
         case countRoll(up: Bool), countFade
-        case symbolReplace, symbolFade
+        case symbolReplace, symbolFade, symbolScaleAndFade
         case symbolBounce, symbolFlash
         case stateTint, placeholderReveal
         case shake, failureFlash

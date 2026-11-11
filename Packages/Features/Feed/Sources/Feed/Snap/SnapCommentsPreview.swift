@@ -109,7 +109,7 @@ final class SnapCommentsPreview: UIView {
             stashChevron.centerYAnchor.constraint(equalTo: stashVeil.centerYAnchor),
             stashChevron.widthAnchor.constraint(equalToConstant: Self.stashedTab),
         ])
-        pausedMark.image = UIImage(systemName: "play.fill")
+        pausedMark.image = AppSymbol.play.image()
         pausedMark.tintColor = .white
         pausedMark.preferredSymbolConfiguration = UIImage.SymbolConfiguration(textStyle: .title2)
         pausedMark.layer.shadowColor = UIColor.black.cgColor
@@ -187,6 +187,11 @@ final class SnapCommentsPreview: UIView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    #if DEBUG
+    /// The paused clip's mark (the owner's play, #2276).
+    var debugPausedMarkImage: UIImage? { pausedMark.image }
+    #endif
 
     override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
         super.traitCollectionDidChange(previousTraitCollection)

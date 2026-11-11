@@ -843,6 +843,8 @@ public final class PostHistoryRowCell: UICollectionViewListCell {
     public var debugMarks: (play: Bool, stack: Bool, textTile: Bool) { square.debugMarks }
     /// The play mark's box side.
     public var debugPlaySide: CGFloat { square.debugPlaySide }
+    /// The play mark's image (the owner's play, #2276).
+    public var debugPlayImage: UIImage? { square.debugPlayImage }
     /// Whether the heart comes after the like count.
     public var debugLikesGlyphTrails: Bool { likes.debugGlyphTrails }
     /// A tap and a hold on the author, as a finger's would land.
@@ -894,8 +896,9 @@ public final class PostHistorySquareView: UIView {
         textLabel.isHidden = true
         addSubview(textLabel)
 
-        for (mark, symbol) in [(playMark, "play.fill"), (stackMark, "square.fill.on.square.fill")] {
-            mark.image = UIImage(systemName: symbol)
+        // The clip's mark is the owner's play (#2276).
+        for (mark, symbol) in [(playMark, AppSymbol.play.rawValue), (stackMark, "square.fill.on.square.fill")] {
+            mark.image = UIImage.symbol(named: symbol)
             mark.tintColor = .white
             mark.contentMode = .center
             mark.isHidden = true
@@ -1017,6 +1020,7 @@ public final class PostHistorySquareView: UIView {
 
     #if DEBUG
     var debugPlaySide: CGFloat { playMark.frame.width }
+    var debugPlayImage: UIImage? { playMark.image }
 
     var debugMarks: (play: Bool, stack: Bool, textTile: Bool) {
         (!playMark.isHidden, !stackMark.isHidden, !textLabel.isHidden)

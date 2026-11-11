@@ -181,7 +181,9 @@ struct VoicePanelTests {
         for style in [UIUserInterfaceStyle.light, .dark] {
             #expect(rgba(view.debugGlyphInk, style) == rgba(view.inks.played, style), "the glyph isn't the played bars' ink")
         }
-        #expect(view.debugGlyph == "play.fill")
+        #expect(view.debugGlyph == AppSymbol.play.rawValue)
+        // The owner's play (#2276) resolves: the button draws it.
+        #expect(view.debugButtonImage?.isSymbolImage == true)
         let button = view.debugPlayButton.convert(view.debugPlayButton.bounds, to: view)
         let panel = view.debugPanelFrame
         #expect(abs((button.minY - panel.minY) - (panel.maxY - button.maxY)) < 0.5, "\(button) in \(panel)")

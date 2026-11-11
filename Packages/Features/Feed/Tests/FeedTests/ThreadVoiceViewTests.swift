@@ -74,7 +74,7 @@ struct ThreadVoiceViewTests {
         #expect(view.debugShowsChip)
         #expect(view.debugChipTitle == "1.5×")
         #expect(view.debugTimerText == "0:06")
-        #expect(view.debugGlyph == "pause.fill")
+        #expect(view.debugGlyph == AppSymbol.pause.rawValue)
 
         state.unplayed = false
         state.playback = .paused(progress: 0.25)
@@ -82,12 +82,12 @@ struct ThreadVoiceViewTests {
         #expect(!view.debugShowsDot)
         #expect(!view.debugShowsChip && view.debugShowsTimer, "paused, the slot shows the time reached")
         #expect(view.debugTimerText == "0:03")
-        #expect(view.debugGlyph == "play.fill")
+        #expect(view.debugGlyph == AppSymbol.play.rawValue)
         #expect(view.accessibilityLabel?.hasSuffix(", played") == true)
 
         state.playback = .loading
         view.update(state)
-        #expect(view.debugGlyph == "pause.fill", "the glyph turns on the tap, not when the audio is ready")
+        #expect(view.debugGlyph == AppSymbol.pause.rawValue, "the glyph turns on the tap, not when the audio is ready")
         #expect(!view.debugShowsLoader)
         view.debugLoaderWaitEnds()
         #expect(view.debugShowsLoader, "a wait that lasts shows the loader")
@@ -132,7 +132,7 @@ struct ThreadVoiceViewTests {
         state.delivery = .sending
         let view = view(state)
         #expect(!view.debugShowsLoader)
-        #expect(view.debugGlyph == "play.fill")
+        #expect(view.debugGlyph == AppSymbol.play.rawValue)
         #expect(!view.debugPlayEnabled)
     }
 

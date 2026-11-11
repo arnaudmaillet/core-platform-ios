@@ -38,6 +38,8 @@ final class MediaPlaybackFlashView: UIView {
     /// Bumped by every flash, so a flash overtaken by a newer one does not
     /// fade the newer one out when its own hold ends.
     private var generation = 0
+    /// The state the glyph names (pause or play), once a flash has shown one.
+    private var shownPaused: Bool?
 
     /// Whether the device asks for less motion — a seam, so a test can state it
     /// rather than inherit the setting of the machine that runs it.
@@ -69,7 +71,17 @@ final class MediaPlaybackFlashView: UIView {
     func flash(paused: Bool, at point: CGPoint) {
         generation += 1
         let mine = generation
-        glyph.image = UIImage(systemName: paused ? "pause.fill" : "play.fill")
+        // ⚠️ A FLASH STILL ON SCREEN SWAPS ITS GLYPH (#2276): a second tap
+        // within the hold turns ▶︎ into ❚❚ by the app's play ⇄ pause swap — in
+        // this glass capsule, the scale and fade (`PlayPauseGlyph`) — where it
+        // was a cut. An unseen flash just takes the glyph.
+        let inSight = (layer.presentation()?.opacity ?? Float(alpha)) > 0.01 && window != nil
+        let changes = shownPaused != paused
+        shownPaused = paused
+        PlayPauseGlyph.swap(
+            glyph, to: (paused ? AppSymbol.pause : AppSymbol.play).image(), site: .mediaFlash,
+            animated: inSight && changes, reducesMotion: reducesMotion()
+        )
         center = point
         superview?.bringSubviewToFront(self)
         layer.removeAllAnimations()
@@ -117,5 +129,8 @@ final class MediaPlaybackFlashView: UIView {
     /// Internal for tests: every flash asked for, as the state it named.
     private(set) var debugFlashes: [Bool] = []
     var debugGlyphName: String? { glyph.image.flatMap { $0.isSymbolImage ? $0.description : nil } }
+    /// The glyph's image (the owner's ▶︎ / ❚❚, #2276) and the view drawing it.
+    var debugGlyphImage: UIImage? { glyph.image }
+    var debugGlyphView: UIImageView { glyph }
     #endif
 }

@@ -78,6 +78,10 @@ open class AppIconButton: AppControl {
     /// default; a toggle answering the tap at once takes a quicker one
     /// (a voice message's play button, `.replace.offUp` at twice the speed).
     public var symbolTransition = UISymbolContentTransition(.replace) { didSet { refresh() } }
+    /// How a symbol swapped for another moves: the replace above, or the
+    /// scale and fade a glyph in glass takes (`PlayPauseGlyph`, #2276). A
+    /// play button takes its site's (`PlayPauseGlyph.swap(for:)`).
+    public var symbolSwap: PlayPauseGlyph.Swap = .replace { didSet { refresh() } }
     /// A glyph's width follows its content, its neighbours with it, in a
     /// spring. Off for a button its host sizes: there is nothing to follow,
     /// and the replace's new symbol only showed once that spring had
@@ -181,15 +185,22 @@ open class AppIconButton: AppControl {
         resize()
     }
 
-    /// A symbol swapped for another: UIKit's replace transition.
+    /// A symbol swapped for another: UIKit's replace transition, or the
+    /// scale and fade (`symbolSwap`).
     private func replaceSymbol(reduced: Bool) {
-        record(reduced ? .symbolFade : .symbolReplace)
         if reduced {
+            record(.symbolFade)
             UIView.transition(with: self, duration: Metrics.fadeDuration, options: [.transitionCrossDissolve, .allowUserInteraction]) {
                 self.refresh()
                 self.layoutIfNeeded()
             }
+        } else if symbolSwap == .scaleAndFade {
+            record(.symbolScaleAndFade)
+            PlayPauseGlyph.scaleAndFade(self) {
+                self.refresh()
+            }
         } else {
+            record(.symbolReplace)
             refresh()
         }
         resize()
@@ -360,7 +371,7 @@ open class AppIconButton: AppControl {
         config.image = UIImage.symbol(named: content.symbol)
         // A symbol swapped for another is replaced — the one symbol motion
         // UIKit does here.
-        config.symbolContentTransition = reducesMotion() ? nil : symbolTransition
+        config.symbolContentTransition = reducesMotion() || symbolSwap == .scaleAndFade ? nil : symbolTransition
         if let text = content.text {
             config.attributedTitle = AttributedString(text, attributes: AttributeContainer([.font: font]))
         }

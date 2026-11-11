@@ -30,8 +30,8 @@ public final class PausedClipMarkView: UIImageView {
 
     public init() {
         super.init(frame: .zero)
-        image = UIImage(systemName: "play.fill")?
-            .withConfiguration(UIImage.SymbolConfiguration(pointSize: 56, weight: .semibold))
+        // The owner's play (#2276), centred on its optical centre.
+        image = AppSymbol.play.image(UIImage.SymbolConfiguration(pointSize: 56, weight: .semibold))
         tintColor = UIColor.white.withAlphaComponent(0.85)
         contentMode = .center
         isUserInteractionEnabled = false

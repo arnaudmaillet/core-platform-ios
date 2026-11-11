@@ -414,7 +414,9 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
     /// The app's icon button as a bare glyph (#2274: the disc is gone), in
     /// the played bars' ink, with the app's swell under the finger and a
     /// 44 pt target. The same button as before, so the same Replace morph.
-    private let playButton = VoicePlayGlyphButton(style: .glyph, content: .symbol("play.fill"), dims: false)
+    /// The owner's play and pause (#2276), swapped as `PlayPauseGlyph`
+    /// says for this site.
+    private let playButton = VoicePlayGlyphButton(style: .glyph, content: .symbol(AppSymbol.play.rawValue), dims: false)
     private let loader = AppLoaderView(size: .medium)
     /// The waveform's box: the line's whole height, between the glyph and
     /// the slot; the bars fill it.
@@ -488,8 +490,10 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
         playButton.symbolPointSize = Self.glyphPointSize(for: size)
         // Off-up at twice the speed: the old glyph goes at once and the new
         // one is up in a tenth of a second — the default down-up shrank the
-        // old one first, a third of a second behind the tap.
-        playButton.symbolTransition = UISymbolContentTransition(.replace.offUp, options: .speed(2))
+        // old one first, a third of a second behind the tap. The app's one
+        // play ⇄ pause swap decides Replace or the scale and fade (#2276).
+        playButton.symbolTransition = PlayPauseGlyph.replaceTransition
+        playButton.symbolSwap = PlayPauseGlyph.swap(for: .voicePanel)
         // Sized here (`buttonSide`): no spring after a swap holding the new
         // glyph back.
         playButton.followsContentSize = false
@@ -801,8 +805,8 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
         if !loader.isHidden { return "" }
         return switch state.playback {
         case .failed: "arrow.clockwise"
-        case .playing, .loading: "pause.fill"
-        default: "play.fill"
+        case .playing, .loading: AppSymbol.pause.rawValue
+        default: AppSymbol.play.rawValue
         }
     }
 
@@ -813,10 +817,11 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
     }
 
     /// The button's glyph — none while the loader stands in its place —
-    /// swapped by the symbol's own Replace.
+    /// swapped by the symbol's own Replace (`PlayPauseGlyph`); under Reduce
+    /// Motion, a cross-fade (#2276).
     private func setGlyph(_ name: String) {
         guard name != shownGlyph else { return }
-        let animated = window != nil && !shownGlyph.isEmpty && !name.isEmpty && !reducesMotion()
+        let animated = window != nil && !shownGlyph.isEmpty && !name.isEmpty
         shownGlyph = name
         // Unanimated (a dequeued row), the glyph lands with no transition.
         glyphStill = !animated
