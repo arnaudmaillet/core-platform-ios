@@ -15,10 +15,10 @@ import VoiceKitUI
 /// `CommentRowView`s (avatar, "Name · 14:32", body — the viewer's too), the
 /// composer is `CommentsInputBar` resting where the text page rests it, the
 /// footer frost is the same `ProgressiveFrostView` band, and the
-/// footer is `SnapFooterToolbar` with the emote strip where a post shows its
-/// music. What a conversation leaves out is what only a post has: the stake
-/// (there is nothing to like), and the footer's save and repost — the strip
-/// takes their room. What a conversation adds is a chat's reading order: oldest at the
+/// footer is `SnapFooterToolbar` with the peer's pill where a post shows its
+/// author. What a conversation leaves out is what only a post has: the stake
+/// (there is nothing to like), and the footer's save and repost — the
+/// conversation's pin and bell take their room (#2305). What a conversation adds is a chat's reading order: oldest at the
 /// top, the newest at the bottom, day pills pinned over each day, and a list
 /// that follows new messages and the keyboard.
 ///
@@ -63,8 +63,11 @@ final class ConversationThreadViewController: UIViewController {
     /// The post's composer, in its conversation's shape (the owner,
     /// 2026-11-07, Telegram's): no column slot — the voice note and the send
     /// are the input row's own bubble at its end (`actsFromOwnBubble`), which
-    /// rides the keyboard with the field. The pin went to the bar, the way
-    /// back to the newest message floats over the composer (`returnButton`).
+    /// rides the keyboard with the field. The camera and the library stand
+    /// between the field and that bubble, hidden while the reader writes
+    /// (`attachmentSources`, #2305). The pin and the bell are the footer's,
+    /// the way back to the newest message floats over the composer
+    /// (`returnButton`).
     private let composeBar = CommentsInputBar()
     /// The leftward swipe's push of the peer's profile (#1525).
     private(set) var swipeArbiter: SwipeStageArbiter?
@@ -79,10 +82,11 @@ final class ConversationThreadViewController: UIViewController {
     }
 
     /// The conversation's pin: a bar item of its own, left of the bell and
-    /// apart from it (the owner, 2026-11-07). Disabled until the driver
-    /// reports one: a draft has nothing to pin. The action carries no image
-    /// (`BarItems.icon`'s note: an action's image is re-applied to its item
-    /// when it fires).
+    /// apart from it (the owner, 2026-11-07) — on the FOOTER since #2305,
+    /// `[peer pill] … [pin] [bell] [⋯]`, each its own bubble. Disabled until
+    /// the driver reports one: a draft has nothing to pin. The action
+    /// carries no image (`BarItems.icon`'s note: an action's image is
+    /// re-applied to its item when it fires).
     private lazy var pinItem: UIBarButtonItem = {
         let item = UIBarButtonItem(
             title: nil, image: UIImage(systemName: "pin"),
@@ -92,7 +96,6 @@ final class ConversationThreadViewController: UIViewController {
         item.tintColor = .label
         return item
     }()
-    private let pinSpacer = UIBarButtonItem.fixedSpace(Spacing.sm)
 
     private func togglePin() {
         guard isPinned != nil else { return }
@@ -214,9 +217,10 @@ final class ConversationThreadViewController: UIViewController {
     /// is out; an idle spinner redraws the screen every frame (#580).
     private let olderSpinner = AppLoaderView(size: .medium)
     private let peerPill = SnapAuthorIdentityView()
-    /// The conversation's mute (#719), at the bar's trailing corner beside
-    /// the points badge: `bell`, or `bell.slash` once muted. Hidden while
-    /// there is nothing to mute (a draft).
+    /// The conversation's mute (#719): `bell`, or `bell.slash` once muted —
+    /// on the footer between the pin and ⋯ since #2305 (the top bar's
+    /// trailing corner before). Hidden while there is nothing to mute (a
+    /// draft).
     ///
     /// ⚠️ ONE ITEM FOR BOTH STATES, ITS GLYPH REPLACED IN PLACE (#2143, the
     /// owner's device check). One item per state (#729) got the glass morph
@@ -226,8 +230,6 @@ final class ConversationThreadViewController: UIViewController {
     /// (`setSymbolImage(_:contentTransition: .replace)`: the slash drawn
     /// across the bell).
     private lazy var muteItem = makeMuteItem()
-    /// Keeps the bell and the badge two bubbles.
-    private let muteSpacer = UIBarButtonItem.fixedSpace(Spacing.sm)
     /// The conversation's mute; nil hides the bell.
     private var muted: Bool?
     /// While the viewer's own mute or unmute is on its way: a second tap does
@@ -547,7 +549,7 @@ final class ConversationThreadViewController: UIViewController {
     /// below the bar's bottom: the stream's own top breath (#750).
     static var dayStartLanding: CGFloat { SnapCommentsLayout.streamTopBreath }
 
-    /// The day on screen, as a bar item left of the bell (#750): a system
+    /// The day on screen, as a bar item right of the back button (#750): a system
     /// glass bubble, interactive. A tap scrolls to that day's first message,
     /// as a search section's pill does. The flow keeps its own day chips,
     /// unpinned (#755).
@@ -708,7 +710,7 @@ final class ConversationThreadViewController: UIViewController {
         collectionView.keyboardDismissMode = .interactive
         collectionView.contentInset.top = SnapCommentsLayout.streamTopBreath
         // ⚠️ NO BLUR UNDER THE HEADER (#750, the owner's call 2026-10-09,
-        // back from #741): the messages run up under the day and the bell
+        // back from #741): the messages run up under the day
         // as on every other screen; the window's status-bar blur
         // (`StatusBarBlurView`) is the only material up there. See
         // `prefersClearTopEdge`.
@@ -965,17 +967,54 @@ final class ConversationThreadViewController: UIViewController {
     }
 
     /// The post's footer, with the peer's pill where the post's author pill
-    /// is (#671): [peer pill] … [⋯]. The emote strip that held the slot is
-    /// gone — the composer's own emote button is the way to emotes.
+    /// is (#671): `[peer pill] … [pin] [bell] [⋯]` (#2305). The emote strip
+    /// that held the slot is gone — the composer's own emote button is the
+    /// way to emotes — and the camera and the library left for the
+    /// composer's row (`attachmentSources`), the pin and the bell coming
+    /// down from the top bar into their place.
+    ///
+    /// What the footer holds follows the kind of conversation, and so do
+    /// the composer's attachments (a channel's reader sends nothing): both
+    /// are set here.
     private func configureToolbar() {
         let more = SnapFooterToolbar.makeMoreItem(menu: overflowMenu())
         moreItem = more
-        toolbarItems = SnapFooterToolbar.items(
-            leading: peerPill, leadingID: "conversation.peer-pill", actions: mediaItems(), more: more
-        )
+        toolbarItems = footerItems()
+        composeBar.attachmentSources = attachmentSources()
         toolbarShape = ToolbarShape(
             isChannel: group?.isChannel == true, isGroup: group != nil, canPost: group?.canPost != false
         )
+    }
+
+    /// The peer pill's item, made once: the footer rebuilt for the bell
+    /// keeps it.
+    private lazy var peerPillItem = BarItems.container(id: "conversation.peer-pill", view: peerPill)
+
+    /// `[peer pill] … [pin] [bell] [⋯]` (#2305): the pin and the bell are
+    /// each a bubble of their own, as they were on the top bar (the owner,
+    /// 2026-11-07) — a separator between them, as between them and ⋯ —
+    /// rather than one platter, which the bar makes of neighbouring items.
+    /// The pin always (disabled on a draft), the bell once there is a
+    /// conversation to mute. A channel's reader keeps both, as the top bar
+    /// gave them.
+    private func footerItems() -> [UIBarButtonItem] {
+        var actions = [pinItem]
+        if muted != nil { actions.append(muteItem) }
+        return [peerPillItem] + SnapFooterToolbar.trailingItems(
+            actions: actions, more: moreItem, separatesActions: true
+        )
+    }
+
+    /// The footer again — the bell come or gone. Rebuilt and handed to the
+    /// bar, which animates the change (R3); nothing when its items are the
+    /// same, which would restart a transition already running (#756).
+    private func placeFooterItems() {
+        guard mode == .full, moreItem != nil else { return }
+        let items = footerItems()
+        let current = toolbarItems ?? []
+        guard items.compactMap(\.identifier) != current.compactMap(\.identifier) else { return }
+        let animated = view.window != nil && transitionCoordinator == nil
+        setToolbarItems(items, animated: animated)
     }
 
     /// The footer's ⋯, kept so its menu follows the standing in place
@@ -1039,21 +1078,27 @@ final class ConversationThreadViewController: UIViewController {
     }
     private var toolbarShape = ToolbarShape()
 
-    /// `[📷 🖼]` left of the ⋯ (#681): the camera and the library, for a
-    /// thread whose driver sends media.
-    /// Stock bar items side by side, so the bar puts them in one platter
-    /// (#1679).
-    private func mediaItems() -> [UIBarButtonItem] {
+    /// The camera and the library (#681), in the composer's row since #2305:
+    /// `[avatar][field][📷][🖼][☺]`, hidden while the reader writes — for a
+    /// thread whose driver sends media. A list of sources, not a pair of
+    /// buttons: the conversation's declared attachments (#2308).
+    private func attachmentSources() -> [ComposerAttachmentSource] {
         // A channel's reader sends nothing (#2215).
         guard mode == .full, driver.sendsMedia, group?.canPost != false else { return [] }
-        let camera = BarItems.icon(
-            id: "conversation.camera", image: UIImage(systemName: "camera"), label: "Camera"
-        ) { [weak self] in self?.pickMedia(.camera) }
-        let library = BarItems.icon(
-            id: "conversation.library", image: UIImage(systemName: "photo.on.rectangle"), label: "Photo Library"
-        ) { [weak self] in self?.pickMedia(.library) }
-        return [camera, library]
+        return [
+            ComposerAttachmentSource(id: Self.cameraID, symbol: "camera", accessibilityLabel: "Camera") { [weak self] in
+                self?.pickMedia(.camera)
+            },
+            ComposerAttachmentSource(
+                id: Self.libraryID, symbol: "photo.on.rectangle", accessibilityLabel: "Photo Library"
+            ) { [weak self] in
+                self?.pickMedia(.library)
+            },
+        ]
     }
+
+    static let cameraID = "conversation.camera"
+    static let libraryID = "conversation.library"
 
     private func pickMedia(_ source: ConversationThreadMediaSource) {
         view.endEditing(true)
@@ -1088,7 +1133,8 @@ final class ConversationThreadViewController: UIViewController {
         navigationItem.compactAppearance = appearance
         // ⚠️ NO TITLE SHOWN IN THE CENTRE (#750, the owner's call 2026-10-09,
         // over #738): the correspondent is the toolbar's pill; the bar
-        // carries the day and the bell.
+        // carries the back button and the day — the pin and the bell went
+        // down to the footer (#2305), so the top bar is calm.
         navigationItem.titleView = nil
         navigationItem.title = nil
 
@@ -1102,37 +1148,11 @@ final class ConversationThreadViewController: UIViewController {
         peerPill.onAuthorLongPressed = { [weak self] _ in self?.driver.didTapIdentity() }
         peerPill.onFollowTapped = { [weak self] id in self?.followPeer(id) }
         // The pill is the toolbar's (#671); a preview (no toolbar) keeps it
-        // in the bar.
-        var items = pillRidesToolbar ? [] : [BarItems.container(id: "conversation.peer-pill", view: peerPill)]
-        // No points badge on a conversation (#738): the bell trails, the pin
-        // beside it.
-        navigationItem.rightBarButtonItems = items
+        // in the bar. No points badge on a conversation (#738), and no pin
+        // or bell either: both are the footer's (#2305).
+        navigationItem.rightBarButtonItems = pillRidesToolbar ? [] : [peerPillItem]
         // The day stands right of the back button (the owner, 2026-11-07).
         navigationItem.leftItemsSupplementBackButton = true
-        placeMuteItem()
-    }
-
-    /// The bell takes the corner, right of the points badge (#719): `[0]` is
-    /// the trailing edge, and a fixed space keeps the two bubbles apart.
-    private func placeMuteItem(replacing old: UIBarButtonItem? = nil, animated: Bool = false) {
-        let current = ownTrailingBarItems
-        var items = current.filter {
-            $0 !== muteItem && $0 !== muteSpacer && $0 !== old && $0 !== pinItem && $0 !== pinSpacer
-        }
-        // `[0]` is the trailing edge: the bell takes the corner, the pin
-        // stands left of it, a bubble of its own (the owner, 2026-11-07).
-        var trailing: [UIBarButtonItem] = []
-        if mode == .full, muted != nil { trailing.append(muteItem) }
-        if mode == .full {
-            if !trailing.isEmpty { trailing.append(pinSpacer) }
-            trailing.append(pinItem)
-        }
-        items = trailing + (items.isEmpty || trailing.isEmpty ? [] : [muteSpacer]) + items
-        // The same items again would restart — and cut short — a transition
-        // already running (#756).
-        guard items.count != current.count || zip(items, current).contains(where: { $0 !== $1 }) else { return }
-        if animated { debugAnimatedBarPlacements += 1 }
-        setOwnTrailingBarItems(items, animated: animated)
     }
 
     /// How many animated placements the bar took. Tests.
@@ -1262,14 +1282,15 @@ final class ConversationThreadViewController: UIViewController {
     }
 
     /// The bell follows the conversation's mute; it appears once there is a
-    /// conversation to mute and leaves if there is none.
+    /// conversation to mute and leaves if there is none — on the footer,
+    /// between the pin and ⋯ (#2305).
     private func renderMuted(_ muted: Bool?) {
         let was = self.muted
         self.muted = muted
         guard let muted else {
             if was != nil {
-                placeMuteItem()
                 fitTrailingRun()
+                placeFooterItems()
             }
             return
         }
@@ -1277,15 +1298,15 @@ final class ConversationThreadViewController: UIViewController {
         // A change redraws the glyph in place; a first appearance lands.
         applyBellLook(muted: muted, animated: was != nil)
         if was == nil {
-            placeMuteItem()
             fitTrailingRun()
+            placeFooterItems()
         }
     }
 
     #if DEBUG
-    /// The bell on the bar, nil while there is none. Tests.
+    /// The bell on the footer, nil while there is none. Tests.
     var debugMuteItem: UIBarButtonItem? {
-        navigationItem.rightBarButtonItems?.first { $0 === muteItem }
+        toolbarItems?.first { $0 === muteItem }
     }
 
     /// What a tap on the bell does. Tests.
@@ -2417,9 +2438,10 @@ final class ConversationThreadViewController: UIViewController {
 
     // MARK: - Bars
 
-    /// The peer pill's share of the nav bar: the bar less its margins, the
-    /// back button, and the bell when there is one. Measured, and
-    /// applied before the bar first lays the run out (see `viewWillAppear`).
+    /// The peer pill's share of its bar: on the footer, what the pin, the
+    /// bell and ⋯ leave; in a preview's nav bar, the bar less its margins
+    /// and the back button. Measured, and applied before the bar first lays
+    /// the run out (see `viewWillAppear`).
     /// Whether the peer pill is the toolbar's leading item (#671): on the full
     /// thread, which has a toolbar; a preview keeps it in the bar.
     private var pillRidesToolbar: Bool { mode == .full }
@@ -2430,18 +2452,17 @@ final class ConversationThreadViewController: UIViewController {
         let itemPadding: CGFloat = 18
         if pillRidesToolbar {
             // The toolbar's leading slot (#671): what the footer's stock items
-            // leave — ⋯ and, sending media (#681), the [📷 🖼] platter — as the
-            // post's footer measures them, at this text size (#1679).
+            // leave — the pin, the bell once there is one, and ⋯, each its own
+            // bubble (#2305) — as the post's footer measures them, at this
+            // text size (#1679). A long name truncates in the pill; the
+            // bubbles never fold into `•••`.
             let reserve = SnapBarPillWidths.toolbarReserve(
-                icon: SnapBarPillWidths.toolbarIcon(for: traitCollection), platter: !mediaItems().isEmpty
+                icon: SnapBarPillWidths.toolbarIcon(for: traitCollection), lone: muted == nil ? 1 : 2
             )
             peerPill.setWidthBudget(bar - reserve)
             return
         }
-        var budget = bar - 16 * 2 - (36 + itemPadding) - itemPadding
-        // The bell beside it (#719).
-        if mode == .full, muted != nil { budget -= 44 + itemPadding + Spacing.sm }
-        peerPill.setWidthBudget(budget)
+        peerPill.setWidthBudget(bar - 16 * 2 - (36 + itemPadding) - itemPadding)
     }
 
     // MARK: - Misc

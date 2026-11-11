@@ -5,8 +5,8 @@ import Testing
 import UIKit
 @testable import Feed
 
-/// The conversation's photos and videos (#681): the footer's camera and
-/// library, the media bubble in its three states, and the retry.
+/// The conversation's photos and videos (#681): the composer row's camera
+/// and library (#2305), the media bubble in its three states, and the retry.
 @MainActor
 struct ConversationThreadMediaTests {
     private final class MediaDriver: ConversationThreadDriving {
@@ -94,29 +94,39 @@ struct ConversationThreadMediaTests {
         return nil
     }
 
-    // MARK: - The footer
+    // MARK: - The composer's row (#2305)
 
-    /// `[peer pill] … [📷 🖼] [⋯]`, labelled, and each hands its source to
-    /// the driver.
-    @Test func theFooterOffersTheCameraAndTheLibrary() throws {
+    /// `[avatar][field][📷][🖼][☺]`: the camera and the library are the
+    /// composer's, labelled, in the row's order, and each hands its source
+    /// to the driver. The footer is `[peer pill] … [pin] [⋯]` — no camera
+    /// or library left on it.
+    @Test func theRowOffersTheCameraAndTheLibrary() throws {
         let (screen, driver, window) = screen()
         defer { window.isHidden = true }
+        let bar = screen.debugComposeBar
+        let buttons = bar.debugAttachmentButtons
+        #expect(buttons.map(\.accessibilityLabel) == ["Camera", "Photo Library"])
+        #expect(buttons.map(\.accessibilityIdentifier) == [
+            ConversationThreadViewController.cameraID, ConversationThreadViewController.libraryID,
+        ])
+        #expect(bar.debugShowsAttachments, "an empty field at rest hides its attachments")
+
+        for button in buttons { button.sendActions(for: .primaryActionTriggered) }
+        #expect(driver.picked == [.camera, .library])
+
         let items = try #require(screen.toolbarItems)
         #expect(items.first?.customView is SnapAuthorIdentityView)
         let labels = toolbarActions(screen).compactMap(\.accessibilityLabel)
-        #expect(labels == ["Camera", "Photo Library", "More actions"], "the footer reads \(labels)")
-
-        let actions = toolbarActions(screen)
-        actions[0].primaryAction?.performWithSender(nil, target: nil)
-        actions[1].primaryAction?.performWithSender(nil, target: nil)
-        #expect(driver.picked == [.camera, .library])
+        #expect(labels == ["Pin conversation", "More actions"], "the footer reads \(labels)")
     }
 
-    /// A driver that sends text only keeps the bare footer.
+    /// A driver that sends text only: no attachments in the row.
     @Test func aTextOnlyThreadHasNoMediaButtons() {
         let (screen, _, window) = screen(sendsMedia: false)
         defer { window.isHidden = true }
-        #expect(toolbarActions(screen).compactMap(\.accessibilityLabel) == ["More actions"])
+        #expect(screen.debugComposeBar.debugAttachmentButtons.isEmpty)
+        #expect(!screen.debugComposeBar.debugShowsAttachments)
+        #expect(toolbarActions(screen).compactMap(\.accessibilityLabel) == ["Pin conversation", "More actions"])
     }
 
     // MARK: - The bubble

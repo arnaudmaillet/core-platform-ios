@@ -728,18 +728,22 @@ struct ConversationThreadViewControllerTests {
         #expect(Self.firstView(UIRefreshControl.self, in: preview.view) == nil)
     }
 
-    /// The pin is the inbox's, in the bar: a tap goes to the driver, and
-    /// what the driver reports — from here or from the inbox — is the
-    /// glyph, filled when pinned. The bubble's send is never a pin.
+    /// The pin is the inbox's, on the footer (#2305): a tap goes to the
+    /// driver, and what the driver reports — from here or from the inbox —
+    /// is the glyph, filled when pinned. The bubble's send is never a pin.
     @Test func thePinPinsThroughTheDriverFromTheBar() throws {
         let (screen, driver, _, _) = makeScreen()
         let bar = try #require(Self.firstView(CommentsInputBar.self, in: screen.view))
         let pin = screen.debugPinItem
         #expect(pin.accessibilityLabel == "Pin conversation")
+        #expect(pin.image == UIImage(systemName: "pin"))
 
-        screen.debugTapPin()
+        // Through the footer item's own action.
+        pin.primaryAction?.performWithSender(nil, target: nil)
         #expect(driver.pinned == true)
         #expect(pin.accessibilityLabel == "Unpin conversation")
+        #expect(pin.image == UIImage(systemName: "pin.fill"))
+        #expect(screen.toolbarItems?.first { $0.identifier == "conversation.pin" } === pin, "the pin left the footer")
 
         bar.draftText = "On my way"
         bar.debugRowActionButton.sendActions(for: .primaryActionTriggered)
@@ -815,18 +819,20 @@ struct ConversationThreadViewControllerTests {
         #expect(driver.sent == ["One", "Two"], "the next text was held back")
     }
 
-    /// The footer: [peer pill] … [⋯] (#671, the layout since #680) — no
-    /// emote strip (the composer's emote button is the way to emotes), and no
-    /// peer pill left in the nav bar. The pin is the bar's, beside the bell.
+    /// The footer: [peer pill] … [pin] [⋯] (#671, the layout since #680; the
+    /// pin since #2305) — no emote strip (the composer's emote button is the
+    /// way to emotes), and no peer pill, pin or bell left in the nav bar.
     @Test func thePeerPillLeadsTheFooter() throws {
         let (screen, _, _, _) = makeScreen()
         let items = try #require(screen.toolbarItems)
         #expect(items.first?.customView is SnapAuthorIdentityView)
         #expect(items.last?.accessibilityLabel == "More actions")
         #expect(items.last?.customView == nil, "⋯ is not a stock bar item")
+        #expect(items.contains { $0 === screen.debugPinItem }, "the pin is not on the footer")
         let nav = screen.navigationItem.rightBarButtonItems ?? []
         #expect(!nav.contains { $0.customView is SnapAuthorIdentityView }, "the peer pill is still in the nav bar")
-        #expect(nav.contains { $0 === screen.debugPinItem })
+        #expect(!nav.contains { $0 === screen.debugPinItem }, "the pin is still on the top bar")
+        #expect(nav.isEmpty, "the top bar's trailing side holds \(nav.compactMap(\.identifier))")
     }
 
     @Test func aPeekHasNoComposerNoFooterAndNoMenu() throws {
@@ -913,7 +919,7 @@ struct ConversationThreadViewControllerTests {
     }
 
     /// The composer has no column slot: its own bubble is the voice note and
-    /// the send, and the pin is the bar's, beside the bell.
+    /// the send, and the pin is the footer's (#2305).
     @Test func theComposersOwnBubbleAndThePinInTheBar() throws {
         let (screen, driver, _, window) = makeScreen(phase: .content(Self.longTranscript))
         defer { window.isHidden = true }
@@ -922,10 +928,11 @@ struct ConversationThreadViewControllerTests {
         #expect(screen.debugComposeBar.actsFromOwnBubble)
         #expect(screen.debugComposeBar.debugShowsRowAction)
         #expect(!screen.debugComposeBar.debugFieldActionShows, "no button left in the field")
-        #expect(screen.navigationItem.rightBarButtonItems?.contains { $0 === screen.debugPinItem } == true)
+        #expect(screen.toolbarItems?.contains { $0 === screen.debugPinItem } == true)
+        #expect(screen.navigationItem.rightBarButtonItems?.contains { $0 === screen.debugPinItem } != true)
         #expect(screen.debugPinItem.isEnabled)
         screen.debugTapPin()
-        #expect(driver.pinned == true, "the bar's pin did not pin the conversation")
+        #expect(driver.pinned == true, "the footer's pin did not pin the conversation")
     }
 
 }

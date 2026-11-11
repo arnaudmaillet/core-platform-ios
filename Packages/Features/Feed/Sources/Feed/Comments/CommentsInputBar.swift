@@ -51,6 +51,10 @@ import CoreNavigation
 ///
 /// `showsStake = false` (a conversation: there is nothing to like) leaves the
 /// column the slot alone.
+///
+/// A conversation's row (`actsFromOwnBubble`) ends in its own bubble, and the
+/// host's attachments stand between the field and it, hidden while the
+/// reader writes (`attachmentSources`, #2305): `[avatar][field][📷][🖼][☺]`.
 final class CommentsInputBar: UIView {
     /// Fired with trimmed, non-empty text; the field clears itself first.
     var onSend: ((String) -> Void)?
@@ -248,6 +252,7 @@ final class CommentsInputBar: UIView {
         voiceHoldTrash = false
         applyVoiceHoldFace()
         layOutVoiceHold(spring: 0.42, bounce: 0.3)
+        updateAttachments()
     }
 
     /// The finger slides toward cancel: the bubble follows it, and wears
@@ -286,6 +291,7 @@ final class CommentsInputBar: UIView {
         if rowActionStepsAside { carryHoldGlyphAway() }
         applyVoiceHoldFace()
         layOutVoiceHold(spring: 0.42, bounce: 0.15) { [weak self] in self?.landVoiceHold() }
+        updateAttachments()
     }
 
     /// The bubble steps aside under the held glyph: the glyph shrinks and
@@ -425,6 +431,182 @@ final class CommentsInputBar: UIView {
         actsFromOwnBubble && !rowActionStepsAside ? Metrics.controlSize + Spacing.sm : 0
     }
 
+    // MARK: The attachments (#2305)
+
+    /// What the reader can attach from the input row, in the row's order:
+    /// one glass bubble per entry, the own bubble's size and spacing,
+    /// BETWEEN THE FIELD AND THE OWN BUBBLE —
+    ///
+    ///     [avatar][field][📷][🖼][☺]
+    ///
+    /// — never right of it: hiding them would make the own bubble jump.
+    /// Between, the field widens into their place and the own bubble never
+    /// moves. Empty by default, so a host that declares none (a post's
+    /// comments) keeps its row exactly; drawn only beside the own bubble
+    /// (`actsFromOwnBubble`), whose place they are counted from.
+    ///
+    /// A LIST, NOT A PAIR (#2308): the conversation declares `[camera,
+    /// library]`, and a later host — comments with photos — declares its own
+    /// with no change here.
+    var attachmentSources: [ComposerAttachmentSource] = [] {
+        didSet {
+            // The same entries, perhaps new actions: the bubbles stay — a
+            // tap reads its action off the list (`attachmentTapped`).
+            guard attachmentSources.map(\.id) != oldValue.map(\.id)
+                || zip(attachmentSources, oldValue).contains(where: {
+                    $0.symbol != $1.symbol || $0.accessibilityLabel != $1.accessibilityLabel
+                })
+            else { return }
+            rebuildAttachmentButtons()
+        }
+    }
+    private var attachmentButtons: [UIButton] = []
+    /// What the bubbles were last told — not `isHidden`, which stays false
+    /// through their way out.
+    private var attachmentsShown = false
+
+    /// The attachments' glyph: the row's quiet ink, one size at every text
+    /// size, as the own bubble's.
+    static let attachmentConfiguration = UIImage.SymbolConfiguration(pointSize: 17, weight: .medium)
+
+    /// Whether the attachments show (#2305, Messenger's rule): only while the
+    /// reader is NOT writing — the field not being edited, and holding no
+    /// draft (text, or a voice take on its way or held), even with the
+    /// keyboard down: a half-written message never gets a narrowed field.
+    /// Pure, for tests.
+    static func showsAttachments(hasSources: Bool, isEditing: Bool, hasDraft: Bool, holdsVoiceTake: Bool) -> Bool {
+        hasSources && !isEditing && !hasDraft && !holdsVoiceTake
+    }
+
+    private var attachmentsWanted: Bool {
+        Self.showsAttachments(
+            hasSources: !attachmentButtons.isEmpty && actsFromOwnBubble && !field.isHidden,
+            isEditing: textView.isFirstResponder,
+            hasDraft: hasDraft,
+            holdsVoiceTake: voiceOverlay != nil || voiceHolding
+        )
+    }
+
+    /// The attachments' room at the field's end, while they show.
+    private var attachmentsInset: CGFloat {
+        attachmentsShown ? CGFloat(attachmentButtons.count) * (Metrics.controlSize + Spacing.sm) : 0
+    }
+
+    /// One bubble per entry, each on the row's line and riding the keyboard
+    /// with the field, counted from the bar's trailing edge — past the own
+    /// bubble's place — so the bubble's hold (which grows and slides it)
+    /// never moves them.
+    private func rebuildAttachmentButtons() {
+        for button in attachmentButtons { button.removeFromSuperview() }
+        let sources = attachmentSources
+        attachmentButtons = sources.map { makeAttachmentButton(for: $0) }
+        let step = Metrics.controlSize + Spacing.sm
+        for (index, button) in attachmentButtons.enumerated() {
+            insertSubview(button, belowSubview: rowActionButton)
+            NSLayoutConstraint.activate([
+                button.trailingAnchor.constraint(
+                    equalTo: trailingAnchor, constant: -step * CGFloat(sources.count - index)
+                ),
+                button.bottomAnchor.constraint(equalTo: field.bottomAnchor),
+                button.widthAnchor.constraint(equalToConstant: Metrics.controlSize),
+                button.heightAnchor.constraint(equalToConstant: Metrics.controlSize),
+            ])
+        }
+        // A new list lands in place: nothing to animate from.
+        attachmentsShown = attachmentsWanted
+        for button in attachmentButtons {
+            button.isHidden = !attachmentsShown
+            button.isAccessibilityElement = attachmentsShown
+        }
+        setNeedsLayout()
+    }
+
+    private func makeAttachmentButton(for source: ComposerAttachmentSource) -> UIButton {
+        var face = UIButton.Configuration.glass()
+        face.cornerStyle = .capsule
+        face.image = UIImage(systemName: source.symbol)
+        face.preferredSymbolConfigurationForImage = Self.attachmentConfiguration
+        face.baseForegroundColor = Self.waveformTint
+        let button = UIButton(configuration: face)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.accessibilityLabel = source.accessibilityLabel
+        button.accessibilityIdentifier = source.id
+        button.maximumContentSizeCategory = .large
+        button.showsLargeContentViewer = true
+        button.scalesLargeContentImage = true
+        let id = source.id
+        button.addAction(UIAction { [weak self] _ in self?.attachmentTapped(id) }, for: .primaryActionTriggered)
+        return button
+    }
+
+    /// A bubble's tap: the action its entry carries now.
+    private func attachmentTapped(_ id: String) {
+        attachmentSources.first { $0.id == id }?.action()
+    }
+
+    /// The attachments in or out, as the reader starts or stops writing:
+    /// they fade and shrink where they stand while the field's end springs
+    /// to its new width — one motion. Reduce Motion: the field at once, the
+    /// bubbles cross-fading. Off screen, at once.
+    private func updateAttachments() {
+        guard !attachmentButtons.isEmpty else { return }
+        let shows = attachmentsWanted
+        guard shows != attachmentsShown else { return }
+        let buttons = attachmentButtons
+        // Gone for VoiceOver at once, not at the end of their way out.
+        for button in buttons { button.isAccessibilityElement = shows }
+        guard window != nil, hasLaidOutOnce else {
+            attachmentsShown = shows
+            for button in buttons {
+                button.layer.removeAllAnimations()
+                button.isHidden = !shows
+                button.alpha = 1
+                button.transform = .identity
+            }
+            return setNeedsLayout()
+        }
+        // What is pending lands first, unanimated — a placeholder moving to
+        // the field's start on focus — so the spring moves only the width.
+        UIView.performWithoutAnimation { layoutIfNeeded() }
+        attachmentsShown = shows
+        #if DEBUG
+        debugAttachmentMotions += 1
+        #endif
+        let reduces = MotionPreference.reducesMotion
+        let away: CGAffineTransform = reduces ? .identity : CGAffineTransform(scaleX: 0.5, y: 0.5)
+        if shows {
+            for button in buttons where button.isHidden {
+                button.isHidden = false
+                button.alpha = 0
+                button.transform = away
+            }
+        }
+        setNeedsLayout()
+        let finish: (Bool) -> Void = { [weak self] _ in
+            guard let self, !self.attachmentsShown else { return }
+            for button in buttons {
+                button.isHidden = true
+                button.alpha = 1
+                button.transform = .identity
+            }
+        }
+        let options: UIView.AnimationOptions = [.allowUserInteraction, .beginFromCurrentState]
+        if reduces {
+            UIView.performWithoutAnimation { layoutIfNeeded() }
+            UIView.animate(withDuration: 0.2, delay: 0, options: options, animations: {
+                for button in buttons { button.alpha = shows ? 1 : 0 }
+            }, completion: finish)
+            return
+        }
+        UIView.animate(springDuration: 0.4, bounce: shows ? 0.2 : 0, options: options, animations: {
+            for button in buttons {
+                button.alpha = shows ? 1 : 0
+                button.transform = shows ? .identity : away
+            }
+            self.layoutIfNeeded()
+        }, completion: finish)
+    }
+
     #if DEBUG
     /// The input row — the avatar and the field — shows (#2216).
     var debugShowsInputRow: Bool { !field.isHidden && !avatarBubble.isHidden }
@@ -452,6 +634,14 @@ final class CommentsInputBar: UIView {
     /// The field's text view, for its VoiceOver actions.
     var debugTextView: UITextView { textView }
     var debugFieldActionShows: Bool { !fieldActionButton.isHidden }
+    /// The attachments' bubbles, in the row's order (#2305).
+    var debugAttachmentButtons: [UIButton] { attachmentButtons }
+    /// Whether the attachments show — or are on their way in.
+    var debugShowsAttachments: Bool { attachmentsShown }
+    /// How many times the attachments came or went in sight.
+    private(set) var debugAttachmentMotions = 0
+    /// The field's trailing edge from the bar's, as last laid out.
+    var debugFieldTrailingInset: CGFloat { -fieldTrailing.constant }
     #endif
 
     #if DEBUG
@@ -463,6 +653,9 @@ final class CommentsInputBar: UIView {
     /// the emote button — and the field's own button when `coversButton`
     /// (the locked and paused bars carry their own). Nil gives the field back.
     func showVoiceOverlay(_ overlay: UIView?, coversButton: Bool = false) {
+        // The row is the take's: the attachments go (#2305) — once the
+        // strip is laid out, whichever way this returns.
+        defer { updateAttachments() }
         let previous = voiceOverlay
         let animated = window != nil && !MotionPreference.reducesMotion
         voiceOverlay = overlay
@@ -1660,6 +1853,7 @@ final class CommentsInputBar: UIView {
         #endif
         riseProgress = progress
         let inset = Self.fieldTrailingInset(progress: progress, keepsSlot: keepsRailSlot) + ownBubbleInset
+            + attachmentsInset
         guard abs(fieldTrailing.constant + inset) > 0.01 else { return false }
         fieldTrailing.constant = -inset
         return true
@@ -2027,6 +2221,7 @@ final class CommentsInputBar: UIView {
         signUpButton?.isHidden = !isGuest || !takesComments
         avatarBubble.isHidden = isGuest || !takesComments
         field.isHidden = isGuest || !takesComments
+        updateAttachments()
     }
 
     /// Whether the post takes comments (#2216): a channel's showcase takes
@@ -2580,6 +2775,7 @@ final class CommentsInputBar: UIView {
             rowActionButton.isEnabled = !isSending
         }
         updateEmoteToggle()
+        updateAttachments()
     }
 
     /// The field's emote button: gone while a take covers the field, and —
@@ -2950,6 +3146,8 @@ extension CommentsInputBar: UITextViewDelegate {
     /// once the panel has left (after this turn). The field speaks again.
     func textViewDidEndEditing(_ textView: UITextView) {
         applyPlaceholder()
+        // An empty field let go: the attachments come back now (#2305).
+        updateAttachments()
         DispatchQueue.main.async { [weak self] in self?.updateFieldAction() }
     }
 

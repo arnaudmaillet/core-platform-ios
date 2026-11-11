@@ -6,7 +6,7 @@ import UIKit
 ///
 /// ```
 ///  [leading] ———————————————— [🔖 ⇄] [⋯]     the post: a pill, then space
-///  [leading] ———————————————— [📷 🖼] [⋯]     a conversation: its media
+///  [leading] ———————————————— [📌] [🔔] [⋯]   a conversation (#2305)
 /// ```
 ///
 /// THE BAR CONTRACT (#1679, `dev/BAR_CONTRACT.md`): every action is a STOCK
@@ -14,8 +14,10 @@ import UIKit
 /// and every item has an identifier, so a footer rebuilt or carried across a
 /// push is matched item by item. Adjacent actions share one platter by
 /// themselves (iOS 26 groups neighbouring items); the separator keeps ⋯ in a
-/// bubble of its own. The leading item is the one container (a person or
-/// media pill, `BarItems.container`).
+/// bubble of its own. A conversation's pin and bell are each their own
+/// bubble too (`separatesActions`, the owner 2026-11-07 / #2305): a
+/// separator between every two. The leading item is the one container (a
+/// person or media pill, `BarItems.container`).
 ///
 /// It used to be custom-view `UIButton`s in a `UIStackView` — each a circle
 /// with a shadow, re-implementing what the bar draws (R1).
@@ -51,9 +53,16 @@ enum SnapFooterToolbar {
     /// matches — the sound's record (#1999). At 36 pt it read a size smaller.
     static let bubbleSide: CGFloat = 44
 
-    static func trailingItems(actions: [UIBarButtonItem], more: UIBarButtonItem?) -> [UIBarButtonItem] {
+    /// `separatesActions`: each action in a bubble of its own rather than
+    /// the actions sharing one platter (a conversation's pin and bell).
+    static func trailingItems(
+        actions: [UIBarButtonItem], more: UIBarButtonItem?, separatesActions: Bool = false
+    ) -> [UIBarButtonItem] {
         var items: [UIBarButtonItem] = [.flexibleSpace()]
-        items += actions
+        for (index, action) in actions.enumerated() {
+            if separatesActions, index > 0 { items.append(BarItems.separator()) }
+            items.append(action)
+        }
         if let more {
             if !actions.isEmpty { items.append(BarItems.separator()) }
             items.append(more)

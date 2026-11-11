@@ -106,8 +106,9 @@ struct ConversationThreadSendAndMuteTests {
         return (screen, driver, window)
     }
 
+    /// The bell, on the footer since #2305.
     private func bell(_ screen: ConversationThreadViewController) -> UIBarButtonItem? {
-        screen.navigationItem.rightBarButtonItems?.first { $0.accessibilityLabel == "Notifications" }
+        screen.toolbarItems?.first { $0.accessibilityLabel == "Notifications" }
     }
 
     private func cells(in view: UIView) -> [ThreadRowCell] {
@@ -144,13 +145,16 @@ struct ConversationThreadSendAndMuteTests {
 
     // MARK: - The bell
 
-    /// The bell takes the bar's trailing corner and follows the mute,
-    /// wherever it was changed; a tap goes to the driver.
+    /// The bell stands on the footer between the pin and ⋯ (#2305) and
+    /// follows the mute, wherever it was changed; a tap goes to the driver.
     @Test func theBellMutesThroughTheDriver() throws {
         let (screen, driver, window) = makeScreen(phase: .content([Self.message("m1", mine: false, minutes: 1)]))
         defer { window.isHidden = true }
-        let item = try #require(bell(screen), "no bell in the bar")
-        #expect(screen.navigationItem.rightBarButtonItems?.first === item, "the bell is not the trailing corner")
+        let item = try #require(bell(screen), "no bell on the footer")
+        let ids = (screen.toolbarItems ?? []).compactMap(\.identifier)
+        #expect(ids.suffix(2) == [ConversationThreadViewController.bellID, SnapFooterToolbar.ID.more],
+                "the bell is not just before ⋯: \(ids)")
+        #expect(!(screen.navigationItem.rightBarButtonItems ?? []).contains { $0 === item }, "the bell is still on the top bar")
         #expect(item.image == UIImage(systemName: "bell"))
         #expect(item.accessibilityValue == "On")
 
@@ -259,16 +263,17 @@ struct ConversationThreadSendAndMuteTests {
     @Test func undoingTheMuteBringsBackExactlyTheBarsItems() throws {
         let (screen, driver, window) = makeScreen(phase: .content([Self.message("m1", mine: false, minutes: 1)]))
         defer { window.isHidden = true }
-        let before = (screen.navigationItem.rightBarButtonItems ?? []).map(\.identifier)
+        let before = (screen.toolbarItems ?? []).map(\.identifier)
         screen.debugTapBell()
         driver.answerMute(true)
         let isToast: (UIBarButtonItem) -> Bool = { $0.customView is ToastView }
+        #expect(!(screen.toolbarItems ?? []).contains(where: isToast), "a toast took the bar")
         #expect(!(screen.navigationItem.rightBarButtonItems ?? []).contains(where: isToast), "a toast took the bar")
         let toast = try #require(Self.firstToast(in: screen.view), "no toast confirmed the mute")
         // Its Undo, through the toast's own action path.
         toast.debugTapAction()
         driver.answerMute(true)
-        let after = screen.navigationItem.rightBarButtonItems ?? []
+        let after = screen.toolbarItems ?? []
         #expect(after.map(\.identifier) == before, "the bar did not get back the items it had: \(after.map(\.identifier))")
         #expect(bell(screen)?.image == UIImage(systemName: "bell"), "Undo did not turn the notifications back on")
     }
@@ -310,7 +315,7 @@ struct ConversationThreadSendAndMuteTests {
         #expect(driver.mutes.count == 1, "a second tap went out while the first was on its way")
 
         driver.answerMute(true)
-        let shown = screen.navigationItem.rightBarButtonItems ?? []
+        let shown = screen.toolbarItems ?? []
         #expect(!shown.contains { $0.customView is ToastView }, "a toast took the bell's place")
         #expect(bell(screen)?.image == UIImage(systemName: "bell.slash"), "the bell left with its toast")
         let toast = try #require(Self.firstToast(in: screen.view), "no toast confirmed the mute")
@@ -336,13 +341,20 @@ struct ConversationThreadSendAndMuteTests {
         return nil
     }
 
-    /// A draft has nothing to mute: no bell until there is a conversation.
+    /// A draft has nothing to mute: no bell until there is a conversation —
+    /// then it joins the footer between the pin and ⋯ (#2305).
     @Test func aDraftHasNoBell() {
         let (screen, driver, window) = makeScreen(phase: .content([]), muted: nil)
         defer { window.isHidden = true }
         #expect(bell(screen) == nil)
+        #expect(screen.debugMuteItem == nil)
         driver.onMutedChange?(false)
         #expect(bell(screen) != nil, "the resolved conversation got no bell")
+        #expect(screen.debugMuteItem === bell(screen))
+        let ids = (screen.toolbarItems ?? []).compactMap(\.identifier)
+        #expect(ids == [
+            "conversation.peer-pill", "conversation.pin", ConversationThreadViewController.bellID, SnapFooterToolbar.ID.more,
+        ], "the footer reads \(ids)")
     }
 
     // MARK: - Sending

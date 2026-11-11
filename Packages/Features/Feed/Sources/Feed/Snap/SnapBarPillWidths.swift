@@ -80,12 +80,21 @@ struct SnapBarPillWidths: Equatable {
         toolbarReserve(icon: icon, platter: true)
     }
 
-    /// The same footer with (`platter`) or without the two-glyph platter —
-    /// the conversation's `[📷 🖼]` is the post's `[☆ ⇄]`, and a thread that
-    /// sends no media wears only ⋯ (#1679: its own arithmetic left the peer
-    /// pill 163pt on an SE, and 🖼 folded into `•••` at XXXL).
+    /// The same footer with (`platter`) or without the two-glyph platter: a
+    /// footer that wears only ⋯ (#1679: its own arithmetic left the peer
+    /// pill 163pt on an SE, and a second glyph folded into `•••` at XXXL).
     static func toolbarReserve(icon: CGFloat, platter: Bool) -> CGFloat {
         28 + 10 + 13 + (platter ? (2 * icon + 31) + 13 : 0) + 48 + 28 + slack
+    }
+
+    /// A conversation's footer (#2305): `[peer pill] —— [pin] [bell] [⋯]`,
+    /// each glyph in a bubble of its own (`lone` of them: the pin, and the
+    /// bell unless the thread is a draft). The margins, the pill's glass and
+    /// ⋯ as above; each lone bubble its glyph and the bar's 10 (☆ alone
+    /// measured 59 at XXXL: 49 + 10) and the 13pt gap before it. Two of them
+    /// cost two points more than the `[📷 🖼]` platter they replace.
+    static func toolbarReserve(icon: CGFloat, lone: Int) -> CGFloat {
+        28 + 10 + 13 + CGFloat(max(0, lone)) * (icon + 10 + 13) + 48 + 28 + slack
     }
 
     /// A text post's footer (#1924): the margins and the pill's glass as
