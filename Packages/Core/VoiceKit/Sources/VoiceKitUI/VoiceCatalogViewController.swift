@@ -9,8 +9,9 @@ import VoiceKit
 ///
 /// The neutral panel (#2241) as every surface draws it:
 /// - **Every size** — full, compact, a conversation's capped panel, the mark
-///   — with a 2 s voice and a 50 s one, playing a mock voice: the panel is
-///   one width whatever the length.
+///   — playing a mock voice. At full size the width says the length (#2329):
+///   voice posts of 1, 5, 15, 30 and 60 s, voice messages of 1, 15 s and
+///   2 min; compact keeps its host's width (1 s and 60 s side by side).
 /// - **Every state**, still: idle, playing, paused mid-way, played, unplayed,
 ///   loading its levels, failed to play, not sent.
 /// - **Every ground:** plain, a card, the dark page, glass — light and dark.
@@ -117,9 +118,12 @@ public final class VoiceCatalogViewController: UIViewController {
         let title = ground == .darkPage ? "Dark page" : "\(style == .dark ? "Dark" : "Light") · \(ground.name)"
         let (block, stack) = groundBlock(title: title, style: style, ground: ground)
         let levels = VoiceView.genericLevels
-        for size in [VoiceView.Size.full, .compact] {
-            // Short, long, and a post's limit: "60″" in the slot (#2294).
-            for duration in [2.0, 50.0, 60.0] {
+        // The width says the length at full size (#2329): the narrowest up
+        // to 2 s, the full width from 30 s, a post's limit "60″" (#2294).
+        // Compact keeps its host's width whatever the length.
+        let lengths: [(VoiceView.Size, [TimeInterval])] = [(.full, [1, 5, 15, 30, 60]), (.compact, [1, 60])]
+        for (size, durations) in lengths {
+            for duration in durations {
                 let voice = VoiceView(size: size)
                 voice.role = .post(author: "Ava Moreau")
                 let id = "catalog-\(style.rawValue)-\(ground.name)-\(size)-\(Int(duration))"
@@ -129,14 +133,19 @@ public final class VoiceCatalogViewController: UIViewController {
             }
         }
         if ground == .plain || ground == .card {
-            // A conversation's panel: from the text column, capped.
-            let message = VoiceView(
-                size: .full, leadingInset: 44, maxPanelWidth: VoiceView.conversationMaxWidth
-            )
-            hub.bind(message, id: "catalog-\(style.rawValue)-\(ground.name)-message", url: mockVoice,
-                     duration: 3, levels: levels)
-            stack.addArrangedSubview(caption("Conversation · capped at \(Int(VoiceView.conversationMaxWidth)) pt"))
-            stack.addArrangedSubview(message)
+            // A conversation's panel: from the text column, its width the
+            // length's up to the cap (#2329).
+            for duration: TimeInterval in [1, 15, 120] {
+                let message = VoiceView(
+                    size: .full, leadingInset: 44, maxPanelWidth: VoiceView.conversationMaxWidth
+                )
+                hub.bind(message, id: "catalog-\(style.rawValue)-\(ground.name)-message-\(Int(duration))",
+                         url: mockVoice, duration: duration, levels: levels)
+                stack.addArrangedSubview(caption(
+                    "Message · \(Int(duration)) s · capped at \(Int(VoiceView.conversationMaxWidth)) pt"
+                ))
+                stack.addArrangedSubview(message)
+            }
 
             let flat = VoiceView(size: .full)
             flat.role = .post(author: nil)

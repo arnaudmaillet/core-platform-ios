@@ -51,8 +51,10 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// was derived from the card's, concentric: 26 − the preview's 12pt inset.
     /// A row has no card around its preview any more, so nothing is left to
     /// be concentric with; the value is kept (14) and #2289 owns any change.
-    /// A shelf's media card wears it too (`PostShelfMediaCardCell`).
-    public static let mediaCornerRadius: CGFloat = 14
+    /// A shelf's media card wears it too (`PostShelfMediaCardCell`), and a
+    /// voice post's panel (#2329): the token is DesignSystem's
+    /// (`Surface.mediaCornerRadius`), so VoiceKitUI reaches it.
+    public static let mediaCornerRadius: CGFloat = Surface.mediaCornerRadius
 
     /// Where the page STOPS MATCHING this card, in the card's own space — the
     /// reveal's cut line. Below it the destination is veiled for the length of

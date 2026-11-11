@@ -85,6 +85,23 @@ extension UIFont {
         appFont(forTextStyle: style, compatibleWith: traits ?? TextSizeCeiling.currentTraits, boldText: AppTypeScale.boldText)
     }
 
+    /// `appFont` with monospaced digits (#2329): the style's size and weight
+    /// on the app's scale, scaled like the style — for a number that changes
+    /// in place (a timer) and must not jiggle, set as the words beside it.
+    public static func appMonospacedDigitFont(
+        forTextStyle style: TextStyle, compatibleWith traits: UITraitCollection? = nil
+    ) -> UIFont {
+        let traits = traits ?? TextSizeCeiling.currentTraits
+        guard let size = AppTypeScale.size(for: style) else {
+            let preferred = preferredFont(forTextStyle: style, compatibleWith: traits)
+            return .monospacedDigitSystemFont(ofSize: preferred.pointSize, weight: .regular)
+        }
+        let font = UIFont.monospacedDigitSystemFont(
+            ofSize: size, weight: AppTypeScale.weight(for: style, boldText: AppTypeScale.boldText)
+        )
+        return UIFontMetrics(forTextStyle: style).scaledFont(for: font, compatibleWith: traits)
+    }
+
     /// `appFont` at given traits (nil: the system's) with Bold Text given.
     /// Tests.
     static func appFont(

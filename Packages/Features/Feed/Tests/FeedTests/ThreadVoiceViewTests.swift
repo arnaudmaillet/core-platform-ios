@@ -9,11 +9,12 @@ import VoiceKitUI
 /// The voice message's bubble (#2104) — the neutral panel since #2241.
 @MainActor
 struct ThreadVoiceViewTests {
-    /// The thread's panel starts at the text column and takes the row's
-    /// width, capped at `conversationMaxWidth` (#2241) — whatever the
-    /// message's length.
-    @Test func aMessagesPanelTakesTheTextColumnCapped() {
+    /// The thread's panel starts at the text column and its width says the
+    /// message's length (#2329): the narrowest up to 2 s, the full width at
+    /// 30 s — the row's, capped at `conversationMaxWidth` (#2241).
+    @Test func aMessagesWidthSaysItsLengthCapped() {
         let leading = CommentRowView.avatarSize + CommentRowView.avatarGap
+        let cap = ThreadVoiceView.conversationMaxWidth
         func panel(width: CGFloat, duration: TimeInterval) -> CGRect {
             let view = ThreadVoiceView.thread()
             view.configure(ThreadVoiceView.State(levels: Array(repeating: 9, count: 100), duration: duration), senderName: nil)
@@ -21,12 +22,28 @@ struct ThreadVoiceViewTests {
             view.layoutIfNeeded()
             return view.debugPanelFrame
         }
-        let phone = panel(width: 300, duration: 2)
-        #expect(phone.minX == leading)
-        #expect(abs(phone.width - (300 - leading)) < 0.5, "\(phone)")
-        let wide = panel(width: 900, duration: 2)
-        #expect(abs(wide.width - ThreadVoiceView.conversationMaxWidth) < 0.5, "\(wide)")
-        #expect(panel(width: 900, duration: 50) == wide, "the length changed the width")
+        let short = panel(width: 300, duration: 1)
+        #expect(short.minX == leading, "not leading-aligned on the text column")
+        #expect(abs(short.width - ThreadVoiceView.minimumPanelWidth) < 0.5, "\(short)")
+        let long = panel(width: 300, duration: 120)
+        #expect(abs(long.width - (300 - leading)) < 0.5, "\(long): a long message doesn't take the column")
+        let wide = panel(width: 900, duration: 120)
+        #expect(abs(wide.width - cap) < 0.5, "\(wide)")
+        let mid = panel(width: 900, duration: 16)
+        let expected = ThreadVoiceView.panelWidth(forLength: 16, available: cap)
+        #expect(abs(mid.width - expected) < 0.5, "\(mid) for \(expected)")
+        #expect(panel(width: 900, duration: 2) == panel(width: 900, duration: 0.5), "under 2 s, one width")
+    }
+
+    /// The conversation draws no bubble round a voice message: its panel is
+    /// the bubble, a rounded rectangle wearing the media message's corner
+    /// (#2329) — no longer a capsule.
+    @Test func aVoiceMessageWearsTheMediaMessagesCorner() {
+        let view = view(ThreadVoiceView.State(levels: Array(repeating: 9, count: 100), duration: 12))
+        #expect(view.debugPanelCornerRadius == ThreadMediaView.cornerRadius)
+        #expect(ThreadMediaView.cornerRadius == Surface.mediaCornerRadius)
+        #expect(view.debugPanelCornerRadius < view.debugPanelFrame.height / 2, "still a capsule")
+        #expect(view.debugPanelFrame.height == 44)
     }
 
     /// 2 pt bars 2 pt apart: about 45 at 180 pt, re-binned from 100 levels
@@ -97,8 +114,8 @@ struct ThreadVoiceViewTests {
     }
 
     /// The sent copy keeps the pending one's bars (the owner, 2026-11-07):
-    /// its length comes back to a tenth of a second, and the panel no longer
-    /// reads its width from the length (#2241), so nothing moves.
+    /// its length comes back to a tenth of a second, and the width reads the
+    /// length's whole seconds (#2329), so nothing moves.
     @Test func theSentCopyKeepsThePendingOnesBars() {
         let pending = view(ThreadVoiceView.State(levels: Array(repeating: 9, count: 100), duration: 4.37))
         let sent = view(ThreadVoiceView.State(levels: Array(repeating: 9, count: 100), duration: 4.4))
@@ -136,14 +153,14 @@ struct ThreadVoiceViewTests {
         #expect(!view.debugPlayEnabled)
     }
 
-    /// No disc (#2274): the app's icon button as a bare glyph, in a 40 pt
-    /// frame in full — where the disc was.
+    /// No disc (#2274): the app's icon button as a bare glyph, in a 32 pt
+    /// frame in full since #2329 (40 before).
     @Test func thePlayButtonHasNoDisc() {
         let view = view(ThreadVoiceView.State(levels: Array(repeating: 9, count: 100), duration: 3))
         view.layoutIfNeeded()
         #expect(view.debugButtonImage != nil)
         #expect(view.debugPlayButtonIsABareGlyph)
-        #expect(view.debugButtonSize == CGSize(width: 40, height: 40))
+        #expect(view.debugButtonSize == CGSize(width: 32, height: 32))
     }
 
     /// A voice message owns horizontal drags: the conversation's leftward

@@ -80,10 +80,12 @@ struct VoicePostSurfaceTests {
         #expect(cell.debugCaptionFrame.minY >= voiceFrame.maxY, "the words aren't under the voice")
     }
 
-    /// The panel takes the caption's whole width on a list card and a
-    /// shelf's card (#2241), whatever the voice's length.
+    /// On the list's card the panel's width says the voice's length
+    /// (#2329): the narrowest for a 2 s voice, the caption's whole width
+    /// for a 50 s one, leading-aligned; a shelf's fixed card keeps the
+    /// caption's whole width whatever the length (#2241).
     @Test(arguments: [nil, 2] as [Int?])
-    func aCardsPanelFillsTheCaptionsWidth(_ captionLines: Int?) throws {
+    func aCardsPanelWidth(_ captionLines: Int?) throws {
         var short = post()
         short.voice = PostVoice(assetID: "short", url: voice.url, duration: 2, waveform: voice.waveform)
         var long = post()
@@ -93,12 +95,21 @@ struct VoicePostSurfaceTests {
             let caption = try #require(cell.debugVoiceCaption)
             let player = try #require(caption.voiceView)
             player.layoutIfNeeded()
-            #expect(abs(player.debugPanelFrame.width - caption.bounds.width) < 0.5,
-                    "\(player.debugPanelFrame) in \(caption.bounds)")
             #expect(caption.bounds.width > 250, "the voice didn't take the card's width")
+            #expect(player.debugPanelFrame.minX == 0, "not leading-aligned")
+            let expected = captionLines == nil
+                ? VoiceView.panelWidth(forLength: candidate.voice?.duration ?? 0, available: caption.bounds.width)
+                : caption.bounds.width
+            #expect(abs(player.debugPanelFrame.width - expected) < 0.5,
+                    "\(player.debugPanelFrame) in \(caption.bounds), expected \(expected)")
             return player.debugPanelFrame.width
         }
-        #expect(widths[0] == widths[1], "a 2 s and a 50 s voice drew different panels")
+        if captionLines == nil {
+            #expect(abs(widths[0] - VoiceView.minimumPanelWidth) < 0.5, "a 2 s voice isn't the narrowest")
+            #expect(widths[0] < widths[1], "a 2 s and a 50 s voice drew the same panel")
+        } else {
+            #expect(widths[0] == widths[1], "a shelf's card changed its voice's width")
+        }
     }
 
     /// A list card's panel claims its drags; a shelf's card gives them to

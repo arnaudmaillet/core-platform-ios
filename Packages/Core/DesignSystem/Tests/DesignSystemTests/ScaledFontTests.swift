@@ -16,6 +16,27 @@ struct ScaledFontTests {
         #expect(digits.pointSize == 15)
     }
 
+    /// A style's monospaced digits (#2329) are the style at the app's size —
+    /// the same size and weight as `appFont`, growing with the text size —
+    /// and a button's words read the same way: the voice panel's timer at
+    /// its speed chip's size.
+    @Test func monospacedDigitsAreTheStylesSize() {
+        for category in [UIContentSizeCategory.large, .extraSmall, .extraExtraExtraLarge] {
+            let digits = UIFont.appMonospacedDigitFont(forTextStyle: .subheadline, compatibleWith: traits(category))
+            let words = UIFont.appFont(forTextStyle: .subheadline, compatibleWith: traits(category))
+            #expect(digits.pointSize == words.pointSize, "\(category): \(digits.pointSize) vs \(words.pointSize)")
+        }
+        let large = UIFont.appMonospacedDigitFont(forTextStyle: .subheadline, compatibleWith: traits(.large))
+        let huge = UIFont.appMonospacedDigitFont(forTextStyle: .subheadline, compatibleWith: traits(.extraExtraExtraLarge))
+        #expect(huge.pointSize > large.pointSize, "the digits don't grow with the text size")
+        let chip = AppButton.titleFont(for: .row)
+        let timer = AppButton.titleFont(for: .row, monospacedDigits: true)
+        #expect(timer.pointSize == chip.pointSize && timer.familyName == chip.familyName)
+        // Monospaced: every digit as wide as every other.
+        let widths = ["1", "8", "0"].map { ($0 as NSString).size(withAttributes: [.font: timer]).width }
+        #expect(Set(widths.map { ($0 * 100).rounded() }).count == 1, "\(widths)")
+    }
+
     @Test func itGrowsAndShrinksWithTheViewersChoice() {
         let small = UIFont.scaledSystemFont(ofSize: 13, relativeTo: .footnote, compatibleWith: traits(.extraSmall))
         let large = UIFont.scaledSystemFont(ofSize: 13, relativeTo: .footnote, compatibleWith: traits(.accessibilityExtraExtraExtraLarge))

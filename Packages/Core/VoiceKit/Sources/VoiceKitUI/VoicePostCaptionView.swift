@@ -12,13 +12,16 @@ public enum VoicePostDisplay {
     /// How much room a surface gives the caption's voice (#2208) — the
     /// owner's rule: the TEXT post's design everywhere, only the caption
     /// becomes the voice, sized to the room. Both players are the same
-    /// neutral panel, filling the width their host gives (#2241).
+    /// neutral panel (#2241): at full size its width says its length
+    /// (#2329); compact, it fills the width its host gives.
     public enum Size: Sendable, Equatable {
         /// Play / pause, the waveform (tap and drag to seek), the timer: a
-        /// post's page, For You's card preview, list cards.
+        /// post's page, For You's card preview, list cards — its width
+        /// says its length (#2329).
         case full
-        /// The same panel a little shorter: cards in horizontal shelves,
-        /// history rows, the map's text bubble (#2241's table). Its drags
+        /// The same panel, as tall since #2329, its width the host's: cards
+        /// in horizontal shelves, history rows, the map's text bubble
+        /// (#2241's table). Its drags
         /// are its own, as at `.full`, unless the host says otherwise
         /// (`VoicePostCaptionView.show(…dragsAreOwn:)`, #2275): only a
         /// shelf's card gives them to its scroll.
@@ -36,8 +39,11 @@ public enum VoicePostDisplay {
 ///
 /// - **`.full` / `.compact`:** a `VoiceView`, bound to the hub — its play
 ///   button and waveform take their own taps; the rest of the card keeps its
-///   action (a host's tap recognizer asks `keepsTouch(_:)`). Its panel takes
-///   this view's whole width (#2241): a host sizes the view, not the voice.
+///   action (a host's tap recognizer asks `keepsTouch(_:)`). A host sizes
+///   the view, not the voice: at `.full` the panel's width says the
+///   voice's length within it, leading-aligned (#2329); at `.compact` it
+///   takes the view's whole width (#2241) — the shelf's card, the history
+///   row and the map's bubble fix it.
 /// - **Its drags are its own** (`dragsAreOwn`, #2275), at both sizes: the
 ///   screen's pans — a list's, a pager's, a map's — wait for the panel's
 ///   sideways drag. Off only in a horizontal shelf's card: a tap seeks, a
