@@ -248,9 +248,12 @@ struct ProfileRelationshipsTabSyncTests {
         // the space is each list's — the opening one and the ones made by
         // paging alike — and none on the pager, whose content does not
         // scroll under the bar.
-        #expect(all.allSatisfy { $0.topFadeClearance == SoftTopEdge.fadeLength },
+        // Measured on the rows' INK (#2286): a row's avatar sits inside its
+        // frame, so a list gets the depth less that padding — some, never
+        // more than the whole depth.
+        #expect(all.allSatisfy { $0.topFadeClearance > 0 && $0.topFadeClearance <= SoftTopEdge.clearanceDepth },
                 "\(all.map(\.topFadeClearance))")
-        #expect(all.allSatisfy { $0.contentInset.top >= SoftTopEdge.fadeLength })
+        #expect(all.allSatisfy { $0.contentInset.top >= $0.topFadeClearance })
         #expect(paging.contentInset.top == 0)
     }
 }

@@ -121,6 +121,12 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
             window.makeKeyAndVisible()
             return
         }
+        // `-top-fade-lab`: where the soft top fade really ends (#2286).
+        if TopFadeLab.isRequested {
+            window.rootViewController = TopFadeLab.makeRoot()
+            window.makeKeyAndVisible()
+            return
+        }
         // `-voice-lab`: the voice messages' engine on a bench (#2101).
         if VoiceLab.isRequested {
             window.rootViewController = VoiceLab.makeRoot()

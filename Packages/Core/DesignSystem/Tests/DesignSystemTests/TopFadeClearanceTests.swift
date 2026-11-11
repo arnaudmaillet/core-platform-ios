@@ -3,29 +3,58 @@ import UIKit
 @testable import DesignSystem
 
 /// The titled contract starts the content below the soft fade at rest
-/// (#2240): what the first content lacks is added to the top inset — the
-/// whole fade for a plain list, nothing for one whose own padding clears it.
+/// (#2240): what the first content's INK lacks (#2286) is added to the top
+/// inset — the whole depth for a plain list whose first row draws from its
+/// top, less for a row whose ink starts lower, nothing for one whose own
+/// padding clears it.
 @MainActor
 struct TopFadeClearanceTests {
-    private static let fade = SoftTopEdge.fadeLength
+    /// The fade's end plus the margin: how deep the first ink must start.
+    private static let fade = SoftTopEdge.clearanceDepth
     /// The windows the lists stand in, kept for the suite's life.
     private static var windows: [UIWindow] = []
 
+    /// Which layout the list wears: our compositional sections, or UIKit's
+    /// list layout (its swipe-actions slot and section background are
+    /// decorations of its own).
+    private enum Layout { case sections, systemList }
+
     /// A list of `rows` rows whose first section starts `sectionTop` points
-    /// into the content (0: a plain list's first row at the very top).
+    /// into the content (0: a plain list's first row at the very top). Each
+    /// row draws an avatar-like disc `inkTop` points below its own top, and
+    /// `dress` adds what a case needs.
     private final class List: NSObject, UICollectionViewDataSource {
         let rows: Int
-        init(rows: Int) { self.rows = rows }
+        let inkTop: CGFloat
+        let dress: ((UICollectionViewCell) -> Void)?
+        init(rows: Int, inkTop: CGFloat, dress: ((UICollectionViewCell) -> Void)?) {
+            self.rows = rows
+            self.inkTop = inkTop
+            self.dress = dress
+        }
 
         func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int { rows }
 
         func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
-            collectionView.dequeueReusableCell(withReuseIdentifier: "row", for: indexPath)
+            let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "row", for: indexPath)
+            cell.contentView.subviews.forEach { $0.removeFromSuperview() }
+            if let dress {
+                dress(cell)
+            } else {
+                let disc = UIView(frame: CGRect(x: 16, y: inkTop, width: 40, height: 40))
+                disc.backgroundColor = .systemGray5
+                cell.contentView.addSubview(disc)
+            }
+            return cell
         }
     }
 
-    private func makeList(rows: Int, sectionTop: CGFloat) -> (UICollectionView, List) {
-        let layout = UICollectionViewCompositionalLayout { _, _ in
+    private func makeList(rows: Int, sectionTop: CGFloat, inkTop: CGFloat = 0, layout kind: Layout = .sections,
+                          dress: ((UICollectionViewCell) -> Void)? = nil) -> (UICollectionView, List) {
+        var listConfiguration = UICollectionLayoutListConfiguration(appearance: .plain)
+        listConfiguration.backgroundColor = .systemBackground
+        let systemList = UICollectionViewCompositionalLayout.list(using: listConfiguration)
+        let sections = UICollectionViewCompositionalLayout { _, _ in
             let size = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1), heightDimension: .absolute(64))
             let item = NSCollectionLayoutItem(layoutSize: size)
             let group = NSCollectionLayoutGroup.vertical(layoutSize: size, subitems: [item])
@@ -33,9 +62,11 @@ struct TopFadeClearanceTests {
             section.contentInsets = NSDirectionalEdgeInsets(top: sectionTop, leading: 0, bottom: 0, trailing: 0)
             return section
         }
+        let layout: UICollectionViewLayout = kind == .systemList ? systemList : sections
         let list = UICollectionView(frame: CGRect(x: 0, y: 0, width: 402, height: 874), collectionViewLayout: layout)
+        list.backgroundColor = .systemBackground
         list.register(UICollectionViewCell.self, forCellWithReuseIdentifier: "row")
-        let source = List(rows: rows)
+        let source = List(rows: rows, inkTop: inkTop, dress: dress)
         list.dataSource = source
         // On screen: the clearance is measured only there.
         let window = UIWindow(frame: list.frame)
@@ -125,6 +156,7 @@ struct TopFadeClearanceTests {
     @Test func aPlainScrollViewMeasuresItsContent() {
         let scroll = UIScrollView(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
         let content = UIView(frame: CGRect(x: 0, y: 12, width: 402, height: 900))
+        content.backgroundColor = .systemGray6
         scroll.addSubview(content)
         scroll.contentSize = CGSize(width: 402, height: 912)
         let window = UIWindow(frame: scroll.frame)
@@ -132,6 +164,128 @@ struct TopFadeClearanceTests {
         Self.windows.append(window)
         scroll.applyTopEdge(for: .titled)
         #expect(scroll.topFadeClearance == Self.fade - 12)
+    }
+
+    /// The owner's Followers case (#2286): a row's avatar sits 7 pt inside
+    /// its frame. The ink counts, not the frame: 7 pt less is added.
+    @Test func aRowsInkNotItsFrameIsMeasured() {
+        let (list, source) = makeList(rows: 20, sectionTop: 0, inkTop: 7)
+        list.applyTopEdge(for: .titled)
+        list.layoutIfNeeded()
+        #expect(list.topFadeClearance == Self.fade - 7)
+        #expect(list.contentOffset.y == -list.adjustedContentInset.top, "not at rest")
+        withExtendedLifetime(source) {}
+    }
+
+    /// UIKit's list layout adds decorations of its own — the swipe actions'
+    /// slot at each row's top, the section's background from far above —
+    /// which draw nothing there: the row's ink is what counts (measured on
+    /// the relationships list, #2286).
+    @Test func aSystemListLayoutsDecorationsAreNotInk() {
+        let (list, source) = makeList(rows: 20, sectionTop: 0, inkTop: 7, layout: .systemList)
+        list.applyTopEdge(for: .titled)
+        list.layoutIfNeeded()
+        #expect(list.topFadeClearance == Self.fade - 7)
+        withExtendedLifetime(source) {}
+    }
+
+    /// A row whose ink already starts past the depth gets nothing, though
+    /// its frame starts at the bar's bottom.
+    @Test func aListWhoseInkClearsTheFadeGetsNothing() {
+        let (list, source) = makeList(rows: 20, sectionTop: 0, inkTop: Self.fade + 2)
+        list.applyTopEdge(for: .titled)
+        list.layoutIfNeeded()
+        #expect(list.topFadeClearance == 0)
+        #expect(list.contentInset.top == 0)
+        withExtendedLifetime(source) {}
+    }
+
+    /// A heading's ink is its text's cap top, not the label's frame, nor the
+    /// header's (the inbox's "Join requests", #2286).
+    @Test func aHeadingIsMeasuredFromItsText() {
+        let font = UIFont.systemFont(ofSize: 15, weight: .semibold)
+        let (list, source) = makeList(rows: 20, sectionTop: 0) { cell in
+            let label = UILabel()
+            label.font = font
+            label.text = "Join requests"
+            label.sizeToFit()
+            label.frame.origin = CGPoint(x: 16, y: 10)
+            cell.contentView.addSubview(label)
+        }
+        list.applyTopEdge(for: .titled)
+        list.layoutIfNeeded()
+        let capTop: CGFloat = 10 + font.ascender - font.capHeight
+        #expect(list.topFadeClearance == (Self.fade - capTop).rounded(.up))
+        withExtendedLifetime(source) {}
+    }
+
+    /// A fill the colour of the list's own ground draws nothing visible (a
+    /// plain list's white cell): the disc below it is the ink.
+    @Test func aFillTheGroundsColourIsNotInk() {
+        let (list, source) = makeList(rows: 20, sectionTop: 0) { cell in
+            cell.backgroundColor = .systemBackground
+            cell.contentView.backgroundColor = .systemBackground
+            let disc = UIView(frame: CGRect(x: 16, y: 9, width: 40, height: 40))
+            disc.backgroundColor = .systemGray5
+            cell.contentView.addSubview(disc)
+            // A separator at the row's top is a hairline, not ink.
+            let separator = UIView(frame: CGRect(x: 16, y: 0, width: 386, height: 0.33))
+            separator.backgroundColor = .separator
+            cell.contentView.addSubview(separator)
+        }
+        list.applyTopEdge(for: .titled)
+        list.layoutIfNeeded()
+        #expect(list.topFadeClearance == Self.fade - 9)
+        withExtendedLifetime(source) {}
+    }
+
+    /// A card's ground in another colour than the screen's is ink from its
+    /// top (an inset-grouped row): nothing changes for those.
+    @Test func aGroundInAnotherColourIsInk() {
+        let (list, source) = makeList(rows: 20, sectionTop: 0) { cell in
+            cell.contentView.backgroundColor = .secondarySystemBackground
+            let label = UILabel(frame: CGRect(x: 16, y: 20, width: 200, height: 20))
+            label.text = "Account"
+            cell.contentView.addSubview(label)
+        }
+        list.applyTopEdge(for: .titled)
+        list.layoutIfNeeded()
+        #expect(list.topFadeClearance == Self.fade)
+        withExtendedLifetime(source) {}
+    }
+
+    /// The fade's end is ONE value per header kind, and the depth is it
+    /// plus the margin.
+    @Test func theDepthIsTheFadesEndPlusTheMargin() {
+        #expect(SoftTopEdge.clearanceDepth == SoftTopEdge.fadeLength + SoftTopEdge.inkMargin)
+        #expect(SoftTopEdge.clearanceDepth(underStackedSearch: true)
+            == SoftTopEdge.fadeLengthUnderStackedSearch + SoftTopEdge.inkMargin)
+        #expect(SoftTopEdge.fadeLength < 40, "#2240's 40 pt was the effect view's frame, not the softening")
+        #expect(SoftTopEdge.fadeLengthUnderStackedSearch < SoftTopEdge.fadeLength)
+    }
+
+    /// Under a search field stacked below the title (the inbox), the fade
+    /// passes under the field: a list there keeps only the margin's worth.
+    @Test func underAStackedSearchFieldOnlyTheMarginIsKept() {
+        let (list, source) = makeList(rows: 20, sectionTop: 0)
+        let screen = UIViewController()
+        screen.view.addSubview(list)
+        screen.navigationItem.searchController = UISearchController(searchResultsController: nil)
+        screen.navigationItem.preferredSearchBarPlacement = .stacked
+        let navigation = UINavigationController(rootViewController: screen)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        window.rootViewController = navigation
+        // Shown: a hidden window never installs its root's view, and the
+        // clearance is measured only on screen. Hidden again at the end, so
+        // the suites that present keep the key window.
+        window.isHidden = false
+        defer { window.isHidden = true }
+        Self.windows.append(window)
+        navigation.view.layoutIfNeeded()
+        list.applyTopEdge(for: .titled)
+        list.layoutIfNeeded()
+        #expect(list.topFadeClearance == SoftTopEdge.clearanceDepth(underStackedSearch: true))
+        withExtendedLifetime(source) {}
     }
 
     /// The untitled header stays clear and gets no space (#1591).
@@ -149,7 +303,7 @@ struct TopFadeClearanceTests {
 /// its lists'.
 @MainActor
 struct HorizontalPagerTopFadeClearanceTests {
-    private static let fade = SoftTopEdge.fadeLength
+    private static let fade = SoftTopEdge.clearanceDepth
     /// The windows the lists stand in, kept for the suite's life.
     private static var windows: [UIWindow] = []
 
