@@ -395,7 +395,7 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
     /// The app's icon button as a bare glyph (#2274: the disc is gone), in
     /// the played bars' ink, with the app's swell under the finger and a
     /// 44 pt target. The same button as before, so the same Replace morph.
-    private let playButton = AppIconButton(style: .glyph, content: .symbol("play.fill"), dims: false)
+    private let playButton = VoicePlayGlyphButton(style: .glyph, content: .symbol("play.fill"), dims: false)
     private let loader = AppLoaderView(size: .medium)
     /// The waveform's box: the line's whole height, between the glyph and
     /// the slot; the bars fill it.
@@ -1520,4 +1520,15 @@ public final class WaveformBars: UIView, UIGestureRecognizerDelegate {
     /// would say it.
     public func debugFinger(_ down: Bool) { onFinger?(down) }
     #endif
+}
+
+/// The panel's play glyph: never an accessibility element of its own — the
+/// panel is the element and says play, pause and the time (#2274).
+/// ⚠️ `AppIconButton.refreshAccessibility` turns a button back into an element
+/// on every refresh, which the bare glyph's ink and face changes run.
+final class VoicePlayGlyphButton: AppIconButton {
+    override func refreshAccessibility() {
+        super.refreshAccessibility()
+        isAccessibilityElement = false
+    }
 }
