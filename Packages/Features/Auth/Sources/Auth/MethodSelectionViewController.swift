@@ -34,7 +34,10 @@ final class MethodSelectionViewController: AuthStepTableViewController {
     }
 
     private lazy var closeItem = AuthFormBar.makeCloseItem(identifier: Self.closeItemIdentifier) { [weak self] in
-        self?.onClose?()
+        // Locked at once under a running sign-in, greyed only once its load
+        // shows (#2270, `applyGating`).
+        guard let self, !locksOthers else { return }
+        onClose?()
     }
 
 
@@ -57,8 +60,16 @@ final class MethodSelectionViewController: AuthStepTableViewController {
     private var buttons: [SignInMethod: AppButton] = [:]
     /// Each method's row, made once, hosting its button on a clear ground.
     private var cells: [SignInMethod: UITableViewCell] = [:]
+    /// Whether the other methods and × refuse taps: from the call's start to
+    /// the end of its answer (#1969).
+    private(set) var locksOthers = false
+    /// The method whose load is drawn — past the button's grace with the call
+    /// still running (#2270): only then do the others and × turn grey.
+    private(set) var shownLoad: SignInMethod?
 
-    init(methods: [SignInMethod] = SignInMethod.all) {
+    /// - Parameter loadClock: the buttons' load time (their grace and
+    ///   minimum, #2270). A test steps it.
+    init(methods: [SignInMethod] = SignInMethod.all, loadClock: LoadingClock = .system) {
         self.methods = methods
         sections = methods.map(Section.method) + [.legal]
         super.init(style: .insetGrouped)
@@ -70,6 +81,8 @@ final class MethodSelectionViewController: AuthStepTableViewController {
             // The tap is the button's, not the row's selection: no grey row
             // highlight, the button's swell instead.
             button.addAction(UIAction { [weak self] _ in self?.onMethodSelected?(method) }, for: .primaryActionTriggered)
+            button.loadClock = loadClock
+            button.onLoadShownChange = { [weak self] shown in self?.loadShown(shown, by: method) }
             buttons[method] = button
         }
         // An inline title in the bar's own appearance, as on the form's steps.
@@ -155,16 +168,66 @@ final class MethodSelectionViewController: AuthStepTableViewController {
     /// Puts `method`'s button in its held load, the others gated — or ends
     /// it everywhere with nil. The coordinator locks the screen itself; this
     /// is only what it shows.
-    func setWorking(_ method: SignInMethod?) {
+    ///
+    /// ⚠️ LOCKED AT ONCE, GREY ONLY ONCE THE LOAD SHOWS (#2270). The others
+    /// and × refuse taps from the start (#1969), but turn grey only when the
+    /// button's grace has passed with the call still running: a fast
+    /// sign-in shows nothing but the press, then the sheet going down.
+    ///
+    /// - Parameter completion: runs once the answer may show — at once, or,
+    ///   ending a load drawn for less than its minimum, at that minimum's
+    ///   end. The lock lifts then too.
+    func setWorking(_ method: SignInMethod?, completion: (@MainActor () -> Void)? = nil) {
+        let previous = workingMethod
         workingMethod = method
+        if method != nil { locksOthers = true }
+        let animated = isViewLoaded
+        for (candidate, button) in buttons where candidate != previous {
+            button.setPhase(candidate == method ? .loading : .content, animated: animated)
+        }
+        applyGating()
+        let ended: @MainActor () -> Void = { [weak self] in
+            if let self, workingMethod == nil {
+                locksOthers = false
+                applyGating()
+            }
+            completion?()
+        }
+        // The answer waits for the load it ends.
+        guard let previous, let button = buttons[previous] else { return ended() }
+        button.setPhase(previous == method ? .loading : .content, animated: animated, completion: ended)
+    }
+
+    /// The call answered: its load ends, and this returns once the answer
+    /// may show (#2270) — the caller's next step, the sheet going down, an
+    /// error, never shows before the load has ended.
+    func endWorking() async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            setWorking(nil) { continuation.resume() }
+        }
+    }
+
+    /// A method's load was drawn, or has ended.
+    private func loadShown(_ shown: Bool, by method: SignInMethod) {
+        if shown {
+            shownLoad = method
+        } else if shownLoad == method {
+            shownLoad = nil
+        }
+        applyGating()
+    }
+
+    /// The others' and ×'s look and taps, from the lock and the load shown.
+    private func applyGating() {
         // ⚠️ × WAITS FOR THE CALL (#1969). Sign in with Apple or a passkey
         // goes on in the system's sheet and on the server; closing under it
         // would leave its answer — a birthday step, a second step, an error
-        // — nowhere to land. The button's load says why.
-        closeItem.isEnabled = method == nil
+        // — nowhere to land. The button's load says why, once it shows.
+        closeItem.isEnabled = shownLoad == nil
         for (candidate, button) in buttons {
-            button.setPhase(candidate == method ? .loading : .content, animated: isViewLoaded)
-            button.isEnabled = method == nil || candidate == method
+            let isWorking = candidate == workingMethod || candidate == shownLoad
+            button.isEnabled = shownLoad == nil || isWorking
+            button.isLocked = locksOthers && !isWorking
         }
     }
 

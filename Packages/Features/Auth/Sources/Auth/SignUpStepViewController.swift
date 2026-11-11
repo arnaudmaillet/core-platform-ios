@@ -7,6 +7,20 @@ import UIKit
 @MainActor
 protocol WorkingIndicating: AnyObject {
     func setWorking(_ working: Bool)
+    /// The call answered: the load ends, and `completion` runs once the
+    /// answer may show — at once, or at the end of a drawn load's minimum
+    /// (#2270).
+    func endWorking(completion: @escaping @MainActor () -> Void)
+}
+
+extension WorkingIndicating {
+    /// `endWorking(completion:)`, awaited: the caller's next step — the next
+    /// screen, an error — never shows before the load has ended (#2270).
+    func endWorking() async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            endWorking { continuation.resume() }
+        }
+    }
 }
 
 /// The shape every sign-up step shares (guest mode B4): the flow's hero
@@ -30,6 +44,10 @@ class SignUpStepViewController: AuthStepTableViewController {
     lazy var primaryButton: AppButton = {
         let button = AppButton(aspect: .pill(.prominent), size: .form, content: .title(""))
         button.addAction(UIAction { [weak self] _ in self?.primaryTapped() }, for: .primaryActionTriggered)
+        // × and the back grey only once the load shows (#2270).
+        button.onLoadShownChange = { [weak self] shown in
+            (self?.navigationController as? ContentFittingNavigationController)?.setFormGreyed(shown)
+        }
         return button
     }()
 
@@ -53,15 +71,34 @@ class SignUpStepViewController: AuthStepTableViewController {
     /// call runs: sending a code, verifying it, creating the account. The
     /// load ignores re-taps and keeps its ground (not greyed as disabled).
     /// The form's × and back are DISABLED, not hidden (#2022): the bar keeps
-    /// its shape (`ContentFittingNavigationController.setFormWorking`).
+    /// its shape (`ContentFittingNavigationController.setFormWorking`) —
+    /// locked at once, greyed only once the load shows (#2270).
     func setWorking(_ working: Bool) {
-        primaryButton.setPhase(working ? .loading : .content, animated: true)
-        primaryButton.isEnabled = working || canContinue
-        (navigationController as? ContentFittingNavigationController)?.setFormWorking(working)
-        view.isUserInteractionEnabled = !working
-        if working {
+        guard !working else {
+            primaryButton.setPhase(.loading, animated: true)
+            primaryButton.isEnabled = true
+            (navigationController as? ContentFittingNavigationController)?.setFormWorking(true)
+            view.isUserInteractionEnabled = false
             Haptics.prepare(.error)
             view.endEditing(true)
+            return
+        }
+        endWorking {}
+    }
+
+    /// The load ends — after its minimum when drawn — and the step opens
+    /// again with it, then `completion` (#2270).
+    ///
+    /// ⚠️ FINAL: overridable, its vtable entry was mangled with a `@Sendable`
+    /// closure its definition lacks, and the test bundle failed to link.
+    final func endWorking(completion: @escaping @MainActor () -> Void) {
+        primaryButton.setPhase(.content, animated: true) { [weak self] in
+            if let self {
+                primaryButton.isEnabled = canContinue
+                (navigationController as? ContentFittingNavigationController)?.setFormWorking(false)
+                view.isUserInteractionEnabled = true
+            }
+            completion()
         }
     }
 

@@ -56,7 +56,8 @@ struct LoginFlowCoordinatorTests {
     @Test func closeWaitsForARunningSignIn() throws {
         let methods = MethodSelectionViewController()
         let close = try #require(methods.navigationItem.rightBarButtonItem)
-        methods.setWorking(.passkey)
+        // Apple: the default list has no passkey row to load.
+        methods.setWorking(.provider(.apple))
         #expect(!close.isEnabled)
         methods.setWorking(nil)
         #expect(close.isEnabled)

@@ -92,10 +92,14 @@ struct AppButtonRowActionTests {
 
     /// A drawn load: the words blurred under the sheen.
     @Test func aDrawnLoadIsTheBlurredWords() {
+        let time = ManualLoadingClock()
         let button = rowAction()
+        button.loadClock = time.clock
         let (window, _) = hosted(button)
         defer { window.isHidden = true }
         button.setPhase(.loading, animated: true)
+        #expect(!button.debugVeilIsShown, "the load was drawn inside its grace (#2270)")
+        time.advance(AppButton.MorphMetrics.loadGrace)
         #expect(button.debugVeilIsShown, "the load was not drawn")
         #expect(button.debugIsUnderStandIn)
         button.setPhase(.content, animated: false)

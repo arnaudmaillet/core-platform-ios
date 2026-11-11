@@ -210,13 +210,20 @@ public final class ContentFittingNavigationController: UINavigationController, U
 
     /// The form's ? was tapped. Not wired yet, as on the method list (#1969).
     var onHelp: (() -> Void)?
-    /// Whether a step's call runs: × and the back are disabled, never hidden.
+    /// Whether a step's call runs: × and the back refuse it, the edge swipe
+    /// waits.
     private(set) var isFormWorking = false
+    /// Whether × and the back are drawn disabled: only once the call's load
+    /// shows (#2270).
+    private(set) var isFormGreyed = false
 
     /// The form's × — the swipe's exit, behind the swipe's own guard: once a
     /// code is sent (`protectsInput`), one confirmation first; before, the
     /// form closes at once, back to the method list.
     func closeForm() {
+        // Locked at once under a call, greyed only once its load shows
+        // (#2270, `setFormWorking`).
+        guard !isFormWorking else { return }
         if let top = topViewController, protectsInput?(top) == true {
             confirmLeaving()
         } else {
@@ -242,7 +249,7 @@ public final class ContentFittingNavigationController: UINavigationController, U
         // Through the screen's OWN trailing list, which bar toasts share.
         let own = step.ownTrailingBarItems.filter { $0.identifier != AuthFormBar.closeIdentifier }
         let close = AuthFormBar.makeCloseItem { [weak self] in self?.closeForm() }
-        close.isEnabled = !isFormWorking
+        close.isEnabled = !isFormGreyed
         step.setOwnTrailingBarItems([close] + own, animated: false)
         // The back the NEXT step shows is this step's: a chevron alone, kept
         // so a call can disable it (`setFormWorking`).
@@ -270,18 +277,28 @@ public final class ContentFittingNavigationController: UINavigationController, U
         return super.popViewController(animated: animated)
     }
 
-    /// A step's call runs or ends (#2022): × and the back chevron are
-    /// disabled, NOT hidden — the bar keeps its shape — and the edge swipe
-    /// waits too. ? stays enabled.
+    /// A step's call runs or ends (#2022): × and the back chevron refuse it
+    /// (`closeForm`, `popViewController`) and the edge swipe waits — at
+    /// once. ? stays enabled. Their grey is `setFormGreyed`'s; the end of
+    /// the call takes it off too.
     func setFormWorking(_ working: Bool) {
         guard isForm else { return }
         isFormWorking = working
-        topViewController?.ownTrailingBarItems
-            .first { $0.identifier == AuthFormBar.closeIdentifier }?.isEnabled = !working
-        if viewControllers.count >= 2 {
-            viewControllers[viewControllers.count - 2].navigationItem.backBarButtonItem?.isEnabled = !working
-        }
         interactivePopGestureRecognizer?.isEnabled = !working
+        if !working { setFormGreyed(false) }
+    }
+
+    /// × and the back chevron drawn disabled, NOT hidden — the bar keeps its
+    /// shape (#2022) — once the call's load shows (#2270): a fast answer
+    /// greys nothing.
+    func setFormGreyed(_ greyed: Bool) {
+        guard isForm else { return }
+        isFormGreyed = greyed
+        topViewController?.ownTrailingBarItems
+            .first { $0.identifier == AuthFormBar.closeIdentifier }?.isEnabled = !greyed
+        if viewControllers.count >= 2 {
+            viewControllers[viewControllers.count - 2].navigationItem.backBarButtonItem?.isEnabled = !greyed
+        }
     }
 
     /// VoiceOver's escape, the only non-visual way out with no close button:

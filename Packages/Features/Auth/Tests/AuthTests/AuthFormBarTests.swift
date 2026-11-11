@@ -1,3 +1,4 @@
+import DesignSystem
 import Testing
 import UIKit
 @testable import Auth
@@ -75,16 +76,24 @@ struct AuthFormBarTests {
         #expect(alert.title == ContentFittingNavigationController.leaveTitle)
     }
 
-    /// A call disables × and the back (and the edge swipe), never hides
-    /// them; the end of the call enables them again.
+    /// A call locks × and the back (and the edge swipe) at once, greys
+    /// them — never hides them — once its load shows (#2270); the end of the
+    /// call enables them again.
     @Test func aCallDisablesCloseAndTheBackWithoutHidingThem() throws {
         let root = Step()
         let (form, window) = form(root: root)
         defer { window.isHidden = true }
         let next = Step()
         form.pushViewController(next, animated: false)
+        var dismissed = 0
+        form.onDismissed = { dismissed += 1 }
 
         form.setFormWorking(true)
+        #expect(closeItem(of: next)?.isEnabled == true, "× greyed before the load shows")
+        #expect(root.navigationItem.backBarButtonItem?.isEnabled == true, "the back greyed before the load shows")
+        form.closeForm()
+        #expect(dismissed == 0, "× closed the form under a call")
+        form.setFormGreyed(true)
         #expect(closeItem(of: next)?.isEnabled == false)
         #expect(root.navigationItem.backBarButtonItem?.isEnabled == false, "the back is not disabled")
         #expect(!next.navigationItem.hidesBackButton, "the back was hidden")
@@ -100,6 +109,41 @@ struct AuthFormBarTests {
         #expect(closeItem(of: next)?.isEnabled == true)
         #expect(root.navigationItem.backBarButtonItem?.isEnabled == true)
         #expect(form.interactivePopGestureRecognizer?.isEnabled == true)
+    }
+
+    /// A step's call (#2270): × and the back locked at once, grey only once
+    /// the button's grace has passed with the call still running; the end
+    /// — the step opening again, the caller going on — waits for the load's
+    /// minimum.
+    @Test func aStepsCallGreysTheBarOnlyOnceItsLoadShows() {
+        let root = Step()
+        let (form, window) = form(root: root)
+        defer { window.isHidden = true }
+        let step = SignUpStepViewController(emoji: "🔑", title: "T", subtitle: "S", buttonTitle: "Continue")
+        form.pushViewController(step, animated: false)
+        step.view.layoutIfNeeded()
+        let time = ManualLoadingClock()
+        step.primaryButton.loadClock = time.clock
+
+        step.setWorking(true)
+        #expect(form.isFormWorking)
+        #expect(form.popViewController(animated: false) == nil, "a pop went through during a call")
+        #expect(closeItem(of: step)?.isEnabled == true, "× greyed before the grace")
+        #expect(root.navigationItem.backBarButtonItem?.isEnabled == true, "the back greyed before the grace")
+
+        time.advance(AppButton.MorphMetrics.loadGrace)
+        #expect(closeItem(of: step)?.isEnabled == false, "× not grey past the grace")
+        #expect(root.navigationItem.backBarButtonItem?.isEnabled == false)
+
+        var answered = false
+        step.endWorking { answered = true }
+        #expect(!answered, "the next step came before the load's minimum")
+        #expect(form.isFormWorking)
+        time.advance(AppButton.MorphMetrics.loadMinimum + 0.05)
+        #expect(answered)
+        #expect(!form.isFormWorking)
+        #expect(closeItem(of: step)?.isEnabled == true)
+        #expect(root.navigationItem.backBarButtonItem?.isEnabled == true)
     }
 
     /// The OTP seam: Cancel gave way to ×, Verify stands inboard of it, and

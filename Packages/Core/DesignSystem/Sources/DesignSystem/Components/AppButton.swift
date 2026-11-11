@@ -106,9 +106,10 @@ open class AppButton: AppControl {
         /// The backend has not answered yet: a bone at the reserved width,
         /// inert, claiming no answer.
         case placeholder
-        /// An action is in flight: the content held blurred under a sheen, the
-        /// width held, re-taps ignored, still focusable for VoiceOver with a
-        /// busy label.
+        /// An action is in flight: the width held, re-taps ignored, still
+        /// focusable for VoiceOver with a busy label — at once; the content
+        /// held blurred under a sheen only once the answer takes time
+        /// (`MorphMetrics.loadGrace`, #2270).
         case loading
     }
 
@@ -151,6 +152,18 @@ open class AppButton: AppControl {
         /// content's ink when the load is not drawn.
         public static let loadingSheen: TimeInterval = 1.1
         public static let loadingInkAlpha: CGFloat = 0.4
+        /// How long a load waits before it is drawn (the owner, 2026-11-10,
+        /// #2270): the press answers the tap — the words dim, the capsule
+        /// swells and settles in about half a second (`morphSwellCurve`) —
+        /// so the load takes over just as the press ends. An answer inside
+        /// it never shows a load; past about a second a viewer doubts the
+        /// tap was taken, so it stays well below that. Reduce Motion too.
+        public static let loadGrace: TimeInterval = 0.5
+        /// Once drawn, a load stays at least this long (#2270): an answer
+        /// landing just past the grace would flash it otherwise. An answer
+        /// inside it waits for its end — the morph and the caller's next
+        /// step both (`setPhase`'s completion).
+        public static let loadMinimum: TimeInterval = 0.3
     }
 
     // MARK: - State
@@ -214,6 +227,31 @@ open class AppButton: AppControl {
     /// What VoiceOver hears while an action is in flight ("Following…").
     /// Nil: "In progress".
     public var busyLabel: String? { didSet { refreshAccessibility() } }
+
+    /// Whether the load is drawn now: past its grace, until it ends (#2270).
+    /// Before, a load refuses taps and says it is busy, but looks as the
+    /// content does.
+    public private(set) var isLoadShown = false {
+        didSet { if isLoadShown != oldValue { onLoadShownChange?(isLoadShown) } }
+    }
+    /// The load is drawn, or has ended (after its minimum): what a screen
+    /// greying its other controls during the call follows, so a fast answer
+    /// greys nothing (#2270).
+    public var onLoadShownChange: ((Bool) -> Void)?
+    /// Takes no tap, and does not look it (#2270): another button's call is
+    /// running, and the screen greys this one (`isEnabled`) only once that
+    /// load shows. VoiceOver hears it dimmed at once.
+    public var isLocked = false { didSet { refreshAccessibility() } }
+    /// The load's time: its grace and its minimum. A test steps it.
+    public var loadClock: LoadingClock = .system
+    /// The grace running before the load is drawn.
+    private var graceTimer: LoadingTimer?
+    /// When the load was drawn, for its minimum.
+    private var loadShownAt: TimeInterval?
+    /// A change out of the load waiting out its minimum.
+    private var endTimer: LoadingTimer?
+    /// The completions of the changes out of a load, run once one is on show.
+    private var endWaiters: [@MainActor () -> Void] = []
 
     /// The veil a content change falls back to when the button cannot be
     /// drawn (a material over a photograph).
@@ -375,7 +413,8 @@ open class AppButton: AppControl {
             refresh()
             return
         }
-        guard animated, window != nil, phase == .content else {
+        let answersInGrace = takesAnswerInGrace()
+        guard animated, window != nil, phase == .content || answersInGrace else {
             land()
             return
         }
@@ -401,12 +440,25 @@ open class AppButton: AppControl {
             refresh()
             return
         }
-        guard animated, window != nil, phase == .content else {
+        let answersInGrace = takesAnswerInGrace()
+        guard animated, window != nil, phase == .content || answersInGrace else {
             isSelected = selected
             land()
             return
         }
         morph(reduced: reducesMotion(), old: old) { self.isSelected = selected }
+    }
+
+    /// A new content while a load waits its grace (#2270) is the answer: the
+    /// load is not drawn now, and the held width gives way to the answer's
+    /// — today's morph, from the sharp content. The phase stays the
+    /// caller's: re-taps are refused until it ends the load.
+    private func takesAnswerInGrace() -> Bool {
+        guard phase == .loading, !isLoadShown else { return false }
+        graceTimer?.cancel()
+        graceTimer = nil
+        heldSize = nil
+        return true
     }
 
     /// An immediate change: the content lands whole, at its own width, and a
@@ -900,8 +952,53 @@ open class AppButton: AppControl {
 
     /// Placeholder, loading or content. The width never jumps: a placeholder
     /// holds its reserved width, a load holds the width it started at.
-    public func setPhase(_ phase: Phase, animated: Bool) {
-        guard phase != self.phase else { return }
+    ///
+    /// ⚠️ A LOAD SHOWS ONLY ONCE THE ANSWER TAKES TIME (#2270, the owner
+    /// 2026-11-10: a fast passkey sign-in flashed a blurred button). At once
+    /// the phase is `.loading` — re-taps refused, the width held, VoiceOver
+    /// told it is busy; the blur and the sheen (or, under Reduce Motion, the
+    /// faded content) only after `MorphMetrics.loadGrace`. An answer inside
+    /// the grace never draws the load. Once drawn, the load stays at least
+    /// `MorphMetrics.loadMinimum`: a change out of it landing sooner waits
+    /// for that — and so does `completion`, so the caller's next step (a
+    /// sheet going down) never shows the answer before the load has ended.
+    /// Not animated, a change is immediate both ways: no grace, no minimum.
+    ///
+    /// - Parameter completion: runs once `phase` is on show — at once, or at
+    ///   the drawn load's minimum. A change replaced before then hands its
+    ///   completion on to the next change out of the load.
+    public func setPhase(_ phase: Phase, animated: Bool, completion: (@MainActor () -> Void)? = nil) {
+        // A change still waiting out the load's minimum gives way to this one.
+        endTimer?.cancel()
+        endTimer = nil
+        if phase == .loading {
+            if self.phase != .loading { apply(.loading, animated: animated) }
+            completion?()
+            return
+        }
+        if let completion { endWaiters.append(completion) }
+        if self.phase == .loading, animated, let shownAt = loadShownAt {
+            let remaining = MorphMetrics.loadMinimum - (loadClock.now() - shownAt)
+            if remaining > 0 {
+                endTimer = loadClock.schedule(remaining) { [weak self] in
+                    self?.endTimer = nil
+                    self?.finishPhase(phase, animated: true)
+                }
+                return
+            }
+        }
+        finishPhase(phase, animated: animated)
+    }
+
+    /// `phase` on show, then the completions waiting for it.
+    private func finishPhase(_ phase: Phase, animated: Bool) {
+        if phase != self.phase { apply(phase, animated: animated) }
+        let waiters = endWaiters
+        endWaiters = []
+        for waiter in waiters { waiter() }
+    }
+
+    private func apply(_ phase: Phase, animated: Bool) {
         let old = self.phase
         if phase == .loading {
             // ⚠️ MEASURED, NOT READ FROM `intrinsicContentSize`, when the
@@ -914,24 +1011,38 @@ open class AppButton: AppControl {
         }
         self.phase = phase
         let animates = animated && window != nil
-        // ⚠️ NO SPINNER (the owner, 2026-10-23): a load holds the button as
-        // it stands the instant before its content changes — the content
-        // blurred, a sheen going over it — and when it ends, the morph goes
-        // on from there to whatever the answer brought.
-        if phase == .loading, animates, !reducesMotion(), holdLoad() {
+        if phase == .loading {
+            if animated {
+                // The grace: the press answers the tap meanwhile. Cancelled
+                // when the phase changes, so a fast answer leaves nothing
+                // scheduled.
+                graceTimer = loadClock.schedule(MorphMetrics.loadGrace) { [weak self] in self?.showLoad() }
+            } else {
+                loadShownAt = loadClock.now()
+                isLoadShown = true
+            }
+            if old == .placeholder { removeBone(animated: animates) }
             refresh()
             announceBusy()
+            invalidateIntrinsicContentSize()
+            superview?.setNeedsLayout()
             return
         }
-        if old == .loading, heldLoad != nil {
-            // Into the answer, the morph; into a placeholder, the bone.
-            if phase == .content, animates {
-                invalidateIntrinsicContentSize()
-                morphGeneration += 1
-                record(.blurMorph)
-                if blurMorph(old: content, swap: nil) { return }
+        if old == .loading {
+            graceTimer?.cancel()
+            graceTimer = nil
+            loadShownAt = nil
+            isLoadShown = false
+            if heldLoad != nil {
+                // Into the answer, the morph; into a placeholder, the bone.
+                if phase == .content, animates {
+                    invalidateIntrinsicContentSize()
+                    morphGeneration += 1
+                    record(.blurMorph)
+                    if blurMorph(old: content, swap: nil) { return }
+                }
+                endBlurMorph()
             }
-            endBlurMorph()
         }
         if phase == .placeholder {
             installBone()
@@ -939,10 +1050,28 @@ open class AppButton: AppControl {
             removeBone(animated: animates)
         }
         refresh()
-        if phase == .loading { announceBusy() }
         invalidateIntrinsicContentSize()
         superview?.setNeedsLayout()
         if animates { resize(reduced: reducesMotion()) }
+    }
+
+    /// The grace has run out with the call still on: the load is drawn.
+    /// ⚠️ NO SPINNER (the owner, 2026-10-23): it holds the button as it
+    /// stands the instant before its content changes — the content blurred,
+    /// a sheen going over it — and when it ends, the morph goes on from
+    /// there to whatever the answer brought. Under Reduce Motion, or where
+    /// it cannot be drawn, the content stays, faded.
+    private func showLoad() {
+        graceTimer = nil
+        guard phase == .loading, !isLoadShown else { return }
+        if window != nil, !reducesMotion() {
+            // Drawn from the configuration as it stands — sharp — before
+            // the refresh fades it under the stand-in.
+            _ = holdLoad()
+        }
+        loadShownAt = loadClock.now()
+        isLoadShown = true
+        refresh()
     }
 
     private func installBone() {
@@ -970,7 +1099,7 @@ open class AppButton: AppControl {
     /// ⚠️ **A BUTTON THAT IS NOT SHOWING ITS CONTENT TAKES NO TAP**: a
     /// placeholder claims no answer, and a load in flight ignores re-taps
     /// (`AppControl` refuses the touch).
-    override open var acceptsTapsWhenEnabled: Bool { phase == .content }
+    override open var acceptsTapsWhenEnabled: Bool { phase == .content && !isLocked }
 
     override open var showsGround: Bool { phase != .placeholder }
 
@@ -1015,7 +1144,7 @@ open class AppButton: AppControl {
         super.refreshAccessibility()
         // A placeholder claims no answer — not even to VoiceOver (#933).
         isAccessibilityElement = phase != .placeholder
-        if phase == .placeholder { accessibilityTraits.insert(.notEnabled) }
+        if phase == .placeholder || isLocked { accessibilityTraits.insert(.notEnabled) }
         switch phase {
         case .content: accessibilityValue = content.count.map(String.init)
         case .loading: accessibilityValue = busyText
@@ -1147,9 +1276,11 @@ open class AppButton: AppControl {
                 AttributedString($0, attributes: AttributeContainer([.font: font, .foregroundColor: UIColor.clear]))
             }
         case .loading:
-            // No spinner: drawn, the load is the content blurred under a
-            // sheen (`holdLoad`); undrawn — Reduce Motion, off screen — the
-            // content stays, faded.
+            // Inside its grace, the load looks as the content does (#2270).
+            // Past it, no spinner: drawn, the load is the content blurred
+            // under a sheen (`holdLoad`); undrawn — Reduce Motion, off
+            // screen — the content stays, faded.
+            guard isLoadShown else { break }
             config.baseForegroundColor = (config.baseForegroundColor ?? .label).withAlphaComponent(MorphMetrics.loadingInkAlpha)
         }
         return config

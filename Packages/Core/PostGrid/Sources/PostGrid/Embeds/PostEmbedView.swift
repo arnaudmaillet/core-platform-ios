@@ -427,8 +427,8 @@ public final class PostEmbedView: UIView {
     private func failed(generation: Int) {
         guard generation == actionGeneration else { return }
         pendingAction = nil
-        actionButton.setPhase(.content, animated: window != nil)
-        actionButton.fail()
+        // The shake is the answer: it waits for the load it ends (#2270).
+        actionButton.setPhase(.content, animated: window != nil) { [weak self] in self?.actionButton.fail() }
     }
 
     // MARK: - Build
