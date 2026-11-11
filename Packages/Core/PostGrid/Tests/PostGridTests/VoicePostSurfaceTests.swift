@@ -42,10 +42,18 @@ struct VoicePostSurfaceTests {
         let speaking = post()
         #expect(PostGridListRowCell.voiceSize(for: speaking, captionLines: nil, showsVoice: true) == .full)
         #expect(PostGridListRowCell.voiceSize(for: speaking, captionLines: 2, showsVoice: true) == .compact,
-                "a shelf's fixed card is compact: a drag is the shelf's")
+                "a shelf's fixed card is compact")
         #expect(PostGridTileCell.voiceSize(for: speaking, showsVoice: true) == .mark)
         #expect(PostHistoryRowCell.voiceSize(for: speaking, showsVoice: true) == .compact,
-                "a history row is compact (#2241): a shorter panel, a sideways drag the list's")
+                "a history row is compact (#2241): a shorter panel")
+    }
+
+    /// The drags are the panel's (#2275) on every surface but a shelf's
+    /// fixed card, whose scroll takes them.
+    @Test func onlyAShelfsCardGivesItsDragsAway() {
+        #expect(PostGridListRowCell.voiceDragsAreOwn(captionLines: nil))
+        #expect(!PostGridListRowCell.voiceDragsAreOwn(captionLines: 2), "a drag on a shelf card's panel is the shelf's")
+        #expect(PostHistoryRowCell.voiceDragsAreOwn, "a history row's panel gave its drags away")
     }
 
     @Test func noSurfaceDrawsAVoiceWithTheSwitchOffOrWithoutOne() {
@@ -91,6 +99,27 @@ struct VoicePostSurfaceTests {
             return player.debugPanelFrame.width
         }
         #expect(widths[0] == widths[1], "a 2 s and a 50 s voice drew different panels")
+    }
+
+    /// A list card's panel claims its drags; a shelf's card gives them to
+    /// the shelf — a tap still seeks — and the same cell reused on a list
+    /// claims them again (#2275).
+    @Test func aShelfCardsDragsAreTheShelfs() throws {
+        let list = listCard(post())
+        let listPlayer = try #require(list.debugVoiceCaption?.voiceView)
+        #expect(listPlayer.dragsAreOwn && listPlayer.debugSideHoldEnabled && listPlayer.waveform.scrubs)
+
+        let cell = listCard(post(), captionLines: 2)
+        let player = try #require(cell.debugVoiceCaption?.voiceView)
+        #expect(!player.dragsAreOwn && !player.debugSideHoldEnabled && !player.debugPlayHoldEnabled)
+        #expect(!player.waveform.scrubs, "a drag on a shelf card's waveform would fight the shelf's scroll")
+        let taps = player.waveform.gestureRecognizers?.filter { $0 is UITapGestureRecognizer && $0.isEnabled } ?? []
+        #expect(!taps.isEmpty, "a shelf card's waveform no longer seeks on a tap")
+
+        cell.prepareForReuse()
+        cell.configure(with: post(), imagePipeline: pipeline, captionLines: nil, showsVoice: true)
+        let reused = try #require(cell.debugVoiceCaption?.voiceView)
+        #expect(reused.dragsAreOwn && reused.debugSideHoldEnabled, "a reused card kept the shelf's rule")
     }
 
     @Test func aShelfCardDrawsTheVoiceCompactAndAlone() throws {
@@ -207,6 +236,35 @@ struct VoicePostSurfaceTests {
         row.configure(with: post(), viewedAt: nil, imagePipeline: nil, showsVoice: false)
         #expect(row.debugVoiceCaption == nil)
         #expect(row.debugShowsTitle && row.debugTitle == "From the ridge")
+    }
+
+    /// ⚠️ THE OWNER'S RECORDING (#2275): a sideways drag on a history row's
+    /// voice moved the profile's pages. Compact as it is, its drags are its
+    /// own: the pager around the list (a paging scroll view, as the
+    /// profile's) and the list's own scroll wait for the panel's sideways
+    /// hold and its scrub; a vertical drag still scrolls the list (the hold
+    /// takes only a sideways one).
+    @Test func aHistoryRowsPanelHoldsThePagerBack() throws {
+        let pager = HorizontalPagerScrollView(frame: CGRect(x: 0, y: 0, width: 360, height: 640))
+        pager.isPagingEnabled = true
+        pager.contentSize = CGSize(width: 360 * 3, height: 640)
+        let list = UIScrollView(frame: CGRect(x: 720, y: 0, width: 360, height: 640))
+        pager.addSubview(list)
+        let row = PostHistoryRowCell(frame: CGRect(x: 0, y: 0, width: 360, height: 72))
+        row.debugVoicePart.hub = VoicePlaybackHub.silentForTests()
+        row.configure(with: post(), viewedAt: nil, imagePipeline: nil, showsVoice: true)
+        list.addSubview(row)
+        row.layoutIfNeeded()
+        let player = try #require(row.debugVoiceCaption?.voiceView)
+        #expect(player.size == .compact)
+        #expect(player.dragsAreOwn && player.debugSideHoldEnabled && player.debugPlayHoldEnabled)
+        #expect(player.waveform.scrubs, "a sideways drag on a history row's waveform doesn't scrub")
+        let scrub = try #require(player.debugScrub)
+        for other in [pager.panGestureRecognizer, list.panGestureRecognizer] {
+            #expect(player.gestureRecognizer(player.debugSideHold, shouldBeRequiredToFailBy: other),
+                    "the pager's pan didn't wait for the panel's sideways drag")
+            #expect(player.waveform.gestureRecognizer(scrub, shouldBeRequiredToFailBy: other))
+        }
     }
 
     @Test func aSpeakingRowsSquareHoldsTheVoicesLine() {

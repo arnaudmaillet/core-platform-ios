@@ -109,6 +109,43 @@ struct MapVoicePostTests {
         #expect(worded.hitTest(onWords, with: nil) == nil, "the words took the marker's tap")
     }
 
+    /// The bubble's voice is compact, and its drags are its own (#2275): the
+    /// map's pan waits for the panel's sideways hold and its scrub, so a
+    /// sideways drag on it scrubs and the map doesn't pan.
+    @Test func theBubblesPanelHoldsTheMapBack() throws {
+        #expect(MapTextBubbleView.voiceDragsAreOwn)
+        let map = UIView(frame: CGRect(x: 0, y: 0, width: 400, height: 800))
+        let mapPan = UIPanGestureRecognizer()
+        map.addGestureRecognizer(mapPan)
+        let worded = bubble(caption: "From the ridge")
+        map.addSubview(worded)
+        let player = try #require(worded.debugVoice?.voiceView)
+        #expect(player.size == .compact)
+        #expect(player.dragsAreOwn && player.debugSideHoldEnabled && player.debugPlayHoldEnabled)
+        #expect(player.waveform.scrubs, "a sideways drag on the bubble's waveform doesn't scrub")
+        let scrub = try #require(player.debugScrub)
+        #expect(player.gestureRecognizer(player.debugSideHold, shouldBeRequiredToFailBy: mapPan),
+                "the map's pan didn't wait for the panel's sideways drag")
+        #expect(player.waveform.gestureRecognizer(scrub, shouldBeRequiredToFailBy: mapPan))
+    }
+
+    /// A sideways drag anywhere on the panel is the panel's (#2275): its
+    /// ground beside the waveform — the timer's place — takes the touch too.
+    /// Off the panel, the marker keeps it.
+    @Test func theWholePanelTakesItsDrag() throws {
+        let worded = bubble(caption: "From the ridge")
+        let player = try #require(worded.debugVoice?.voiceView)
+        player.layoutIfNeeded()
+        let timer = player.debugTimerFrame
+        let onTimer = player.convert(CGPoint(x: timer.midX, y: timer.midY), to: worded)
+        #expect(!player.keepsPress(at: CGPoint(x: timer.midX, y: timer.midY)), "the timer became a press of the voice's")
+        #expect(worded.hitTest(onTimer, with: nil) != nil, "the panel's ground gave its drag to the map")
+        let onAuthor = worded.authorLabel.convert(
+            CGPoint(x: worded.authorLabel.bounds.midX, y: worded.authorLabel.bounds.midY), to: worded
+        )
+        #expect(worded.hitTest(onAuthor, with: nil) == nil, "the author's line took the marker's tap")
+    }
+
     @Test func aFoldedBubbleStopsItsVoice() throws {
         let worded = bubble(caption: "")
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 400, height: 800))

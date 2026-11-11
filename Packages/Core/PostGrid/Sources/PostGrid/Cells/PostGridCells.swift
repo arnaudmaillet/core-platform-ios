@@ -2392,13 +2392,21 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
 
     /// The size a card gives a voice post's caption (#2208), nil for a post
     /// that does not speak or with the switch off: full on the list's card,
-    /// compact on a card of a FIXED height (`captionLines` — a shelf's, where
-    /// a drag on the waveform would fight the shelf's scroll). Pure.
+    /// compact on a card of a FIXED height (`captionLines` — a shelf's).
+    /// Pure.
     public static func voiceSize(
         for post: GalleryPost, captionLines: Int?, showsVoice: Bool
     ) -> VoicePostDisplay.Size? {
         guard showsVoice, post.kind == .text, post.voice != nil else { return nil }
         return captionLines == nil ? .full : .compact
+    }
+
+    /// Whether the voice's drags are its own (#2275): on the list's card,
+    /// yes; on a card of a FIXED height (`captionLines` — a horizontal
+    /// shelf's), no — a drag on its panel scrolls the shelf, a tap seeks.
+    /// Pure.
+    public static func voiceDragsAreOwn(captionLines: Int?) -> Bool {
+        captionLines == nil
     }
 
     private func buildVoiceCaption() {
@@ -2431,7 +2439,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         }
         voiceCaption.show(
             postID: post.id.rawValue, url: voice.url, duration: voice.duration, levels: voice.waveform,
-            author: post.authorName, size: size
+            author: post.authorName, size: size, dragsAreOwn: Self.voiceDragsAreOwn(captionLines: fixedCaptionLines)
         )
         captionFollowsBand.isActive = false
         captionFollowsVoice.constant = fullCaption.isEmpty ? 0 : Self.voiceCaptionGap
