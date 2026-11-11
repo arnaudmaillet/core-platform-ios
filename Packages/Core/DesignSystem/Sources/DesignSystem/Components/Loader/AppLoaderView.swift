@@ -344,6 +344,44 @@ public final class AppLoaderView: UIView {
         isHidden = hidesWhenStopped && !isAnimating && phase == .idle && progress == 0
     }
 
+    /// The loader as it shows now — its pills where the wave has them, in
+    /// their gradient — drawn by hand on a margin `pad` wide: a toast blurs
+    /// it from this (#2285, `ToastPictured`). Inside the toast's glass a
+    /// layer mask isn't drawn, so a render of the masked gradient would not
+    /// be what shows.
+    func picture(scale: CGFloat, pad: CGFloat) -> CGImage? {
+        let origin = CGPoint(x: pad + (bounds.width - side) / 2, y: pad + (bounds.height - side) / 2)
+        let shownMark = mark.presentation() ?? mark
+        let layers: [(CAGradientLayer, [CALayer])] = [(leadGradient, leads), (pillGradient, pills)]
+        return ToastBlur.draw(size: bounds.size, pad: pad, scale: scale) { _ in
+            guard let context = UIGraphicsGetCurrentContext() else { return }
+            for (gradientLayer, pieces) in layers {
+                let colours = (gradientLayer.colors ?? []) as CFArray
+                let locations = (gradientLayer.locations ?? []).map { CGFloat($0.doubleValue) }
+                guard let gradient = CGGradient(
+                    colorsSpace: nil, colors: colours, locations: locations.isEmpty ? nil : locations
+                ) else { continue }
+                let path = UIBezierPath()
+                for piece in pieces {
+                    let frame = (piece.presentation() ?? piece).frame.offsetBy(dx: origin.x, dy: origin.y)
+                    path.append(UIBezierPath(roundedRect: frame, cornerRadius: min(frame.width, frame.height) / 2))
+                }
+                context.saveGState()
+                context.setAlpha(CGFloat(shownMark.opacity * gradientLayer.opacity))
+                path.addClip()
+                let start = gradientLayer.startPoint
+                let end = gradientLayer.endPoint
+                context.drawLinearGradient(
+                    gradient,
+                    start: CGPoint(x: origin.x + start.x * side, y: origin.y + start.y * side),
+                    end: CGPoint(x: origin.x + end.x * side, y: origin.y + end.y * side),
+                    options: [.drawsBeforeStartLocation, .drawsAfterEndLocation]
+                )
+                context.restoreGState()
+            }
+        }
+    }
+
     #if DEBUG
     /// What a test reads.
     var debugIsLooping: Bool { if case .looping = phase { return true } else { return false } }

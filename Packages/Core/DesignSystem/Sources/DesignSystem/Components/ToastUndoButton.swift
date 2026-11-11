@@ -76,6 +76,11 @@ final class ToastUndoButton: ToastActionButton {
 /// app's primary for what went well, red for a failure, yellow (and a dark
 /// glyph) for a warning, a glyph's own colour where it has one (the Points
 /// heart, the saved star). Concentric with the toast, as its action is.
+///
+/// A content change never repaints it (#2285): the old disc blurs away and
+/// the new one comes out of a blur at the same place — a change of colour
+/// happens inside the blur. (Its glyph swapped by the symbol transition left
+/// the disc empty for a third of a second, filmed, #2166.)
 @MainActor
 final class ToastBadge: UIView {
     /// The disc's side, and the action capsule's height: the toast's height
@@ -109,30 +114,6 @@ final class ToastBadge: UIView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    /// Another glyph and colour on the same disc — animated: the glyphs
-    /// cross-fade in place and the colour eases. (The symbol transition
-    /// `.replace` left the disc empty for a third of a second between two
-    /// unrelated glyphs — filmed.)
-    func update(image: UIImage, fill: UIColor, ink: UIColor, animated: Bool) {
-        let template = image.withRenderingMode(.alwaysTemplate)
-        if animated {
-            UIView.transition(with: glyph, duration: 0.2, options: [.transitionCrossDissolve, .allowUserInteraction]) {
-                self.glyph.image = template
-            }
-        } else {
-            glyph.image = template
-        }
-        let paint = {
-            self.backgroundColor = fill
-            self.glyph.tintColor = ink
-        }
-        if animated {
-            UIView.animate(withDuration: 0.25, delay: 0, options: [.allowUserInteraction, .beginFromCurrentState], animations: paint)
-        } else {
-            paint()
-        }
-    }
 }
 
 /// A toast's close control, when it has one (a toast that does not leave on
@@ -262,59 +243,43 @@ final class ToastWords: UIView {
     }
 
     /// Blurs the words in (`appearing`: from `peak`, in pixels, to sharp) or
-    /// away (sharp to `peak`), fading as they go, over `duration` after
-    /// `delay`: a picture stands exactly where the words are, the words
-    /// hidden under it; arriving, they take its place as it clears.
-    func blur(appearing: Bool, peak: CGFloat, delay: TimeInterval, duration: TimeInterval) {
+    /// away (sharp to `peak`, from `opacity` — what still showed of them),
+    /// fading as they go, over `duration` after `delay`: a picture stands
+    /// exactly where the words are, the words hidden under it; arriving,
+    /// they take its place as it clears (`ToastBlur`). `completion` runs
+    /// once it has finished. False, and nothing done, when there is nothing
+    /// to draw (words not laid out).
+    @discardableResult
+    func blur(
+        appearing: Bool, peak: CGFloat, delay: TimeInterval, duration: TimeInterval,
+        from opacity: Float = 1, completion: (@MainActor () -> Void)? = nil
+    ) -> Bool {
         // One picture at a time: a change mid-change starts over from here.
         stand?.removeFromSuperview()
         let scale = max(1, window?.screen.scale ?? traitCollection.displayScale)
         let pad = peak / scale * 3
-        guard let image = picture(scale: scale, pad: pad) else { return }
-        let levels = 4
-        var images = (0...levels).map { AppButtonBlur.blurred(image, radius: peak * CGFloat($0) / CGFloat(levels)) }
-        if appearing { images.reverse() }
-        let stand = UIImageView(image: UIImage(cgImage: images[0], scale: scale, orientation: .up))
-        stand.frame = label.convert(label.bounds, to: self).insetBy(dx: -pad, dy: -pad)
-        stand.autoresizingMask = [.flexibleLeftMargin, .flexibleRightMargin, .flexibleTopMargin, .flexibleBottomMargin]
-        stand.isUserInteractionEnabled = false
-        addSubview(stand)
-        self.stand = stand
-        label.alpha = 0
-        let begin = stand.layer.convertTime(CACurrentMediaTime(), from: nil) + delay
-        let contents = CAKeyframeAnimation(keyPath: "contents")
-        contents.values = images.map(\.self)
-        contents.beginTime = begin
-        contents.duration = duration
-        contents.fillMode = .both
-        contents.isRemovedOnCompletion = false
-        let fade = CABasicAnimation(keyPath: "opacity")
-        fade.fromValue = appearing ? 0 : 1
-        fade.toValue = appearing ? 1 : 0
-        fade.beginTime = begin
-        fade.duration = duration
-        fade.timingFunction = CAMediaTimingFunction(name: appearing ? .easeOut : .easeIn)
-        fade.fillMode = .both
-        fade.isRemovedOnCompletion = false
-        CATransaction.begin()
-        CATransaction.setCompletionBlock { [weak self, weak stand] in
-            guard let self, let stand else { return }
-            guard appearing else {
-                stand.removeFromSuperview()
+        guard let image = picture(scale: scale, pad: pad) else { return false }
+        let standFrame = label.convert(label.bounds, to: self).insetBy(dx: -pad, dy: -pad)
+        let standIn = ToastBlur.stand(
+            image, scale: scale, frame: standFrame, in: self, appearing: appearing,
+            peak: peak, delay: delay, duration: duration, opacity: opacity
+        ) { [weak self] finished in
+            // A newer blur took over: it owns the words now.
+            guard let self, finished === self.stand else {
+                finished.removeFromSuperview()
                 return
             }
-            // The words take over from their picture in a breath: the
-            // glass's vibrant ink and the picture's are not quite one.
-            UIView.animate(withDuration: 0.08, delay: 0, options: [.allowUserInteraction]) {
-                self.label.alpha = 1
-                stand.alpha = 0
-            } completion: { _ in
-                stand.removeFromSuperview()
+            if appearing {
+                ToastBlur.handOver(from: finished, to: label)
+            } else {
+                finished.removeFromSuperview()
             }
+            completion?()
         }
-        stand.layer.add(contents, forKey: "blur.contents")
-        stand.layer.add(fade, forKey: "blur.opacity")
-        CATransaction.commit()
+        standIn.autoresizingMask = [.flexibleLeftMargin, .flexibleRightMargin, .flexibleTopMargin, .flexibleBottomMargin]
+        self.stand = standIn
+        label.alpha = 0
+        return true
     }
 
     /// Whether a change holds the words now (opening or closing).
