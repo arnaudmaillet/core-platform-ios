@@ -81,7 +81,7 @@ struct VoicePanelTests {
         let long = laidOut(size, width: 340, duration: 50)
         #expect(short.debugPanelFrame == long.debugPanelFrame)
         #expect(short.waveform.bars.count == long.waveform.bars.count)
-        #expect(short.debugTimerText == "0:02" && long.debugTimerText == "0:50")
+        #expect(short.debugTimerText == "2\u{2033}" && long.debugTimerText == "50\u{2033}", "a post's seconds (#2294)")
     }
 
     // MARK: - The waveform across the width
@@ -277,7 +277,9 @@ struct VoicePanelTests {
     func theSlotFollowsThePlayback(_ role: VoiceView.Role) {
         var state = VoiceView.State(levels: VoiceView.genericLevels, duration: 12)
         let view = laidOut(.full, width: 340, duration: 12, role: role)
-        #expect(view.debugShowsTimer && !view.debugShowsChip && view.debugTimerText == "0:12")
+        // A message's clock, a post's seconds (#2294).
+        let (total, reached) = role == .message ? ("0:12", "0:07") : ("12\u{2033}", "7\u{2033}")
+        #expect(view.debugShowsTimer && !view.debugShowsChip && view.debugTimerText == total)
         #expect(view.debugTimerAlpha == 1 && view.debugChipAlpha == 0)
 
         state.playback = .loading
@@ -294,11 +296,11 @@ struct VoicePanelTests {
         state.playback = .paused(progress: 7.0 / 12)
         view.update(state)
         #expect(view.debugShowsTimer && !view.debugShowsChip)
-        #expect(view.debugTimerText == "0:07", "paused, the time it resumes from")
+        #expect(view.debugTimerText == reached, "paused, the time it resumes from")
 
         state.playback = .rest
         view.update(state)
-        #expect(view.debugShowsTimer && view.debugTimerText == "0:12", "the end shows the total again")
+        #expect(view.debugShowsTimer && view.debugTimerText == total, "the end shows the total again")
         #expect(VoiceView.slotContent(for: .failed) == .timer)
     }
 
@@ -338,11 +340,12 @@ struct VoicePanelTests {
     }
 
     /// The slot holds the widest timer the voice can show — its total
-    /// length's format — and the widest speed: never narrower than either.
-    @Test(arguments: [TimeInterval(12), 65, 760])
-    func theSlotHoldsTheWidestTimerAndSpeed(_ duration: TimeInterval) {
+    /// length in its own format (#2294) — and the widest speed: never
+    /// narrower than either.
+    @Test(arguments: [TimeInterval(12), 65, 760], [VoiceView.Role.message, .post(author: nil)])
+    func theSlotHoldsTheWidestTimerAndSpeed(_ duration: TimeInterval, role: VoiceView.Role) {
         var state = VoiceView.State(levels: VoiceView.genericLevels, duration: duration)
-        let view = laidOut(.full, width: 340, duration: duration)
+        let view = laidOut(.full, width: 340, duration: duration, role: role)
         let slot = view.debugSlotFrame
         #expect(view.debugTimerFrame.width <= slot.width + 0.5)
         state.playback = .playing(progress: 0.5)
@@ -351,6 +354,23 @@ struct VoicePanelTests {
         view.debugSetSpeedLabel(VoiceView.widestSpeedLabel)
         #expect(view.debugSlotFrame == slot)
         #expect(view.debugChipFrame == slot)
+    }
+
+    /// The slot is measured on the voice's own format (#2294) — a post's
+    /// seconds, a message's clock — and again when a laid-out panel's role
+    /// changes. An hour's length, which no post has, so the timer is wider
+    /// than the chip and decides the slot.
+    @Test func theSlotIsMeasuredOnTheVoicesOwnFormat() {
+        let post = laidOut(.full, width: 340, duration: 3_723, role: .post(author: nil))
+        let message = laidOut(.full, width: 340, duration: 3_723, role: .message)
+        #expect(post.debugTimerText == "3723\u{2033}" && message.debugTimerText == "1:02:03")
+        for view in [post, message] {
+            #expect(view.debugTimerFrame.width <= view.debugSlotFrame.width + 0.5, "\(view.role): the timer overflows")
+        }
+        message.role = .post(author: nil)
+        message.layoutIfNeeded()
+        #expect(message.debugTimerText == "3723\u{2033}", "a role change kept the clock")
+        #expect(abs(message.debugSlotFrame.width - post.debugSlotFrame.width) < 0.5, "the slot kept the clock's width")
     }
 
     /// The change is a cross-fade in place on screen; under Reduce Motion, a
@@ -523,11 +543,11 @@ struct VoicePanelTests {
         view.update(state)
         #expect(!view.isAccessibilityElement)
         #expect(view.debugAccessibilityElements?.count == 2)
-        #expect(view.debugPlayElementValue == "0:06, speed 1.5×")
+        #expect(view.debugPlayElementValue == "6 seconds, speed 1.5×", "a post's time, spoken (#2294)")
         #expect(view.accessibilityCustomActions?.map(\.name).contains("Speed 1.5×") == true)
         state.playback = .paused(progress: 0.5)
         view.update(state)
         #expect(view.isAccessibilityElement && view.debugAccessibilityElements == nil)
-        #expect(view.accessibilityValue == "0:06, speed 1.5×")
+        #expect(view.accessibilityValue == "6 seconds, speed 1.5×")
     }
 }

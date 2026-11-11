@@ -616,12 +616,15 @@ struct TextPostComposePageTests {
         page.drafts.delete(draft.id)
     }
 
-    /// The list says a draft speaks, and for how long.
+    /// The list says a draft speaks, and for how long — in a voice post's
+    /// seconds (#2294), rounded down as the timer rounds them.
     @Test func theDraftsListSaysAVoiceAndItsLength() {
         let saved = Date(timeIntervalSince1970: 0)
-        let voice = PostDraft(text: "", updatedAtMS: 0, voice: .init(fileName: "x.m4a", duration: 72, waveform: []))
+        let voice = PostDraft(text: "", updatedAtMS: 0, voice: .init(fileName: "x.m4a", duration: 42.8, waveform: []))
         let line = TextPostDraftsViewController.secondLine(for: voice, saved: saved, now: saved)
-        #expect(line.hasPrefix("Voice 1:12 \u{00B7} Saved "), "\(line)")
+        #expect(line.hasPrefix("Voice 42\u{2033} \u{00B7} Saved "), "\(line)")
+        let full = PostDraft(text: "", updatedAtMS: 0, voice: .init(fileName: "x.m4a", duration: 60, waveform: []))
+        #expect(TextPostDraftsViewController.secondLine(for: full, saved: saved, now: saved).hasPrefix("Voice 60\u{2033} "))
         let words = PostDraft(text: "Hi", updatedAtMS: 0)
         #expect(TextPostDraftsViewController.secondLine(for: words, saved: saved, now: saved).hasPrefix("Saved "))
     }

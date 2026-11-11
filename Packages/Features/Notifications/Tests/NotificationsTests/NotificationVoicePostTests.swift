@@ -4,7 +4,7 @@ import Testing
 @testable import Notifications
 
 /// A notification about a voice post (#2208): its row says the voice — "🎙
-/// Voice post · 0:32", or the post's words marked — and, with the switch
+/// Voice post · 32″", or the post's words marked — and, with the switch
 /// off, reads as the text post it is.
 struct NotificationVoicePostTests {
     private let voice = PostVoice(assetID: "a", url: nil, duration: 32.2, waveform: [])
@@ -21,8 +21,8 @@ struct NotificationVoicePostTests {
 
     @Test func aVoiceAloneSaysItIsAVoicePost() {
         let model = NotificationDisplayModel(item: item(excerpt: nil, voice: voice), now: now, showsVoice: true)
-        #expect(model.excerpt == "🎙 Voice post · 0:32")
-        #expect(model.accessibilityText.contains("🎙 Voice post · 0:32"))
+        #expect(model.excerpt == "🎙 Voice post · 32\u{2033}")
+        #expect(model.accessibilityText.contains("🎙 Voice post · 32\u{2033}"))
     }
 
     @Test func aVoiceWithWordsShowsTheWordsMarked() {

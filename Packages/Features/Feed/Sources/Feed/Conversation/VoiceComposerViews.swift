@@ -15,6 +15,10 @@ import VoiceKitUI
 /// paused      [▶︎ 0:42] ▂▅▇▅▃▂▅▇▆▃▂▅   (🎙)  (↑)
 /// ```
 ///
+/// A voice post's composer (#2209) writes its time in seconds — `● 7″`,
+/// `-7″` in red for the last ten — as every voice post's timer does
+/// (`timerStyle`, #2294).
+///
 /// The 🎙 stays on the paused bar even after a listen back: it records on
 /// from where the take ended (the owner, 2026-11-08).
 final class VoiceRecordingStrip: UIView {
@@ -31,6 +35,16 @@ final class VoiceRecordingStrip: UIView {
     var onSeek: ((Double) -> Void)?
 
     private(set) var mode: Mode = .recording
+    /// How the take's time is written (#2294): a voice message's clock
+    /// (`0:12`), a voice post's seconds (`12″`) — the composer's to say.
+    var timerStyle: VoiceView.TimerStyle = .clock {
+        didSet {
+            guard timerStyle != oldValue, let shown = shownTime else { return }
+            setTime(shown.seconds, remaining: shown.remaining)
+        }
+    }
+    /// The time last shown, written again in a new style.
+    private var shownTime: (seconds: TimeInterval, remaining: TimeInterval?)?
     private let dot = UIView()
     private let timerLabel = UILabel()
     private let slideLabel = UILabel()
@@ -275,13 +289,25 @@ final class VoiceRecordingStrip: UIView {
     /// The parts a mode shows or hides.
     private var animatedParts: [UIView] { [dot, timerLabel, slideLabel, chip, box, takeButton, sendButton] }
 
-    /// The take's time; red in its last ten seconds, counting down (#2102).
+    /// The take's time; red in its last ten seconds, counting down (#2102) —
+    /// in the voice's own format (#2294): a message's "0:12" and "-0:07", a
+    /// post's "12″" and "-7″".
     func setTime(_ seconds: TimeInterval, remaining: TimeInterval?) {
         let running = remaining.map { $0 <= 10 } ?? false
-        let text = running ? "-" + ThreadVoiceView.clock((remaining ?? 0).rounded(.up)) : ThreadVoiceView.clock(seconds)
+        let left = (remaining ?? 0).rounded(.up)
+        let text = running
+            ? "-" + ThreadVoiceView.timerText(left, style: timerStyle)
+            : ThreadVoiceView.timerText(seconds, style: timerStyle)
+        shownTime = (seconds, remaining)
         timerLabel.text = text
         timerLabel.textColor = running ? Palette.tint : .label
-        timerLabel.accessibilityLabel = "\(Int(seconds)) seconds"
+        timerLabel.accessibilityLabel = switch timerStyle {
+        case .clock: "\(Int(seconds)) seconds"
+        // A post's countdown says what is left (#2294): "7 seconds left".
+        case .seconds: running
+            ? ThreadVoiceView.spokenTime(left, style: .seconds) + " left"
+            : ThreadVoiceView.spokenTime(seconds, style: .seconds)
+        }
         // The chip's time and ink change with no animation, laid out at once:
         // set inside a spring, the title flew in from the chip's corner.
         UIView.performWithoutAnimation {
@@ -364,6 +390,10 @@ final class VoiceRecordingStrip: UIView {
 
     #if DEBUG
     var debugTimerText: String? { box.isHidden ? timerLabel.text : chip.configuration?.title }
+    /// What VoiceOver reads for the time (#2294).
+    var debugTimerAccessibilityLabel: String? { timerLabel.accessibilityLabel }
+    /// The time is red: its last ten seconds.
+    var debugTimerIsRunningOut: Bool { timerLabel.textColor == Palette.tint }
     var debugVisibleControls: [String] {
         var shown = [takeButton, sendButton].filter { !$0.isHidden }.compactMap(\.accessibilityLabel)
         if !box.isHidden, chip.isAccessibilityElement, let label = chip.accessibilityLabel { shown.insert(label, at: 0) }
