@@ -52,9 +52,10 @@ final class ThreadMediaView: UIView {
         imageView.contentMode = .scaleAspectFill
         imageView.clipsToBounds = true
         dim.backgroundColor = UIColor.black.withAlphaComponent(0.35)
-        playBadge.image = UIImage(
-            systemName: "play.circle.fill",
-            withConfiguration: UIImage.SymbolConfiguration(pointSize: 34, weight: .regular)
+        // The owner's play knocked out of play.circle.fill's disc (#2276):
+        // the same disc, the same white, the picture through the play.
+        playBadge.image = AppSymbol.playCircle.image(
+            UIImage.SymbolConfiguration(pointSize: 34, weight: .regular)
         )?.withRenderingMode(.alwaysOriginal).withTintColor(.white.withAlphaComponent(0.9))
         playBadge.contentMode = .center
         durationLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
@@ -197,6 +198,8 @@ final class ThreadMediaView: UIView {
 
     #if DEBUG
     var debugFrameSize: CGSize { frameView.bounds.size }
+    /// The video's disc (the owner's play knocked out of it, #2276).
+    var debugPlayBadgeImage: UIImage? { playBadge.image }
     var debugIsSpinning: Bool { !spinner.isHidden && spinner.isAnimating }
     var debugShowsFailure: Bool { !failedStack.isHidden }
     var debugShowsPlay: Bool { !playBadge.isHidden }

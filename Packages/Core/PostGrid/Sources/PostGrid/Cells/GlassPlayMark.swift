@@ -22,6 +22,10 @@ import UIKit
 /// glass materialising and dematerialising, the system's own way to fade it —
 /// with the app's bounce-in / scale-out on top (`AppearMotion`'s numbers);
 /// under Reduce Motion, the materialise alone.
+///
+/// Left as a prototype by #2276: its triangle keeps `play.fill`'s
+/// proportions. Shipped, it would take the owner's play
+/// (`dev/symbols/play-pause/source/play-owner.svg`) as its `Shape`.
 enum GlassPlayMark {
     enum Variant: String {
         case regular, clear, tinted

@@ -79,7 +79,7 @@ final class SnapBrowseStripView: UIView {
             return tile
         }
         videoMarks = thumbnails.indices.map { index in
-            let mark = UIImageView(image: UIImage(systemName: "play.fill"))
+            let mark = UIImageView(image: AppSymbol.play.image())
             mark.tintColor = .white
             mark.contentMode = .scaleAspectFit
             mark.isHidden = !videoPages.contains(index)
@@ -239,6 +239,8 @@ final class SnapBrowseStripView: UIView {
         )
     }
     var debugTileCount: Int { tiles.count }
+    /// Each tile's clip mark's image (the owner's play, #2276).
+    var debugVideoMarkImages: [UIImage?] { videoMarks.map(\.image) }
     /// The page whose tile holds a live picture, nil when none does. Tests.
     var debugLivePage: Int? {
         guard let liveView, tiles.indices.contains(livePage), liveView.superview === tiles[livePage] else { return nil }

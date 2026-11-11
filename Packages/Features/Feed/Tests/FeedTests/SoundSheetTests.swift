@@ -877,11 +877,11 @@ struct SoundSheetTests {
         header.debugTapRecord()
         #expect(controller.isPreviewing)
         #expect(header.debugIsSpinning && header.debugShowsPause)
-        #expect(header.debugShownGlyph == "pause.fill")
+        #expect(header.debugShownGlyph == AppSymbol.pause.rawValue)
 
         header.debugTapRecord()
         #expect(!controller.isPreviewing)
-        #expect(!header.debugIsSpinning && header.debugShownGlyph == "play.fill")
+        #expect(!header.debugIsSpinning && header.debugShownGlyph == AppSymbol.play.rawValue)
         #expect(covers == [true], "pausing the sheet's track handed the sound back to the post")
         #expect(controller.isTrackEngaged)
     }
@@ -1036,12 +1036,12 @@ struct SoundSheetTests {
         let controller = sheet(tiles: 3, preview: Self.previewFile)
         try laidOut(controller)
         let header = try #require(controller.debugHeader)
-        #expect(header.debugShownGlyph == "play.fill")
+        #expect(header.debugShownGlyph == AppSymbol.play.rawValue)
         controller.debugShowRecord(playing: true, available: true)
-        #expect(header.debugShownGlyph == "pause.fill")
+        #expect(header.debugShownGlyph == AppSymbol.pause.rawValue)
         #expect(header.debugShowsPause)
         controller.debugShowRecord(playing: false, available: true)
-        #expect(header.debugShownGlyph == "play.fill")
+        #expect(header.debugShownGlyph == AppSymbol.play.rawValue)
         #expect(!header.debugShowsPause)
     }
 
@@ -1054,14 +1054,16 @@ struct SoundSheetTests {
         try laidOut(controller)
         let header = try #require(controller.debugHeader)
         #expect(header.debugGlyphIsInTheGlass)
-        func configured(_ name: String) -> CGSize? {
-            UIImage(systemName: name, withConfiguration: SoundSheetHeaderView.glyphConfiguration)?.size
+        // The owner's play and pause (#2276), as configured.
+        func configured(_ symbol: AppSymbol) -> CGSize? {
+            symbol.image(SoundSheetHeaderView.glyphConfiguration)?.size
         }
         // The witness: a bare symbol is drawn at another size.
-        #expect(UIImage(systemName: "pause.fill")?.size != configured("pause.fill"))
-        #expect(header.debugGlyphImage?.size == configured("play.fill"))
+        #expect(AppSymbol.pause.image()?.size != configured(.pause))
+        #expect(header.debugGlyphImage?.isSymbolImage == true, "the owner's play resolves")
+        #expect(header.debugGlyphImage?.size == configured(.play))
         controller.debugShowRecord(playing: true, available: true)
-        #expect(header.debugGlyphImage?.size == configured("pause.fill"))
+        #expect(header.debugGlyphImage?.size == configured(.pause))
     }
 
     /// ⚠️ THE WHOLE RECORD TAKES THE TAP (#1162): its upper half, under the

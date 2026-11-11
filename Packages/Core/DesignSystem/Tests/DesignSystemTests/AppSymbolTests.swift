@@ -58,6 +58,45 @@ struct AppSymbolTests {
         #expect(large.size.height > small.size.height)
     }
 
+    /// ⚠️ The owner's play and pause (#2276) resolve at every size a site
+    /// draws them — 13 pt (the timeline), 16 (the compact voice), 22 (the
+    /// sound sheet), 56 (a paused clip): `UIImage(systemName:)` would find
+    /// nothing, and the control would draw nothing.
+    @Test(arguments: [AppSymbol.play, .pause, .playCircle])
+    func thePlayAndPauseResolveAtEverySize(_ symbol: AppSymbol) throws {
+        for size in [CGFloat(13), 16, 22, 56] {
+            let image = try #require(symbol.image(AppSymbol.fixed(size, weight: .semibold)), "\(symbol) at \(size) pt")
+            #expect(image.isSymbolImage)
+            #expect(image.size.width > 0 && image.size.height > 0, "\(symbol) at \(size) pt is \(image.size)")
+            #expect(inked(image) > 0.05, "\(symbol) at \(size) pt paints nothing")
+            #expect(UIImage.symbol(named: symbol.rawValue, configuration: AppSymbol.fixed(size)) != nil)
+        }
+    }
+
+    /// ⚠️ ONE BOX FOR PLAY AND PAUSE (#2276): a swap between them never moves
+    /// the glyph — the same width, the same line, the same margins.
+    @Test func thePlayAndThePauseShareOneBox() throws {
+        for size in [CGFloat(13), 16, 22, 56] {
+            let configuration = AppSymbol.fixed(size, weight: .semibold)
+            let play = try #require(AppSymbol.play.image(configuration))
+            let pause = try #require(AppSymbol.pause.image(configuration))
+            #expect(abs(play.size.width - pause.size.width) < 0.01, "at \(size) pt: \(play.size) vs \(pause.size)")
+            #expect(abs(play.size.height - pause.size.height) <= 1, "at \(size) pt: \(play.size) vs \(pause.size)")
+            #expect(abs(play.alignmentRectInsets.left - pause.alignmentRectInsets.left) < 0.01)
+            #expect(abs(play.alignmentRectInsets.right - pause.alignmentRectInsets.right) < 0.01)
+            let playBaseline = play.baselineOffsetFromBottom ?? 0, pauseBaseline = pause.baselineOffsetFromBottom ?? 0
+            #expect(abs(playBaseline - pauseBaseline) <= 1, "at \(size) pt: baselines \(playBaseline) vs \(pauseBaseline)")
+        }
+    }
+
+    /// VoiceOver reads the play and the pause as what they do.
+    @Test func thePlayAndPauseReadAsWhatTheyDo() {
+        #expect(AppSymbol.play.accessibilityLabel == "Play")
+        #expect(AppSymbol.pause.accessibilityLabel == "Pause")
+        #expect(AppSymbol.playCircle.accessibilityLabel == "Play")
+        #expect(AppSymbol.pause.image()?.accessibilityLabel == "Pause")
+    }
+
     /// VoiceOver reads the star as Save, not as a favourite.
     @Test func theStarReadsAsSave() {
         #expect(AppSymbol.save.accessibilityLabel == "Save")
@@ -74,6 +113,7 @@ struct AppSymbolSizeTests {
         (AppSymbol.liked, "heart.fill"), (.save, "star"), (.comment, "ellipsis.message"),
         (.repost, "arrow.trianglehead.2.clockwise.rotate.90"), (.crownFilled, "crown.fill"),
         (.share, "square.and.arrow.up"),
+        (.play, "play.fill"), (.pause, "pause.fill"), (.playCircle, "play.circle.fill"),
     ])
     func aGlyphIsAsTallAsTheSystemsOwn(_ pair: (AppSymbol, String)) throws {
         let configuration = AppSymbol.fixed(12, weight: .semibold)

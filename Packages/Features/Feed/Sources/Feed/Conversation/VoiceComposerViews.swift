@@ -40,8 +40,9 @@ final class VoiceRecordingStrip: UIView {
     private let chip = UIButton(configuration: .gray())
     /// ❚❚ while it records, 🎙 once paused: ONE button whose symbol is
     /// replaced (the owner, 2026-11-07: an icon turning into another is
-    /// always the symbol's own Replace).
-    private let takeButton = VoiceRecordingStrip.button("pause.fill", label: "Pause recording")
+    /// always the symbol's own Replace) — the app's play ⇄ pause swap
+    /// (`PlayPauseGlyph`, #2276), the owner's pause.
+    private let takeButton = VoiceRecordingStrip.button(AppSymbol.pause.rawValue, label: "Pause recording")
     private let sendButton = VoiceRecordingStrip.button("arrow.up.circle.fill", label: "Send voice message")
     private let stack = UIStackView()
     private var liveLevels: [UInt8] = []
@@ -55,8 +56,12 @@ final class VoiceRecordingStrip: UIView {
     /// play and pause (2026-11-08).
     private var chipWidth: NSLayoutConstraint?
     private var chipWidthTitle = ""
-    /// The chip's three faces.
-    private static let chipFaces = ["circle.fill", "play.fill", "pause.fill"]
+    /// The chip's three faces: the recording dot, the owner's play and
+    /// pause (#2276).
+    private static let chipFaces = ["circle.fill", AppSymbol.play.rawValue, AppSymbol.pause.rawValue]
+    /// The faces shown, by name — a repeat of the same face swaps nothing.
+    private var shownTakeFace = AppSymbol.pause.rawValue
+    private var shownChipFace = ""
     /// Holding, the mic disc stands over the field's end — its glow wider
     /// still: the hint stops short of it (the owner, 2026-11-07: covered
     /// before the finger had moved).
@@ -86,7 +91,6 @@ final class VoiceRecordingStrip: UIView {
         chip.configuration?.imagePadding = 4
         chip.configuration?.contentInsets = NSDirectionalEdgeInsets(top: 3, leading: 8, bottom: 3, trailing: 9)
         chip.configuration?.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(pointSize: 9, weight: .bold)
-        chip.configuration?.symbolContentTransition = UISymbolContentTransition(.replace)
         chip.configuration?.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
             var attributes = attributes
             attributes.font = .scaledMonospacedDigitSystemFont(
@@ -124,7 +128,6 @@ final class VoiceRecordingStrip: UIView {
         box.setContentHuggingPriority(UILayoutPriority(1), for: .horizontal)
         box.setContentCompressionResistancePriority(UILayoutPriority(1), for: .horizontal)
 
-        takeButton.configuration?.symbolContentTransition = UISymbolContentTransition(.replace)
         takeButton.addAction(UIAction { [weak self] _ in
             guard let self else { return }
             if mode == .locked { onPause?() } else { onResume?() }
@@ -155,7 +158,7 @@ final class VoiceRecordingStrip: UIView {
 
     private static func button(_ symbol: String, label: String) -> UIButton {
         var configuration = UIButton.Configuration.plain()
-        configuration.image = UIImage(systemName: symbol)
+        configuration.image = UIImage.symbol(named: symbol)
         configuration.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(pointSize: 18, weight: .semibold)
         configuration.contentInsets = NSDirectionalEdgeInsets(top: 4, leading: 4, bottom: 4, trailing: 4)
         configuration.baseForegroundColor = .label
@@ -207,16 +210,30 @@ final class VoiceRecordingStrip: UIView {
         let wasShown = !takeButton.isHidden
         takeButton.isHidden = !(locked || paused)
         sendButton.isHidden = recording
-        let take = UIImage(systemName: locked ? "pause.fill" : "mic.fill")
-        let face = UIImage(systemName: paused ? (playing ? "pause.fill" : "play.fill") : "circle.fill")
-        UIView.performWithoutAnimation {
-            if takeButton.configuration?.image != take {
-                takeButton.configuration?.symbolContentTransition = wasShown ? UISymbolContentTransition(.replace) : nil
+        // The faces swap by the app's play ⇄ pause swap (#2276), in sight
+        // only, before the row's layout: the scale and fade and the
+        // cross-fade are view animations, which no `performWithoutAnimation`
+        // may hold.
+        let takeFace = locked ? AppSymbol.pause.rawValue : "mic.fill"
+        if takeFace != shownTakeFace {
+            shownTakeFace = takeFace
+            let take = UIImage.symbol(named: takeFace)
+            PlayPauseGlyph.swap(takeButton, site: .voiceComposerTake, animated: wasShown && window != nil) {
                 takeButton.configuration?.image = take
             }
-            // The chip leads with what it is: a red dot while it records,
-            // ▶︎ / ❚❚ to listen back when it is paused.
-            if chip.configuration?.image != face { chip.configuration?.image = face }
+        }
+        // The chip leads with what it is: a red dot while it records,
+        // ▶︎ / ❚❚ to listen back when it is paused.
+        let chipFace = paused ? (playing ? AppSymbol.pause.rawValue : AppSymbol.play.rawValue) : "circle.fill"
+        if chipFace != shownChipFace {
+            let chipWasShown = shownBefore[ObjectIdentifier(chip)] ?? false
+            shownChipFace = chipFace
+            let face = UIImage.symbol(named: chipFace)
+            PlayPauseGlyph.swap(chip, site: .voiceComposerChip, animated: chipWasShown && window != nil) {
+                chip.configuration?.image = face
+            }
+        }
+        UIView.performWithoutAnimation {
             chip.configuration?.imageColorTransformer = paused ? nil : UIConfigurationColorTransformer { _ in .systemRed }
             takeButton.layoutIfNeeded()
             chip.layoutIfNeeded()
@@ -288,7 +305,7 @@ final class VoiceRecordingStrip: UIView {
         var widest: CGFloat = 0
         for face in Self.chipFaces {
             sizing.configuration?.title = shape
-            sizing.configuration?.image = UIImage(systemName: face)
+            sizing.configuration?.image = UIImage.symbol(named: face)
             widest = max(widest, sizing.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width)
         }
         chipWidth?.constant = ceil(widest)
@@ -358,6 +375,12 @@ final class VoiceRecordingStrip: UIView {
     var debugChipFrame: CGRect { chip.convert(chip.bounds, to: self) }
     var debugWaveformFrame: CGRect { waveform.convert(waveform.bounds, to: self) }
     var debugTakeFrame: CGRect { takeButton.convert(takeButton.bounds, to: self) }
+    /// The take button's and the chip's faces, by name, and their images
+    /// (the owner's play and pause, #2276).
+    var debugTakeFace: String { shownTakeFace }
+    var debugChipFace: String { shownChipFace }
+    var debugTakeImage: UIImage? { takeButton.configuration?.image }
+    var debugChipImage: UIImage? { chip.configuration?.image }
     /// How many times the row sprang: a change of faces alone never does.
     private(set) var debugSpringCount = 0
     /// How many times the bars cross-dissolved to another source.

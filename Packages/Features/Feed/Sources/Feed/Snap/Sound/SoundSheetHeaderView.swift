@@ -47,11 +47,12 @@ final class SoundSheetHeaderView: UICollectionReusableView {
     private let recordGlass = SoundRecordGlass()
     private var artwork: UIImageView { recordGlass.cover }
     private let playButton = UIButton(configuration: .glass())
-    /// ▶︎ / ❚❚, drawn in the glass disc by an image view of its own, swapped
-    /// by our own bounce and fade (`swapGlyph`). The glass button's
-    /// configured image swapped with no transition, even with
-    /// `symbolContentTransition` set.
-    private let playGlyph = UIImageView(image: UIImage(systemName: "play.fill", withConfiguration: glyphConfiguration))
+    /// ▶︎ / ❚❚ (the owner's, `AppSymbol.play` / `.pause`, #2276), drawn in
+    /// the glass disc by an image view of its own, swapped by the app's
+    /// scale and fade (`PlayPauseGlyph`). The glass button's configured
+    /// image swapped with no transition, even with `symbolContentTransition`
+    /// set.
+    private let playGlyph = UIImageView(image: AppSymbol.play.image(glyphConfiguration))
     private let titleLabel = UILabel()
     private let subtitleLabel = UILabel()
     private let metaLabel = UILabel()
@@ -315,60 +316,27 @@ final class SoundSheetHeaderView: UICollectionReusableView {
     /// ▶︎ while paused, ❚❚ while it plays — no muted state since #1931: the
     /// sound follows the device, and this button only pauses and resumes.
     private func applyGlyph() {
-        let name = isPlaying ? "pause.fill" : "play.fill"
-        guard name != shownGlyph else { return }
-        shownGlyph = name
-        if let image = UIImage(systemName: name, withConfiguration: Self.glyphConfiguration) {
-            swapGlyph(to: image, animated: window != nil)
+        let symbol = isPlaying ? AppSymbol.pause : .play
+        guard symbol.rawValue != shownGlyph else { return }
+        shownGlyph = symbol.rawValue
+        // ⚠️ NOT THE SYSTEM'S SYMBOL REPLACE (the owner, 2026-10-16): inside
+        // the glass button, `setSymbolImage(_:contentTransition: .replace)` is
+        // drawn in the glass's own pass — on a device it stuttered ("as if at
+        // 30 fps"), on the simulator it was a plain cut, at any `.speed`. The
+        // glyph stays IN the glass and the app's play ⇄ pause swap runs its
+        // scale and fade there (`PlayPauseGlyph`, #2276: this sheet's own
+        // swap, moved into DesignSystem) — view animations, which the glass
+        // composites like any other.
+        if let image = symbol.image(Self.glyphConfiguration) {
+            PlayPauseGlyph.swap(playGlyph, to: image, site: .soundSheet, animated: window != nil)
         }
     }
-
-    /// ⚠️ NOT THE SYSTEM'S SYMBOL REPLACE (the owner, 2026-10-16): inside
-    /// the glass button, `setSymbolImage(_:contentTransition: .replace)` is
-    /// drawn in the glass's own pass — on a device it stuttered ("as if at
-    /// 30 fps"), on the simulator it was a plain cut, at any `.speed`. The
-    /// glyph stays IN the glass, and the swap is ours: the old symbol shrinks
-    /// and fades on a copy while the new one bounces up from small as it
-    /// fades in — view animations, which the glass composites like any other.
-    private func swapGlyph(to image: UIImage, animated: Bool) {
-        guard animated, let old = playGlyph.image else {
-            playGlyph.image = image
-            return
-        }
-        let outgoing = UIImageView(image: old)
-        outgoing.tintColor = playGlyph.tintColor
-        outgoing.contentMode = .center
-        outgoing.isUserInteractionEnabled = false
-        outgoing.frame = playGlyph.frame
-        playButton.insertSubview(outgoing, belowSubview: playGlyph)
-        UIView.performWithoutAnimation {
-            playGlyph.image = image
-            playGlyph.alpha = 0
-            playGlyph.transform = CGAffineTransform(scaleX: Self.swapScale, y: Self.swapScale)
-        }
-        UIView.animate(withDuration: 0.16, delay: 0, options: [.curveEaseIn, .allowUserInteraction]) {
-            outgoing.alpha = 0
-            outgoing.transform = CGAffineTransform(scaleX: Self.swapScale, y: Self.swapScale)
-        } completion: { _ in
-            outgoing.removeFromSuperview()
-        }
-        UIView.animate(
-            withDuration: 0.42, delay: 0.06, usingSpringWithDamping: 0.55, initialSpringVelocity: 0,
-            options: [.allowUserInteraction, .beginFromCurrentState]
-        ) {
-            self.playGlyph.alpha = 1
-            self.playGlyph.transform = .identity
-        }
-    }
-
-    /// How small a symbol is when it leaves, and when the next one starts.
-    static let swapScale: CGFloat = 0.4
 
     /// ▶︎ / ❚❚'s size and weight — the glass button's image as it drew it.
     static let glyphConfiguration = UIImage.SymbolConfiguration(pointSize: 22, weight: .semibold)
 
     /// The glyph shown — so a repeat of the same state replaces nothing.
-    private var shownGlyph = "play.fill"
+    private var shownGlyph = AppSymbol.play.rawValue
 
     private func applyPlayingRest(_ playing: Bool) {
         record.accessibilityLabel = playing ? "Pause post" : "Play post"

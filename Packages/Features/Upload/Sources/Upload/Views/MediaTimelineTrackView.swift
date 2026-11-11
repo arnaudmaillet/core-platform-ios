@@ -233,7 +233,16 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
     /// so it hangs in a host that does not scroll and is moved by hand instead.
     private let rulerHost = UIView()
     private let ruler = RulerView()
-    private let playButton = UIButton(type: .system)
+    /// ▶︎ / ❚❚, the owner's (#2276): a configured button, so the app's play ⇄
+    /// pause swap (`PlayPauseGlyph`) can replace its symbol instead of a cut.
+    private let playButton: UIButton = {
+        var configuration = UIButton.Configuration.plain()
+        configuration.contentInsets = .zero
+        configuration.preferredSymbolConfigurationForImage = MediaTimelineTrackView.playGlyphConfiguration
+        return UIButton(configuration: configuration)
+    }()
+    /// The play button's glyph: 13 pt semibold, as it always drew.
+    static let playGlyphConfiguration = UIImage.SymbolConfiguration(pointSize: 13, weight: .semibold)
     private let film = UIView()
     private let topBar = UIView()
     private let bottomBar = UIView()
@@ -2469,14 +2478,12 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
     /// player and tells the track which way round it is.
     func showPaused(_ paused: Bool) {
         guard paused != showingPaused else { return }
+        let swapsInSight = showingPaused != nil && window != nil
         showingPaused = paused
-        playButton.setImage(
-            UIImage(
-                systemName: paused ? "play.fill" : "pause.fill",
-                withConfiguration: UIImage.SymbolConfiguration(pointSize: 13, weight: .semibold)
-            ),
-            for: .normal
-        )
+        let image = (paused ? AppSymbol.play : AppSymbol.pause).image(Self.playGlyphConfiguration)
+        PlayPauseGlyph.swap(playButton, site: .mediaTimeline, animated: swapsInSight) {
+            playButton.configuration?.image = image
+        }
         playButton.accessibilityLabel = paused ? "Play" : "Pause"
     }
 
@@ -3320,6 +3327,8 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
     var debugKeptIsOnScreen: Bool { bounds.contains(keptLabel.frame) && !keptLabel.isHidden }
     /// Internal for tests: whether the play button is showing the pause glyph.
     var debugShowsPause: Bool { playButton.accessibilityLabel == "Pause" }
+    /// The play button's glyph as configured (the owner's ▶︎ / ❚❚, #2276).
+    var debugPlayGlyph: UIImage? { playButton.configuration?.image }
     /// Internal for tests: the pieces of the selection's frame, in content
     /// coordinates, so a test can ask whether it actually closes.
     var debugTopRail: CGRect { topBar.frame }
