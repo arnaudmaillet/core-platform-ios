@@ -110,9 +110,8 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         super.viewDidLoad()
         // ⚠️ NO TITLE. "Messages" sat here for a while (the tab bar says the
         // word already); it went on 2026-09-22 with the map tab's and For
-        // You's. The section the list has scrolled into ("Join requests") is
-        // named in the bar, after the bell (#1301; first tried in #179 and
-        // reverted in #181, when it had the leading group to itself).
+        // You's. Nor does the bar name a section after the bell any more
+        // (#1301, gone with the last headed section in #2328).
         navigationItem.largeTitleDisplayMode = .never
         // ⚠️ **AND THE CHEVRON KEEPS ITS SILENCE.** A titled root gives every
         // screen pushed from it a WORDED back button, and two pushed bars were
@@ -234,12 +233,6 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         for surface in surfaces {
             apply(surface.chrome, from: surface)
             surface.onChromeChange = { [weak self] chrome in self?.apply(chrome, from: surface) }
-            // Only the page in front names its section; the others are read
-            // again when they come in front (`didSettle`).
-            surface.onPinnedSectionChange = { [weak self, weak surface] pinned in
-                guard let self, let surface, surface === activeSurface else { return }
-                applyPinnedSection(pinned)
-            }
         }
 
         categoryBar.setProgress(CGFloat(pagerView.activeIndex))
@@ -489,63 +482,30 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         applyRestingBar()
     }
 
-    /// `[ bell ][ Join requests · 3 ]————————[ coins ][ search ]`
+    /// `[ bell ]————————————————[ coins ][ search ]`
     ///
-    /// What the shell hands in — the bell leading, the balance trailing —
-    /// and, after the bell, the section the page in front has scrolled into
-    /// (`applyPinnedSection`, #1301). The search is not among the items: it
-    /// is stacked under the bar (`searchController`).
+    /// What the shell hands in: the bell leading, the balance trailing. No
+    /// section is named after the bell any more (#2328): one list per tab
+    /// (#2292), and the join requests on Requests, the last section with a
+    /// name, wear no header now. The search is not among the items: it is
+    /// stacked under the bar (`searchController`).
     ///
     /// ⚠️ NEVER `searchBarPlacementBarButtonItem` IN THE NAVIGATION BAR: iOS 26
     /// throws ("only supported in UIToolbar") — iOS 27 accepts it, which is
     /// how it shipped in #1689's first push and crashed CI's iOS 26 hosts.
     private func applyRestingBar() {
         setOwnTrailingBarItems([trailingAccessoryItem].compactMap { $0 }, animated: false)
-        // The leading group is the contract's: the bell, then the section.
-        sectionBinding.leadingPrefix = [leadingAccessoryItem].compactMap { $0 }
-        sectionBinding.placeNow()
-    }
-
-    // MARK: - The pinned section (#1301)
-
-    /// Its name after the bell — the conversation's day item, exactly (#750,
-    /// #755; the owner, 2026-10-17): a system-titled glass bubble in the bar's
-    /// own type, interactive, one item per section and count so a count
-    /// changing is UIKit's Liquid Glass morph. Only Requests' Join requests
-    /// section has a name since one list per tab (#2292). Minted, placed
-    /// once per turn and held past a push by the contract
-    /// (`PinnedSectionBarBinding`, #1573); the bell is its `leadingPrefix`.
-    /// Only the leading group: the trailing one is the balance's.
-    private lazy var sectionBinding: PinnedSectionBarBinding = {
-        let binding = PinnedSectionBarBinding(
-            viewController: self, placement: .leading, scope: "inbox", countNoun: "unread"
-        )
-        // What tapping the header's pill did: that section's first row under
-        // the bar.
-        binding.onSelect = { [weak self] _ in self?.activeSurface?.scrollToPinnedSection() }
-        return binding
-    }()
-
-    /// Names `section` after the bell, or takes the name away.
-    private func applyPinnedSection(_ section: InboxPinnedSection?) {
-        // The page in front scrolls to its own section on a tap; the index
-        // only tells the sections apart.
-        sectionBinding.show(pinned: section.map { pinned in
-            (pinned.section.order, .init(id: pinned.title, title: pinned.title, count: pinned.count))
-        })
+        // The leading group is the contract's: the bell alone. A back chevron
+        // (none on the tab root) would keep its place before it.
+        navigationItem.leftItemsSupplementBackButton = true
+        let leading = [leadingAccessoryItem].compactMap { $0 }
+        // An identical group is not handed back: re-setting the same items
+        // rebuilds their glass.
+        guard !(navigationItem.leftBarButtonItems ?? []).elementsEqual(leading, by: ===) else { return }
+        navigationItem.setLeftBarButtonItems(leading, animated: false)
     }
 
     #if DEBUG
-    /// The bar's section item while it is shown — what a test reads.
-    var debugSectionItem: UIBarButtonItem? {
-        guard let sectionItem = sectionBinding.item,
-              navigationItem.leftBarButtonItems?.contains(where: { $0 === sectionItem }) == true
-        else { return nil }
-        return sectionItem
-    }
-
-    /// What a tap on the section item does. Tests.
-    func debugTapSectionItem() { activeSurface?.scrollToPinnedSection() }
     /// The pager coming to rest on `index`, as a swipe that ended there.
     func debugSettle(on index: Int) { didSettle(on: index) }
     /// The pages, in order (#2215). Tests.
@@ -600,8 +560,6 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         // and finding All's count gone is losing the comparison you switched
         // for. Only leaving the screen retires them; see `viewWillDisappear`.
         apply(surface.chrome, from: surface)
-        // The bar names the section of the page now in front, or none.
-        applyPinnedSection(surface.pinnedSection)
         // The shared bar follows whichever page is now in front, and the new page
         // gets the same clearance. Re-syncing here is what keeps a bar collapsed
         // on one tab from sitting half-open over another.

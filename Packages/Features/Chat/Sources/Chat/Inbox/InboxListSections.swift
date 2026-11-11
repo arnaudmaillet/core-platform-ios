@@ -14,36 +14,19 @@ import UIKit
 /// (`ConversationDisplayModel.unreadInk`).
 ///
 /// What keeps a section of its own is another KIND of row: Requests' join
-/// requests for a channel the viewer runs (#2230), always headed.
+/// requests for a channel the viewer runs (#2230). It wears no header either
+/// (#2328, the owner 2026-11-11): the row already says what it is ("Studio
+/// drops · 3 requests", its line, its disc and chevron), as "Hidden requests"
+/// does at the other end of the same list. The section stays for the data
+/// source's sake, and for the gap under its last row.
 enum InboxListSection: Hashable {
     /// The channels the viewer runs with requests waiting (#2230): Requests'
-    /// first section, one row per channel, under its header. Never in Chats.
+    /// first section, one row per channel, with no header (#2328). Never in
+    /// Chats.
     case joinRequests
     /// The conversations — on Requests, the conversation requests — in one
     /// list sorted by recency (pinned first on Chats), with no header.
     case conversations
-}
-
-extension InboxListSection {
-    /// The header's words, for the one section that wears one.
-    var title: String {
-        switch self {
-        case .joinRequests: "Join requests"
-        case .conversations: ""
-        }
-    }
-
-    /// Whether the section wears a header: only the join requests (#2230).
-    /// The conversations are one list with no title (#2292).
-    var isHeaded: Bool { self == .joinRequests }
-
-    /// A stable number per section, for the bar's section item.
-    var order: Int {
-        switch self {
-        case .joinRequests: 0
-        case .conversations: 1
-        }
-    }
 }
 
 /// Which rows a diffable list has to re-render even though its diff is empty.
@@ -74,25 +57,3 @@ enum InboxRowDiff {
 
 typealias SectionedConversationDataSource =
     UITableViewDiffableDataSource<InboxListSection, ConversationID>
-
-extension UITableViewDiffableDataSource<InboxListSection, ConversationID> {
-    /// The section at an index when it wears a header — the join requests
-    /// only (#2292) — or nil.
-    func headedSection(at index: Int) -> InboxListSection? {
-        let current = snapshot()
-        guard current.sectionIdentifiers.indices.contains(index) else { return nil }
-        let section = current.sectionIdentifiers[index]
-        return section.isHeaded ? section : nil
-    }
-
-    /// Puts a section's first row on the pin line, under the bar — what
-    /// tapping that section's name means: "show me this part". See
-    /// `UITableView.scrollFirstRow(ofSection:)` for why not
-    /// `scrollToRow(at:.top)`. A no-op for a section with no rows.
-    func scroll(_ tableView: UITableView, toSectionAt index: Int) {
-        guard snapshot().numberOfSections > index,
-              tableView.numberOfRows(inSection: index) > 0
-        else { return }
-        tableView.scrollFirstRow(ofSection: index)
-    }
-}
