@@ -188,6 +188,14 @@ struct AppIconButtonTests {
         #expect(press.scale > 1, "\(style) gave under the finger instead of swelling")
         let swelled = PressFeedback.swelledScale(for: button.bounds.size)
         #expect(swelled.x <= swelled.y, "a square swelled wider than tall: \(swelled)")
+        // Its content scales evenly (#2284), and on a bubble by as much as
+        // its ground: nothing grows on top, so it swells as it did.
+        let held = try #require(PressFeedback.debugHeldScale(on: button.layer))
+        #expect(held.x == held.y, "\(style)'s content is stretched: \(held)")
+        if case .bubble = style {
+            #expect(held.x == swelled.y, "a bubble's content and ground no longer scale alike")
+            #expect(press.debugGrownGrounds.isEmpty, "a bubble's ground grew past its content")
+        }
     }
 
     @Test func aGlyphDimsAndABubbleDoesNotByDefault() throws {

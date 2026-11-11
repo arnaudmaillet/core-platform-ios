@@ -376,21 +376,34 @@ struct VoicePanelTests {
 
     /// A finger on the waveform swells the whole panel by the app's press
     /// swell on its size — and nothing inside it on its own; it settles when
-    /// the finger lifts, and when it is cancelled.
+    /// the finger lifts, and when it is cancelled. What it holds — the
+    /// glyph, the bars, the slot — scales by ONE factor on both axes, while
+    /// its ground grows by the swell's points across and down, a capsule
+    /// still (#2284).
     @Test(arguments: [VoiceView.Size.full, .compact])
     func aFingerOnTheWaveformSwellsTheWholePanel(_ size: VoiceView.Size) {
         let view = laidOut(size, width: 320, playback: .playing(progress: 0.3))
         view.reducesMotion = { false }
         let resting = view.debugPanelRestingSize
         let scale = PressFeedback.swelledScale(for: resting)
+        let even = PressFeedback.swell(for: resting).content
         #expect(scale.x > 1 && scale.y > 1)
+        #expect(view.debugGroundSize == resting, "the ground at rest is not the panel")
+        #expect(view.debugWaveformSwellFactor == even, "the bars aren't drawn for the content's swell")
         view.waveform.debugFinger(true)
-        #expect(view.debugPanelTransform == CGAffineTransform(scaleX: scale.x, y: scale.y))
+        let transform = view.debugPanelTransform
+        #expect(transform.a == transform.d && transform.b == 0 && transform.c == 0, "the content is stretched: \(transform)")
+        #expect(transform == CGAffineTransform(scaleX: even, y: even))
+        let drawn = view.debugDrawnGroundSize
+        #expect(abs(drawn.width - resting.width * scale.x) < 0.01, "across: \(drawn) for \(resting)")
+        #expect(abs(drawn.height - resting.height * scale.y) < 0.01, "down: \(drawn) for \(resting)")
+        #expect(abs(view.debugPanelCornerRadius - view.debugGroundSize.height / 2) < 0.001, "the ground's ends turned oval")
         #expect(view.debugPartTransforms.allSatisfy { $0 == .identity }, "a part swelled on its own")
         #expect(view.debugPanelRestingSize == resting, "the swell re-laid the panel")
         // Lifted: it settles.
         view.waveform.debugFinger(false)
         #expect(view.debugPanelTransform == .identity)
+        #expect(view.debugGroundSize == resting && view.debugPanelCornerRadius == VoiceView.panelCornerRadius(for: size))
         // A scrub keeps it swollen past the touch's cancel (the drag took
         // the touch), until the drag ends.
         view.waveform.debugFinger(true)
@@ -432,6 +445,7 @@ struct VoicePanelTests {
         view.waveform.debugFinger(true)
         view.waveform.onSeek?(0.4, true)
         #expect(view.debugPanelTransform == .identity)
+        #expect(view.debugGroundSize == view.debugPanelRestingSize, "the ground grew under Reduce Motion")
         view.waveform.onSeek?(0.4, false)
         view.waveform.debugFinger(false)
     }
