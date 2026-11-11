@@ -9,8 +9,9 @@ import UIKit
 // MARK: - Timeline row skeleton
 
 /// The `PostGridListRowCell` mimic, as a list draws it (#2243): no card,
-/// stacked caption lines on the row's own column over the quiet metadata row
-/// (counter cluster leading, age trailing), and the hairline a row draws
+/// stacked caption lines on the row's own column — 16pt from the screen on
+/// both sides, as a row's ink (#2289) — over the quiet metadata row (counter
+/// cluster leading, age trailing), and the full-width hairline a row draws
 /// under it. Two- and three-line variants alternate so a column of them reads
 /// as text, not as a pattern.
 public final class PostGridSkeletonListCell: UICollectionViewCell {
@@ -36,7 +37,7 @@ public final class PostGridSkeletonListCell: UICollectionViewCell {
 public final class PostGridSkeletonRow: UIView {
     private let thirdLine = SkeletonBoneView()
 
-    /// The row's hairline, inset to its column, mid-gap under it.
+    /// The row's hairline, full width (#2289), mid-gap under it.
     private let rule = UIView()
 
     public init() {
@@ -109,13 +110,20 @@ public final class PostGridSkeletonRow: UIView {
         thirdLine.isHidden = count < 3
     }
 
+    /// The hairline's frame in the row's space. Tests.
+    var debugRuleFrame: CGRect {
+        layoutIfNeeded()
+        return rule.frame
+    }
+
     override public func layoutSubviews() {
         super.layoutSubviews()
         let hairline = Surface.hairline(for: traitCollection)
-        let leading = PostGridListRowCell.captionInset
+        // Edge to edge, as a row's (#2289): the row stands `rowInset` in.
+        let bleed = PostGridListLayout.rowInset
         rule.frame = CGRect(
-            x: leading, y: bounds.height + PostGridListRowCell.separatorOffset - hairline / 2,
-            width: max(0, bounds.width + PostGridListLayout.rowInset - leading), height: hairline
+            x: -bleed, y: bounds.height + PostGridListRowCell.separatorOffset - hairline / 2,
+            width: bounds.width + bleed * 2, height: hairline
         )
     }
 }

@@ -1,5 +1,6 @@
 import DesignSystem
 import MediaCore
+import PostGrid
 import Testing
 import UIKit
 @testable import HeroPage
@@ -306,5 +307,28 @@ struct HeroHeaderViewTests {
         #expect(header.debugBannerShadowOpacity == 0)
         // Nor a black ground where the banner is not drawn yet.
         #expect(header.debugBannerShadowGround == Surface.skeleton)
+    }
+
+    // MARK: - The foot's hairline (#2289)
+
+    /// Off by default — a conversation's info page and the profile card's
+    /// sheet are no post lists — and, once a page asks for it, one device
+    /// pixel of `.separator` edge to edge, half the rows' gap over the
+    /// header's foot: where a row above would draw its line, so the list's
+    /// first row draws none of its own.
+    @Test func theFootDrawsTheListsHairlineOnlyWhenAsked() throws {
+        let header = makeHeader()
+        #expect(header.debugFootHairlineFrame == nil, "a hairline nobody asked for")
+        header.drawsFootHairline = true
+        let line = try #require(header.debugFootHairlineFrame)
+        #expect(line.minX == 0)
+        #expect(line.width == header.bounds.width)
+        #expect(line.height == Surface.hairline(for: header.traitCollection))
+        #expect(abs(line.midY - (header.bounds.height - PostGridListRowCell.separatorOffset)) < 0.01)
+        // Under the actions, never across them.
+        let tray = header.debugTrayFrame
+        #expect(line.minY > tray.maxY, "the line \(line) crosses the actions \(tray)")
+        header.drawsFootHairline = false
+        #expect(header.debugFootHairlineFrame == nil)
     }
 }

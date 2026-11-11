@@ -863,6 +863,62 @@ open class HeroHeaderView: UIView {
         }
     }
 
+    // MARK: - The foot's hairline (#2289)
+
+    /// Whether the header closes with one full-width hairline — the same one
+    /// a post list draws between two posts (`ListSeparators`): one device
+    /// pixel, `.separator`, edge to edge. Set by the hero pages whose tabs
+    /// are post lists, the profile and the place page; off by default (a
+    /// conversation's info page, the profile card's sheet).
+    ///
+    /// ⚠️ THE HEADER'S, NOT A PAGE'S (the owner, 2026-11-11): it shows over
+    /// every tab — a media grid, an empty tab's message — and scrolls with
+    /// the header. A list's first row draws none above it (one line per
+    /// boundary); its own top padding is unchanged.
+    ///
+    /// It stands where a row above would draw its line: half the rows' gap
+    /// (`PostGridListRowCell.separatorOffset`) over the header's foot, which
+    /// is the content's top — so a first row's avatar stands under it as far
+    /// as any row's under the line between two posts (16pt), and the actions
+    /// 20pt over it.
+    public var drawsFootHairline = false {
+        didSet {
+            guard drawsFootHairline != oldValue else { return }
+            footHairline.isHidden = !drawsFootHairline
+            setNeedsLayout()
+        }
+    }
+
+    private let footHairline = UIView()
+
+    private func installFootHairline() {
+        footHairline.backgroundColor = .separator
+        footHairline.isUserInteractionEnabled = false
+        footHairline.isHidden = true
+        addSubview(footHairline)
+        // One device pixel: re-laid on a scale change.
+        registerForTraitChanges([UITraitDisplayScale.self]) { (header: HeroHeaderView, _: UITraitCollection) in
+            header.setNeedsLayout()
+        }
+    }
+
+    private func layoutFootHairline() {
+        guard drawsFootHairline else { return }
+        let hairline = Surface.hairline(for: traitCollection)
+        footHairline.frame = CGRect(
+            x: 0, y: bounds.height - PostGridListRowCell.separatorOffset - hairline / 2,
+            width: bounds.width, height: hairline
+        )
+    }
+
+    #if DEBUG
+    /// The foot's hairline in the header's space, nil when not drawn. Tests.
+    public var debugFootHairlineFrame: CGRect? {
+        layoutIfNeeded()
+        return footHairline.isHidden ? nil : footHairline.frame
+    }
+    #endif
+
     /// The action row's foot in `view`'s space: once it has scrolled under
     /// the navigation bar, the bar takes the relationship over (the owner,
     /// 2026-10-15).
@@ -943,6 +999,7 @@ open class HeroHeaderView: UIView {
         // shown (#1424).
         avatar?.animationTrigger = .firstAppearance(AnimatedAvatarScope())
         configureSubviews()
+        installFootHairline()
         // The picture decides the shape, whenever it lands.
         bannerView.onImageResolved = { [weak self] image in
             self?.setBannerFormat(.resolved(forImageSize: image.size))
@@ -1859,6 +1916,7 @@ open class HeroHeaderView: UIView {
         // avatar actually are, not where they were a pass ago.
         topRow.superview?.layoutIfNeeded()
         placeBannerFade()
+        layoutFootHairline()
     }
 
     /// Hands the banner its run-out from where the avatar actually stands.

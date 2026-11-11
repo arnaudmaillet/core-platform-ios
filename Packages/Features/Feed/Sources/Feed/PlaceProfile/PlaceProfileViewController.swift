@@ -723,6 +723,8 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
         // A place's band card rests COLLAPSED (the owner, 2026-10-23): the
         // height a profile's shrinks to, its flag just under the bar.
         header.bandRestsCollapsed = true
+        // The header closes with the posts' hairline (#2289).
+        header.drawsFootHairline = true
         // One page, so no selector is ever placed: the strip is the
         // container's, titled for the day a place has tabs.
         // ⚠️ NO DOCKED SLOT: with no selector the WHOLE header climbs under
