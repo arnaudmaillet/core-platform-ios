@@ -139,7 +139,8 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     /// Kept: the trailing run is compared by reference (the bar's
     /// identical-group guard), so a fresh item is a rebuild.
     private let cornerSpacer = UIBarButtonItem.fixedSpace(Spacing.sm)
-    /// Keeps History's Select / Done its own bubble, apart from the gear.
+    /// Keeps History's Select / Done — standing in the gear's place (#2307)
+    /// — its own bubble, apart from the balance.
     private let historySelectSpacer = UIBarButtonItem.fixedSpace(Spacing.sm)
     /// An item the SHELL owns at the head of the leading group — the
     /// notifications bell, on the tab root only (a pushed profile leads with
@@ -159,8 +160,8 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     /// Whether the header's action tray has scrolled under the bar: the bar
     /// then carries the profile's Follow (or Requested) in its corner — at
     /// exactly the point the identity pill used to come in (#1451, #2248),
-    /// so the page never shows two Follows at once. Never on the viewer's
-    /// own profile.
+    /// so the page never shows two Follows at once. On the viewer's own
+    /// profile, History's Select takes the gear's place then (#2307).
     private(set) var isTrayScrolledAway = false
     /// Keeps History's day in its own bubble, inboard of the trailing group.
     private let sectionSpacer = UIBarButtonItem.fixedSpace(Spacing.sm)
@@ -1950,7 +1951,9 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
 
         // No content-source filter on any profile (#772): its sources are
         // pages at the foot, your own as anyone else's (#696).
-        //   tab root  [bell] … [day][coins][switcher gear]
+        //   tab root  [bell][day] … [coins][gear | Select | Done]
+        //             (History only: Select once the tray has scrolled away,
+        //             Done while selecting, wherever the scroll — #2307)
         //   pushed    [‹ @handle] … [day][coins][Follow | Requested | bell]
         //             (Follow / Requested once the tray has scrolled away,
         //             the bell whenever followed, the day on History — #2248)
@@ -2058,8 +2061,9 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     }
 
     /// Composes the trailing group per the current state: the own profile's
-    /// gear, the corner item (`cornerItem` — Follow / Requested once the
-    /// tray has scrolled away, #2248; never the bell, #2302), the shell's balance, and
+    /// gear (History's Select or Done in its place, #2307), the corner item
+    /// (`cornerItem` — Follow / Requested once the tray has scrolled away,
+    /// #2248; never the bell, #2302), the shell's balance, and
     /// History's day. Nothing relational until the relationship is known.
     /// Native items only (the bar contract, #1679): iOS 26 wraps each in the
     /// bar's own Liquid Glass capsule, and a glass-configured custom button
@@ -2121,7 +2125,17 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         // the viewer's own tab root keeps the gear and the switcher, its only
         // way to settings and to another profile.
         let namesNoOne = viewModel.namesNoOne
-        if let settingsItem { items.append(settingsItem) }
+        // The own profile's corner: the gear — or, on History once the tray
+        // has scrolled away, Select in its place, and Done while selecting
+        // wherever the scroll is (#2307, the owner 2026-11-11). Each its own
+        // item under its own identifier, so UIKit morphs the gear into Select
+        // and back (R3), on the trigger the handle and the blur use (#2268).
+        let historyItem = historySelectBarItem
+        if let historyItem {
+            items.append(historyItem)
+        } else if let settingsItem {
+            items.append(settingsItem)
+        }
         // The corner, someone else's profile only: `[0]`, as the gear is on
         // your own. Follow or Requested, once the tray has scrolled away
         // (#2248, where the identity pill came in before, #1451) —
@@ -2135,13 +2149,15 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         // [search]). On a pushed profile, which has neither the gear nor the
         // switcher, the balance is the corner. Fixed spaces keep each its own
         // bubble — adjacent items share one glass capsule.
-        // History's Select (Done while selecting) takes the balance's place
-        // on the own profile's History page (the owner, 2026-11-08).
-        if let historyItem = historySelectBarItem {
-            items.append(historySelectSpacer)
-            items.append(historyItem)
-        } else if let trailingAccessoryItem, !namesNoOne {
-            if corner != nil { items.append(cornerSpacer) }
+        // ⚠️ THE BALANCE IS NEVER REPLACED (#2307): History's Select / Done
+        // took its place until then (#2188); it stands in the gear's now, and
+        // the balance keeps its own on every tab.
+        if let trailingAccessoryItem, !namesNoOne {
+            if corner != nil {
+                items.append(cornerSpacer)
+            } else if historyItem != nil {
+                items.append(historySelectSpacer)
+            }
             items.append(trailingAccessoryItem)
         }
         // History's day, innermost (#1590), is the section contract's
@@ -2162,6 +2178,21 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         // (#756) — and so would Follow taken away.
         let cornerArrives = corner.map { item in !ownTrailingBarItems.contains { $0 === item } } ?? false
         let relationshipLeaves = isShowingRelationshipItem && corner !== followBarItem && corner !== requestedBarItem
+        // So does the own profile's corner changing hands (#2307) — Done
+        // leaving as the screen does (`viewWillDisappear`), Select or the gear
+        // coming back: a write mid-push lands unanimated at its end (#756).
+        // On this screen's own coordinator, one turn after its completion; a
+        // coordinator already past its animations takes the write now.
+        let historySlotChanges = dayLeads && shownHistoryBarItem !== historyItem
+        if historySlotChanges, let coordinator = transitionCoordinator,
+           coordinator.animate(alongsideTransition: nil, completion: { [weak self] _ in
+               DispatchQueue.main.async { [weak self] in
+                   guard let self else { return }
+                   updateActionBarItem(followButtonState, animated: view.window != nil)
+               }
+           }) {
+            return
+        }
         if cornerArrives || relationshipLeaves, transitionCoordinator != nil {
             navigationController?.whenAtRest { [weak self] in
                 guard let self else { return }
@@ -2284,7 +2315,9 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
             viewModel.releaseHistory()
             setSelectingHistory(false)
         }
-        // History's Select stands in the balance's place, and only there.
+        // History's Select stands in the gear's place, and only there (#2307):
+        // leaving History with the tray away puts the gear back, coming back
+        // brings Select.
         if changed { applyNavigationState(animated: view.window != nil) }
     }
 
@@ -2298,13 +2331,32 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     private(set) var isSelectingHistory = false
     private var historySelection: [PostID] = []
 
-    /// The own profile, on its History page: Select (Done while selecting)
-    /// stands where the balance does.
+    /// The own profile, on its History page, in the gear's place (#2307, the
+    /// owner 2026-11-11):
+    ///
+    /// | History                    | the corner |
+    /// |----------------------------|------------|
+    /// | tray in sight              | the gear (nil here) |
+    /// | tray scrolled away         | Select (disabled with no history) |
+    /// | selecting, wherever scrolled | Done |
+    ///
+    /// No Select at rest: it comes in once the header's tray has gone under
+    /// the bar, as someone else's Follow does (#2248). Done holds while
+    /// selecting, even back at the top — without it there would be no way
+    /// out; after it, the scroll's rule again. The word, not a pencil: iOS's
+    /// word for the mode (Photos, Files, Mail), beside the header's Edit
+    /// profile.
     private var historySelectBarItem: UIBarButtonItem? {
         guard dayLeads, !viewModel.namesNoOne, shownTab == .history else { return nil }
         if isSelectingHistory { return historyDoneItem }
+        guard isTrayScrolledAway else { return nil }
         historySelectItem.isEnabled = viewModel.hasHistory
         return historySelectItem
+    }
+
+    /// History's Select or Done, if the bar wears one now.
+    private var shownHistoryBarItem: UIBarButtonItem? {
+        ownTrailingBarItems.first { $0 === historySelectItem || $0 === historyDoneItem }
     }
 
     private lazy var historySelectItem = BarItems.title(id: "profile.history.select", title: "Select") { [weak self] in
@@ -2658,7 +2710,8 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
 
     /// Once the tray has scrolled under the bar, the bar's corner carries the
     /// profile's Follow or Requested (#2248) — and gives it back to the tray
-    /// on the way down.
+    /// on the way down. On the viewer's own History, the gear becomes Select
+    /// on the same frame (#2307).
     override func heroPageHeaderDidMove(travelled: CGFloat) {
         let trayGone = isActionRowUnderBar(travelled: travelled)
         guard trayGone != isTrayScrolledAway else { return }
