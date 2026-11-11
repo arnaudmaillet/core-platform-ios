@@ -282,6 +282,9 @@ enum DebugDashboardTools {
             ("Labs", [
                 ("Glass lens lab", "-lens-lab"),
                 ("Voice messages lab", "-voice-lab"),
+                // Where the titled bar's soft fade really ends, on a
+                // checkerboard scrolled under it (#2286).
+                ("Top fade lab", "-top-fade-lab -top-fade-lab-scroll 60"),
                 // The comments sheet's shapes, tried without a rebuild
                 // (#2195): any ratios, the layouts on their default.
                 ("Comments sheet shapes (3:2 for 4:3)", "-comments-sheet-shapes \"3:4 1:1 3:2 16:9\""),
