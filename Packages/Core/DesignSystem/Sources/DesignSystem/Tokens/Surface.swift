@@ -33,7 +33,9 @@ import UIKit
 /// for free, and in the dark they are byte-identical to the plain
 /// `systemBackground` pair, which is why moving to them changed nothing there.
 public enum Surface {
-    /// What a screen of cards lies on.
+    /// What a screen of cards lies on: Settings, the grouped lists, the
+    /// sheets (the grouped surfaces rule). NOT the post lists, which lie on
+    /// `plainPage` (#2243, #2290).
     public static let page: UIColor = .systemGroupedBackground
 
     /// A card, one step up from the page. Also the ground a media carousel's
@@ -41,11 +43,11 @@ public enum Surface {
     /// the card.
     public static let card: UIColor = .secondarySystemGroupedBackground
 
-    /// What a FLAT list of posts lies on (#2243, behind
-    /// `PostListStyle.flat`): the plain background, white in the light and
-    /// black in the dark — a timeline one reads, its posts parted by
-    /// hairlines rather than raised as cards. Byte-identical to `page` in the
-    /// dark, so only the light side changes.
+    /// What the post lists lie on (#2243; the only style since #2290): the
+    /// profile, the place page, For You's pages and the post sets. The plain
+    /// background, white in the light and black in the dark — a timeline one
+    /// reads, its posts parted by hairlines rather than raised as cards.
+    /// Byte-identical to `page` in the dark, so only the light side differs.
     public static let plainPage: UIColor = .systemBackground
 
     /// A card's tone on `plainPage` — a text tile, a shelf's text card: one

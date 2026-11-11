@@ -95,8 +95,8 @@ enum PostShelfOrigins {
     }
 
     /// The window a MEDIA card closes through once the feed is on a text page
-    /// — marker-shaped, for the place page's reason
-    /// (`PlaceProfileViewController.textRowReveal`): the feed is a pager, so
+    /// — marker-shaped, for a pushed list's reason
+    /// (`ForYouPostListViewController.textRowReveal`): the feed is a pager, so
     /// the card and the page are the same post only until the first swipe.
     /// The card itself, drawn fresh as it rests, is the stand-in.
     static func cardReveal(

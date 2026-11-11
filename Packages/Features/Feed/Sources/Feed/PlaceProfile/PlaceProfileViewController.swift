@@ -587,7 +587,7 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
                     // perfectly good animation. Only the line says which happened.
                     let post = grid?.posts.indices.contains(index) == true
                         ? grid?.posts[index] : nil
-                    let window = post.flatMap { p in grid.flatMap { textRowReveal(for: p, in: $0) } }
+                    let window = post.flatMap { p in grid.flatMap { textTileReveal(for: p, in: $0) } }
                     print("[place] opening tile \(index) from tab \(activeIndex)"
                         + " posts=\(grid?.posts.count ?? -1)"
                         + " post=\(post?.id.rawValue ?? "nil")"
@@ -1749,9 +1749,9 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
         // in on a close. Closed by `viewDidAppear`'s `endPlaybackHandoff`.
         let origin = grid.heroOrigin(
             opening: tapped, stream: stream, in: view,
-            // A row with no media has nothing to fly; this is the window every
-            // other list gives a text post.
-            textReveal: textRowReveal(for: tapped, in: grid),
+            // A tile of words opens through its window; a row of words pushes
+            // natively and needs none (#2243, #2290).
+            textReveal: textTileReveal(for: tapped, in: grid),
             // A TEXT post's page IS its thread — see `opensComments`.
             opensComments: showingComments && tapped.kind != .text,
             // This page manages its own freeze (`clearLandingConcealment`).
@@ -1784,43 +1784,22 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
         onListTab && post.kind == .text
     }
 
-    /// The window a TEXT row opens through, or nil for anything that is not
-    /// one — which keeps the plain push as the honest floor.
+    /// The window a text TILE of the Activity list opens through, or nil for
+    /// anything else — which keeps the plain push (or the flight) as the
+    /// honest floor.
     ///
-    /// Only the Activity tab can produce one: it is the `.list` page, and
-    /// Discover is `.grid`, whose text posts are tiles with no caption to open
-    /// out of. Asked of the page that was actually tapped rather than assumed,
-    /// so a future third tab cannot inherit a window it cannot draw.
+    /// Only the Activity tab can produce one: Discover is `.grid`, whose text
+    /// posts are tiles with no caption to open out of. Asked of the page that
+    /// was actually tapped rather than assumed, so a future third tab cannot
+    /// inherit a window it cannot draw.
     ///
-    /// ⚠️ MARKER-SHAPED, not row-shaped, and that is a deliberate trade. A
-    /// row's caption normally lets the window align the page to it — the
-    /// effect that reads as the card growing — but that alignment is only
-    /// honest while the row and the page are the SAME post, and this feed is a
-    /// PAGER. So the window takes the same answers the map's marker takes
-    /// (`alignsPageToSource: false`, no cut, no borrowed band): the page holds
-    /// still and the card opens over it. Never mis-aimed, at the cost of the
-    /// growth effect.
-    ///
-    /// ⚠️ IT LANDS ON THE POST THE VIEWER TAPPED, always — even several pages
-    /// on, even onto a photograph.
-    ///
-    /// This was briefly re-pointed at the settled post, on the reasoning that a
-    /// window opened from WORDS has nothing a text row can receive once the
-    /// viewer is on a picture. That reasoning was answering the wrong
-    /// complaint. What made a paged close look like no animation at all was a
-    /// forwarded pop returning nil and stranding the grab
-    /// (`InteractiveSlideDismissal`'s decline rule); with that fixed the window
-    /// runs either way, and re-pointing bought nothing but a list that appeared
-    /// to shuffle. A scroll is not a reorder in the code and IS one to the eye:
-    /// the post that was under the card is replaced by another, which is
-    /// exactly what the product rule for this ranked tab forbids.
-    ///
-    /// So the fade is the answer, and the machinery already gives it:
-    /// `RevealStage.swapFractions` puts an empty beat between the page and the
-    /// card, so the departing media dissolves out and the original's words
-    /// dissolve in with nothing drawn over anything. That beat is also why this
-    /// is legal at all — neither half of the fade ever has text on both sides.
-    private func textRowReveal(
+    /// ⚠️ NO WINDOW FOR A ROW since #2290. A text ROW opened through a
+    /// marker-shaped window grown from its card; a list's row of words opens
+    /// with the native push now (`ForYouGridPage.opensWithNativePush`), whose
+    /// close is the native pop (`presentSnapFeedHero` ignores the window for
+    /// it), so the row's window was built for nothing. A media row's
+    /// flight-opened close lands through this page's own `CardCloseLanding`.
+    private func textTileReveal(
         for post: GalleryPost, in grid: ForYouGridPage
     ) -> TextRevealOrigin? {
         // ⚠️ THE MODEL SAYS WHAT THE POST IS, the page only says whether it can
@@ -1852,56 +1831,8 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
                 }
             )
         }
-        return TextRevealOrigin(
-            rowFrame: { [weak self] space in
-                guard let self else { return nil }
-                return activityPage.textRowFrame(for: anchor, in: space)
-                    ?? activityPage.rowFrame(for: anchor, in: space)
-            },
-            captionEnd: nil,
-            depthView: { [weak self] in self?.activityPage },
-            makeDismissStandIn: { [weak self] _ in
-                // The settled post is deliberately ignored: this window closes
-                // onto the row it opened from, whatever the viewer paged to.
-                self?.activityPage.makeDismissStandIn(for: anchor)
-            },
-            alignsPageToSource: false,
-            // ⚠️ THE PAGE FILLS THE WINDOW — see `RevealPageFit.covering`.
-            //
-            // Held still it stayed at full size while the window shrank around
-            // it: a keyhole panning over a photograph, filmed on this screen.
-            // It fitted INSIDE the window for a while instead, which stopped
-            // the truncation and started the other half of it — on the release
-            // spring, where the window's aspect leaves the page's, the media
-            // sat letterboxed with the card's ground above and below it.
-            // Filmed too.
-            //
-            // The invariant every report has agreed on is the simple one: the
-            // media fills the transition window, always. That is covering, and
-            // it is what the marker has used all along.
-            pageFit: .covering,
-            setConcealed: { [weak self] concealed in
-                self?.activityPage.setRevealConcealed(concealed, for: anchor)
-            },
-            // The row may have scrolled away under the open post — a hydration
-            // or an engagement decoration re-realizes this list — and an
-            // unrealized row answers nil for its rect, which sends the window
-            // to a centred fallback that on screen is indistinguishable from a
-            // working close. Bringing it back is all this does; the SETTLED
-            // post is deliberately unused, see the note above.
-            willStageDismissal: { [weak self] _ in
-                guard let self else { return }
-                view.layoutIfNeeded()
-                activityPage.beginHeroFreeze()
-                activityPage.revealPost(anchor, clearing: landingOcclusion)
-                view.layoutIfNeeded()
-            },
-            dismissalDidEnd: { [weak self] committed in
-                guard let self else { return }
-                activityPage.endHeroFreeze()
-                if !committed { activityPage.clearRevealConcealment() }
-            }
-        )
+        // A row of words opens and closes natively (#2243, #2290): no window.
+        return nil
     }
 }
 

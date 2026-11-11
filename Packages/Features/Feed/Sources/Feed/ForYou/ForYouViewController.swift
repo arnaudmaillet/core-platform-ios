@@ -343,9 +343,8 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        // The page the cards lie on, a step below them — see `Surface` — or
-        // the plain page under flat rows (#2243).
-        view.backgroundColor = page.pageGround
+        // The plain page the post lists lie on (#2243) — see `Surface`.
+        view.backgroundColor = Surface.plainPage
         // ⚠️ **NO TITLE IN THE BAR.** "For You" was written here (the static
         // word); it went with the map tab's on 2026-09-22 —
         // the two roots' headers carry their controls and nothing else, and the
@@ -703,42 +702,21 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         return feed
     }
 
-    /// **THE TEXT REVEAL**: opens a text post with a clip-window
-    /// reveal instead of UIKit's slide. `-text-reveal-plain` compares the
-    /// unmatched variant (the window opens over a page that never moves);
-    /// `-text-reveal-log` prints the rects both legs measured.
+    /// **THE TEXT WINDOW'S CLOSE**: the window a feed a FLIGHT opened closes
+    /// through, once the viewer has paged onto words — built at the grab, for
+    /// the row or tile the flight left (`stageCardClose`).
+    /// `-text-reveal-log` prints the rects it measured.
     ///
-    /// ASSIGNED ON EVERY TEXT PUSH, including with `nil`, and that is not
-    /// defensive — `textSlideDismissal` is one retained instance shared by
-    /// every plain push this screen makes, and the branch it lives in is taken
-    /// by more than text rows (a media row scrolled out of the viewport lands
-    /// here too). A geometry left over from the previous tap would aim the
-    /// next post's reveal at a row that has nothing to do with it.
+    /// ⚠️ NEVER AN OPENING since #2290. This used to open a text ROW through
+    /// the window grown from its card too (`presenting`); a list's row of
+    /// words opens with the native push now (`ForYouGridPage
+    /// .opensWithNativePush`), and that was the only post this screen's
+    /// page could open through it — `textRowFrame` answers for a realized
+    /// text row alone, which is exactly the post that pushes.
     ///
-    /// Whether a row can be revealed is asked of the GRID, not of the post's
-    /// kind: `textRowFrame` answers only for a realized, on-screen text row,
-    /// which is the same question the reveal has to answer again at dismissal.
-    /// One predicate, so the two legs cannot disagree about whether this
-    /// transition exists.
-    /// Returns whether the reveal is armed — the caller uses it to leave the
-    /// tab bar alone, because a reveal takes the bar down ITSELF.
-    ///
-    /// The bar FLOATS: it draws over the grid without insetting it (measured on
-    /// an iPhone 17 Pro — bar at y 791 height 83, while the grid reserves 34),
-    /// so it covers the bottom 26pt of the very row a reveal departs from.
-    /// Hidden before the push, as every plain push does it, that 26pt is the
-    /// card's whole metric line snapping into existence one frame after the
-    /// mask opens: the card the viewer tapped is not the card that starts
-    /// growing. Driven by the flight instead, the bar is fully in place on
-    /// frame 0 and dissolves as the page grows past it.
+    /// Returns whether the window is armed.
     @discardableResult
-    /// `presenting` is whether this call is setting up an OPENING. False when a
-    /// screen that was opened by a flight rebuilds the geometry at the grab,
-    /// for a post it has since paged to — see `attachCardCloseAlongsideFlight`.
-    /// A reveal must not claim a push that has already happened.
-    private func installTextReveal(
-        feed: UIViewController, postID: PostID, presenting: Bool = true
-    ) -> Bool {
+    private func installTextReveal(feed: UIViewController, postID: PostID) -> Bool {
         let page = self.page
         // Cleared together: a stale geometry from the previous post would be
         // read by the next close, and a stale `revealPresents` would put a
@@ -769,9 +747,6 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // the viewer paged to (#1283): the rect, the stand-in and the
         // concealment all read it.
         let anchorID = postID
-        func sourceFrame(_ space: UICoordinateSpace) -> CGRect? {
-            page.textRowFrame(for: anchorID, in: space)
-        }
         /// The rect this window closes onto — the text row's, and the ROW's
         /// when the anchor turns out not to be a text row at all.
         ///
@@ -779,24 +754,15 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         /// hero flies instead of opening as a window), so a window landing on
         /// a media row would be told nil and close into the middle of the
         /// screen: the row's own rect is the floor.
-        ///
-        /// Deliberately only for the CLOSE: the opening is still gated on a
-        /// real text row, which is what decides that this window exists at all.
         func closingFrame(_ space: UICoordinateSpace) -> CGRect? {
             page.textRowFrame(for: anchorID, in: space)
                 ?? page.rowFrame(for: anchorID, in: space)
         }
-        // ⚠️ EACH LEG ASKS ITS OWN QUESTION, and asking the opening's on a
-        // close is why a close could have nowhere to land.
-        //
-        // An OPENING is gated on a realized TEXT row, because that is what
-        // decides a window exists at all rather than a flight (the `!revealing`
-        // fork downstream depends on it). A CLOSE is a different question: it
-        // already HAS a window in the air, and all it needs to know is whether
-        // the row it is aiming at can be found. `closingFrame` answers that for
-        // a row of any kind — it is already what the geometry's rect uses, so
-        // until now the existence check and the rect disagreed: the guard said
-        // "no such transition" about a row `closingFrame` would have found.
+        // ⚠️ A CLOSE ASKS ITS OWN QUESTION: it already HAS a window in the
+        // air, and all it needs to know is whether the row it is aiming at can
+        // be found. `closingFrame` answers that for a row of any kind — it is
+        // also what the geometry's rect uses, so the existence check and the
+        // rect cannot disagree.
         //
         // Filmed as a text page leaving a media row with no hero at all — a
         // plain horizontal slide — because the row it had to land on carried a
@@ -805,16 +771,11 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // to read from a recording: this returns false, the geometry it just
         // cleared stays nil, and the close leaves on the plain slide with
         // nothing anywhere saying why. Each reason is named instead.
-        let frame = presenting ? sourceFrame(view) : closingFrame(view)
-        guard TextRevealInstaller.isEnabled, frame != nil else {
+        guard TextRevealInstaller.isEnabled, closingFrame(view) != nil else {
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-text-reveal-log") {
-                let why: String
-                if !TextRevealInstaller.isEnabled { why = "disabled" }
-                else { why = presenting ? "no text row (sourceFrame nil)"
-                                        : "no landing row (closingFrame nil)" }
-                print("[text-reveal] install REFUSED post=\(postID.rawValue)"
-                    + " presenting=\(presenting) why=\(why)")
+                let why = TextRevealInstaller.isEnabled ? "no landing row (closingFrame nil)" : "disabled"
+                print("[text-reveal] install REFUSED post=\(postID.rawValue) why=\(why)")
             }
             #endif
             return false
@@ -833,16 +794,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             print("[text-reveal] \(stage) \(page.debugInsetState)")
             #endif
         }
-        log("atTap        ")
-        if trace, let rect = sourceFrame(view) {
-            // The row's rect BEFORE the push hides the tab bar. Compared with
-            // the animator's `source=`, this says whether the grid moved
-            // between the tap and the opening — which is what a pre-opening
-            // jump would be.
-            #if DEBUG
-            print("[text-reveal] atTap  row=\(NSCoder.string(for: rect))")
-            #endif
-        }
+        log("atGrab       ")
         // ⚠️ THE BAR IS NOT TOUCHED AT THE DRAG'S BEGIN any more. It used to be
         // put back here at alpha 0 — geometrically present, visually absent —
         // and shown at the landing. Native chrome is UIKit's (see
@@ -864,10 +816,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // hand-written copies of thirteen fields agree only on the day they
         // are written. What stays is what genuinely differs between the two
         // screens: which chrome comes back, and what has to settle first.
-        // The OPENING is the reveal's — see `revealPresents`. Set alongside
-        // the geometry rather than derived from it, because a media post will
-        // carry a geometry too and must still open with its flight.
-        textSlideDismissal.revealPresents = presenting
+        // Never an opening: `revealPresents` stays false (cleared above).
         // ⚠️ A WINDOW ONTO A TILE IS THE TILE'S SHAPE, not a card's.
         //
         // Discover draws a chunk's posts as bricks, and a brick opened by a
@@ -933,14 +882,6 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
                 // still hidden.
                 setConcealed: { [weak page] concealed in
                     page?.setRevealConcealed(concealed, for: anchorID)
-                },
-                presentationDidEnd: { [weak self] landed in
-                    // The bar went down through UIKit with the push. A
-                    // REVERSED opening never showed the page, so the bar goes
-                    // back to being the grid's — through UIKit again, a turn
-                    // after the transition's own bookkeeping.
-                    guard !landed else { return }
-                    self?.tabBarController?.showTabBarNativelyNextTurn()
                 },
                 // Pin the grid's inset before the landing rect is read. The pop
                 // animates the safe area and this collection view adds it to
@@ -1434,53 +1375,33 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // Reduce Motion opens every post with the stack's own push: no window,
         // no flight (`HeroMotionPolicy`).
         let reducesMotion = HeroMotionPolicy.prefersNativePush
-        // ⚠️ A FLAT ROW OF WORDS OPENS WITH THE NATIVE PUSH (#2243): it has
-        // no card for the window to grow from. And it closes with the native
+        // ⚠️ A ROW OF WORDS OPENS WITH THE NATIVE PUSH (#2243): it has no
+        // card for the window to grow from. And it closes with the native
         // pop, whatever the feed has paged onto — no flight rides along for a
         // photograph's page, no window for a text one (the owner's rule,
         // 2026-11-01: a screen closes the way it opened).
-        let flatPush = page.opensWithNativePush(tapped.id)
-        let revealing = !reducesMotion && !flatPush && installTextReveal(feed: feed, postID: tapped.id)
-        // No window: the stack's own push, so its vertical closes are pulls
-        // (#2045, #2046) and the release is that push's pop.
-        textSlideDismissal.closesByPull = !revealing
-        // ⚠️ NOT REBUILT FOR THE POST THE VIEWER ENDS ON, and NOT adopted into
-        // the tapped post's slot. The list keeps its order; the window travels
-        // to wherever the arrival row actually is.
         //
-        // A rebuild was tried and is the regression it replaced: the geometry's
-        // guard is `textRowFrame`, which REFUSES a row carrying media on
-        // purpose, so rebuilding for a landed photo or video returned false and
-        // cleared the reveal outright — the page then slid out as a strip while
-        // a stray card floated over the list. Filmed.
-        //
-        // Nothing moves instead: the window closes onto the row it opened from
-        // (#1283), `closingFrame` finds it whatever kind it is, and
-        // `pageFit: .covering` carries the departing page into it — which is
-        // also what stops the veil and the borrowed band, both of them the
-        // TAPPED post's, from being drawn over a landing that is somebody
-        // else's.
+        // NO OPENING THROUGH THE WINDOW from this page any more (#2290): a
+        // row of words was the only post it could grow from (`textRowFrame`
+        // answers for a realized text row alone), and that row pushes. A
+        // picture flies; anything else takes the plain push below, whose
+        // vertical closes are pulls (#2045, #2046) and whose release is that
+        // push's pop. A window still CLOSES a flight-opened feed paged onto
+        // words (`stageCardClose`).
+        let nativePush = page.opensWithNativePush(tapped.id)
+        textSlideDismissal.closesByPull = true
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-text-reveal-log") {
-            // Which driver opened the screen, said once. Everything downstream
-            // reads differently depending on this answer.
-            //
-            // ⚠️ "not the reveal" is TWO outcomes, not one: a flight, and the
-            // plain push a row that is not realized falls back to. Printing
-            // them as one made a harness run where the row had not been
-            // realized look like a text post opening with a hero, which is a
-            // defect that does not exist.
-            print("[text-reveal] open reveal=\(revealing)"
+            // Which driver opened the screen, said once: a flight, or the
+            // plain push (a row of words, or a row that is not realized).
+            print("[text-reveal] open nativePush=\(nativePush)"
                 + " post=\(tapped.id.rawValue) kind=\(tapped.kind)")
         }
         #endif
         tabBarController?.hideTabBarNatively()
 
         guard let destination = feed as? any ZoomTransitionDestination,
-              // A reveal never also flies a hero. For a TEXT row this changes
-              // nothing — it has no hero to fly — and for OPTION A it is what
-              // sends a media row down the window's path instead.
-              !revealing, !reducesMotion,
+              !reducesMotion,
               page.hero(for: tapped.id, in: view) != nil
         else {
             // No hero available — a text-only row has no media to fly, and a
@@ -1532,19 +1453,21 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             // ⚠️ AND THE FLIGHT RIDES ALONG, for the post this screen may end
             // on — the mirror of `attachCardCloseAlongsideFlight`.
             //
-            // A text post opened this feed as a window, and the feed is a
-            // PAGER: swipe to a photograph and the post being dismissed has a
-            // hero to fly after all. Attached BEFORE the slide installs, so the
+            // A post with no flight opened this feed (a row that is not
+            // realized, a tile of words), and the feed is a PAGER: swipe to a
+            // photograph and the post being dismissed has a hero to fly after
+            // all. Attached BEFORE the slide installs, so the
             // slide saves this controller as the delegate it displaced and can
             // forward a hero pop straight back to it.
             // Reduce Motion: no flight rides along either, so a media page
             // closes with the window's own slide, not a hero home.
-            let alongside = reducesMotion || flatPush
+            let alongside = reducesMotion || nativePush
                 ? nil
                 : attachFlightAlongsideCardClose(feed: feed, tappedID: tapped.id)
-            // A flat row's native push closes with the native pop (#2243): the
-            // slide forwards no `.hero` pop to a flight, and holds no window.
-            if flatPush {
+            // A row of words' native push closes with the native pop (#2243):
+            // the slide forwards no `.hero` pop to a flight, and holds no
+            // window.
+            if nativePush {
                 // No hero grab on this screen to arbitrate with: every drag is
                 // the slide's, and its pop is the native one.
                 textSlideDismissal.arbitratesWithHeroGrab = false
@@ -1557,9 +1480,9 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             // ⚠️ AND CLAIM THE DRAGS THE HERO DECLINES — asked of the hero's
             // own gate, see `heroLandingArbiter`.
             //
-            // This screen opened as a WINDOW on a text row, so on a list its
-            // landing IS that text row, whatever the viewer has since paged to.
-            // The hero attached alongside refuses a landing it cannot draw;
+            // This screen's landing is the post it opened from, whatever the
+            // viewer has since paged to. The hero attached alongside refuses a
+            // landing it cannot draw;
             // without this line the refusals are symmetric and NEITHER driver
             // claims the drag, which is a plain slide — the failure this whole
             // pairing exists to prevent.
@@ -1963,7 +1886,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // viewer paged to (#1283): a close comes home to the tapped tile, and
         // nothing in the grid moves to meet it.
         let landingID = departureID
-        installTextReveal(feed: feed, postID: landingID, presenting: false)
+        installTextReveal(feed: feed, postID: landingID)
         // ⚠️ AND HIDE THE ROW, which on this path nothing else has.
         //
         // A reveal normally conceals the row it departed from at the

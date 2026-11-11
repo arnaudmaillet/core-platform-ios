@@ -125,6 +125,27 @@ dressed up as one.
   `-interaction-latency-hud` on a device; UIKit's own floor by
   `-latency-bench`. The audit and its offenders: `dev/RESPONSIVENESS_AUDIT.md`.
 
+### Which presentation a post opens with
+
+A post closes the way it opened (the owner, 2026-11-01). Since #2290 (#2243:
+the post lists drop their cards) the opening is decided by what the post is
+drawn as (`PostListOpening`):
+
+- **A list's row of words** (For You's Feed, a profile's lists, the place
+  page, a post set, a pushed list) opens with the native push and closes with
+  its pop, whatever the feed has paged onto (`SnapFeedHeroOrigin
+  .opensWithNativePush`). It never opens through the text window.
+- **A picture** (a media row, a tile, a shelf's media card) flies
+  (`PostGridFlightCard`). Paged onto words, its feed closes through a window
+  onto the row or tile it left (`RowCardCloseLanding`, a place page's own
+  `CardCloseLanding`).
+- **The text window** (`TextRevealInstaller`, `RevealTransition`) still opens
+  and closes: a text tile (`tileWindow`: the mosaic, Discover), a shelf's text
+  card (`PostShelfOrigins`), the friends' stories row
+  (`ForYouRowOrigins.storyReveal`), the map's bubble, For You's preview, the
+  conversation status page and a History row's square (`rowSquareWindow`).
+  `-no-text-reveal` turns it off for all of them.
+
 ---
 
 ## How it is measured

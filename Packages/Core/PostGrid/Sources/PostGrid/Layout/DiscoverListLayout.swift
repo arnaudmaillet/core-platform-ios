@@ -1,13 +1,13 @@
 import DesignSystem
 import UIKit
 
-/// The Discover list: full-width cards with pieces of the chaotic mosaic set
+/// The Discover list: full-width rows with pieces of the chaotic mosaic set
 /// between them — the shape `MosaicChunkPlanner` decides, one section per
 /// stretch (`DiscoverSegment`).
 ///
 /// **Compositional, one section per stretch — and not a custom layout like the
-/// feed mosaic's.** The cards SELF-SIZE (a caption, a carousel, a collapsed
-/// band all change a card's height), which a compositional list does for free
+/// feed mosaic's.** The rows SELF-SIZE (a caption, a carousel, a collapsed
+/// band all change a row's height), which a compositional list does for free
 /// and a custom `UICollectionViewLayout` would have to re-implement through
 /// preferred-attributes invalidation. The reason the feed mosaic could not be
 /// compositional does not apply here: a chunk's tiling is seeded by its
@@ -19,8 +19,8 @@ import UIKit
 ///
 /// A chunk section is a single custom group: the chunk's own frames, at the
 /// width the list's margins leave, with the mosaic's gutter between tiles and
-/// none at the edges — so its outer tiles line up with the cards above and
-/// below it, and its foot is one straight line (`MosaicChunk.frames`). Under
+/// none at the edges — so its outer tiles line up with the rows' words above
+/// and below it, and its foot is one straight line (`MosaicChunk.frames`). Under
 /// it, a "View all" footer.
 ///
 /// `@MainActor` because the gutter is `ChaoticSliceLayout`'s, whose statics a
@@ -34,14 +34,16 @@ public enum DiscoverListLayout {
     /// It starts FLUSH WITH THE CHUNK'S FOOT (no inset between them) and its
     /// control draws its title at its top (`DiscoverViewAllFooterView`), so
     /// the words sit just under the tiles they belong to and the rest of the
-    /// 44pt is the air before the next card — no separate gap below.
+    /// 44pt is the air before the next row — no separate gap below.
     public static let viewAllHeight: CGFloat = 44
     /// The feed mosaic's gutter, so a chunk reads as a window onto the same
     /// wall — see `ChaoticSliceLayout.harmonisedGutter`.
     public static let gutter: CGFloat = ChaoticSliceLayout.harmonisedGutter
-    /// Air between the last card of a run and the chunk under it: more than
-    /// two cards keep between them, so the chunk reads as a shelf of its own
-    /// rather than as one more card.
+    /// Air between the last row of a run and the chunk under it: more than
+    /// two rows keep between them (`PostGridListLayout.rowSpacing`), so the
+    /// chunk reads as a shelf of its own rather than as one more row. Set
+    /// when the rows were cards 10pt apart; the value stays (#2290, #2289
+    /// may revisit it).
     public static let gapAboveChunk: CGFloat = 20
 
     /// The element kind of the list's LEADING header — whatever a host puts
@@ -73,9 +75,10 @@ public enum DiscoverListLayout {
     }
 
     /// The gap between the two cards of a pair, and between two rows of pairs:
-    /// the list's own row spacing, so a block reads as the same list folded
-    /// in two rather than as a grid of its own.
-    public static let pairGutter: CGFloat = PostGridListLayout.rowSpacing
+    /// `PostGridListLayout.cardSpacing`, the cards' own gap. It was the list's
+    /// row spacing when the rows were cards too; the rows are flat now
+    /// (#2290) and the pairs keep the value (#2289 may revisit it).
+    public static let pairGutter: CGFloat = PostGridListLayout.cardSpacing
 
     /// A paired card's height over its width: 3:4, the For You FOLLOWING
     /// card's own shape (`LeadRowMetrics.cardAspect`, which a Feed
@@ -97,8 +100,8 @@ public enum DiscoverListLayout {
     }
 
     /// `chunk(section)` answers the chunk a section holds, or nil for a run of
-    /// cards (and for any section the model does not know — a skeleton, a
-    /// reload in flight — which is laid out as cards). `isPairs(section)` says
+    /// rows (and for any section the model does not know — a skeleton, a
+    /// reload in flight — which is laid out as rows). `isPairs(section)` says
     /// a section is a block of paired half-width cards (see
     /// `DiscoverSegment.pairs`).
     ///
@@ -108,22 +111,20 @@ public enum DiscoverListLayout {
     /// `endsGroup(section)` spends the app's section gap after the last
     /// stretch of a group, before the next one's title.
     ///
-    /// `listStyle` (#2243): a run of cards, or of flat rows — the runs alone
-    /// change (`PostGridListLayout.rowSideInset`, `rowSpacing(for:)`); the
-    /// chunks and the pairs keep the page's margin, so a flat row's words
-    /// and the tiles under it stand on one edge.
+    /// A run's rows stand `PostGridListLayout.rowInset` from the screen's
+    /// edges, `rowSpacing` apart (#2243); the chunks and the pairs keep the
+    /// page's margin, so a row's words and the tiles under it stand on one
+    /// edge.
     public static func layout(
         chunk: @escaping @MainActor (Int) -> MosaicChunk?,
         isPairs: @escaping @MainActor (Int) -> Bool = { _ in false },
         isTitled: @escaping @MainActor (Int) -> Bool = { _ in false },
         endsGroup: @escaping @MainActor (Int) -> Bool = { _ in false },
-        showsViewAll: @escaping @MainActor () -> Bool = { true },
-        listStyle: PostListStyle = .cards
+        showsViewAll: @escaping @MainActor () -> Bool = { true }
     ) -> UICollectionViewCompositionalLayout {
         UICollectionViewCompositionalLayout { index, environment in
             let section = stretch(
-                index, environment: environment, chunk: chunk, isPairs: isPairs, showsViewAll: showsViewAll(),
-                listStyle: listStyle
+                index, environment: environment, chunk: chunk, isPairs: isPairs, showsViewAll: showsViewAll()
             )
             if endsGroup(index) {
                 var insets = section.contentInsets
@@ -141,24 +142,24 @@ public enum DiscoverListLayout {
                 // host names the group in its bar once the title has gone
                 // under it (the Messages inbox's rule, #1301).
                 header.zIndex = 2
-                // A run's title stays on the page's margin when the run's
-                // own insets narrow for flat rows (#2243).
+                // A run's title stays on the page's margin although the run's
+                // own insets narrow for its rows (#2243); a chunk's and a
+                // block of pairs' stand on the margin already.
                 let isRun = chunk(index) == nil && !isPairs(index)
-                header.contentInsets = PostGridListLayout.headerInsets(for: isRun ? listStyle : .cards)
+                header.contentInsets = isRun ? PostGridListLayout.headerInsets : .zero
                 section.boundarySupplementaryItems.insert(header, at: 0)
             }
             return section
         }
     }
 
-    /// One stretch's section: a run of cards, a block of pairs, or a chunk.
+    /// One stretch's section: a run of rows, a block of pairs, or a chunk.
     private static func stretch(
         _ index: Int,
         environment: any NSCollectionLayoutEnvironment,
         chunk: @MainActor (Int) -> MosaicChunk?,
         isPairs: @MainActor (Int) -> Bool,
-        showsViewAll: Bool,
-        listStyle: PostListStyle
+        showsViewAll: Bool
     ) -> NSCollectionLayoutSection {
         do {
             let margin = PostGridListLayout.sideMargin
@@ -175,11 +176,11 @@ public enum DiscoverListLayout {
                     subitems: [item]
                 )
                 let section = NSCollectionLayoutSection(group: group)
-                section.interGroupSpacing = PostGridListLayout.rowSpacing(for: listStyle)
+                section.interGroupSpacing = PostGridListLayout.rowSpacing
                 // The gap to whatever follows goes on the TRAILING edge of
                 // this section — `PostGridListLayout` measured why a leading
                 // inset on the next one misbehaves.
-                let side = PostGridListLayout.rowSideInset(for: listStyle)
+                let side = PostGridListLayout.rowInset
                 section.contentInsets = NSDirectionalEdgeInsets(
                     top: 0, leading: side, bottom: gapAboveChunk, trailing: side
                 )
@@ -219,8 +220,8 @@ public enum DiscoverListLayout {
     }
 
     /// A block of paired cards: rows of two half-width cards, `pairGutter`
-    /// between them, on the cards' own margins — so a pair's outer edges line
-    /// up with the full-width cards above and below it.
+    /// between them, on the page's margin — so a pair's outer edges line up
+    /// with the rows' words above and below it.
     ///
     /// FIXED sizes, not self-sizing: a paired card is a Following card, all
     /// picture with its words over it, so its size is a function of the width
@@ -241,9 +242,9 @@ public enum DiscoverListLayout {
         )
         group.interItemSpacing = .fixed(pairGutter)
         let section = NSCollectionLayoutSection(group: group)
-        section.interGroupSpacing = PostGridListLayout.rowSpacing
+        section.interGroupSpacing = pairGutter
         // The gap to whatever follows on the TRAILING edge, as a run's — see
-        // the cards' section above.
+        // the rows' section above.
         section.contentInsets = NSDirectionalEdgeInsets(
             top: 0, leading: margin, bottom: gapAboveChunk, trailing: margin
         )

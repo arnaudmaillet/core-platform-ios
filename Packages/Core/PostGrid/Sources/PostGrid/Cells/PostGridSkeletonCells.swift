@@ -2,69 +2,51 @@ import DesignSystem
 import UIKit
 
 // The grid's loading placeholders: shimmering stand-ins that borrow the
-// real cells' geometry — same cards, same corners, same margins — so hydration
+// real cells' geometry — same shapes, same corners, same margins — so hydration
 // swaps content into a frame the eye has already accepted, instead of
 // replacing a spinner with a different screen.
 
 // MARK: - Timeline row skeleton
 
-/// The `PostGridListRowCell` mimic: the same soft 18pt card, holding stacked
-/// caption lines over the quiet metadata row (counter cluster leading, age
-/// trailing). Two- and three-line variants alternate so a column of them
-/// reads as text, not as a pattern.
+/// The `PostGridListRowCell` mimic, as a list draws it (#2243): no card,
+/// stacked caption lines on the row's own column over the quiet metadata row
+/// (counter cluster leading, age trailing), and the hairline a row draws
+/// under it. Two- and three-line variants alternate so a column of them reads
+/// as text, not as a pattern.
 public final class PostGridSkeletonListCell: UICollectionViewCell {
     public static let reuseID = "PostGridSkeletonListCell"
 
-    private let card = PostGridSkeletonCard()
+    private let row = PostGridSkeletonRow()
 
     override public init(frame: CGRect) {
         super.init(frame: frame)
-        card.pin(to: contentView)
+        row.pin(to: contentView)
     }
 
     @available(*, unavailable)
     public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    /// `listStyle` (#2243): the card's bones, or a flat row's — no card,
-    /// the row's own column, and the hairline a flat row draws under it.
-    public func configure(variant: Int, listStyle: PostListStyle = .cards) {
-        card.setLines(variant.isMultiple(of: 2) ? 3 : 2)
-        card.listStyle = listStyle
+    public func configure(variant: Int) {
+        row.setLines(variant.isMultiple(of: 2) ? 3 : 2)
     }
 }
 
-/// The card body of a timeline-row skeleton, reusable outside a collection
-/// view (a first-load screen skeleton stacks these directly).
-public final class PostGridSkeletonCard: UIView {
+/// The body of a timeline-row skeleton, reusable outside a collection view
+/// (a first-load screen skeleton stacks these directly).
+public final class PostGridSkeletonRow: UIView {
     private let thirdLine = SkeletonBoneView()
 
-    /// The card, or a flat row's bones (#2243) — the shape the rows of
-    /// either style hydrate into.
-    public var listStyle: PostListStyle = .cards {
-        didSet {
-            guard listStyle != oldValue else { return }
-            dress()
-        }
-    }
-
-    private var columnLeading: NSLayoutConstraint!
-    private var columnTrailing: NSLayoutConstraint!
-    /// A flat row's hairline, inset to its column, mid-gap under it.
+    /// The row's hairline, inset to its column, mid-gap under it.
     private let rule = UIView()
 
     public init() {
         super.init(frame: .zero)
-        // The shimmer has to be the shape content hydrates INTO — a literal
-        // here silently stopped matching the day the card's curve moved.
-        layer.cornerCurve = .continuous
-        // …and the edge, for the same reason: `dress`, re-run on a style flip.
-        registerForTraitChanges([UITraitUserInterfaceStyle.self, UITraitDisplayScale.self]) {
-            (card: PostGridSkeletonCard, _: UITraitCollection) in
-            card.dress()
-        }
         rule.backgroundColor = .separator
-        rule.isHidden = true
         addSubview(rule)
+        // The hairline is one device pixel: re-laid on a scale change.
+        registerForTraitChanges([UITraitDisplayScale.self]) { (row: PostGridSkeletonRow, _: UITraitCollection) in
+            row.setNeedsLayout()
+        }
 
         // Caption lines at body-text pitch: 14pt bones on the ~21pt line grid.
         let firstLine = SkeletonBoneView()
@@ -91,17 +73,14 @@ public final class PostGridSkeletonCard: UIView {
         column.axis = .vertical
         column.alignment = .leading
         column.spacing = 7
-        let columnLeading = column.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16)
-        let columnTrailing = column.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16)
-        self.columnLeading = columnLeading
-        self.columnTrailing = columnTrailing
+        // The bones stand on the row's caption column.
+        let side = PostGridListRowCell.captionInset
         column.constrain(in: self) { parent in
             column.topAnchor.constraint(equalTo: parent.topAnchor, constant: 18)
-            columnLeading
-            columnTrailing
+            column.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: side)
+            column.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -side)
             column.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -18)
         }
-        dress()
 
         NSLayoutConstraint.activate([
             firstLine.heightAnchor.constraint(equalToConstant: 14),
@@ -130,28 +109,13 @@ public final class PostGridSkeletonCard: UIView {
         thirdLine.isHidden = count < 3
     }
 
-    /// The card's tone, corner and edge, or none of them on a flat row —
-    /// whose bones then stand on the row's caption column (#2243).
-    private func dress() {
-        let flat = listStyle == .flat
-        backgroundColor = flat ? .clear : PostGridListRowCell.cardFillColor
-        layer.cornerRadius = flat ? .zero : PostGridListRowCell.cardCornerRadius
-        layer.borderWidth = flat ? .zero : Surface.hairline(for: traitCollection)
-        layer.borderColor = Surface.cardEdge.resolvedColor(with: traitCollection).cgColor
-        let side = flat ? PostGridListRowCell.captionInset : 16
-        columnLeading?.constant = side
-        columnTrailing?.constant = -side
-        rule.isHidden = !flat
-        setNeedsLayout()
-    }
-
     override public func layoutSubviews() {
         super.layoutSubviews()
         let hairline = Surface.hairline(for: traitCollection)
         let leading = PostGridListRowCell.captionInset
         rule.frame = CGRect(
-            x: leading, y: bounds.height + PostGridListRowCell.flatSeparatorOffset - hairline / 2,
-            width: max(0, bounds.width + PostGridListLayout.flatRowInset - leading), height: hairline
+            x: leading, y: bounds.height + PostGridListRowCell.separatorOffset - hairline / 2,
+            width: max(0, bounds.width + PostGridListLayout.rowInset - leading), height: hairline
         )
     }
 }

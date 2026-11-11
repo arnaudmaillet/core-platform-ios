@@ -138,7 +138,7 @@ open class HeroHeaderView: UIView {
         /// ⚠️ EXPERIMENT (the owner, 2026-10-15): a band is a CARD — inset
         /// from the screen's sides, held off the screen's top by the same
         /// margin, behind the status bar, its top corners following the display's and its
-        /// bottom ones the post cards' — and the content starts lower, so
+        /// bottom ones the app's card corner — and the content starts lower, so
         /// more of the picture shows.
         static let bandCardInset: CGFloat = 12
         /// A band card's foot: 30 % of the screen's height.
@@ -349,7 +349,10 @@ open class HeroHeaderView: UIView {
         bannerLeadingEdge?.constant = inset
         bannerTrailingEdge?.constant = -inset
         // The top corners concentric with the display's (the card's top is
-        // the screen's), the bottom ones the post cards' below.
+        // the screen's), the bottom ones the app's card corner — the
+        // shelves' cards' (`PostGridListRowCell.cardCornerRadius`). It came
+        // from the post cards below, which are flat rows now (#2290); #2289
+        // may revisit it.
         let foot = UICornerRadius.fixed(PostGridListRowCell.cardCornerRadius)
         bannerShadow.isHidden = isBannerSuppressed || !card
         bannerShadow.cornerConfiguration = card

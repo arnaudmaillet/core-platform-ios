@@ -74,6 +74,7 @@ struct TileMediaGroundTests {
     @Test func aMediaTileWearsTheMediaGround() {
         #expect(PostGridTileCell.fillColor(for: post(.photo)) == Surface.mediaGround)
         #expect(PostGridTileCell.fillColor(for: post(.video)) == Surface.mediaGround)
-        #expect(PostGridTileCell.fillColor(for: post(.text)) == Surface.card)
+        // A tile of words wears the card's tone on the plain page (#2243).
+        #expect(PostGridTileCell.fillColor(for: post(.text)) == Surface.cardOnPlainPage)
     }
 }

@@ -165,7 +165,7 @@ struct DismissalDriverArbitrationTests {
     }
 
     /// ⚠️ A NATIVE PUSH KEEPS ITS CLOSE AFTER PAGING ONTO THE OTHER KIND
-    /// (#2243, #2015): a flat text row opened the feed with the stack's own
+    /// (#2243, #2015): a list's text row opened the feed with the stack's own
     /// push, and the viewer paged onto a photograph. The page now reports
     /// `.hero`, and the landing's refusal is what keeps the pop native — never
     /// handed to a flight, never a window.

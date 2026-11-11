@@ -180,8 +180,8 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        // The grey page under cards, the white one under flat rows (#2243).
-        view.backgroundColor = page.pageGround
+        // The plain page the post lists lie on (#2243) — see `Surface`.
+        view.backgroundColor = Surface.plainPage
         page.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(page)
         NSLayoutConstraint.activate([
@@ -478,20 +478,20 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
         page.openHoldingStill(from: stackScreen) { openPost(self, origin, stream.map(\.id)) }
     }
 
-    /// The window a TEXT post opens through, and ANY post closes through once
-    /// the feed has paged onto words — the profile's description of the same
-    /// rows (`ProfileViewController`'s `textReveal`), since these are For
-    /// You's own cards: the page grows out of the card with its caption
-    /// aligned to the card's, the card's author band borrowed for the flight,
-    /// and the close carrying the card home (`RevealDismissCardView`) onto the
-    /// row it opened from. A TILE (a mosaic brick, a paired card) answers with
-    /// its own window instead (`ForYouGridPage.tileWindow`): its shape and
-    /// ground, nothing to align. Nil for a row the page cannot find, the plain
-    /// push then being the honest floor.
+    /// The window a post closes through once the feed has paged onto words —
+    /// the profile's description of the same rows (`ProfileViewController`'s
+    /// `textReveal`), since these are For You's own rows: the close carries
+    /// the post home (`RevealDismissCardView`) onto the row it opened from. A
+    /// TILE (a mosaic brick, a paired card) answers with its own window
+    /// (`ForYouGridPage.tileWindow`), which a tile of words also OPENS
+    /// through: its shape and ground, nothing to align. Nil for a row the page
+    /// cannot find, the plain push then being the honest floor.
     ///
-    /// ⚠️ OFFERED FOR MEDIA POSTS TOO. `hasHero` decides the opening; this
-    /// decides whether a close that has nothing left to fly has anywhere to
-    /// go (`RowCardCloseLanding`) — the rows' rule (`ForYouRowOrigins`).
+    /// ⚠️ A ROW OF WORDS NEVER READS IT: it opens with the native push and
+    /// closes with its pop (#2243). A MEDIA row's flight-opened feed does:
+    /// `hasHero` decides the opening; this decides whether a close that has
+    /// nothing left to fly has anywhere to go (`RowCardCloseLanding`) — the
+    /// rows' rule (`ForYouRowOrigins`).
     ///
     /// ⚠️ NO THAW HERE: `viewDidAppear` hands the inset back. A window's close
     /// ends before the pop has settled the chrome, and a thaw then re-bases
