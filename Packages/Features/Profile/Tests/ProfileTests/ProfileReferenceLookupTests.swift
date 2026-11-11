@@ -157,30 +157,30 @@ struct ProfileReferenceLookupTests {
         let screen = Self.screen(lookup: lookup, relationship: .other(isFollowing: true, isBlocked: false))
 
         screen.loadViewIfNeeded()
-        #expect(screen.debugMuteBellItem == nil, "a bell presumed before the lookup")
+        #expect(screen.debugMuteBell == nil, "a bell presumed before the lookup")
 
         await lookup.release()
-        await settle { screen.debugMuteBellItem?.isEnabled == true }
+        await settle { screen.debugMuteBell?.isEnabled == true }
     }
 
     @Test func aHandleThatNamesNoOneNeverShowsABell() async {
         let screen = Self.screen(lookup: ScriptedLookup([.missing]), relationship: .other(isFollowing: false, isBlocked: false))
 
         screen.loadViewIfNeeded()
-        #expect(screen.debugMuteBellItem == nil)
+        #expect(screen.debugMuteBell == nil)
         // Its lookup and relationship land; no bell ever comes.
         for _ in 0..<500 { await Task.yield() }
-        #expect(screen.debugMuteBellItem == nil)
+        #expect(screen.debugMuteBell == nil)
     }
 
     @Test func aHandleThatNamesTheViewerNeverShowsABell() async {
         let screen = Self.screen(lookup: ScriptedLookup([.found(ProfileID("prof-7"))]), relationship: .me)
 
         screen.loadViewIfNeeded()
-        #expect(screen.debugMuteBellItem == nil)
+        #expect(screen.debugMuteBell == nil)
         // Its lookup and relationship land; no bell ever comes.
         for _ in 0..<500 { await Task.yield() }
-        #expect(screen.debugMuteBellItem == nil)
+        #expect(screen.debugMuteBell == nil)
     }
 
     private struct SilentFetcher: ImageFetching {

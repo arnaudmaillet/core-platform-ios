@@ -21,7 +21,8 @@ private final class Taps {
             report: { self.fired.append("report") },
             toggleRestrict: { self.fired.append("toggleRestrict") },
             unblock: { self.fired.append("unblock") },
-            confirmBlock: { self.fired.append("confirmBlock") }
+            confirmBlock: { self.fired.append("confirmBlock") },
+            unfollow: { self.fired.append("unfollow") }
         )
     }
 }
@@ -33,11 +34,13 @@ private func state(
     isGuest: Bool = false,
     canRestrict: Bool = true,
     isRestricted: Bool = false,
-    isBlocked: Bool = false
+    isBlocked: Bool = false,
+    isFollowing: Bool = false
 ) -> ProfileMenuBuilder.MoreMenuState {
     ProfileMenuBuilder.MoreMenuState(
         canShare: canShare, mapPin: mapPin, canModerate: canModerate, isGuest: isGuest,
-        canRestrict: canRestrict, isRestricted: isRestricted, isBlocked: isBlocked
+        canRestrict: canRestrict, isRestricted: isRestricted, isBlocked: isBlocked,
+        isFollowing: isFollowing
     )
 }
 
@@ -118,6 +121,25 @@ struct ProfileMenuBuilderTests {
             action(title, in: menu)?.performWithSender(nil, target: nil)
         }
         #expect(taps.fired == ["share", "copyLink", "toggleRestrict", "report"])
+    }
+
+    /// ⚠️ UNFOLLOW LEADS THE MENU ONCE FOLLOWED (#2302, the owner
+    /// 2026-11-11): the header's Following became the bell. First, alone in
+    /// its group, red, `person.badge.minus` — and only while followed.
+    @Test func unfollowLeadsTheMenuOnlyOnceFollowed() {
+        let taps = Taps()
+        let followed = ProfileMenuBuilder.moreMenuElements(
+            state(mapPin: .shown(categories: [], includesFriends: false), isFollowing: true), handlers: taps.handlers
+        )
+        #expect(groups(followed) == [["Unfollow"], ["Share", "Copy Link"], ["Map"], ["Restrict"], ["Block", "Report"]])
+        let unfollow = try? #require(action("Unfollow", in: followed))
+        #expect(unfollow?.attributes == .destructive, "Unfollow is not red")
+        #expect(unfollow?.image == UIImage(systemName: "person.badge.minus"))
+        unfollow?.performWithSender(nil, target: nil)
+        #expect(taps.fired == ["unfollow"])
+
+        let stranger = ProfileMenuBuilder.moreMenuElements(state(), handlers: taps.handlers)
+        #expect(action("Unfollow", in: stranger) == nil, "Unfollow on a profile the viewer does not follow")
     }
 
     @Test func aFollowedProfileGetsAMapSubmenuBeforeModeration() {

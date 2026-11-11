@@ -27,7 +27,7 @@ struct ProfileCountersRowTests {
             bio: "Building small tools.", avatarURL: nil, websiteURL: nil, isVerified: false,
             followerCount: .exact(4_200), followingCount: .exact(318), reactionCount: likes
         )))
-        header.configureAction(.following)
+        header.configureAction(.following, bell: ProfileHeaderView.Bell(scopes: .none))
         header.frame = CGRect(x: 0, y: 0, width: width, height: 1)
         header.frame.size.height = header.systemLayoutSizeFitting(
             CGSize(width: width, height: UIView.layoutFittingCompressedSize.height),

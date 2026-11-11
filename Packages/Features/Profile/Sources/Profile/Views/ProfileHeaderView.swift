@@ -16,19 +16,35 @@ final class ProfileHeaderView: HeroHeaderView {
     /// press each (#866), never glass.
     private let messageButton = AppButton(aspect: .pill(.quiet), size: .header, content: .title("Message"))
     private let editButton = AppButton(aspect: .pill(.quiet), size: .header, content: .title("Edit Profile"))
-    /// Follow is the one prominent capsule; Following and Requested are its
-    /// selected, quiet state. Between them the words and the ground swap
-    /// under one blur, the capsule springs to its width (#726, #931), and
-    /// while the relationship is unread it is the button's placeholder.
-    private let followButton: AppButton = {
-        let button = AppButton(aspect: .pill(.prominent), size: .header, content: .title("Follow"))
+    /// The relationship's control (`ProfileRelationControl`): Follow, the one
+    /// prominent capsule; Requested, its selected, quiet state; and once
+    /// followed the mute bell, a quiet bubble the QR's size (#2302). Between
+    /// them the content and the ground swap under one blur and the button
+    /// springs to its width (#726, #931, #1665) — Follow into the bell and
+    /// back is that change, never a pop. While the relationship is unread it
+    /// is the button's placeholder, as wide as Requested.
+    private let followButton: RelationButton = {
+        let button = RelationButton(aspect: .pill(.prominent), size: .header, content: .title("Follow"))
         button.isToggle = true
-        button.reservedContents = [.title("Follow"), .title("Following"), .title("Requested")]
+        button.reservedContents = [.title("Follow"), .title("Requested")]
         return button
     }()
-    /// What the capsule last showed, so a change of state morphs and a first
+    /// What the tray last showed, so a change of state morphs and a first
     /// answer simply lands.
     private var shownFollowState: ProfileViewModel.FollowButton?
+    /// The relationship's control last shown, nil for none.
+    private var shownControl: ProfileRelationControl?
+    /// Message as wide as Follow or Requested: the two capsules halve the
+    /// width the bubbles leave. Let go once the control is the bell (Message
+    /// takes the free width, as on the card) or gone.
+    private var equalCapsules: NSLayoutConstraint?
+    /// The bell's side: the QR bubble's (`HeroHeaderView.bubbleSize`). 999,
+    /// as the bubbles' own, so a short row shaves a point rather than breaks.
+    private lazy var bellWidth: NSLayoutConstraint = {
+        let width = followButton.widthAnchor.constraint(equalToConstant: HeroHeaderView.bubbleSize)
+        width.priority = UILayoutPriority(999)
+        return width
+    }()
     private let qrCodeButton = AppIconButton(style: .bubble(.quiet), content: .symbol("qrcode"))
     private let moreButton = AppIconButton(style: .bubble(.quiet), content: .symbol("ellipsis"))
 
@@ -55,10 +71,11 @@ final class ProfileHeaderView: HeroHeaderView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    /// Invoked when the Follow / Following capsule is tapped (other users
-    /// only). The capsule lives HERE, beside Message, rather than in the
-    /// navigation bar: the two are one decision about one person, and a
-    /// finger should not have to travel from the bar to the tray to make it.
+    /// Invoked when the Follow / Requested capsule is tapped (other users
+    /// only) — never by the bell, which opens its menu. The capsule lives
+    /// HERE, beside Message, rather than in the navigation bar: the two are
+    /// one decision about one person, and a finger should not have to travel
+    /// from the bar to the tray to make it.
     var onFollowTapped: (() -> Void)?
     /// Invoked when the Message button is tapped (other users only).
     var onMessageTapped: (() -> Void)?
@@ -150,16 +167,78 @@ final class ProfileHeaderView: HeroHeaderView {
         moreButton.contextMenuInteraction?.updateVisibleMenu(transform)
     }
 
-    /// Adjusts the tray's capsules to the viewer's relationship: Follow or
-    /// Following beside Message for other users, Edit Profile alone for the
-    /// viewer's own profile; the QR and see-more bubbles trail whichever
-    /// is showing.
+    /// The bell, as the tray shows it once followed (#2302): the muted scopes
+    /// (`bell` / `bell.slash`), and whether it can be used yet — a handle or
+    /// link route has no one to mute until its read names someone else.
+    struct Bell: Equatable {
+        var scopes: MuteScopes
+        var isEnabled = true
+    }
+
+    /// One place of the action row, leading to trailing.
+    nonisolated enum TrayItem: Equatable, Sendable {
+        /// The relationship's slot while it is unread: a bone as wide as
+        /// Requested.
+        case placeholder
+        case follow, requested, bell
+        case message, edit, qr, more
+    }
+
+    /// ⚠️ THE ROW PER RELATION (#2302, the owner 2026-11-11), the card's rule
+    /// (#1562) — the relationship's control from the one rule the card's
+    /// toolbar reads too (`ProfileRelationControl.control`):
+    ///
+    /// | Relation              | Row                              |
+    /// |-----------------------|----------------------------------|
+    /// | not followed          | `[Follow][Message][QR][…]`       |
+    /// | requested             | `[Requested][Message][QR][…]`    |
+    /// | followed              | `[bell][——Message——][QR][…]`     |
+    /// | followed, no bell     | `[——Message——][QR][…]`           |
+    /// | not followable        | `[——Message——][QR][…]`           |
+    /// | not read yet          | `[bone][Message][QR][…]`         |
+    /// | the viewer's own      | `[Edit Profile][QR][…]`          |
+    ///
+    /// `showsBell`: the bell's own rule (`ProfileRelationControl.showsMuteBell`).
+    /// Pure, for tests.
+    nonisolated static func trayItems(
+        for state: ProfileViewModel.FollowButton, showsBell: Bool
+    ) -> [TrayItem] {
+        let bubbles: [TrayItem] = [.qr, .more]
+        switch state {
+        case .edit:
+            return [.edit] + bubbles
+        case .hidden:
+            return [.placeholder, .message] + bubbles
+        case .follow, .following, .requested, .unavailable:
+            let control: [TrayItem] = switch ProfileRelationControl.control(for: state, showsBell: showsBell) {
+            case .follow?: [.follow]
+            case .requested?: [.requested]
+            case .bell?: [.bell]
+            case nil: []
+            }
+            return control + [.message] + bubbles
+        }
+    }
+
+    /// Installs the bell's menu — the scoped Mute menu — once, its children
+    /// resolved when it opens (`UIDeferredMenuElement`), as the see-more's.
+    func setBellMenu(_ menu: UIMenu) {
+        bellMenu = menu
+        if shownControl == .bell { followButton.menu = menu }
+    }
+
+    private var bellMenu: UIMenu?
+
+    /// Adjusts the tray to the viewer's relationship (`trayItems`): the
+    /// relationship's control beside Message for other users, Edit Profile
+    /// alone for the viewer's own profile; the QR and see-more bubbles trail
+    /// whichever is showing.
     ///
     /// Follow is the one PROMINENT capsule on the screen — the action a
-    /// stranger's profile exists to invite — and it goes quiet the moment it
-    /// has been taken, so Following reads as a state rather than a second
-    /// call to action.
-    func configureAction(_ state: ProfileViewModel.FollowButton) {
+    /// stranger's profile exists to invite. Once taken, it becomes the bell
+    /// (`bell`: the bell's state, nil when there is none to show), and
+    /// Message takes the width it leaves (#2302).
+    func configureAction(_ state: ProfileViewModel.FollowButton, bell: Bell? = nil) {
         noteLayoutChange()
         // A tray already showing a state changes on screen: what comes in
         // bounces in, what goes scales out (#931). A first answer lands.
@@ -167,32 +246,52 @@ final class ProfileHeaderView: HeroHeaderView {
         defer { shownFollowState = state }
         switch state {
         case .follow, .following, .requested:
-            let title = switch state {
-            case .follow: "Follow"
-            case .requested: "Requested"
-            default: "Following"
+            guard let control = ProfileRelationControl.control(for: state, showsBell: bell != nil) else {
+                // Followed with no bell (a guest, a composition that cannot
+                // mute): Message alone, across the free width.
+                followButton.setPhase(.content, animated: false)
+                applyControl(nil, bell: nil)
+                show(followButton, false, animated: onScreen)
+                show(messageButton, true, animated: onScreen)
+                show(editButton, false, animated: onScreen)
+                return
             }
-            let changes = [.follow, .following, .requested].contains(shownFollowState) && shownFollowState != state
+            let content: AppButton.Content = switch control {
+            case .follow: .title("Follow")
+            case .requested: .title("Requested")
+            case .bell: .symbol(ProfileRelationControl.bellSymbol(for: bell?.scopes ?? .none))
+            }
+            // A change of what the button shows morphs — Follow into the bell
+            // and back on the follow's optimistic flip and its rollback, the
+            // bell's glyph on a mute — never a first answer, never a button
+            // coming back from hidden.
+            let changes = !followButton.isHidden && followButton.phase == .content
+                && (shownControl != control || followButton.content != content)
             if followButton.phase == .placeholder {
-                // The read landed: the bone fades into the answer.
-                followButton.setContent(.title(title), selected: state != .follow, animated: false)
+                // The read landed: the bone fades into the answer, the row
+                // springing to the bell's width if that is the answer.
+                applyControl(control, bell: bell)
+                followButton.setContent(content, selected: control != .follow, animated: false)
                 followButton.setPhase(.content, animated: onScreen)
+                if onScreen { springRow() }
             } else {
-                followButton.setContent(.title(title), selected: state != .follow, animated: changes)
+                // The row's widths change with the content, in the morph's
+                // own spring (`AppButton.blurMorph` lays the row out in it).
+                applyControl(control, bell: bell)
+                followButton.setContent(content, selected: control != .follow, animated: changes && onScreen)
             }
-            followButton.accessibilityLabel = title
-            // Tapping Requested withdraws it; say so to VoiceOver.
-            followButton.accessibilityHint = state == .requested ? "Withdraws your follow request." : nil
             show(followButton, true, animated: onScreen)
             show(messageButton, true, animated: onScreen)
             show(editButton, false, animated: onScreen)
         case .edit:
+            applyControl(nil, bell: nil)
             show(followButton, false, animated: onScreen)
             show(messageButton, false, animated: onScreen)
             show(editButton, true, animated: onScreen)
         case .unavailable:
             // No Follow where following is impossible (#726); Message stays.
             followButton.setPhase(.content, animated: false)
+            applyControl(nil, bell: nil)
             show(followButton, false, animated: onScreen)
             show(messageButton, true, animated: onScreen)
             show(editButton, false, animated: onScreen)
@@ -207,12 +306,64 @@ final class ProfileHeaderView: HeroHeaderView {
             // have. The push never waits for the answer (#778): this holds
             // the slot until the read lands.
             // It is the button's PLACEHOLDER (#933): a bone as wide as the
-            // widest answer, inert, hidden from VoiceOver.
-            followButton.accessibilityLabel = nil
+            // widest capsule answer, inert, hidden from VoiceOver.
+            applyControl(nil, bell: nil, holdsCapsuleSlot: true)
             followButton.setPhase(.placeholder, animated: false)
             show(followButton, true, animated: false)
             show(messageButton, true, animated: onScreen)
             show(editButton, false, animated: onScreen)
+        }
+    }
+
+    /// The control's geometry, tap and voice. Called before the content
+    /// changes, so an animated change lays the new widths out in its own
+    /// spring.
+    ///
+    /// - Follow and Requested halve the free width with Message
+    ///   (`equalCapsules`); the bell is a bubble the QR's size and Message
+    ///   takes the rest, as on the card.
+    /// - The bell's tap is its menu (the scoped Mute menu, `setBellMenu`);
+    ///   Follow's is `onFollowTapped`.
+    private func applyControl(_ control: ProfileRelationControl?, bell: Bell?, holdsCapsuleSlot: Bool = false) {
+        shownControl = control
+        let isBell = control == .bell
+        equalCapsules?.isActive = holdsCapsuleSlot || control == .follow || control == .requested
+        bellWidth.isActive = isBell
+        followButton.showsMenuAsPrimaryAction = isBell
+        followButton.menu = isBell ? bellMenu : nil
+        // A bell is a menu, not a toggle.
+        followButton.isToggle = !isBell
+        followButton.isEnabled = isBell ? (bell?.isEnabled ?? true) : true
+        switch control {
+        case .follow?:
+            followButton.accessibilityLabel = "Follow"
+            followButton.accessibilityHint = nil
+            followButton.stateValue = nil
+        case .requested?:
+            followButton.accessibilityLabel = "Requested"
+            // Tapping Requested withdraws it; say so to VoiceOver.
+            followButton.accessibilityHint = "Withdraws your follow request."
+            followButton.stateValue = nil
+        case .bell?:
+            // The words the bar's bell spoke (#689).
+            followButton.accessibilityLabel = "Notifications"
+            followButton.accessibilityHint = nil
+            followButton.stateValue = ProfileRelationControl.bellAccessibilityValue(for: bell?.scopes ?? .none)
+        case nil:
+            followButton.accessibilityLabel = nil
+            followButton.accessibilityHint = nil
+            followButton.stateValue = nil
+        }
+    }
+
+    /// Lays the row out on the morph's spring — a placeholder answered with
+    /// the bell, whose width is not the bone's.
+    private func springRow() {
+        UIView.animate(
+            springDuration: AppButton.MorphMetrics.morphDuration, bounce: AppButton.MorphMetrics.morphBounce,
+            options: [.allowUserInteraction, .beginFromCurrentState]
+        ) {
+            self.layoutIfNeeded()
         }
     }
 
@@ -277,23 +428,53 @@ final class ProfileHeaderView: HeroHeaderView {
 
     #if DEBUG
     /// What the relationship capsule currently says — nil while it is the
-    /// blank placeholder or hidden. For tests and QA probes.
+    /// blank placeholder, hidden, or the bell. For tests and QA probes.
     var debugFollowTitle: String? {
         guard !followButton.isHidden, followButton.phase == .content else { return nil }
         return followButton.content.title
     }
+    /// A hidden capsule (a followed profile with no bell, #2302) calls for
+    /// nothing, whatever ground it kept.
     var debugFollowIsProminent: Bool {
-        followButton.phase == .content && followButton.currentGround == .prominent
+        !followButton.isHidden && followButton.phase == .content && followButton.currentGround == .prominent
     }
     var debugFollowButton: AppButton { followButton }
     var debugTrayButtons: [AppControl] {
         [followButton, messageButton, editButton, qrCodeButton, moreButton]
     }
+    /// The bell, when the row shows it (#2302).
+    var debugBell: AppButton? {
+        guard !followButton.isHidden, followButton.phase == .content, shownControl == .bell else { return nil }
+        return followButton
+    }
+    /// What the row shows, leading to trailing — `trayItems`, read off the
+    /// buttons on screen.
+    var debugTrayItems: [TrayItem] {
+        var items: [TrayItem] = []
+        if !followButton.isHidden {
+            if followButton.phase == .placeholder {
+                items.append(.placeholder)
+            } else {
+                switch shownControl {
+                case .follow?: items.append(.follow)
+                case .requested?: items.append(.requested)
+                case .bell?: items.append(.bell)
+                case nil: break
+                }
+            }
+        }
+        if !messageButton.isHidden { items.append(.message) }
+        if !editButton.isHidden { items.append(.edit) }
+        if !qrCodeButton.isHidden { items.append(.qr) }
+        if !moreButton.isHidden { items.append(.more) }
+        return items
+    }
 
     /// Fires the follow capsule's own action — the simulator cannot tap it
-    /// through the harness, so the QA path presses it from here.
+    /// through the harness, so the QA path presses it from here. Not the
+    /// bell: its tap is its menu.
     func debugTapFollow() -> Bool {
-        guard !followButton.isHidden else { return false }
+        guard !followButton.isHidden, shownControl != .bell else { return false }
         followButton.sendActions(for: .primaryActionTriggered)
         return true
     }
@@ -304,7 +485,11 @@ final class ProfileHeaderView: HeroHeaderView {
     private func configureTray() {
         followButton.isHidden = true
         followButton.addAction(
-            UIAction { [weak self] _ in self?.onFollowTapped?() },
+            UIAction { [weak self] _ in
+                // The bell's tap is its menu, never a follow.
+                guard let self, shownControl != .bell else { return }
+                onFollowTapped?()
+            },
             for: .primaryActionTriggered
         )
 
@@ -351,7 +536,8 @@ final class ProfileHeaderView: HeroHeaderView {
         //
         // The two capsules share the width left by the bubbles equally: the
         // pair reads as one control with two halves, and Follow is the one
-        // that is prominent.
+        // that is prominent. Once followed Follow is the bell, a bubble, and
+        // Message takes the rest (#2302, `applyControl`).
         // ⚠️ NO STAR IN THE ROW ANY MORE (#689, the owner's call 2026-10-08):
         // keeping a profile on the map's rails is the "Map" submenu of the
         // see-more menu, so the row reads Follow · Message · QR · ⋯ and the
@@ -360,9 +546,25 @@ final class ProfileHeaderView: HeroHeaderView {
             .capsule(followButton), .capsule(messageButton), .capsule(editButton),
             .bubble(qrCodeButton), .bubble(moreButton)
         ])
-        let equalCapsules = messageButton.widthAnchor.constraint(equalTo: followButton.widthAnchor)
-        equalCapsules.priority = UILayoutPriority(999)
-        equalCapsules.isActive = true
+        let halves = messageButton.widthAnchor.constraint(equalTo: followButton.widthAnchor)
+        halves.priority = UILayoutPriority(999)
+        halves.isActive = true
+        equalCapsules = halves
+    }
+}
+
+/// The relationship's button: the app's button, with the bell's state
+/// spoken as its value (#2302) — `AppButton` writes its own value (the count,
+/// a load) on every refresh, which would drop "Muted: Posts".
+private final class RelationButton: AppButton {
+    /// What VoiceOver hears as the value while the content is shown.
+    var stateValue: String? {
+        didSet { refreshAccessibility() }
+    }
+
+    override func refreshAccessibility() {
+        super.refreshAccessibility()
+        if phase == .content, let stateValue { accessibilityValue = stateValue }
     }
 }
 

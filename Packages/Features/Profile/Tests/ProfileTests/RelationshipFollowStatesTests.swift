@@ -233,7 +233,8 @@ struct RelationshipFollowStatesTests {
     }
 
     /// A profile the viewer can't follow shows no Follow (Message stays);
-    /// a change of follow state morphs the capsule.
+    /// a change of follow state morphs the button — Follow into the bell
+    /// once followed (#2302).
     @Test func theHeaderHidesAnImpossibleFollowAndMorphsAChange() throws {
         let header = ProfileHeaderView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()))
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
@@ -252,9 +253,10 @@ struct RelationshipFollowStatesTests {
         header.layoutIfNeeded()
         #expect(!follow.events.contains(.blurMorph), "a first answer morphed")
         #expect(!follow.isHidden)
-        header.configureAction(.following)
-        #expect(follow.events.last == .blurMorph, "Follow → Following did not morph")
-        #expect(follow.content.title == "Following")
+        header.configureAction(.following, bell: ProfileHeaderView.Bell(scopes: .none))
+        #expect(follow.events.last == .blurMorph, "Follow → the bell did not morph")
+        #expect(follow.content.symbol == "bell")
+        #expect(follow.content.title == nil)
     }
 
     /// An unread relationship is the button's placeholder (#933): a bone,
@@ -277,12 +279,12 @@ struct RelationshipFollowStatesTests {
         #expect(header.debugFollowTitle == nil)
         #expect(follow.configuration?.image == nil)
 
-        header.configureAction(.following)
+        header.configureAction(.following, bell: ProfileHeaderView.Bell(scopes: .none))
         #expect(follow.phase == .content)
         #expect(!follow.debugHasBone)
-        #expect(header.debugFollowTitle == "Following")
+        #expect(header.debugBell === follow, "a followed read did not land as the bell")
         #expect(follow.isAccessibilityElement)
-        #expect(follow.accessibilityLabel == "Following")
+        #expect(follow.accessibilityLabel == "Notifications")
     }
 
     /// The touch-down handlers wired to a control: one per press effect.
