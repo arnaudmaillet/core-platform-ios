@@ -382,19 +382,16 @@ struct MediaMetaPillContentTests {
 /// unless the radii differ by exactly the inset that band swells through the
 /// turn. Along a straight edge there is no such constraint at all.
 ///
-/// So the preview is concentric with the card, whose corners it sits on; and
-/// the indicator is a capsule, because it is held clear of the preview's
-/// corners and meets nothing but flat edge. The second half is the one a test
+/// The preview was concentric with the card while the list rows were cards;
+/// a row has no card now (#2290) and the preview's radius is its own constant
+/// (`mediaCornerRadius`), so that half went. The indicator is a capsule,
+/// because it is held clear of the preview's corners and meets nothing but
+/// flat edge. The second half is the one a test
 /// has to carry: it is invisible, it is what the capsule is standing on, and
 /// the clearance would be the first thing "tidied" by anyone tightening the
 /// inset.
 @MainActor
 struct CardShapeSystemTests {
-    @Test func thePreviewIsConcentricWithTheCard() {
-        #expect(PostGridListRowCell.cardCornerRadius
-            - PostGridListRowCell.mediaCornerRadius == PostGridListRowCell.mediaInset)
-    }
-
     /// The preview's edges fall on the caption's, which is the whole reason
     /// the inset is shared.
     @Test func thePreviewSitsOnTheCaptionsColumn() {

@@ -41,21 +41,18 @@ import VoiceKitUI
 public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognizerDelegate {
     public static let reuseID = "PostGridListRowCell"
     /// The inner preview's rounding — the radius a hero flying from this row
-    /// must start at, so the card is the preview's twin rather than its
-    /// approximation.
+    /// must start at (`PostGridFlightCard.Style.listMedia`), so the flight is
+    /// the preview's twin rather than its approximation. A NUMBER, not a
+    /// corner configuration: the hero reads it to open a flight at, and a
+    /// configuration resolved at layout time is not something a transition
+    /// can ask for up front.
     ///
-    /// CONCENTRIC with the card: its radius carried inward by the preview's own
-    /// inset, so the two curves stay parallel the whole way round.
-    ///
-    /// This is the arithmetic `UICornerRadius.containerConcentric` performs,
-    /// written out rather than delegated — the hero reads a NUMBER to open a
-    /// flight at, and a corner configuration resolved at layout time is not
-    /// something a transition can ask for up front.
-    ///
-    /// Derived, never restated, for the same reason: a literal here would put a
-    /// flight's first frame at a curve the row it left has not had for some
-    /// time.
-    public static var mediaCornerRadius: CGFloat { cardCornerRadius - mediaInset }
+    /// ⚠️ ITS OWN CONSTANT since the list rows lost their card (#2290). It
+    /// was derived from the card's, concentric: 26 − the preview's 12pt inset.
+    /// A row has no card around its preview any more, so nothing is left to
+    /// be concentric with; the value is kept (14) and #2289 owns any change.
+    /// A shelf's media card wears it too (`PostShelfMediaCardCell`).
+    public static let mediaCornerRadius: CGFloat = 14
 
     /// Where the page STOPS MATCHING this card, in the card's own space — the
     /// reveal's cut line. Below it the destination is veiled for the length of
@@ -1247,8 +1244,9 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     ///
     /// * the reading padding of a card,
     /// * where the preview's edges fall (on the caption's),
-    /// * **the preview's radius**, `cardCornerRadius - contentInset`, and
-    ///   therefore how close the image's roundness is to the card's,
+    /// * **the preview's radius** — it chose 14 (`cardCornerRadius -
+    ///   contentInset`) while the rows were cards; the radius is its own
+    ///   constant now (`mediaCornerRadius`, #2290),
     /// * the reading padding of the post's own PAGE — `captionInset` is shared
     ///   with `PostCaptionRowView` structurally, because a reveal has to land
     ///   the window's caption on the card's.
@@ -1325,10 +1323,10 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// radius 2 and cost the chips their shape. Moving them off the corner costs
     /// nothing and dissolves the question.
     ///
-    /// The clearance is therefore a FLOOR, not a preference: whatever the card's
-    /// padding is, furniture on the preview has to start outside an arc whose
-    /// size moves the other way. Tighten the card and the preview gets rounder,
-    /// and its corners reach further in.
+    /// The clearance is therefore a FLOOR, not a preference: whatever the
+    /// row's padding is, furniture on the preview has to start outside the
+    /// preview's corner arcs — round the preview more and its corners reach
+    /// further in.
     ///
     /// `CardShapeSystemTests` asserts it, because it is what the capsule is
     /// standing on.
@@ -2014,15 +2012,15 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     override public init(frame: CGRect) {
         super.init(frame: frame)
         card.layer.cornerCurve = .continuous
-        // The card's tone, corner and edge — an edge in the dark and nothing
-        // in the light, see `Surface` — or none of them on a flat row
-        // (#2243): `dressForListStyle`, re-run on a style flip.
-        dressForListStyle()
+        // A shelf's card: its tone, corner and edge — an edge in the dark and
+        // nothing in the light, see `Surface` — or none of them on a list's
+        // row (#2243): `applyDress`, re-run on a style flip.
+        applyDress()
         registerForTraitChanges([UITraitUserInterfaceStyle.self, UITraitDisplayScale.self]) {
             (cell: PostGridListRowCell, _: UITraitCollection) in
-            cell.dressForListStyle()
+            cell.applyDress()
         }
-        buildFlatChrome()
+        buildRowChrome()
         card.pin(to: contentView)
 
         captionLabel.font = .appFont(forTextStyle: .body)
@@ -2611,61 +2609,71 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         authorBand.alpha = 1
     }
 
-    // MARK: - The flat style (#2243)
+    // MARK: - The dress: a list's row, or a shelf's card (#2243, #2290)
 
-    /// How this row draws (#2243): today's card, or a FLAT row — no ground,
-    /// no corner, no edge, a hairline between posts (`flatSeparators`) and a
-    /// wash under a press. Set by the page from its own style
-    /// (`ForYouGridPage.listStyle`), never read from the launch arguments
-    /// here.
+    /// What this cell is drawn as.
+    ///
+    /// ⚠️ TWO DRESSES, ONE CELL — and not the A/B #2290 removed. The post
+    /// lists draw every text post as a ROW (no ground, no corner, no edge, a
+    /// hairline between posts and a wash under a press); a horizontal
+    /// shelf's text card (`PostShelfSection`) is this same cell dressed as a
+    /// CARD, and the window's stand-in (`RevealDismissCardView`) builds one
+    /// too. The list's page sets `.row`; everything else keeps the card.
+    public enum Dress: Equatable, Sendable {
+        /// A shelf's card: the card's tone, its corner and its edge.
+        case card
+        /// A post list's row (#2243): the page shows through.
+        case row
+    }
+
+    /// How this cell draws — set by its host (`ForYouGridPage` sets `.row`
+    /// on its lists' rows).
     ///
     /// ⚠️ ONLY THE DRESS CHANGES. The insets, the band, the caption, the
-    /// closing line and the preview keep every number they have: a flat row
+    /// closing line and the preview keep every number they have: a row
     /// stands on the page's margin because its SECTION narrows
-    /// (`PostGridListLayout.flatRowInset`), so the reveal's geometry and the
-    /// post page's register — both built on this cell's constants — are
-    /// untouched.
-    public var listStyle: PostListStyle = .cards {
+    /// (`PostGridListLayout.rowInset`), so a window's geometry and the post
+    /// page's register — both built on this cell's constants — are untouched.
+    public var dress: Dress = .card {
         didSet {
-            guard listStyle != oldValue else { return }
-            dressForListStyle()
+            guard dress != oldValue else { return }
+            applyDress()
         }
     }
 
-    /// The hairlines this flat row draws above and below it — the page
-    /// decides from the row's neighbours (`FlatListSeparators`). Drawn only
-    /// in the flat style.
-    public var flatSeparators: FlatRowSeparators = .none {
+    /// The hairlines this row draws above and below it — the page decides
+    /// from the row's neighbours (`ListSeparators`). Drawn only on a row.
+    public var rowSeparators: RowSeparators = .none {
         didSet {
-            guard flatSeparators != oldValue else { return }
+            guard rowSeparators != oldValue else { return }
             setNeedsLayout()
         }
     }
 
-    /// The hairline sits mid-gap between two flat rows, outside the row's
-    /// bounds: half the flat spacing below its foot (and above its head).
-    public static var flatSeparatorOffset: CGFloat { PostGridListLayout.flatRowSpacing / 2 }
+    /// The hairline sits mid-gap between two rows, outside the row's bounds:
+    /// half the rows' spacing below its foot (and above its head).
+    public static var separatorOffset: CGFloat { PostGridListLayout.rowSpacing / 2 }
 
     /// Where an INSET hairline starts, from the row's leading edge: the text
     /// column — after the band's avatar and its gap, as Threads draws it — or
     /// the caption's own column under a bare band, which has no avatar.
-    public static func flatSeparatorLeading(showsIdentity: Bool) -> CGFloat {
+    public static func separatorLeading(showsIdentity: Bool) -> CGFloat {
         showsIdentity
             ? captionInset + PostAuthorBandView.avatarDiameter + Spacing.sm
             : captionInset
     }
 
     /// What a collection's box and gutter show: the card's tone, or the page
-    /// through a flat row.
-    private var rowGround: UIColor { listStyle == .flat ? .clear : Self.cardFillColor }
+    /// through a row.
+    private var rowGround: UIColor { dress == .row ? .clear : Self.cardFillColor }
 
     private let topRule = UIView()
     private let bottomRule = UIView()
-    /// A flat row's press: the `.label` wash `AppControl` lays under a card
-    /// action, here under the whole row — a card no longer gives way.
+    /// A row's press: the `.label` wash `AppControl` lays under a card
+    /// action, here under the whole row — a row has no card to give way.
     private let pressWash = UIView()
 
-    private func buildFlatChrome() {
+    private func buildRowChrome() {
         for rule in [topRule, bottomRule] {
             rule.backgroundColor = .separator
             rule.isUserInteractionEnabled = false
@@ -2678,42 +2686,43 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         insertSubview(pressWash, at: 0)
     }
 
-    /// The card's dress for the current style and traits.
-    private func dressForListStyle() {
-        let flat = listStyle == .flat
-        card.backgroundColor = flat ? .clear : Self.cardFillColor
-        card.layer.cornerRadius = flat ? .zero : Self.cardCornerRadius
-        card.layer.borderWidth = flat ? .zero : Surface.hairline(for: traitCollection)
+    /// The dress for the current traits: a card's tone, corner and edge, or
+    /// none of them on a row.
+    private func applyDress() {
+        let row = dress == .row
+        card.backgroundColor = row ? .clear : Self.cardFillColor
+        card.layer.cornerRadius = row ? .zero : Self.cardCornerRadius
+        card.layer.borderWidth = row ? .zero : Surface.hairline(for: traitCollection)
         card.layer.borderColor = Surface.cardEdge.resolvedColor(with: traitCollection).cgColor
         if showsCarousel {
             mediaView.backgroundColor = rowGround
             carousel?.backgroundColor = rowGround
         }
-        if !flat { pressWash.alpha = 0 }
+        if !row { pressWash.alpha = 0 }
         setNeedsLayout()
     }
 
     override public func layoutSubviews() {
         super.layoutSubviews()
-        layoutFlatChrome()
+        layoutRowChrome()
     }
 
-    private func layoutFlatChrome() {
-        let flat = listStyle == .flat
+    private func layoutRowChrome() {
+        let row = dress == .row
         let hairline = Surface.hairline(for: traitCollection)
-        let offset = Self.flatSeparatorOffset
-        // FULL means the screen's width: the row stands `flatRowInset` in
-        // from each edge.
-        let bleed = PostGridListLayout.flatRowInset
+        let offset = Self.separatorOffset
+        // FULL means the screen's width: the row stands `rowInset` in from
+        // each edge.
+        let bleed = PostGridListLayout.rowInset
         let showsIdentity = authorBand.model?.showsIdentity ?? true
-        func frame(_ kind: FlatRowSeparator, y: CGFloat) -> CGRect {
-            let leading = kind == .full ? -bleed : Self.flatSeparatorLeading(showsIdentity: showsIdentity)
+        func frame(_ kind: RowSeparator, y: CGFloat) -> CGRect {
+            let leading = kind == .full ? -bleed : Self.separatorLeading(showsIdentity: showsIdentity)
             return CGRect(x: leading, y: y, width: max(0, bounds.width + bleed - leading), height: hairline)
         }
-        topRule.isHidden = !flat || flatSeparators.top == .none
-        bottomRule.isHidden = !flat || flatSeparators.bottom == .none
-        topRule.frame = frame(flatSeparators.top, y: -offset - hairline / 2)
-        bottomRule.frame = frame(flatSeparators.bottom, y: bounds.height + offset - hairline / 2)
+        topRule.isHidden = !row || rowSeparators.top == .none
+        bottomRule.isHidden = !row || rowSeparators.bottom == .none
+        topRule.frame = frame(rowSeparators.top, y: -offset - hairline / 2)
+        bottomRule.frame = frame(rowSeparators.bottom, y: bounds.height + offset - hairline / 2)
         // The wash spans the row and half the gap either side, so two
         // neighbours' washes would meet on their hairline.
         pressWash.frame = bounds.insetBy(dx: -bleed, dy: -offset)
@@ -2721,7 +2730,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
 
     override public var isHighlighted: Bool {
         didSet {
-            guard listStyle == .flat, isHighlighted != oldValue else { return }
+            guard dress == .row, isHighlighted != oldValue else { return }
             let target: CGFloat = isHighlighted ? AppControl.Metrics.pressedWash : 0
             UIView.animate(
                 withDuration: PressFeedback.Metrics.response, delay: 0,
@@ -2733,13 +2742,13 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     }
 
     /// The hairlines' frames in the row's space, nil when hidden. Tests.
-    public var debugFlatRuleFrames: (top: CGRect?, bottom: CGRect?) {
+    public var debugRuleFrames: (top: CGRect?, bottom: CGRect?) {
         layoutIfNeeded()
         return (topRule.isHidden ? nil : topRule.frame, bottomRule.isHidden ? nil : bottomRule.frame)
     }
 
-    /// The card's ground, corner and edge as drawn. Tests.
-    public var debugCardDress: (fill: UIColor?, cornerRadius: CGFloat, borderWidth: CGFloat) {
+    /// The dress's ground, corner and edge as drawn. Tests.
+    public var debugDress: (fill: UIColor?, cornerRadius: CGFloat, borderWidth: CGFloat) {
         (card.backgroundColor, card.layer.cornerRadius, card.layer.borderWidth)
     }
 
@@ -2946,8 +2955,8 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
             // The box behind the pages is the CARD, not the placeholder fill a
             // single-media row uses: with a gutter between items and one cropped
             // at the edge, that fill is on screen at rest and has to be the
-            // surface the pages are lying on — the page itself on a flat
-            // row (#2243).
+            // surface the pages are lying on — the page itself on a list's
+            // row (#2243), a shelf card's tone on a card.
             mediaView.backgroundColor = rowGround
             let carousel = makeCarouselIfNeeded()
             carousel.backgroundColor = rowGround
@@ -3052,21 +3061,14 @@ public final class PostGridTileCell: UICollectionViewCell {
     /// bone's own grey, so a tile reads the same loading, missing or failed —
     /// and the card's for words.
     ///
-    /// ⚠️ THE CARD'S TONE ON THE PAGE OF THE STYLE (#2243): a tile of words —
-    /// a chunk's, a shelf's text card, a History square — is white on the
-    /// grey page, and one grey step down on the flat style's white page,
-    /// where white would have no edge (`PostListStyle.cardFill`). The launch's
-    /// style by default, the same answer for a tile and for every copy of it
-    /// (a flight's card, a close's stand-in, a window's floor) — none of which
-    /// has a page to ask. Under flat, every page that draws such tiles lies
-    /// on the white page too.
+    /// ⚠️ THE CARD'S TONE ON THE PLAIN PAGE (#2243): a tile of words — a
+    /// chunk's, a shelf's text media card, a History square — is one grey
+    /// step down from the white page the post lists lie on, where a white
+    /// card would have no edge (`Surface.cardOnPlainPage`). The same answer
+    /// for a tile and for every copy of it (a flight's card, a close's
+    /// stand-in, a window's floor).
     public static func fillColor(for post: GalleryPost) -> UIColor {
-        fillColor(for: post, style: .current)
-    }
-
-    /// The same, in a given style. Tests.
-    public static func fillColor(for post: GalleryPost, style: PostListStyle) -> UIColor {
-        post.kind == .text ? style.cardFill : Surface.mediaGround
+        post.kind == .text ? Surface.cardOnPlainPage : Surface.mediaGround
     }
 
     /// The image the brick is currently showing — see `PostGridListRowCell`'s

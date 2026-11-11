@@ -99,10 +99,11 @@ extension ForYouGridPage {
             // outlives the viewer swiping on to another post (#1332).
             currentCover: { [weak self] in self?.heroAppearance(for: id)?.cover },
             continuation: continuation,
-            // ⚠️ A FLAT ROW OF WORDS OPENS WITH THE NATIVE PUSH (#2243), its
-            // window kept for nothing but the record: there is no card for it
-            // to grow from, and a native push closes with the native pop
-            // whatever the feed pages onto (`presentSnapFeedHero`).
+            // ⚠️ A ROW OF WORDS OPENS WITH THE NATIVE PUSH (#2243), its
+            // window unused: there is no card for it to grow from, and a
+            // native push closes with the native pop whatever the feed pages
+            // onto (`presentSnapFeedHero`). A MEDIA row's window is used: it
+            // is how its flight-opened feed closes once paged onto words.
             opensWithNativePush: opensWithNativePush(id)
         )
     }
@@ -110,7 +111,14 @@ extension ForYouGridPage {
     /// The window a post closes through when there is no picture to fly — a
     /// TEXT post, or any post once the feed has paged onto words — for the
     /// tile or row it sits on: the tile's own window (`tileWindow`), or the
-    /// row's card (#1273, the hosts' copies made one).
+    /// row's (#1273, the hosts' copies made one).
+    ///
+    /// ⚠️ A ROW'S WINDOW ONLY EVER CLOSES (#2290). A row of words opens with
+    /// the native push and closes with its pop (`opensWithNativePush`), so
+    /// nothing reads its window; a MEDIA row's flight-opened feed, paged onto
+    /// words, closes through it — its stand-in still the card
+    /// (`RevealDismissCardView`), a whole card squeezed into the row, as the
+    /// flat style drew it before #2290. #2289 may give the row its own.
     ///
     /// - Parameters:
     ///   - alignsPageToSource: the page grows out of the card caption on
@@ -151,8 +159,8 @@ extension ForYouGridPage {
             alignsPageToSource: alignsPageToSource,
             // The media fills the window, always — see `RevealPageFit.covering`.
             pageFit: .covering,
-            // The list's card, its own curve and fill (the initialiser's
-            // defaults are the card's).
+            // The card's curve and fill (the initialiser's defaults), as the
+            // stand-in is the card.
             setConcealed: { [weak self] concealed in self?.setRevealConcealed(concealed, for: anchor) },
             willStageDismissal: { _ in willStageDismissal() },
             dismissalDidEnd: dismissalDidEnd

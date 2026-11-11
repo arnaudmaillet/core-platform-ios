@@ -11,8 +11,10 @@ import UIKit
 /// every gallery (For You, profile, cluster) funnels through.
 ///
 /// `PlainPushDismissalTests` pins the no-hero degradation and its gestures;
-/// this suite pins the three elections it leaves open: a describable text row
-/// gets the REVEAL rather than the bare slide, a gallery presenter splits its
+/// this suite pins the three elections it leaves open: a text post whose
+/// origin describes its window (a tile of words, a shelf's card — a list's
+/// row of words pushes natively instead, #2290) gets the REVEAL rather than
+/// the bare slide, a gallery presenter splits its
 /// dismissal axes across two drivers, and the flight's ownership of the stack
 /// ends with the return — the delegate slot and the concealed tile both handed
 /// back. All of it is stack-transaction and wiring state, per the headless
@@ -21,8 +23,8 @@ import UIKit
 struct HeroElectionTests {
     // MARK: - The reveal election
 
-    /// A text post whose origin can describe its ROW opens as a reveal — the
-    /// window, not the slide. The wiring is the assertion: the slide driver
+    /// A text post whose origin can describe its window (and does not ask for
+    /// the native push) opens as a reveal — the window, not the slide. The wiring is the assertion: the slide driver
     /// owns the stack AND carries the reveal geometry, and it presents.
     @Test func aTextRowWithARevealOpensAsAReveal() throws {
         let stack = Stack()

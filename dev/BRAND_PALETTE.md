@@ -8,6 +8,7 @@ The app's colours are one **theme**: **coral** — the primary `FF1358`, used al
 
 ## Rules
 - **Neutrals stay the system's.** Labels, backgrounds, fills, separators and `Surface` already adapt to dark mode, Increased Contrast and glass. `Palette` holds only the hues.
+- **The post lists lie on the plain page** (#2243; the only style since #2290, Release included). The profile, the place page, For You's pages and the post sets lie on `Surface.plainPage` (white / black); their text posts are flat rows parted by `separator` hairlines. A tile of words and a shelf's media card wear `Surface.cardOnPlainPage` there. Every other screen keeps the grouped grey (`Surface.page`) and its cards (`Surface.card`): Settings, the grouped lists, the sheets.
 - **The UI is neutral** (#1169). The selected tab, secondary buttons, chips, the segmented selection and in-text mentions stay neutral.
 - **The primary marks what matters**:
   - a screen's one primary action;

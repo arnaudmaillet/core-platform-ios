@@ -251,27 +251,29 @@ struct PlainPushDismissalTests {
         #expect(slide.closesByPull, "a plain push's vertical close still slides")
     }
 
-    // MARK: - Flat rows (#2243)
+    // MARK: - List rows (#2243, #2290)
 
-    /// ⚠️ A FLAT ROW OF WORDS OPENS WITH THE NATIVE PUSH (#2243), though it
+    /// ⚠️ A LIST ROW OF WORDS OPENS WITH THE NATIVE PUSH (#2243), though it
     /// hands over a window: no reveal, and the native push's close — never a
     /// flight for a photograph paged onto, never a window, its vertical
     /// closes pulls.
-    @Test func aFlatTextRowOpensWithTheNativePushAndClosesWithItsPop() throws {
+    @Test func aListTextRowOpensWithTheNativePushAndClosesWithItsPop() throws {
         let stack = Stack()
         stack.builder.presentSnapFeedHero(
             postIDs: [PostID("t1")], from: stack.presenter,
             origin: origin(hasHero: false, textReveal: rowWindow(), opensWithNativePush: true)
         )
         let slide = try #require(stack.nav.leasedDelegate as? InteractiveSlideDismissal)
-        #expect(!slide.revealPresents, "a flat row opened as a window")
-        #expect(slide.revealGeometry == nil, "a flat row's push closes as a window")
+        #expect(!slide.revealPresents, "a list row opened as a window")
+        #expect(slide.revealGeometry == nil, "a list row's push closes as a window")
         #expect(slide.heroLandingAcceptsHero?() == false, "a photograph paged onto could take the close")
         #expect(slide.closesByPull)
     }
 
-    /// The control: the same row in the cards style keeps today's window.
-    @Test func aCardsTextRowStillOpensAsTheWindow() throws {
+    /// The control: words that do not push natively — a tile of words, a
+    /// shelf's text card — still open through their window (#2290 removed
+    /// only the list card's).
+    @Test func aTextTileStillOpensAsTheWindow() throws {
         let stack = Stack()
         stack.builder.presentSnapFeedHero(
             postIDs: [PostID("t1")], from: stack.presenter,

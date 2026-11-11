@@ -13,7 +13,7 @@ import UIKit
 /// # What it is
 ///
 /// A list of posts: the profile's Activity tab without the profile — the same
-/// timeline cards (`PostGridListRowCell`) on the same list layout, through a
+/// timeline rows (`PostGridListRowCell`) on the same list layout, through a
 /// `ForYouGridPage` in its `.list` style, no mosaic chunks. Driven by
 /// `ForYouViewController`, which forwards each snapshot, the paging spinner
 /// and the refresh while this screen is on the stack — one view model, so the
@@ -46,9 +46,10 @@ import UIKit
 /// place page, the search results and Discover's mosaic use — for the reason
 /// `DiscoverGalleryViewController` gives: For You's own `openFeed` is keyed to
 /// For You's page and its appearance, and this screen covers both. A media
-/// row flies; a text row opens as a WINDOW shaped like the place page's
-/// (`textRowReveal`), and a close lands on the row the viewer opened, order
-/// untouched — the product rule for a list.
+/// row flies; a text row opens with the native push and closes with its pop
+/// (#2243). A flight-opened feed paged onto words closes through a window
+/// (`textRowReveal`) onto the row the viewer opened, order untouched — the
+/// product rule for a list.
 ///
 /// # Its chrome
 ///
@@ -169,8 +170,8 @@ final class ForYouPostListViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        // The grey page under cards, the white one under flat rows (#2243).
-        view.backgroundColor = page.pageGround
+        // The plain page the post lists lie on (#2243) — see `Surface`.
+        view.backgroundColor = Surface.plainPage
         page.pin(to: view)
         page.onItemTapped = { [weak self] index in self?.openRow(at: index) }
         page.onItemCommentsTapped = { [weak self] index in self?.openRow(at: index, showingComments: true) }
@@ -350,9 +351,10 @@ final class ForYouPostListViewController: UIViewController {
         page.openHoldingStill(from: self) { openPost(self, origin, stream.map(\.id)) }
     }
 
-    /// The window a TEXT row opens through — and ANY row closes through once
-    /// the feed is on a text page — or nil for a row the list cannot find, the
-    /// plain push then being the honest floor.
+    /// The window a row closes through once the feed is on a text page, or
+    /// nil for a row the list cannot find, the plain slide then being the
+    /// honest floor. A MEDIA row's: a row of words opens with the native push
+    /// and closes with its pop (#2243), which never read this window.
     ///
     /// ⚠️ OFFERED FOR MEDIA ROWS TOO. `hasHero` decides the opening; this
     /// decides whether a close that has nothing to fly has anywhere to go. A
@@ -361,11 +363,10 @@ final class ForYouPostListViewController: UIViewController {
     /// carries a window for `RowCardCloseLanding` to arm — the profile's rule
     /// ("Offered for EVERY post") and For You's rows' (`ForYouRowOrigins`).
     ///
-    /// ⚠️ MARKER-SHAPED, and for the place page's reason
-    /// (`PlaceProfileViewController.textRowReveal`): the feed is a PAGER, so
-    /// the row and the page are only the same post until the first swipe. The
-    /// window therefore does not align the page to the row's caption; it opens
-    /// over a page that holds still, and closes onto the row it opened from.
+    /// ⚠️ MARKER-SHAPED: the feed is a PAGER, so the row and the page are only
+    /// the same post until the first swipe. The window therefore does not
+    /// align the page to the row's caption; it holds the page still and
+    /// closes onto the row it opened from.
     private func textRowReveal(for post: GalleryPost) -> TextRevealOrigin? {
         let anchor = post.id
         return page.closeWindow(

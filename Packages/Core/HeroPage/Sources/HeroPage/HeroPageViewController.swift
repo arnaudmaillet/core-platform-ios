@@ -131,9 +131,8 @@ open class HeroPageViewController<Tab: Equatable>: UIViewController {
         NotificationCenter.default.addObserver(
             self, selector: #selector(decorativeMotionDidChange), name: .decorativeMotionDidChange, object: nil
         )
-        // The page the cards lie on, a step below them — see `Surface` — or
-        // the plain page under flat rows (#2243): a profile's and a place's
-        // pages are vertical post lists.
+        // The plain page (#2243, #2290): a profile's and a place's pages are
+        // vertical post lists — see `HeroPageGround`.
         view.backgroundColor = HeroPageGround.color
         configureHeroNavigationBar()
         installHeroLayout()
@@ -267,7 +266,7 @@ open class HeroPageViewController<Tab: Equatable>: UIViewController {
         // banner while the host travels down under a pull, stretching it
         // instead of dragging it away and exposing the background behind.
         // ⚠️ THE BANNER STANDS BEHIND THE PAGES, not in the floating header:
-        // the pages are clear and only their cards cover it. It still rests on
+        // the pages are clear and only what they draw covers it. It still rests on
         // the header's top and travels with it, so the fade, the ink and the
         // stretch are read as before.
         heroHeader.moveBanner(into: view, below: heroPager)

@@ -582,7 +582,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         // Reduce Motion: the stack's own push, no flight and no window
         // (`HeroMotionPolicy`).
         let reducesMotion = HeroMotionPolicy.prefersNativePush
-        // A flat row of words (#2243) opens with the native push too: no
+        // A list's row of words (#2243) opens with the native push too: no
         // window, so the plain push's close — the native pop, whatever page
         // the feed shows by then (`heroLandingAcceptsHero = { false }`), its
         // vertical closes pulls.
