@@ -131,8 +131,10 @@ final class ConversationRowView: UIView {
         // The COUNT, not just presence — `chat.v1` still serves no
         // `unread_count`, so this is counted from the history tail the inbox
         // already fetches (`Conversation.unreadCount`). Never at zero.
-        if model.isUnread, model.unreadCount > 0 {
-            unreadPill.show(count: model.unreadCount)
+        // Its ink (#2292): the primary only on a row new since the visit and
+        // not muted, grey on every other unread row; the bold stays on all.
+        if let ink = model.unreadInk, model.unreadCount > 0 {
+            unreadPill.show(count: model.unreadCount, ink: ink)
         } else {
             unreadPill.hide()
         }
@@ -156,10 +158,13 @@ final class ConversationRowView: UIView {
         return model.runsChannel ? "Channel, you run it" : "Channel"
     }
 
-    /// "3 unread"; "Unread" when there is no count; nil when read.
+    /// "3 new unread" for a count in the primary, "3 unread" for a grey one
+    /// (#2292); "Unread" when there is no count; nil when read. "Muted" is
+    /// said on its own.
     static func unreadWords(_ model: ConversationDisplayModel) -> String? {
-        guard model.isUnread else { return nil }
-        return model.unreadCount > 0 ? "\(model.unreadCount) unread" : "Unread"
+        guard let ink = model.unreadInk else { return nil }
+        guard model.unreadCount > 0 else { return "Unread" }
+        return ink == .primary ? "\(model.unreadCount) new unread" : "\(model.unreadCount) unread"
     }
 
     /// The relation the face wears, through the badge's replace and the
@@ -396,6 +401,13 @@ extension ConversationRowView {
     var debugPreviewText: String? { previewLabel.attributedText?.string ?? previewLabel.text }
     /// Whether the channel's megaphone shows (#2215, #2230). Tests.
     var debugShowsChannelBadge: Bool { !channelBadge.isHidden }
+    /// Whether the row wears the unread treatment — the bold title, the
+    /// full-strength preview and time — which every unread row keeps,
+    /// whatever its count's ink (#2292). Tests.
+    var debugWearsUnreadStyle: Bool {
+        titleLabel.font.fontName == UIFont.preferredFont(forTextStyle: .headline, weight: .bold).fontName
+            && previewLabel.textColor == .label && timeLabel.textColor == .label
+    }
 }
 #endif
 

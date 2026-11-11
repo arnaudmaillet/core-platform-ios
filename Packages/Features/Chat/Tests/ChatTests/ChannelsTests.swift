@@ -157,20 +157,19 @@ struct ChannelsTests {
 
         let list = ConversationListViewModel(catalog: catalog)
         await settle { if case .content = list.phase { true } else { false } }
-        guard case .content(let sections) = list.phase else { Issue.record("\(list.phase)"); return }
-        let muted = try #require(sections.all.first { $0.id == botanic })
+        guard case .content(let rows) = list.phase else { Issue.record("\(list.phase)"); return }
+        let muted = try #require(rows.first { $0.id == botanic })
         #expect(muted.isUnread && muted.unreadCount > 0, "the row still shows its posts")
         #expect(!muted.countsInBadge)
-        let notifying = try #require(sections.all.first { $0.id == tides })
+        let notifying = try #require(rows.first { $0.id == tides })
         #expect(notifying.countsInBadge)
         // The badge: every unread row's messages but the muted channel's.
         let expected = snapshot.active
             .filter { $0.id != botanic && snapshot.unreadIDs.contains($0.id) }
             .reduce(0) { $0 + $1.unreadCount }
         #expect(list.newCount == expected)
-        // The headers add up to it.
-        let headers = sections.unreadMessages(in: .new) + sections.unreadMessages(in: .earlier)
-        #expect(headers == list.newCount)
+        // Its count is grey, new or not (#2292): muted.
+        #expect(muted.unreadInk == .neutral)
 
         // Notifications on: its posts count again.
         catalog.setMute(botanic, muted: false, until: nil)
@@ -182,7 +181,8 @@ struct ChannelsTests {
                               otherMemberIDs: [ProfileID("ada")], isUnread: true, unreadCount: 2)
         let model = ConversationDisplayModel(conversation: dm, isMuted: true, isUnread: true, unreadCount: 2)
         #expect(model.countsInBadge)
-        #expect(InboxListSections.unreadMessages(in: [model]) == 2)
+        // Counted, but its row's count is grey (#2292): muted.
+        #expect(model.unreadInk == .neutral)
     }
 
     @Test func joiningFromTheThreadMutesTheChannel() async throws {
@@ -300,6 +300,27 @@ struct ChannelsTests {
         await settle { requests.joinRequests.isEmpty }
         #expect(requests.joinRequests.isEmpty, "a channel whose requests were all answered leaves the section")
         #expect(requests.newCount == plain.newCount)
+    }
+
+    /// One list on Requests (#2292), but the join requests keep their own
+    /// section with its header, above the requests: another kind of request.
+    @Test func theJoinRequestsKeepTheirHeadedSectionAboveTheRequests() async throws {
+        let repository = make()
+        let catalog = InboxCatalog(repository: repository)
+        let digest = ChannelJoinRequestsDigest(catalog: catalog, service: repository)
+        let requests = MessageRequestsViewModel(catalog: catalog, joinRequests: digest)
+        catalog.reload()
+        await settle { requests.joinRequests.count == 1 && catalog.snapshot.phase == .loaded }
+        guard case .content(let rows) = requests.phase else { Issue.record("\(requests.phase)"); return }
+
+        let list = MessageRequestsViewController(viewModel: requests)
+        list.loadViewIfNeeded()
+        list.view.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+        list.view.layoutIfNeeded()
+        #expect(list.debugSections == (rows.isEmpty ? [.joinRequests] : [.joinRequests, .conversations]))
+        #expect(list.debugHeadedSections == [.joinRequests], "only the join requests wear a header")
+        #expect(list.debugRowIDs(in: .joinRequests) == [studio])
+        #expect(list.debugRowIDs(in: .conversations) == rows.map(\.id))
     }
 
     @Test func theHiddenRequestsListNeverShowsJoinRequests() async {

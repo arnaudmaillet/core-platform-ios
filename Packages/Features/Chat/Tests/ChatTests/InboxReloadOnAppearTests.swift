@@ -33,18 +33,17 @@ struct InboxReloadOnAppearTests {
     @Test func anUnchangedListIsNotReloaded() {
         let table = CountingTable(frame: CGRect(x: 0, y: 0, width: 402, height: 800))
         let adapter = ConversationListTableAdapter(tableView: table) { _, _, _ in UITableViewCell() }
-        var sections = InboxListSections()
-        sections.earlier = [model("a"), model("b")]
-        adapter.apply(sections, animated: false)
+        var shown = [model("a"), model("b")]
+        adapter.apply(shown, animated: false)
         #expect(table.reloads == 1, "the first rows load")
-        adapter.apply(sections, animated: false)
+        adapter.apply(shown, animated: false)
         #expect(table.reloads == 1, "an unchanged list reloaded")
-        sections.earlier = [model("b"), model("a"), model("c")]
-        adapter.apply(sections, animated: false)
+        shown = [model("b"), model("a"), model("c")]
+        adapter.apply(shown, animated: false)
         #expect(table.reloads == 2, "changed rows were not reloaded")
         #expect(adapter.allIdentifiers == [ConversationID("b"), ConversationID("a"), ConversationID("c")])
-        sections.earlier = []
-        adapter.apply(sections, animated: false)
+        shown = []
+        adapter.apply(shown, animated: false)
         #expect(table.reloads == 3, "an emptied list kept its rows")
     }
 }

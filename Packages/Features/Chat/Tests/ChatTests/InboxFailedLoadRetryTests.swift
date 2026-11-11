@@ -158,7 +158,7 @@ struct InboxFailedLoadRetryTests {
             Issue.record("expected content, got \(viewModel.phase)")
             return
         }
-        #expect(sections.all.map(\.id.rawValue) == ["a"])
+        #expect(sections.map(\.id.rawValue) == ["a"])
     }
 
     @Test func failedRequestsOfferTryAgainWhichReloadsThem() async throws {
@@ -183,7 +183,7 @@ struct InboxFailedLoadRetryTests {
             Issue.record("expected content, got \(viewModel.phase)")
             return
         }
-        #expect(sections.all.map(\.id.rawValue) == ["r1"])
+        #expect(sections.map(\.id.rawValue) == ["r1"])
     }
 
     @Test func failedSuggestionsOfferTryAgainWhichReloadsThem() async throws {

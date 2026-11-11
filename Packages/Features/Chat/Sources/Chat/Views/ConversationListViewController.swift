@@ -5,7 +5,13 @@ import MediaCore
 import UIKit
 
 /// The inbox's "All" surface: every active direct message, with unread ones
-/// marked in place — bold row, tinted dot, and a count on the tab itself.
+/// marked in place — bold row, a count on the row, and a count on the tab
+/// itself.
+///
+/// ONE LIST (#2292, the owner 2026-11-11): no New / Recent sections, sorted
+/// by the last activity with the pinned rows first. A row new since the
+/// visit wears its count in the primary, every other unread row in grey
+/// (`ConversationDisplayModel.unreadInk`).
 ///
 /// It is a paged child of `MessagesInboxViewController`, which owns the only
 /// navigation bar on screen — so the Edit/Cancel/Delete items are *published*
@@ -58,33 +64,7 @@ final class ConversationListViewController: UIViewController {
 
     private var adapter: ConversationListTableAdapter!
     private var modelsByID: [ConversationID: ConversationDisplayModel] = [:]
-    /// The sections as last rendered — what the headers count (#1210).
-    private var renderedSections = InboxListSections()
-
-    /// Each visible section header's unread messages, from the rendered rows.
-    private func refreshHeaderCounts() {
-        for index in 0..<tableView.numberOfSections {
-            guard let section = adapter.headedSection(at: index),
-                  let header = tableView.headerView(forSection: index) as? InboxSectionHeaderView else { continue }
-            header.setCount(renderedSections.unreadMessages(in: section))
-        }
-        // The bar names the stuck section with the same count.
-        updatePinnedSection()
-    }
     private var hasRenderedContent = false
-
-    /// The section the list has scrolled into, which the inbox names in its
-    /// bar (#1301). Re-read on every scroll and every render.
-    private let pinnedTracker = PinnedSectionTracker<InboxPinnedSection>()
-
-    private func updatePinnedSection() {
-        // A list off screen behind the skeleton or a status names nothing.
-        let isShowing = !tableView.isHidden
-        pinnedTracker.update(in: tableView) { index in
-            guard isShowing, let section = adapter.headedSection(at: index) else { return nil }
-            return InboxPinnedSection(section: section, count: renderedSections.unreadMessages(in: section))
-        }
-    }
 
     /// Builds the thread screen a context-menu long-press previews — injected
     /// by the feature builder so preview and push share one construction.
@@ -342,16 +322,9 @@ final class ConversationListViewController: UIViewController {
         // `prefersClearTopEdge`.
         tableView.prefersClearTopEdge()
         tableView.delegate = self
-        tableView.register(
-            InboxSectionHeaderView.self,
-            forHeaderFooterViewReuseIdentifier: InboxSectionHeaderView.reuseIdentifier
-        )
-        tableView.estimatedSectionHeaderHeight = 44
-        // A plain table reserves ~22pt above every section header by default,
-        // which under a floating pill is a band of nothing between the tab
-        // capsule and the first row. The pill carries its own breathing room
-        // (`SectionHeaderPillButton.Metrics.float`), so this is padding on top
-        // of padding.
+        // One list with no header (#2292). A plain table still reserves ~22pt
+        // of padding above a section's header, which would be a band of
+        // nothing between the tab capsule and the first row.
         tableView.sectionHeaderTopPadding = 0
         // No hairlines, matching every other people list in the app: a 48pt
         // disc and two lines of type already make each row its own object.
@@ -438,12 +411,7 @@ final class ConversationListViewController: UIViewController {
         switch phase {
         case .loading:
             loading.load()
-        case .content(let sections):
-            renderedSections = sections
-            // After this pass's apply: a header on screen whose section stays
-            // is not dequeued again, and reading a row changes its count.
-            DispatchQueue.main.async { [weak self] in self?.refreshHeaderCounts() }
-            let models = sections.all
+        case .content(let models):
             // Rows whose content changed without moving. Applied straight to
             // the visible cells below — there is no snapshot to reconcile, so
             // this cannot collide with the move animation the way a diffable
@@ -469,7 +437,7 @@ final class ConversationListViewController: UIViewController {
             // ones, means the cell already looks right when the batch picks it
             // up and the band travels with it.
             reconfigureVisible(changed)
-            adapter.apply(sections, animated: hasRenderedContent && view.window != nil)
+            adapter.apply(models, animated: hasRenderedContent && view.window != nil)
             reloadRowsOfChangedKind(changed)
             hasRenderedContent = true
             // The list moved under the spinner: it waits for the end to
@@ -493,7 +461,6 @@ final class ConversationListViewController: UIViewController {
             )
             loading.showStatus()
         }
-        updatePinnedSection()
     }
 
     /// Swaps the skeleton for the populated table. The rows are applied
@@ -508,26 +475,6 @@ final class ConversationListViewController: UIViewController {
         viewModel.retry()
     }
 
-    #if DEBUG
-    /// `-inbox-tap-section new|recent` fires a header pill's own action ~2s in.
-    ///
-    /// A tap cannot be injected in the simulator, and driving one through
-    /// CGEvent needs the Simulator window's geometry — which changes the moment
-    /// the window is resized or reopened, and a mis-mapped tap looks exactly
-    /// like a header that does not respond. This calls what the pill calls.
-    private func runSectionTapDebugSequence() {
-        let arguments = ProcessInfo.processInfo.arguments
-        guard let index = arguments.firstIndex(of: "-inbox-tap-section"),
-              let name = arguments.dropFirst(index + 1).first
-        else { return }
-        let section: InboxListSection = name == "new" ? .new : .earlier
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-            guard let self, let target = adapter.index(of: section) else { return }
-            adapter.scroll(tableView, toSectionAt: target)
-        }
-    }
-    #endif
-
     /// The spinner hangs under the last row only while there is more to load.
     private func updatePagingFooter() {
         pagingFooter.setSpinning(false)
@@ -536,10 +483,6 @@ final class ConversationListViewController: UIViewController {
 }
 
 extension ConversationListViewController: UITableViewDelegate {
-    func scrollViewDidScroll(_ scrollView: UIScrollView) {
-        updatePinnedSection()
-    }
-
     /// Paging: one of the last rows coming on screen asks for the next page
     /// (#593), early enough that it usually lands before the end does.
     func tableView(_ tableView: UITableView, willDisplay cell: UITableViewCell, forRowAt indexPath: IndexPath) {
@@ -550,77 +493,17 @@ extension ConversationListViewController: UITableViewDelegate {
         viewModel.loadMore()
     }
 
-    // MARK: - Section headers
+    // MARK: - No section header (#2292)
 
-    /// The glass pill, and the tap that scrolls to the section it names.
-    #if DEBUG
-    /// `-inbox-header-audit`: the pill's offset INSIDE each section header.
-    ///
-    /// That offset is what a pinned header carries with it, so it is the number
-    /// that decides whether two stuck headers line up. Measuring the pinned
-    /// position directly would need a scroll per section; this needs none, and it
-    /// is the same quantity.
-    func runHeaderAlignmentAudit() {
-        guard ProcessInfo.processInfo.arguments.contains("-inbox-header-audit") else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
-            guard let self else { return }
-            tableView.layoutIfNeeded()
-            for section in 0..<tableView.numberOfSections {
-                guard let header = tableView.headerView(forSection: section) else { continue }
-                let pill = header.contentView.subviews.first {
-                    String(describing: type(of: $0)).contains("SectionHeaderPill")
-                }
-                print(String(format: "[header-align] section %d headerH=%.1f pillTop=%.1f pillBottom=%.1f",
-                             section, header.bounds.height,
-                             pill?.frame.minY ?? -1,
-                             (pill.map { header.bounds.height - $0.frame.maxY }) ?? -1))
-            }
-        }
-    }
-    #endif
-
-    func tableView(_ tableView: UITableView, viewForHeaderInSection index: Int) -> UIView? {
-        guard let section = adapter.headedSection(at: index) else { return nil }
-        let header = tableView.dequeueReusableHeaderFooterView(
-            withIdentifier: InboxSectionHeaderView.reuseIdentifier
-        ) as? InboxSectionHeaderView
-        // The separation between sections is the footer's job — see
-        // `heightForFooterInSection` — so the header has nothing to pad.
-        header?.setTitle(section.title)
-        header?.setCount(renderedSections.unreadMessages(in: section))
-        // The section's own first row, so tapping "Recent" puts Recent under
-        // the header rather than wherever the list happened to be.
-        header?.onTap = { [weak self] in
-            guard let self else { return }
-            adapter.scroll(tableView, toSectionAt: index)
-        }
-        return header
-    }
-
-    /// Zero for an unheaded list — a table gives an unclaimed plain-style
-    /// section a default height even when its header view is nil, which would
-    /// leave a blank band above a list that has no header at all.
+    /// None: one list, no title. ⚠️ A plain table gives a section a default
+    /// header height even when its header view is nil, which would leave a
+    /// blank band above the first row.
     func tableView(_ tableView: UITableView, heightForHeaderInSection index: Int) -> CGFloat {
-        adapter.headedSection(at: index) == nil ? .leastNormalMagnitude : UITableView.automaticDimension
+        .leastNormalMagnitude
     }
 
-    /// ⚠️ A FOOTER, not a bigger header margin.
-    ///
-    /// The section gap used to sit above the next header, which put the break in
-    /// the right place visually and the pill in the wrong one: a plain table PINS
-    /// its headers, so that margin travelled with the pill and hung a stuck
-    /// header lower than the first one's. Spending the space at the END of the
-    /// previous section separates the two lists without moving anything that pins.
     func tableView(_ tableView: UITableView, heightForFooterInSection index: Int) -> CGFloat {
-        index < tableView.numberOfSections - 1
-            ? SectionHeaderPillButton.sectionGap(traits: tableView.traitCollection)
-            : .leastNormalMagnitude
-    }
-
-    func tableView(_ tableView: UITableView, viewForFooterInSection index: Int) -> UIView? {
-        let spacer = UIView()
-        spacer.backgroundColor = .clear
-        return spacer
+        .leastNormalMagnitude
     }
 
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
@@ -729,17 +612,7 @@ extension ConversationListViewController: UITableViewDelegate {
 extension ConversationListViewController: InboxSurface {
     var listScrollView: UIScrollView? { tableView }
 
-    var pinnedSection: InboxPinnedSection? { pinnedTracker.pinned }
-
-    var onPinnedSectionChange: ((InboxPinnedSection?) -> Void)? {
-        get { pinnedTracker.onChange }
-        set { pinnedTracker.onChange = newValue }
-    }
-
-    func scrollToPinnedSection() {
-        guard let index = pinnedTracker.index else { return }
-        adapter.scroll(tableView, toSectionAt: index)
-    }
+    // No `pinnedSection`: one list, no section to name in the bar (#2292).
 
     var category: MessagesCategory { .all }
 
@@ -747,11 +620,15 @@ extension ConversationListViewController: InboxSurface {
     /// load is already in flight, so this is free on the appear path.
     func surfaceDidBecomeActive() {
         viewModel.refresh()
-        #if DEBUG
-        runHeaderAlignmentAudit()
-        #endif
-        #if DEBUG
-        runSectionTapDebugSequence()
-        #endif
     }
 }
+
+#if DEBUG
+extension ConversationListViewController {
+    /// The list's table (#2292: one section, no header). Tests.
+    var debugTableView: UITableView { tableView }
+
+    /// The rows on show, in order. Tests.
+    var debugRowIDs: [ConversationID] { adapter.allIdentifiers }
+}
+#endif

@@ -74,7 +74,7 @@ struct ChatViewModelTests {
     }
 
     private func ids(_ phase: ConversationListViewModel.Phase?) -> [ConversationID] {
-        if case .content(let sections) = phase { sections.all.map(\.id) } else { [] }
+        if case .content(let sections) = phase { sections.map(\.id) } else { [] }
     }
 
     private func isContent(_ phase: ConversationViewModel.Phase?) -> Bool {
@@ -129,11 +129,10 @@ struct ChatViewModelTests {
 
         viewModel.togglePin(ConversationID("c2"))
 
-        guard case .content(let modelsSections) = last else {
+        guard case .content(let models) = last else {
             Issue.record("expected content, got \(String(describing: last))")
             return
         }
-        let models = modelsSections.all
         #expect(models.map(\.id) == [ConversationID("c2"), ConversationID("c1")])
         #expect(models[0].isPinned)
         #expect(!models[1].isPinned)
@@ -151,11 +150,10 @@ struct ChatViewModelTests {
 
         viewModel.toggleMute(ConversationID("c1"))
 
-        guard case .content(let modelsSections) = last else {
+        guard case .content(let models) = last else {
             Issue.record("expected content, got \(String(describing: last))")
             return
         }
-        let models = modelsSections.all
         #expect(models.map(\.id) == [ConversationID("c1"), ConversationID("c2")])
         #expect(models[0].isMuted)
         #expect(viewModel.isMuted(ConversationID("c1")))
@@ -170,11 +168,10 @@ struct ChatViewModelTests {
         #expect(await settle { isContent(last) })
 
         viewModel.delete([ConversationID("c1")])
-        guard case .content(let afterDeleteSections) = last else {
+        guard case .content(let afterDelete) = last else {
             Issue.record("expected content, got \(String(describing: last))")
             return
         }
-        let afterDelete = afterDeleteSections.all
         #expect(afterDelete.map(\.id) == [ConversationID("c2")])
 
         // A refresh re-fetches c1 from the repository; the local delete

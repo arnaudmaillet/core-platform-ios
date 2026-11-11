@@ -2,104 +2,46 @@ import CoreModels
 import Foundation
 import UIKit
 
-/// An inbox list split in two: what arrived since the viewer last left the
-/// screen, and everything that was already there.
+/// The sections of an inbox list (#2292, the owner 2026-11-11): ONE LIST PER
+/// TAB.
 ///
-/// The split is `InboxTabWatermark`'s. The tab's badge and each section's
-/// header read the same rows, so the headers add up to the badge: UNREAD
-/// MESSAGES on Chats (#1210, the owner 2026-10-15, `unreadMessages(in:)`),
-/// NEW REQUESTS on Requests (#2171, the owner 2026-11-07, `unreadRows(in:)`).
+/// Chats and Requests were split into "New" and "Recent" by
+/// `InboxTabWatermark` (#1210, #2171). The split went: "new" meant "since the
+/// cold launch", a rule nobody can see, and an unread row older than it sat
+/// in "Recent", still bold and counted, so the two sections read alike. The
+/// list is sorted by recency anyway, so the new rows are at the top without
+/// a header. The watermark now only decides the ink of a row's unread count
+/// (`ConversationDisplayModel.unreadInk`).
 ///
-/// ⚠️ For the All list, "new" is NOT the same as "unread". Unread is server
-/// truth — a read cursor — and a conversation can sit unread for a week without
-/// being new. New is "since you last looked at this screen". So an unread row
-/// whose last message predates the visit belongs in the second section, still
-/// bold, still badged: it is waiting, but it is not news.
-public struct InboxListSections: Equatable, Sendable {
-    public var new: [ConversationDisplayModel] = []
-    public var earlier: [ConversationDisplayModel] = []
-
-    public var isEmpty: Bool { new.isEmpty && earlier.isEmpty }
-
-    /// Every row in display order, for the callers that do not care about the
-    /// split — a tap resolving an id, a test asserting ordering.
-    public var all: [ConversationDisplayModel] { new + earlier }
-
-    /// Splits rows by a predicate, preserving the order they arrive in. The
-    /// list is already sorted by recency, so the new section is the recent end
-    /// of it and neither section needs sorting of its own.
-    public init(rows: [ConversationDisplayModel], isNew: (ConversationDisplayModel) -> Bool) {
-        for row in rows {
-            if isNew(row) { new.append(row) } else { earlier.append(row) }
-        }
-    }
-
-    public init() {}
-
-    /// The unread messages a section holds: what its header counts (#1210).
-    func unreadMessages(in section: InboxListSection) -> Int {
-        Self.unreadMessages(in: rows(of: section))
-    }
-
-    /// The rows `section` holds. The Join requests section holds no
-    /// conversation (#2230): its rows are the Requests page's own.
-    private func rows(of section: InboxListSection) -> [ConversationDisplayModel] {
-        switch section {
-        case .new: new
-        case .earlier: earlier
-        case .joinRequests: []
-        }
-    }
-
-    /// The unread messages of `rows` — a row's count is already zero once
-    /// it reads as read (`ConversationDisplayModel.unreadCount`). A muted
-    /// channel's are left out (#2230, `countsInBadge`): the badge leaves
-    /// them out, and the headers add up to the badge.
-    static func unreadMessages(in rows: [ConversationDisplayModel]) -> Int {
-        rows.reduce(0) { $0 + ($1.isUnread && $1.countsInBadge ? $1.unreadCount : 0) }
-    }
-
-    /// The rows of `section` still unread, each one 1 — the Requests
-    /// headers' count, as its badge's (#2171).
-    func unreadRows(in section: InboxListSection) -> Int {
-        rows(of: section).count(where: \.isUnread)
-    }
-}
-
-/// The two halves of an inbox list, and the titles they wear.
-///
-/// Each section's header counts its unread messages — see
-/// `InboxListSections`. A section with nothing in it is not appended at all, so
-/// an inbox with no arrivals renders as one unlabelled list rather than as an
-/// empty header over everything.
+/// What keeps a section of its own is another KIND of row: Requests' join
+/// requests for a channel the viewer runs (#2230), always headed.
 enum InboxListSection: Hashable {
     /// The channels the viewer runs with requests waiting (#2230): Requests'
-    /// first section, one row per channel. Never in Chats.
+    /// first section, one row per channel, under its header. Never in Chats.
     case joinRequests
-    case new
-    case earlier
+    /// The conversations — on Requests, the conversation requests — in one
+    /// list sorted by recency (pinned first on Chats), with no header.
+    case conversations
 }
 
-/// The two words every sectioned inbox list uses.
-///
-/// Both lists say "New" and "Recent" — the same split deserves the same pair,
-/// and a viewer paging between the tabs should not have to re-read a header to
-/// work out that it means what the last one meant.
 extension InboxListSection {
+    /// The header's words, for the one section that wears one.
     var title: String {
         switch self {
         case .joinRequests: "Join requests"
-        case .new: "New"
-        case .earlier: "Recent"
+        case .conversations: ""
         }
     }
+
+    /// Whether the section wears a header: only the join requests (#2230).
+    /// The conversations are one list with no title (#2292).
+    var isHeaded: Bool { self == .joinRequests }
 
     /// A stable number per section, for the bar's section item.
     var order: Int {
         switch self {
-        case .new: 0
-        case .earlier: 1
-        case .joinRequests: 2
+        case .joinRequests: 0
+        case .conversations: 1
         }
     }
 }
@@ -134,12 +76,13 @@ typealias SectionedConversationDataSource =
     UITableViewDiffableDataSource<InboxListSection, ConversationID>
 
 extension UITableViewDiffableDataSource<InboxListSection, ConversationID> {
-    /// The section at an index, or `nil` when the list is a single unlabelled
-    /// block — titling the whole list says nothing, so it goes unheaded.
+    /// The section at an index when it wears a header — the join requests
+    /// only (#2292) — or nil.
     func headedSection(at index: Int) -> InboxListSection? {
         let current = snapshot()
-        guard current.numberOfSections > 1 else { return nil }
-        return current.sectionIdentifiers[index]
+        guard current.sectionIdentifiers.indices.contains(index) else { return nil }
+        let section = current.sectionIdentifiers[index]
+        return section.isHeaded ? section : nil
     }
 
     /// Puts a section's first row on the pin line, under the bar — what
@@ -151,10 +94,5 @@ extension UITableViewDiffableDataSource<InboxListSection, ConversationID> {
               tableView.numberOfRows(inSection: index) > 0
         else { return }
         tableView.scrollFirstRow(ofSection: index)
-    }
-
-    /// Where a section currently sits, or `nil` if the list does not have one.
-    func index(of section: InboxListSection) -> Int? {
-        snapshot().sectionIdentifiers.firstIndex(of: section)
     }
 }

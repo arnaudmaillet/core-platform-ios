@@ -1,9 +1,14 @@
 import DesignSystem
 import UIKit
 
-/// The inbox's unread pill: the count in white on the solid unread mark
-/// (#2062, never a gradient), "99+" past 99, a circle for one digit and a
-/// capsule beyond.
+/// The inbox's unread pill: "99+" past 99, a circle for one digit and a
+/// capsule beyond, in one of two inks (#2292, the owner 2026-11-11):
+/// - **primary** — the count in white on the solid unread mark (#2062,
+///   never a gradient): a conversation new since the visit, not muted;
+/// - **neutral** — the count in `label` on a neutral grey
+///   (`neutralFill`): every other unread conversation, waiting, or muted.
+///
+/// Same shape, size and place in both inks: only the colour says which.
 ///
 /// Worn on the rows, never on a face: under a conversation row's time
 /// (#2049), and under a request's Accept and ✕ (#2088). The ringed variant
@@ -28,12 +33,36 @@ final class UnreadCountPill: UIView {
         static let labelInset: CGFloat = 6
     }
 
+    /// The neutral ink's fill (#2292): `systemGray4`, and `systemGray3`
+    /// with Increased Contrast — a deeper grey. Opaque, so a pinned row's
+    /// band does not tint it. Under `label` it measures 13.8:1 in light and
+    /// 11.4:1 in dark (9.5:1 and 7.6:1 with Increased Contrast, where the
+    /// pill itself stands further off the row); the WCAG floor is 4.5:1.
+    /// `systemGray` under white, the other candidate, is 3.3:1 and fails.
+    static let neutralFill = UIColor { traits in
+        let grey: UIColor = traits.accessibilityContrast == .high ? .systemGray3 : .systemGray4
+        return grey.resolvedColor(with: traits)
+    }
+
+    /// The neutral ink's count: the text colour, black in light and white in
+    /// dark — the grey flips with the appearance, so its count does too.
+    static let neutralText: UIColor = .label
+
+    /// The primary ink's count: white in both appearances. The same trap
+    /// `PagedTabBar.BadgeView` documents: a semantic colour can resolve to
+    /// the wrong end of the spectrum over a tinted fill, so it is stated
+    /// outright — the fill does not flip with the appearance.
+    static let primaryText: UIColor = .white
+
     private let label = UILabel()
     private var width: NSLayoutConstraint!
+    /// The ink on show. Tests.
+    private(set) var ink: ConversationDisplayModel.UnreadInk = .primary
 
     init() {
         super.init(frame: .zero)
-        // The solid unread mark, as every pill and badge (#2062).
+        // The solid unread mark, as every pill and badge (#2062), until a
+        // count says which ink it wears.
         backgroundColor = Palette.counter
         clipsToBounds = true
         layer.cornerCurve = .continuous
@@ -43,11 +72,7 @@ final class UnreadCountPill: UIView {
         label.font = UIFont.scaledFont(forTextStyle: .caption1, weight: .semibold)
         label.adjustsFontForContentSizeCategory = true
         label.textAlignment = .center
-        // The same trap `PagedTabBar.BadgeView` documents: a semantic colour
-        // can resolve to the wrong end of the spectrum over a tinted fill, so
-        // the count's colour is stated outright. White in both appearances:
-        // the fill does not flip with them.
-        label.textColor = .white
+        label.textColor = Self.primaryText
         label.isHidden = true
         label.pin(to: self, insets: NSDirectionalEdgeInsets(
             top: 0, leading: Metrics.labelInset, bottom: 0, trailing: Metrics.labelInset
@@ -75,9 +100,10 @@ final class UnreadCountPill: UIView {
         count > 99 ? "99+" : String(count)
     }
 
-    /// The count, nil for a bare dot. Hidden at zero, the same rule
-    /// `PagedTabBar` follows.
-    func show(count: Int?) {
+    /// The count, nil for a bare dot, in `ink`. Hidden at zero, the same
+    /// rule `PagedTabBar` follows.
+    func show(count: Int?, ink: ConversationDisplayModel.UnreadInk = .primary) {
+        apply(ink)
         guard let count else {
             label.isHidden = true
             width.constant = Metrics.height
@@ -95,6 +121,22 @@ final class UnreadCountPill: UIView {
         let measured = ceil(((label.text ?? "") as NSString).size(withAttributes: [.font: label.font as Any]).width)
         width.constant = max(Metrics.height, measured + Metrics.labelInset * 2)
     }
+
+    /// The fill and the count's colour for `ink`.
+    private func apply(_ ink: ConversationDisplayModel.UnreadInk) {
+        self.ink = ink
+        switch ink {
+        case .primary:
+            backgroundColor = Palette.counter
+            label.textColor = Self.primaryText
+        case .neutral:
+            backgroundColor = Self.neutralFill
+            label.textColor = Self.neutralText
+        }
+    }
+
+    /// The count's colour on show. Tests.
+    var textColor: UIColor? { label.textColor }
 
     /// Hides the pill.
     func hide() {

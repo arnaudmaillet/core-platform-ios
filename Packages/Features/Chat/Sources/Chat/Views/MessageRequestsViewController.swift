@@ -17,6 +17,10 @@ import UIKit
 /// With channels (#2230), the list leads with a **Join requests** section,
 /// always titled: one row per channel the viewer runs with requests
 /// waiting, which opens that channel's requests list.
+///
+/// The conversation requests are ONE LIST with no header (#2292, the owner
+/// 2026-11-11): the New / Recent split went. An unviewed request keeps its
+/// full-weight preview; "Hidden requests" stays the last row.
 final class MessageRequestsViewController: UIViewController {
     private let viewModel: MessageRequestsViewModel
 
@@ -67,28 +71,19 @@ final class MessageRequestsViewController: UIViewController {
     var onOpenJoinRequests: ((_ presenter: UIViewController, _ channel: RunChannel) -> Void)?
 
     /// The section at `index` when it wears a header: the Join requests
-    /// section always does (#2230) — alone, nothing else would say what its
-    /// rows are; New and Recent only beside another section, as before.
+    /// section only (#2230) — alone, nothing else would say what its rows
+    /// are. The conversation requests have none (#2292).
     private func headedSection(at index: Int) -> InboxListSection? {
-        let current = dataSource.snapshot()
-        guard current.sectionIdentifiers.indices.contains(index) else { return nil }
-        let section = current.sectionIdentifiers[index]
-        if section == .joinRequests { return section }
-        return dataSource.headedSection(at: index)
+        dataSource.headedSection(at: index)
     }
 
-    /// What a section's header counts: its new requests (#2171), or — Join
-    /// requests — every request waiting there, as the badge adds them.
+    /// What the Join requests header counts: every request waiting there,
+    /// as the badge adds them (#2230).
     private func headerCount(for section: InboxListSection) -> Int {
-        section == .joinRequests
-            ? viewModel.joinRequests.reduce(0) { $0 + $1.count }
-            : renderedSections.unreadRows(in: section)
+        section == .joinRequests ? viewModel.joinRequests.reduce(0) { $0 + $1.count } : 0
     }
-    /// The sections as last rendered — what the headers count (#1210).
-    private var renderedSections = InboxListSections()
 
-    /// Each visible section header's new requests, from the rendered rows —
-    /// the badge's count (#2171).
+    /// The visible header's count, re-read after a render.
     private func refreshHeaderCounts() {
         for index in 0..<tableView.numberOfSections {
             guard let section = headedSection(at: index),
@@ -316,8 +311,7 @@ final class MessageRequestsViewController: UIViewController {
         switch phase {
         case .loading:
             loading.load()
-        case .content(let sections):
-            renderedSections = sections
+        case .content(let models):
             // After this pass's apply: a header on screen whose section stays
             // is not dequeued again, and reading a row changes its count.
             DispatchQueue.main.async { [weak self] in self?.refreshHeaderCounts() }
@@ -331,18 +325,15 @@ final class MessageRequestsViewController: UIViewController {
                 snapshot.appendSections([.joinRequests])
                 snapshot.appendItems(joinRequests.map(\.id), toSection: .joinRequests)
             }
-            if !sections.new.isEmpty {
-                snapshot.appendSections([.new])
-                snapshot.appendItems(sections.new.map(\.id), toSection: .new)
-            }
-            if !sections.earlier.isEmpty {
-                snapshot.appendSections([.earlier])
-                snapshot.appendItems(sections.earlier.map(\.id), toSection: .earlier)
+            // Then the requests: one list, in recency order, unheaded
+            // (#2292).
+            if !models.isEmpty {
+                snapshot.appendSections([.conversations])
+                snapshot.appendItems(models.map(\.id), toSection: .conversations)
             }
             // Same-identity rows whose content changed re-render in place —
-            // reading a request clears its bold preview and its count without
-            // moving it. See `InboxRowDiff`.
-            let models = sections.all
+            // reading a request clears its bold preview without moving it.
+            // See `InboxRowDiff`.
             snapshot.reconfigureItems(InboxRowDiff.changedRows(in: models, against: modelsByID))
             // A channel's count that changed redraws its row in place.
             let recounted = joinRequests.filter { previousJoinRequests[$0.id] != nil && previousJoinRequests[$0.id] != $0 }
@@ -394,26 +385,6 @@ final class MessageRequestsViewController: UIViewController {
         loading.load()
         viewModel.retry()
     }
-    #if DEBUG
-    /// `-inbox-tap-section new|recent` fires a header pill's own action ~2s in.
-    ///
-    /// A tap cannot be injected in the simulator, and driving one through
-    /// CGEvent needs the Simulator window's geometry — which changes the moment
-    /// the window is resized or reopened, and a mis-mapped tap looks exactly
-    /// like a header that does not respond. This calls what the pill calls.
-    private func runSectionTapDebugSequence() {
-        let arguments = ProcessInfo.processInfo.arguments
-        guard let index = arguments.firstIndex(of: "-inbox-tap-section"),
-              let name = arguments.dropFirst(index + 1).first
-        else { return }
-        let section: InboxListSection = name == "new" ? .new : .earlier
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-            guard let self, let target = dataSource.index(of: section) else { return }
-            dataSource.scroll(tableView, toSectionAt: target)
-        }
-    }
-    #endif
-
     // MARK: - The relation mark (#2088, as the All list's #2049)
 
     /// The peers to ask about: the rows on screen and as many again below
@@ -501,8 +472,7 @@ extension MessageRequestsViewController: UITableViewDelegate {
         // `heightForFooterInSection` — so the header has nothing to pad.
         header?.setTitle(section.title)
         header?.setCount(headerCount(for: section))
-        // The section's own first row, so tapping "Recent" puts Recent under
-        // the header rather than wherever the list happened to be.
+        // The section's own first row under the bar.
         header?.onTap = { [weak self] in
             guard let self else { return }
             dataSource.scroll(tableView, toSectionAt: index)
@@ -510,7 +480,7 @@ extension MessageRequestsViewController: UITableViewDelegate {
         return header
     }
 
-    /// Zero for an unheaded list — a table gives an unclaimed plain-style
+    /// Zero for the unheaded requests — a table gives an unclaimed plain-style
     /// section a default height even when its header view is nil, which would
     /// leave a blank band above a list that has no header at all.
     func tableView(_ tableView: UITableView, heightForHeaderInSection index: Int) -> CGFloat {
@@ -523,7 +493,8 @@ extension MessageRequestsViewController: UITableViewDelegate {
     /// the right place visually and the pill in the wrong one: a plain table PINS
     /// its headers, so that margin travelled with the pill and hung a stuck
     /// header lower than the first one's. Spending the space at the END of the
-    /// previous section separates the two lists without moving anything that pins.
+    /// previous section separates the join requests from the requests without
+    /// moving anything that pins.
     func tableView(_ tableView: UITableView, heightForFooterInSection index: Int) -> CGFloat {
         index < tableView.numberOfSections - 1
             ? SectionHeaderPillButton.sectionGap(traits: tableView.traitCollection)
@@ -621,9 +592,6 @@ extension MessageRequestsViewController: InboxSurface {
     /// asks for a refresh — which no-ops while one is in flight.
     func surfaceDidBecomeActive() {
         viewModel.refresh()
-        #if DEBUG
-        runSectionTapDebugSequence()
-        #endif
     }
 }
 
@@ -632,3 +600,25 @@ extension MessageRequestsViewController: InboxSurface {
 extension MessageRequestsViewController: StackScreen {
     var leaving: ScreenLeaving { .nativeBack }
 }
+
+#if DEBUG
+extension MessageRequestsViewController {
+    /// The sections on show, in order (#2292). Tests.
+    var debugSections: [InboxListSection] { dataSource.snapshot().sectionIdentifiers }
+
+    /// The sections that wear a header: the Join requests only (#2292). Tests.
+    var debugHeadedSections: [InboxListSection] {
+        (0..<dataSource.snapshot().numberOfSections).compactMap { headedSection(at: $0) }
+    }
+
+    /// The rows of `section`, in order; empty when it is not on show. Tests.
+    func debugRowIDs(in section: InboxListSection) -> [ConversationID] {
+        let current = dataSource.snapshot()
+        guard current.sectionIdentifiers.contains(section) else { return [] }
+        return current.itemIdentifiers(inSection: section)
+    }
+
+    /// Whether the list ends on the Hidden requests row (#552). Tests.
+    var debugEndsOnHiddenRequestsRow: Bool { tableView.tableFooterView === hiddenRequestsRow }
+}
+#endif

@@ -4,9 +4,12 @@ import UIKit
 /// The section a list has scrolled into — what the inbox names in its bar,
 /// after the bell (#1301), instead of a capsule pinned under the bar. Each
 /// list works it out with the one rule (`PinnedSectionTracker`, #1573).
+///
+/// Since one list per tab (#2292), only Requests' Join requests section
+/// (#2230) has a name to give; Chats names none.
 struct InboxPinnedSection: Equatable {
     var section: InboxListSection
-    /// Its unread messages, as its header counts them (#1210).
+    /// What its header counts: the join requests waiting (#2230).
     var count: Int
 
     var title: String { section.title }

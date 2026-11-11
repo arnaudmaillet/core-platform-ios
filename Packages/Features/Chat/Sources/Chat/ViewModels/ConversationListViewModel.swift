@@ -13,7 +13,10 @@ import Foundation
 public final class ConversationListViewModel {
     public nonisolated enum Phase: Equatable, Sendable {
         case loading
-        case content(InboxListSections)
+        /// One list, sorted by the last activity, pinned rows first (#2292):
+        /// no New / Recent sections. A row new since the visit says so
+        /// itself (`ConversationDisplayModel.isNew`).
+        case content([ConversationDisplayModel])
         case empty
         case failed(message: String)
     }
@@ -27,7 +30,7 @@ public final class ConversationListViewModel {
     /// unread rows' counts, falling as a conversation is read. It counted
     /// the conversations new since the visit (`InboxTabWatermark`) — 3 on a
     /// tab holding 4 unread messages, and never lowered by reading. The
-    /// watermark still splits the list into New and Recent. A muted
+    /// watermark now decides only the ink of a row's count (#2292). A muted
     /// channel's posts are left out (#2230,
     /// `ConversationDisplayModel.countsInBadge`).
     public private(set) var newCount = 0
@@ -220,9 +223,8 @@ public final class ConversationListViewModel {
         let rows = snapshot.active
         hasMore = snapshot.hasMore.contains(.inbox)
         publishNewCount(rows.reduce(0) { total, row in
-            // A muted channel's posts stay on its row and off the badge (#2230).
-            // The display model's rule (`countsInBadge`), so the headers
-            // add up to it.
+            // A muted channel's posts stay on its row and off the badge (#2230):
+            // the display model's rule (`countsInBadge`).
             let isChannel = row.kind == .channel && row.identity != nil
             let counts = !(isChannel && snapshot.muted.contains(row.id))
             return total + (counts && snapshot.unreadIDs.contains(row.id) ? row.unreadCount : 0)
@@ -238,11 +240,9 @@ public final class ConversationListViewModel {
                 return
             }
             let now = now()
-            // The watermark decides the split, and it is the same watermark
-            // the badge is counted from — see `InboxListSections`.
-            let isNew = Dictionary(
-                uniqueKeysWithValues: rows.map { ($0.id, watermark.isNewOnRow($0)) }
-            )
+            // One list in the catalog's order (#2292). The watermark that
+            // split it into New and Recent now marks each row it would have
+            // put in New: the primary ink of its count (`unreadInk`).
             let models = rows.map {
                 ConversationDisplayModel(
                     conversation: $0,
@@ -254,10 +254,11 @@ public final class ConversationListViewModel {
                     // clear a row ahead of the server, and a count left behind
                     // would be a number beside a row that reads as read.
                     unreadCount: snapshot.unreadIDs.contains($0.id) ? $0.unreadCount : 0,
+                    isNew: watermark.isNewOnRow($0),
                     joinedInvitation: snapshot.joinedInvitations.contains($0.id)
                 )
             }
-            phase = .content(InboxListSections(rows: models) { isNew[$0.id] ?? false })
+            phase = .content(models)
         }
     }
 }

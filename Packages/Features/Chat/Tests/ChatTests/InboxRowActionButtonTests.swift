@@ -251,7 +251,7 @@ struct InboxRowActionButtonTests {
 
         func requestIDs() -> [String] {
             guard case .content(let sections) = viewModel.phase else { return [] }
-            return sections.all.map(\.id.rawValue)
+            return sections.map(\.id.rawValue)
         }
         #expect(requestIDs() == ["r1", "r2"])
         let first = try #require(cell(MessageRequestCell.self, row: 0, in: screen))
