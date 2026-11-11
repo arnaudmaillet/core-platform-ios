@@ -7,6 +7,7 @@ import EntityStore
 import MediaCore
 import UIKit
 import VoiceKit
+import VoiceKitUI
 
 /// The "+" menu's Text Post: a text post's own page, born empty, in a sheet.
 ///
@@ -151,7 +152,10 @@ final class TextPostComposerViewController: UIViewController {
     /// typed so far go with it as its caption), or words alone as before.
     private func installVoiceComposer() {
         guard panel.viewModel.acceptsVoice, voiceComposer == nil else { return }
-        let composer = VoiceComposer(draftKey: "text-post-voice", limit: TextPostVoice.maximumDuration)
+        let composer = VoiceComposer(
+            draftKey: "text-post-voice", limit: TextPostVoice.maximumDuration,
+            timerStyle: VoiceView.TimerStyle(role: .post(author: nil))
+        )
         composer.onSend = { [weak self] take in
             guard let self else { return }
             panel.viewModel.publishVoice(

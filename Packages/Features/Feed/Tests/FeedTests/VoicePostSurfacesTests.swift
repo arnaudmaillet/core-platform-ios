@@ -47,7 +47,7 @@ struct VoicePostSurfacesTests {
         card.install(in: host)
         #expect(card.voice.superview === host)
         #expect(card.voice.size == .full)
-        #expect(card.voice.voiceView?.debugTimerText == "0:32")
+        #expect(card.voice.voiceView?.debugTimerText == "32\u{2033}")
         #expect(card.caption.frame.minY >= card.voice.frame.maxY, "the words aren't under the voice")
         #expect(card.caption.text == "From the ridge")
     }
@@ -67,7 +67,7 @@ struct VoicePostSurfacesTests {
     // MARK: - The share
 
     @Test func theShareSaysTheVoiceWithAndWithoutWords() {
-        #expect(VoicePosts.shareText(caption: "", voice: voice, showsVoice: true) == "🎙 Voice post · 0:32")
+        #expect(VoicePosts.shareText(caption: "", voice: voice, showsVoice: true) == "🎙 Voice post · 32\u{2033}")
         #expect(VoicePosts.shareText(caption: " From the ridge ", voice: voice, showsVoice: true) == "🎙 From the ridge")
         let long = String(repeating: "a", count: 100)
         #expect(VoicePosts.shareText(caption: long, voice: voice, showsVoice: true)

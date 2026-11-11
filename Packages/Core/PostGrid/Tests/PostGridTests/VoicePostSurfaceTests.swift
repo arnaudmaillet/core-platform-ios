@@ -74,7 +74,7 @@ struct VoicePostSurfaceTests {
         let caption = try #require(cell.debugVoiceCaption)
         #expect(caption.size == .full)
         #expect(caption.voiceView?.size == .full)
-        #expect(caption.voiceView?.debugTimerText == "0:12")
+        #expect(caption.voiceView?.debugTimerText == "12\u{2033}")
         #expect(cell.debugCaptionText == "From the ridge", "the words under a full voice went")
         let voiceFrame = caption.convert(caption.bounds, to: cell)
         #expect(cell.debugCaptionFrame.minY >= voiceFrame.maxY, "the words aren't under the voice")
@@ -201,7 +201,7 @@ struct VoicePostSurfaceTests {
         tile.configure(with: post(), imagePipeline: pipeline, showsVoice: true)
         let mark = try #require(tile.debugVoiceMark)
         #expect(mark.size == .mark)
-        #expect(mark.markView?.debugDurationText == "0:12")
+        #expect(mark.markView?.debugDurationText == "12\u{2033}")
         #expect(!mark.isUserInteractionEnabled, "the mark takes the tile's tap")
         #expect(tile.accessibilityLabel == "Voice post by Ava Moreau, 13 seconds")
 

@@ -19,7 +19,7 @@ public enum VoicePosts {
     static let shareCaptionLimit = 80
 
     /// What a voice post's share says where no player is drawn (#2208): "🎙
-    /// Voice post · 0:32", or its words marked and cut at
+    /// Voice post · 32″", or its words marked and cut at
     /// `shareCaptionLimit`; nil for a post that does not speak, or with the
     /// switch off. Pure.
     static func shareText(caption: String?, voice: PostVoice?, showsVoice: Bool = areDrawn) -> String? {

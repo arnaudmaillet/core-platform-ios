@@ -2,6 +2,7 @@ import DesignSystem
 import FeedInterface
 import UIKit
 import VoiceKit
+import VoiceKitUI
 
 /// Recording a voice message from a conversation's composer (#2102): hold
 /// the empty field to talk (#2183), slide to cancel, slide up to lock, then
@@ -66,6 +67,7 @@ final class VoiceComposer {
     init(
         recorder: VoiceRecorder = VoiceRecorder(), draftKey: String?, now: @escaping () -> Date = Date.init,
         limit: TimeInterval = VoiceRecorder.maximumDuration,
+        timerStyle: VoiceView.TimerStyle = .clock,
         join: @escaping (VoiceDraft, VoiceDraft) async throws -> VoiceDraft = { first, second in
             try await VoiceTakeJoin.join(
                 first, second,
@@ -75,6 +77,8 @@ final class VoiceComposer {
     ) {
         self.recorder = recorder
         recorder.limit = limit
+        // A voice post's take reads in seconds, a message's on the clock (#2294).
+        strip.timerStyle = timerStyle
         self.draftKey = draftKey
         self.now = now
         self.join = join

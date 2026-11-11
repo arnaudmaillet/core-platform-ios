@@ -7,7 +7,7 @@ import UIKit
 /// it speaks.
 ///
 /// ```
-///   🎙 ▂▅▇▅▃▂▅▇▆▃  0:32
+///   🎙 ▂▅▇▅▃▂▅▇▆▃  32″
 /// ```
 ///
 /// - **Not interactive:** a tap is the tile's (it opens the post).
@@ -18,6 +18,9 @@ public final class VoiceMarkView: UIView {
     /// The bars' height and count.
     public static let waveformHeight: CGFloat = 12
     public static let barCount = 12
+    /// The mark is only ever a voice post's: its length in seconds, "32″"
+    /// (#2294).
+    public static let timerStyle = VoiceView.TimerStyle(role: .post(author: nil))
 
     private let mic = UIImageView()
     private let waveform = WaveformBars()
@@ -68,7 +71,8 @@ public final class VoiceMarkView: UIView {
     public func configure(duration: TimeInterval, levels: [UInt8]?) {
         self.duration = duration
         waveform.configure(levels: levels ?? VoiceView.genericLevels, barCount: Self.barCount, progress: 0)
-        durationLabel.text = VoiceView.clock(duration)
+        // A voice post's length, in its seconds (#2294).
+        durationLabel.text = VoiceView.timerText(duration, style: Self.timerStyle)
         invalidateIntrinsicContentSize()
     }
 

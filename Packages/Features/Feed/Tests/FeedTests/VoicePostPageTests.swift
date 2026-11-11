@@ -72,7 +72,7 @@ struct VoicePostPageTests {
                        imagePipeline: nil)
         let view = try? #require(cell.debugVoiceView)
         #expect(view?.size == .full)
-        #expect(view?.debugTimerText == "0:12")
+        #expect(view?.debugTimerText == "12\u{2033}", "a voice post's seconds (#2294)")
         #expect(view?.accessibilityLabel == "Voice post by Ava Moreau, 13 seconds")
         #expect(!cell.debugShowsBody, "an empty line under a voice alone")
 

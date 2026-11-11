@@ -118,7 +118,8 @@ public final class VoiceCatalogViewController: UIViewController {
         let (block, stack) = groundBlock(title: title, style: style, ground: ground)
         let levels = VoiceView.genericLevels
         for size in [VoiceView.Size.full, .compact] {
-            for duration in [2.0, 50.0] {
+            // Short, long, and a post's limit: "60″" in the slot (#2294).
+            for duration in [2.0, 50.0, 60.0] {
                 let voice = VoiceView(size: size)
                 voice.role = .post(author: "Ava Moreau")
                 let id = "catalog-\(style.rawValue)-\(ground.name)-\(size)-\(Int(duration))"

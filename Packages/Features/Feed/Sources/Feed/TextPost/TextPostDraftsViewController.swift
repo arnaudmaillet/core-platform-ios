@@ -1,6 +1,7 @@
 import CoreStorage
 import DesignSystem
 import UIKit
+import VoiceKitUI
 
 /// The drafts the viewer kept, pushed inside the Text Post sheet from its
 /// "Drafts" button. Tapping one opens it in the composer; swiping deletes it.
@@ -21,12 +22,13 @@ final class TextPostDraftsViewController: UIViewController {
     }()
 
     /// "Saved 2 hours ago", and the voice's length when the draft has one
-    /// (#2209): "Voice 0:12 · Saved 2 hours ago".
+    /// (#2209), in a voice post's seconds (#2294): "Voice 12″ · Saved 2 hours
+    /// ago".
     static func secondLine(for draft: PostDraft, saved: Date, now: Date = Date()) -> String {
         let age = "Saved " + ageFormatter.localizedString(for: saved, relativeTo: now)
         guard let voice = draft.voice else { return age }
-        let seconds = Int(voice.duration.rounded())
-        return String(format: "Voice %d:%02d", seconds / 60, seconds % 60) + " \u{00B7} " + age
+        let length = VoiceView.timerText(voice.duration, style: VoiceView.TimerStyle(role: .post(author: nil)))
+        return "Voice \(length) \u{00B7} \(age)"
     }
 
     init(store: PostDraftStore) {

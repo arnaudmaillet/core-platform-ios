@@ -113,8 +113,8 @@ struct ShareSheetTests {
     @Test func aVoicePostsShareTitleSaysItsVoice() {
         let link = URL(string: "https://core-platform.click/p/1")!
         let voice = ShareCard(displayName: "Ava Moreau", handle: "@ava", avatarURL: nil, url: link,
-                              detail: "🎙 Voice post · 0:32")
-        #expect(voice.shareTitle == "Ava Moreau · 🎙 Voice post · 0:32")
+                              detail: "🎙 Voice post · 32\u{2033}")
+        #expect(voice.shareTitle == "Ava Moreau · 🎙 Voice post · 32\u{2033}")
         let plain = ShareCard(displayName: "Ava Moreau", handle: "@ava", avatarURL: nil, url: link)
         #expect(plain.shareTitle == "Ava Moreau · @ava")
     }
