@@ -163,10 +163,34 @@ final class SnapChromeView: UIView {
     /// about 10 pt either side of the line over the toolbar, about 8 over
     /// the tab bar — the 2 pt difference between the two screens is
     /// accepted, for one rule on both.
+    ///
+    /// ⚠️ SUPERSEDED BY #2301 (the owner, 2026-11-11): the strip is no longer
+    /// centred. Its line stands `SnapActionColumn.stripAboveGlass` (10 pt)
+    /// over the bar's glass on both screens, and the caption rises instead
+    /// (`coverLineLift`), its letters `captionAboveStrip` (16 pt) above it.
     static func pageBarCenterOffset(overTabBar: Bool, breathApplied: Bool = true) -> CGFloat {
-        let letters: CGFloat = -(SnapActionColumn.inputRestingGap + captionLetterDrop)
         let glass: CGFloat = SnapActionColumn.glassBelowMargins(overTabBar: overTabBar, breathApplied: breathApplied)
-        return (letters + glass) / 2
+        return glass - SnapActionColumn.stripAboveGlass - SnapMediaPageBarView.thickness / 2
+    }
+
+    /// ⚠️ ONE SEAT FOR EVERY MEDIA POST, RAISED (#2301): how far the
+    /// caption's bottom — and with it the caption floor and the band —
+    /// stands above where #2252 put it (`inputRestingGap` over the margins),
+    /// so the caption's letters end `captionAboveStrip` over the strip's top,
+    /// strip or not. Stated from the glass, so it is the same on both bars:
+    /// about 6 pt on a pushed post, 10 on Shots.
+    ///
+    /// ⚠️ THE COLUMN DOES NOT RISE (the owner, 2026-11-11, option c): the
+    /// sound cover stays on the composer's line (`inputRestingGap`), level
+    /// with the engaged composer's field, and the composer's stake and rail
+    /// keep standing exactly on the like and the sound. The caption's bottom
+    /// leaves the cover's line by this lift (#2252's level is given up).
+    static func coverLineLift(overTabBar: Bool, breathApplied: Bool = true) -> CGFloat {
+        let glass: CGFloat = SnapActionColumn.glassBelowMargins(overTabBar: overTabBar, breathApplied: breathApplied)
+        let lettersAboveMargins: CGFloat = SnapActionColumn.stripAboveGlass + SnapMediaPageBarView.thickness
+            + SnapActionColumn.captionAboveStrip - glass
+        let captionBottomAboveMargins: CGFloat = lettersAboveMargins - captionLetterDrop
+        return max(0, captionBottomAboveMargins - SnapActionColumn.inputRestingGap)
     }
 
     /// What the caption's line box keeps under its baseline: the bottom of
@@ -272,6 +296,9 @@ final class SnapChromeView: UIView {
     let postActions = SnapPostActionsCapsule()
     private var boostStationTop: NSLayoutConstraint?
     private var boostStationBottom: NSLayoutConstraint?
+    /// The caption floor's bottom, raised with the caption on a media page
+    /// (#2301) so the band keeps its place over it.
+    private var captionFloorBottom: NSLayoutConstraint?
     private var railBottom: NSLayoutConstraint?
 
     /// The insets the cell handed over (`setFixedInsets`), before the
@@ -595,6 +622,8 @@ final class SnapChromeView: UIView {
         buildLayout()
         installSoundBubble()
         applySoundVisibility()
+        // The cover's line raised from the start (#2301), before any insets.
+        applySeat()
     }
 
     @available(*, unavailable)
@@ -773,12 +802,18 @@ final class SnapChromeView: UIView {
         addLayoutGuide(captionFloorGuide)
         let floorHeight = captionFloorGuide.heightAnchor.constraint(equalToConstant: Self.captionFloorHeight)
         captionFloorHeightConstraint = floorHeight
+        // Raised with the cover's line on a media page (#2301), so the band
+        // keeps its place over the caption.
+        let floorBottom = captionFloorGuide.bottomAnchor.constraint(
+            equalTo: layoutMarginsGuide.bottomAnchor, constant: -Spacing.xl
+        )
+        captionFloorBottom = floorBottom
         NSLayoutConstraint.activate([
             captionFloorGuide.leadingAnchor.constraint(equalTo: captionLabel.leadingAnchor),
             captionFloorGuide.trailingAnchor.constraint(equalTo: captionLabel.trailingAnchor),
             // A FIXED line, not the label's bottom: the corner that hangs off
             // this floor keeps its own rule (#2252 left it where it was).
-            captionFloorGuide.bottomAnchor.constraint(equalTo: layoutMarginsGuide.bottomAnchor, constant: -Spacing.xl),
+            floorBottom,
             floorHeight,
         ])
 
@@ -1065,6 +1100,7 @@ final class SnapChromeView: UIView {
             soundStation.widthAnchor.constraint(equalTo: bandSeat.heightAnchor)
             soundStation.heightAnchor.constraint(equalTo: bandSeat.heightAnchor)
         }
+        // On the composer's line, not raised with the caption (#2301, c).
         soundStation.bottomAnchor.constraint(
             equalTo: layoutMarginsGuide.bottomAnchor, constant: -SnapActionColumn.inputRestingGap
         ).isActive = true
@@ -1223,9 +1259,11 @@ final class SnapChromeView: UIView {
     /// media page (the sound bubble's rule).
     private func applyPostActionsLayout() {
         let lift = showsPostActions ? SnapPostActionsCapsule.columnExtent : 0
-        boostStationTop?.constant = -lift
+        // The band rises with the caption (#2301); the like pill keeps its
+        // top where the column stands (option c).
+        boostStationTop?.constant = -lift + currentCoverLineLift
         boostStationBottom?.constant = -(Self.boostStationBottomInset + lift)
-        railBottom?.constant = -lift
+        railBottom?.constant = -lift + currentCoverLineLift
         applySoundVisibility()
         setNeedsLayout()
     }
@@ -1300,7 +1338,9 @@ final class SnapChromeView: UIView {
         let fixedZones = SnapShortcutRailView.restingWindowHeight
             + SnapShortcutRailView.edgeFadeLength
             + seat.height
-        let headroom = seat.maxY - base - fixedZones
+        // The rail stands the seat's lift below the risen band (#2301,
+        // option c): its bottom stays with the column.
+        let headroom = seat.maxY + currentCoverLineLift - base - fixedZones
         guard headroom > 0 else { return }
         let aligned = (headroom / SnapShortcutRailView.step).rounded(.down) * SnapShortcutRailView.step
         let constant = base + (headroom - aligned)
@@ -1338,9 +1378,39 @@ final class SnapChromeView: UIView {
     /// Re-centres the strip (#2252): the bar under it, the breath and the
     /// caption's font all move the gap it is centred in.
     private func applyPageBarPlacement() {
+        applySeat()
         let offset = currentPageBarCenterOffset
         guard let center = pageBarCenterConstraint, center.constant != offset else { return }
         center.constant = offset
+        setNeedsLayout()
+    }
+
+    /// The cover's line's lift for this chrome as it stands (#2301): a
+    /// media page's; a text page keeps #2252's line.
+    private var currentCoverLineLift: CGFloat {
+        guard hasMedia else { return 0 }
+        let raw: CGFloat = Self.coverLineLift(overTabBar: sitsOverTabBar, breathApplied: fixedInsets != nil)
+        // On the pixel grid, so the band, the floor and the rail's headroom
+        // all move by the same drawn amount.
+        let scale: CGFloat = max(traitCollection.displayScale, 1)
+        return (raw * scale).rounded() / scale
+    }
+
+    /// Raises the caption and its floor (the band rides it) by the lift;
+    /// the column stays on the composer's line (option c).
+    private func applySeat() {
+        let lift = currentCoverLineLift
+        let captionBottom: CGFloat = -(SnapActionColumn.inputRestingGap + lift)
+        guard captionOnCoverLine?.constant != captionBottom else { return }
+        captionOnCoverLine?.constant = captionBottom
+        captionFloorBottom?.constant = -(Spacing.xl + lift)
+        // The band rises with the floor; the like pill (whose top is the
+        // band's) stays with the column.
+        let actionsLift: CGFloat = showsPostActions ? SnapPostActionsCapsule.columnExtent : 0
+        boostStationTop?.constant = -actionsLift + lift
+        // The shortcut rail is the column's too: its bottom stays on the
+        // like pill's square, not on the risen band.
+        railBottom?.constant = -actionsLift + lift
         setNeedsLayout()
     }
 
@@ -1509,7 +1579,9 @@ final class SnapChromeView: UIView {
     /// Whether the represented post carries media. Text-only posts show an
     /// empty shell, so this gates page content — including ticker queues
     /// arriving *after* configure (`updateTickerComments`).
-    private var hasMedia = true
+    private var hasMedia = true {
+        didSet { if hasMedia != oldValue { applySeat() } }
+    }
 
     private func renderCaption() {
         lastRenderedCaptionWidth = captionLabel.bounds.width

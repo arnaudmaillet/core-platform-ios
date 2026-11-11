@@ -1300,20 +1300,35 @@ struct SnapMediaPageBarTests {
         #expect(strip.height == SnapMediaPageBarView.thickness)
     }
 
-    /// ⚠️ CENTRED BETWEEN THE LETTERS AND THE GLASS, ON BOTH SCREENS (#2252,
-    /// the owner 2026-11-10): halfway from the bottom of the caption's letters
-    /// to the top of the bottom bar's glass — the toolbar's on the post
-    /// screen, the tab bar's on Shots. The issue's expected gaps: about 10 pt
-    /// each side over the toolbar, about 8 over the tab bar.
-    @Test func theStripIsCentredBetweenTheLettersAndTheGlass() {
+    /// ⚠️ 10 PT OVER THE GLASS, THE LETTERS 16 PT ABOVE IT, ON BOTH SCREENS
+    /// (#2301, the owner 2026-11-11, superseding #2252's midpoint): the strip
+    /// belongs to the bottom of the screen, and the caption rises so a 2 pt
+    /// line no longer reads as its underline.
+    @Test func theStripStandsOverTheGlassAndTheCaptionAboveIt() {
         for overTabBar in [false, true] {
             let view = chrome(pages: 3, overTabBar: overTabBar)
             let strip = view.debugPageBarFrame
-            let above = strip.minY - lettersBottom(view)
             let below = glassTop(overTabBar: overTabBar) - strip.maxY
-            #expect(abs(above - below) < 0.5, "over the tab bar: \(overTabBar) — \(above) above, \(below) below")
-            let expected: ClosedRange<CGFloat> = overTabBar ? 6.5...9.5 : 8.5...11.5
-            #expect(expected.contains(above), "over the tab bar: \(overTabBar) — \(above) pt from the letters")
+            let above = strip.minY - lettersBottom(view)
+            #expect(abs(below - SnapActionColumn.stripAboveGlass) < 0.5,
+                    "over the tab bar: \(overTabBar) — the strip \(below) pt over the glass")
+            #expect(abs(above - SnapActionColumn.captionAboveStrip) < 0.5,
+                    "over the tab bar: \(overTabBar) — the letters \(above) pt above the strip")
+        }
+    }
+
+    /// ⚠️ ONE SEAT, STRIP OR NOT (#2301, #2252's rule kept): a single photo's
+    /// caption and column stand exactly where a carousel's do, raised alike.
+    @Test func everyMediaPostTakesTheSameRaisedSeat() {
+        for overTabBar in [false, true] {
+            let carousel = chrome(pages: 3, overTabBar: overTabBar)
+            let photo = chrome(pages: 1, overTabBar: overTabBar)
+            #expect(carousel.debugCaptionFrame == photo.debugCaptionFrame, "over the tab bar: \(overTabBar)")
+            #expect(carousel.debugSoundStationFrame == photo.debugSoundStationFrame, "over the tab bar: \(overTabBar)")
+            // The column stays on the composer's line (the owner, option c):
+            // the caption stands the lift above the cover's bottom.
+            let lift = SnapChromeView.coverLineLift(overTabBar: overTabBar)
+            #expect(abs(photo.debugSoundStationFrame.maxY - photo.debugCaptionFrame.maxY - lift) < 0.5)
         }
     }
 
@@ -1528,9 +1543,10 @@ struct SnapMediaPageBarTests {
             #expect(view.debugCaptionFrame == photo.debugCaptionFrame, "\(name): the caption moved for the strip")
             #expect(view.debugFrame(of: view.debugBoostButton) == photo.debugFrame(of: photo.debugBoostButton), "\(name)")
         }
-        // On the cover's line.
+        // The cover's line, raised by the seat's lift (#2301).
         let line = Self.barLine - SnapActionColumn.bottomBreath - SnapActionColumn.inputRestingGap
-        #expect(abs(photo.debugCaptionFrame.maxY - line) < 0.5, "the caption is off the cover's line")
+            - SnapChromeView.coverLineLift(overTabBar: false)
+        #expect(abs(photo.debugCaptionFrame.maxY - line) < 0.5, "the caption is off its seat")
     }
 
     /// ⚠️ NOTHING SHIFTS BETWEEN POSTS (#2252): a one-line caption, a
