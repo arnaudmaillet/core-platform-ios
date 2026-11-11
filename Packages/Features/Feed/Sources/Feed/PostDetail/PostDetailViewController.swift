@@ -129,6 +129,40 @@ final class PostDetailViewController: UIViewController {
     /// The pager, for a selector that scrubs it.
     var streamPager: HorizontalPagerView { pager }
 
+    // MARK: - The streams cut to their room (#2298)
+
+    /// Whether the streams read in the panel's room (#2298, the owner
+    /// 2026-11-11): Popular shows the caption and the whole threads that fit
+    /// between the bar and the composer, then "See all n comments"; Recent
+    /// loads its older pages only on its "Earlier comments" row. On the text
+    /// page in a vertical feed (`setEngagedPageSwipeHandler`) and in the
+    /// comments sheet (`SnapCommentsSheetViewController.prepare`); elsewhere
+    /// (the published text post's sheet) both scroll through all they hold
+    /// and page as the reader nears an end, as before.
+    private(set) var cutsStreamsToRoom = false
+
+    /// Turns `cutsStreamsToRoom` on, for good.
+    func cutStreamsToRoom() {
+        guard !cutsStreamsToRoom else { return }
+        cutsStreamsToRoom = true
+        guard isViewLoaded else { return }
+        streams.filter(\.hasAppliedStream).forEach { $0.applyStream(animated: false) }
+    }
+
+    /// Popular's "See all n comments": Recent, as a tap on its tab would
+    /// show it — the pager's own change, the selector following (#2298).
+    func seeAllComments() {
+        showStream(.recent, animated: !MotionPreference.reducesMotion)
+    }
+
+    /// The post's comment count, as well as the panel knows it: the opener's,
+    /// or what Recent holds once it holds more. Nil when neither knows.
+    var postCommentCount: Int64? {
+        let held = Int64(commentCount)
+        guard let known = knownCommentCount ?? seededCardMetrics?.comments else { return held > 0 ? held : nil }
+        return max(known, held)
+    }
+
     /// THE CAPTION ROW'S AUTHOR FACE, bound by the screen hosting the panel
     /// (#2300). A text page's author is its caption's row — the chrome's
     /// author row shows only on a media page — so that face is one more of
@@ -432,6 +466,8 @@ final class PostDetailViewController: UIViewController {
         // Rows realised as the engaged stream grows into its room (#1799).
         let rise = streamsRideKeyboard ? composerRise : 0
         streams.forEach {
+            // Popular's cut once its room is known, or changed (#2298).
+            $0.refitCut()
             $0.syncBottomAnchor()
             $0.syncKeyboardRise(rise)
             $0.keepRestingEnd()
@@ -519,6 +555,7 @@ final class PostDetailViewController: UIViewController {
         viewModel.onEngagementChange = { [weak self] state in self?.renderEngagement(state) }
         viewModel.onCommentsChange = { [weak self] state in self?.recent.renderComments(state) }
         viewModel.onPopularCommentsChange = { [weak self] state in self?.popular.renderComments(state) }
+        viewModel.onOlderCommentsLoadChange = { [weak self] _ in self?.recent.syncLinkRows() }
         viewModel.onComposingChange = { [weak self] composing in self?.renderComposing(composing) }
         viewModel.onViewerIdentityChange = { [weak self] identity in
             guard let self else { return }
@@ -541,7 +578,11 @@ final class PostDetailViewController: UIViewController {
         // size changes — see `refitEmptyPage`.
         registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) {
             (controller: PostDetailViewController, _: UITraitCollection) in
-            controller.streams.forEach { $0.refitEmptyPage() }
+            controller.streams.forEach {
+                $0.refitEmptyPage()
+                // …and Popular's cut is the threads that fit at that size (#2298).
+                $0.refitCut()
+            }
         }
         // …and the keyboard takes the room the page is fitted to.
         observeKeyboardForEmptyPage()
@@ -703,6 +744,8 @@ final class PostDetailViewController: UIViewController {
         guard count != commentCount else { return }
         commentCount = count
         onCommentCountChange?(count)
+        // Popular's "See all n comments" says the post's count (#2298).
+        if cutsStreamsToRoom, isViewLoaded { popular.syncLinkRows() }
     }
 
     /// The composer's text, for a host that keeps drafts of it.
@@ -972,9 +1015,10 @@ final class PostDetailViewController: UIViewController {
     ) {
         composeBar.onPageSwipe = handler
         pagesBackFromStreamTop = pagesBack
-        // A page in a vertical feed: its comments read in tiers, the edge of
-        // what is shown handing the swipe to the feed (#2042).
-        streams.forEach { $0.readsInTiers = true }
+        // A page in a vertical feed: its streams read in its room (#2298),
+        // and a drag beginning at an edge of what is shown goes to the next
+        // post or the previous one (`CommentStream.edgeHandOff`).
+        cutStreamsToRoom()
     }
     /// Whether a drag beginning at the stream's top edge goes to the previous
     /// post. Nil outside a vertical feed.
@@ -1763,7 +1807,6 @@ final class PostDetailViewController: UIViewController {
         streams.forEach {
             $0.refitEmptyPage()
             $0.syncBottomAnchor(animated: true)
-            $0.syncMoreButton()
         }
     }
 
@@ -1773,7 +1816,6 @@ final class PostDetailViewController: UIViewController {
         streams.forEach {
             $0.refitEmptyPage()
             $0.syncBottomAnchor(animated: true)
-            $0.syncMoreButton()
         }
     }
 

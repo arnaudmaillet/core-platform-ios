@@ -1742,6 +1742,11 @@ final class SnapCommentsSheetViewController: UIViewController, UINavigationBarDe
         // stream and Recent's anchor was turned off.
         // A stream held whole leaves a drag on it to the sheet.
         detail.letSheetTakeShortStreams()
+        // ONE PANEL, ONE CONTRACT (#2298): Popular is the threads that fit
+        // the sheet's room, then "See all n comments"; Recent's older pages
+        // come on its "Earlier comments" row — as on the text page. No pull
+        // to another post here: the sheet is not a page of the feed.
+        detail.cutStreamsToRoom()
         // The sheet rises over the keyboard itself: Recent does not ride it.
         detail.streamsRideKeyboard = false
         // The count the feed knows: no comment bones for a post with none (#1773).
