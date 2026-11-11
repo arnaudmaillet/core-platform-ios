@@ -1,36 +1,43 @@
 {
-  "fill" : "automatic",
+  "fill" : {
+    "solid" : "srgb:1.00000,0.07451,0.34510,1.00000"
+  },
   "groups" : [
     {
       "layers" : [
         {
           "fill" : {
-            "solid" : "extended-gray:1.00000,0.70000"
+            "solid" : "display-p3:0.46658,0.98557,0.80754,0.40000"
           },
-          "image-name" : "play-converti.svg",
-          "name" : "play-converti",
+          "glass" : true,
+          "hidden" : false,
+          "image-name" : "mark.svg",
+          "name" : "mark-mint",
+          "opacity" : 0.6,
           "position" : {
-            "scale" : 1.05,
+            "scale" : 0.6,
             "translation-in-points" : [
-              -0.4800000000000182,
-              -0.005572070426296705
+              -20,
+              24
             ]
           }
         },
         {
-          "blend-mode" : "normal",
-          "image-name" : "circle.svg",
-          "name" : "circle",
+          "fill" : {
+            "solid" : "srgb:1.00000,1.00000,1.00000,1.00000"
+          },
+          "image-name" : "mark.svg",
+          "name" : "mark",
+          "opacity" : 0.8,
           "position" : {
             "scale" : 1,
             "translation-in-points" : [
               0,
-              1.1368683772161603e-13
+              20.5
             ]
           }
         }
       ],
-      "name" : "Group",
       "shadow" : {
         "kind" : "neutral",
         "opacity" : 0.5
