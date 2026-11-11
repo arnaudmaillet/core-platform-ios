@@ -6,6 +6,7 @@ import DesignSystem
 import EntityStore
 import MediaCore
 import UIKit
+import VoiceKit
 
 /// The "+" menu's Text Post: a text post's own page, born empty, in a sheet.
 ///
@@ -52,6 +53,11 @@ final class TextPostComposerViewController: UIViewController {
     /// The thread's voice composer, on the text composer (#2209,
     /// `-voice-posts`): the first message can be a voice.
     private(set) var voiceComposer: VoiceComposer?
+    /// The copy of the opened draft's voice handed to the bar (#2209): the
+    /// draft's own file stays the store's, so publishing (which deletes the
+    /// draft) never pulls the file from under the post that plays it. While
+    /// the bar still holds this file, the draft's voice is unchanged.
+    private var restoredVoiceURL: URL?
     /// The card the screen was opened with (#2216, "Share as a Post"): a
     /// channel's, attached above the composer until the author removes it.
     private let openingEmbed: PostEmbed?
@@ -158,6 +164,8 @@ final class TextPostComposerViewController: UIViewController {
             Feedback.info(hint, symbol: "mic", from: self)
         }
         composer.onPermissionDenied = { [weak self] in self?.offerMicrophoneSettings() }
+        // A take recorded or thrown away changes what leaving would lose.
+        composer.onPhaseChange = { [weak self] _ in self?.refreshSwipeGuard() }
         composer.attach(to: panel.composeBar, host: view)
         // A failed upload keeps the take and offers to try again, as a failed
         // chat send does.
@@ -456,13 +464,25 @@ final class TextPostComposerViewController: UIViewController {
         navigationController?.isModalInPresentation = hasUnsavedChanges || panel.isPublishing
     }
 
-    /// Whether leaving now would lose writing: text that is neither published,
-    /// on its way, nor already the saved draft it came from.
+    /// Whether leaving now would lose writing: text or a voice that is
+    /// neither published, on its way, nor already the saved draft it came from.
     var hasUnsavedChanges: Bool {
         guard publishedModel == nil, !panel.isPublishing else { return false }
         let text = composerText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return false }
-        return text != editingDraftID.flatMap { drafts.draft($0) }?.text
+        let hasVoice = voiceComposer?.hasTake == true
+        guard !text.isEmpty || hasVoice else { return false }
+        let saved = editingDraftID.flatMap { drafts.draft($0) }
+        return text != saved?.text || voiceDiffers(from: saved)
+    }
+
+    /// Whether the bar's voice is not the saved draft's (#2209): a take
+    /// recorded, recorded on, or thrown away. Without the voice composer
+    /// (`-voice-posts` off) a draft's voice is kept as it is.
+    private func voiceDiffers(from saved: PostDraft?) -> Bool {
+        guard let composer = voiceComposer else { return false }
+        guard composer.hasTake else { return saved?.voice != nil }
+        guard saved?.voice != nil, let restoredVoiceURL else { return true }
+        return composer.closedTakeURL != restoredVoiceURL
     }
 
     private func cancelTapped() {
@@ -494,8 +514,32 @@ final class TextPostComposerViewController: UIViewController {
 
     /// Internal for tests: the alert's actions cannot be tapped from one.
     func saveDraftAndClose() {
-        drafts.save(composerText, replacing: editingDraftID)
-        close()
+        saveDraft { [weak self] in self?.close() }
+    }
+
+    /// Saves what is on screen — the words, and the bar's take when there is
+    /// one (#2209) — over the draft being edited, then `done`. A take is
+    /// closed first, which may take a moment when two parts are being joined.
+    private func saveDraft(then done: @escaping () -> Void) {
+        let text = composerText
+        let id = editingDraftID
+        guard let composer = voiceComposer else {
+            // No bar to record on: a draft's voice is kept as it was.
+            let kept = id.flatMap { drafts.draft($0) }?.voice.map {
+                PostDraftVoiceTake(fileURL: drafts.voiceURL($0), duration: $0.duration, waveform: $0.waveform)
+            }
+            drafts.save(text, voice: kept, replacing: id)
+            return done()
+        }
+        composer.takeForDraft { [weak self] take in
+            guard let self else { return }
+            let voice = take.map { PostDraftVoiceTake(fileURL: $0.fileURL, duration: $0.duration, waveform: $0.waveform) }
+            drafts.save(text, voice: voice, replacing: id)
+            // The store kept a copy: the take's own file was a temporary one.
+            if let take { try? FileManager.default.removeItem(at: take.fileURL) }
+            restoredVoiceURL = nil
+            done()
+        }
     }
 
     func deleteDraftAndClose() {
@@ -528,13 +572,41 @@ final class TextPostComposerViewController: UIViewController {
         // The draft already open keeps the edits on screen — its row was read
         // before they were made.
         if draft.id != editingDraftID {
-            if hasUnsavedChanges { drafts.save(composerText, replacing: editingDraftID) }
-            editingDraftID = draft.id
-            panel.composerText = draft.text
+            let switchTo = { [weak self] in
+                guard let self else { return }
+                editingDraftID = draft.id
+                panel.composerText = draft.text
+                restoreVoice(of: draft)
+                refreshSwipeGuard()
+            }
+            if hasUnsavedChanges {
+                saveDraft(then: switchTo)
+            } else {
+                voiceComposer?.clearTake()
+                restoredVoiceURL = nil
+                switchTo()
+            }
         }
         if navigationController?.topViewController !== self {
             navigationController?.popToViewController(self, animated: true)
         }
+    }
+
+    /// A draft's voice back on the paused bar (#2209), from a copy of its
+    /// file: listen back, record on, delete or send, as with a fresh take.
+    private func restoreVoice(of draft: PostDraft) {
+        guard let composer = voiceComposer, let voice = draft.voice else { return }
+        let source = drafts.voiceURL(voice)
+        let folder = FileManager.default.temporaryDirectory.appending(path: "voice-takes", directoryHint: .isDirectory)
+        let copy = folder.appending(path: UUID().uuidString + "." + (source.pathExtension.isEmpty ? "m4a" : source.pathExtension))
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try FileManager.default.copyItem(at: source, to: copy)
+        } catch {
+            return
+        }
+        restoredVoiceURL = copy
+        composer.restore(VoiceDraft(fileURL: copy, duration: voice.duration, waveform: voice.waveform))
     }
 
     // MARK: - Keyboard

@@ -361,22 +361,22 @@ struct ProfileGalleryOffsetSyncTests {
 
 /// ⚠️ PULL-TO-REFRESH ON FOR YOU'S PAGE (#1273): the profile's pages hand the
 /// pull to the header — no stock control on them, its indicator is the
-/// header's (`HeroPullToRefreshView`) — and a drag released past the top of
-/// the active page reaches the screen with how far it was pulled.
+/// header's (`HeroPullToRefreshView`) — and the active page's overscroll
+/// reaches the screen as its vertical offset, which the indicator reads with
+/// the app's one rule (`PullRefreshRule`, #2235).
 @MainActor
 struct ProfileGalleryPullTests {
-    @Test func aPullReleasedOnTheActivePageReachesTheScreen() throws {
+    @Test func theActivePagesPullReachesTheScreen() throws {
         let pager = ProfileGalleryPagerView(tabs: ProfileTab.postTabsForTests, makePage: TestGridPages.pageMaker())
         pager.frame = CGRect(x: 0, y: 0, width: 400, height: 600)
         pager.layoutIfNeeded()
-        var released: [CGFloat] = []
-        pager.onPullReleased = { released.append($0) }
+        var offsets: [CGFloat] = []
+        pager.onVerticalScroll = { offsets.append($0) }
         let page = try #require(pager.activePage as? ForYouGridPage)
         #expect(!page.debugHasRefreshControl, "the page kept the stock control under the header")
 
-        page.debugReleasePull(by: 90)
-        #expect(released.count == 1)
-        #expect(abs((released.first ?? 0) - 90) < 1)
+        page.setVerticalOffset(-90, animated: false)
+        #expect(abs((offsets.last ?? 0) + 90) < 1, "the pull did not reach the screen")
     }
 }
 

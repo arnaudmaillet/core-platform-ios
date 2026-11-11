@@ -148,11 +148,9 @@ final class ForYouGridPage: UIView {
     /// A post's cell is about to display: its page, fetched ahead of the
     /// viewer, was shown (#970).
     var onWillDisplayPost: ((PostID) -> Void)?
+    /// A finger's pull reached the app's threshold (`AppRefreshControl`,
+    /// `PullRefreshRule`, #2235), or the failed state's "Try Again".
     var onRefresh: (() -> Void)?
-    /// Fired when a drag ends, with how far the page was pulled past its top
-    /// — the pull of a page whose host draws the indicator and owns the
-    /// threshold (`handPullToHost`).
-    var onPullReleased: ((CGFloat) -> Void)?
     /// Where a release comes to rest while a hosted header is on screen, in
     /// the travelled space (`ScrollDetents`). Empty — every host but the
     /// profile — means free (#1273).
@@ -1098,7 +1096,7 @@ final class ForYouGridPage: UIView {
         collectionView.delegate = self
         collectionView.addGestureRecognizer(offMediaHold)
         captionSelection.install(on: collectionView)
-        refreshControl.addAction(UIAction { [weak self] _ in self?.onRefresh?() }, for: .valueChanged)
+        refreshControl.onRefresh = { [weak self] in self?.onRefresh?() }
         collectionView.refreshControl = refreshControl
         collectionView.pin(to: self)
 
@@ -1477,7 +1475,8 @@ final class ForYouGridPage: UIView {
     }
 
     /// Drops the stock `UIRefreshControl`: the host reads the pull from
-    /// `onPullReleased` and draws its own indicator.
+    /// `onVerticalScroll` and draws its own indicator, with the same rule
+    /// (`PullRefreshRule`, #2235).
     ///
     /// ⚠️ **FOR A PAGE UNDER A FLOATING HEADER.** The stock control positions
     /// itself against the content top, which is under the header there — its
@@ -4373,7 +4372,6 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
             updateAutoplay()
             lookahead.scrollViewDidEndScrolling()
         }
-        onPullReleased?(max(0, -verticalOffset))
         if !decelerate, let pendingSnap {
             self.pendingSnap = nil
             scrollView.setContentOffset(CGPoint(x: scrollView.contentOffset.x, y: pendingSnap), animated: true)

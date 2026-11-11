@@ -108,17 +108,47 @@ struct HeroPageViewControllerTests {
         }
     }
 
-    /// A pull released past the threshold turns the spinner and asks the page
-    /// kind; one released short does neither.
-    @Test func aReleasedPullRefreshes() {
+    /// ONE RULE (#2235): a finger's pull refreshes as it reaches the shared
+    /// threshold — under the finger, not on the release — turning the
+    /// spinner and asking the page kind; short of it, nothing.
+    @Test func aFingersPullRefreshesAtTheThreshold() {
         hosting { screen in
-            screen.heroPager.onPullReleased?(HeroPullToRefreshView.threshold / 2)
-            #expect(screen.refreshes == 0)
+            screen.debugFollowPull(by: 0, isTracking: true)
+            screen.debugFollowPull(by: PullRefreshRule.threshold - 1, isTracking: true)
+            #expect(screen.refreshes == 0, "short of the threshold, it refreshed")
             #expect(!screen.pullIndicator.debugIsRefreshing)
-            screen.heroPager.onPullReleased?(HeroPullToRefreshView.threshold + 40)
-            #expect(screen.refreshes == 1)
+            screen.debugFollowPull(by: PullRefreshRule.threshold, isTracking: true)
+            #expect(screen.refreshes == 1, "the pull reached the threshold and did not refresh")
             #expect(screen.pullIndicator.debugIsRefreshing)
+            screen.debugFollowPull(by: PullRefreshRule.threshold + 40, isTracking: true)
+            screen.debugFollowPull(by: 0, isTracking: false)
+            #expect(screen.refreshes == 1, "one pull refreshed twice")
             screen.pullIndicator.endRefreshing()
+        }
+    }
+
+    /// A pull let go short, and a fling's bounce past the threshold with no
+    /// finger, never refresh — the page's own scroll path included, whose
+    /// list has no finger on it here.
+    @Test func aShortPullOrABounceDoesNotRefresh() {
+        hosting { screen in
+            screen.debugFingerPull(by: PullRefreshRule.threshold - 20)
+            #expect(screen.refreshes == 0, "a pull let go short refreshed")
+            for distance in stride(from: CGFloat(0), through: PullRefreshRule.threshold + 40, by: 10) {
+                screen.debugFollowPull(by: distance, isTracking: false)
+            }
+            #expect(screen.refreshes == 0, "a bounce refreshed")
+            screen.page.onVerticalScroll?(-(PullRefreshRule.threshold + 40))
+            #expect(screen.refreshes == 0, "a scripted offset, no finger, refreshed")
+            #expect(!screen.pullIndicator.debugIsRefreshing)
+        }
+    }
+
+    /// The failed state's "Try Again" refreshes at once — no pull to wait for.
+    @Test func tryAgainRefreshesAtOnce() {
+        hosting { screen in
+            screen.page.onRefresh?()
+            #expect(screen.refreshes == 1)
         }
     }
 

@@ -212,7 +212,6 @@ final class StubPage: UIView, PostGridPage {
     var onRefresh: (() -> Void)?
     func refreshAuthorMenus() {}
     var onVerticalScroll: ((CGFloat) -> Void)?
-    var onPullReleased: ((CGFloat) -> Void)?
     func setVerticalOffset(_ offset: CGFloat, animated: Bool) { verticalOffset = offset }
     func setHostedInsets(top: CGFloat, bottom: CGFloat) {
         hostedInsets = UIEdgeInsets(top: top, left: 0, bottom: bottom, right: 0)
