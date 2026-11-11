@@ -3,7 +3,7 @@ import UIKit
 /// The glyph for GEMS — the charter's currency B, earned-only: what a stake
 /// that turned out to carry information pays, after its deferred settlement
 /// (`dev/economy/`). `LikesSymbol`'s counterpart, so the two currencies are
-/// told apart at a glance: a raspberry heart you commit, a gold crown you
+/// told apart at a glance: a heart in the primary you commit, a gold crown you
 /// earn (the owner's crown since #2071; a violet diamond before).
 public enum GemSymbol {
     /// The owner's crown, filled (#2071).

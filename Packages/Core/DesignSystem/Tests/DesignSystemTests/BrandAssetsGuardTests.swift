@@ -9,6 +9,14 @@ import Testing
 /// `F37AB4`, and nothing said so. This reads each file in the repository and
 /// checks it against `BrandTheme.current`.
 ///
+/// ⚠️ #2282 IN TWO PULL REQUESTS: the first moves the theme (`coral`), the
+/// second redraws the icon and the launch logo. Until then those two still
+/// wear the raspberry signature, which the theme no longer holds, so they
+/// are checked against `UntilTheNewIcon` below — PR 2 (#2282, 2/2) replaces
+/// it with the new icon's guard (its ground is `primary`, its mint layer
+/// `accent`, the launch logo's colours the theme's). `AccentColor` is
+/// checked against the theme already.
+///
 /// CI only runs this in DesignSystem's lane: changing an asset's colour, run
 /// DesignSystem's tests too.
 struct BrandAssetsGuardTests {
@@ -27,6 +35,20 @@ struct BrandAssetsGuardTests {
     }
 
     private static let theme = BrandTheme.current
+
+    /// ⚠️ PR 2 (#2282, 2/2) REPLACES THIS: what the icon and the launch logo
+    /// hold today — #2062's raspberry → violet → mint signature, which
+    /// `BrandTheme` dropped with #2282's first pull request. Pinned here, in
+    /// a test (out of `RawHueGuardTests`' reach), so the guard still fails
+    /// on an asset that drifts until the new icon lands.
+    enum UntilTheNewIcon {
+        /// `LaunchLogo.svg`'s pale gradient stops, first to last.
+        static let launchLogoStops: [UInt32] = [0xF699C1, 0xD2B6FF, 0xA1F8D8]
+        /// `circle.svg`'s blob gradient, first stop to last, and each stop's
+        /// opacity.
+        static let iconStops: [UInt32] = [0xEC1C75, 0x9B5CFF, 0x2EF0A8]
+        static let iconOpacities: [Double] = [0.75, 0.6, 0.55]
+    }
 
     /// A colorset's values by appearance: "light", "dark", "lightIC",
     /// "darkIC".
@@ -81,22 +103,20 @@ struct BrandAssetsGuardTests {
         #expect(found == Self.expectedAccentColor(Self.theme))
     }
 
-    /// The launch logo's gradient stops, first to last.
-    @Test func theLaunchLogoWearsTheThemesStops() throws {
+    /// The launch logo's gradient stops, first to last (PR 2 replaces it).
+    @Test func theLaunchLogoWearsItsStops() throws {
         let svg = String(decoding: try Self.read("App/Resources/Assets.xcassets/LaunchLogo.imageset/LaunchLogo.svg"), as: UTF8.self)
-        #expect(Self.svgStops(svg) == Self.theme.launchLogoStops.map(Self.hex))
+        #expect(Self.svgStops(svg) == UntilTheNewIcon.launchLogoStops.map(Self.hex))
     }
 
-    /// The icon's blob: the theme's stops, drawn by `circle.svg` — and no
-    /// layer fill in `icon.json` painting over them.
-    @Test func theIconWearsTheThemesGradient() throws {
+    /// The icon's blob: its stops, drawn by `circle.svg` — and no layer fill
+    /// in `icon.json` painting over them (PR 2 replaces it).
+    @Test func theIconWearsItsGradient() throws {
         let svg = String(decoding: try Self.read("App/Resources/AppIcon.icon/Assets/circle.svg"), as: UTF8.self)
-        #expect(Self.svgStops(svg) == Self.theme.iconStops.map(Self.hex))
-        // Their opacities too (#2147): the loader wears the signature at
-        // them, so the icon changing fails here until the theme follows.
+        #expect(Self.svgStops(svg) == UntilTheNewIcon.iconStops.map(Self.hex))
         let opacities = svg.components(separatedBy: "stop-opacity=\"").dropFirst()
             .compactMap { Double($0.prefix { $0 != "\"" }) }
-        #expect(opacities == Self.theme.signatureOpacities)
+        #expect(opacities == UntilTheNewIcon.iconOpacities)
         struct Icon: Decodable {
             struct Group: Decodable { let layers: [Layer] }
             struct Layer: Decodable {
@@ -123,9 +143,9 @@ struct BrandAssetsGuardTests {
         #expect(try Self.accentColorValues(Data(colorset.utf8)) != Self.expectedAccentColor(Self.theme))
 
         let svg = String(decoding: try Self.read("App/Resources/Assets.xcassets/LaunchLogo.imageset/LaunchLogo.svg"), as: UTF8.self)
-        let first = Self.hex(Self.theme.launchLogoStops[0])
+        let first = Self.hex(UntilTheNewIcon.launchLogoStops[0])
         let wrong = svg.replacingOccurrences(of: "#\(first)", with: "#010203", options: .caseInsensitive)
-        #expect(Self.svgStops(wrong) != Self.theme.launchLogoStops.map(Self.hex))
+        #expect(Self.svgStops(wrong) != UntilTheNewIcon.launchLogoStops.map(Self.hex))
     }
 }
 

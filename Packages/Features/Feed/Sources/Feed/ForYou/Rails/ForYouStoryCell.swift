@@ -58,9 +58,10 @@ final class ForYouStoryCell: UICollectionViewCell {
         }
     }
 
-    /// The ring a face wears while there is something unseen: raspberry →
-    /// violet, no mint (`Palette.storyRingGradient`, #2089; #1169, #2062 — a
-    /// ring, not a pill, so it keeps a gradient). `-theme-rings accent`
+    /// The ring a face wears while there is something unseen: the signature,
+    /// violet → mint, its mint end deepened under Increased Contrast
+    /// (`Palette.storyRingGradient`, #2089, #2282; #1169, #2062 — a ring, not
+    /// a pill, so it keeps a gradient). `-theme-rings accent`
     /// compares the solid accent.
     /// A gradient layer either way, so the mask and geometry are untouched;
     /// re-resolved on a style flip.

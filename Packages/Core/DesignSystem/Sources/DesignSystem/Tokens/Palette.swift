@@ -7,29 +7,33 @@ import UIKit
 /// names and their meaning.
 ///
 /// ```
-///   role                light      dark       IC light   IC dark
-///   tint                EC1C75     EC1C75     C2105F     F25C9A
-///   brandText           EC1C75     EC1C75     C2105F     F25C9A
-///   primaryFill         EC1C75     EC1C75     C2105F     C2105F
+///   role                light      dark       IC light   IC dark    (contrast, WCAG 2.x)
+///   tint                FF1358     FF1358     C6003A     FF5C8C     3.83 white · 5.49 black · IC 6.07 · 7.16
+///   brandText           EB0045     FF1358     C6003A     FF5C8C     4.55 white · 5.49 black · IC 6.07 · 7.16
+///   primaryFill         FF1358     FF1358     C6003A     C6003A     white label 3.83 · IC 6.07
 ///   onPrimary           FFFFFF     FFFFFF
-///   primaryFillPressed  D41868     D41868     A80D52     D41868
-///   primaryContainer    FDE3EE     3D0A20     (text B00E57 / F57BAE)
-///   counter             EC1C75     EC1C75     C2105F     C2105F
+///   primaryFillPressed  DA0040     DA0040     AA0032     DA0040     white label 5.18 · IC 7.62 · 5.18
+///   primaryContainer    FFE3EB     3D0515     (text B20034 / FF7DA3: 5.93 · 7.08)
+///   counter             FF1358     FF1358     C6003A     C6003A     white count 3.83 · IC 6.07
 ///   entityInk           5E5E66     AEAEB4     48484F     C8C8CD
 ///   gem                 F5C000     FFE600     A87C00     FFE600
 ///   gemText             8A6400     FFE600     7A5800     FFE600
 ///   gemGround           FFE600     FFE600     (a wash, at the bubble's alpha)
 ///   saveGold            FFC53D     FFC53D     (one gold, #1190)
-///   brandGradient       EC1C75 0 · 9B5CFF 0.5 · 2EF0A8 1   (the assets)
-///   storyRingGradient   EC1C75 0 · 9B5CFF 1
+///   brandGradient       7235FF 0 · 16FFCB 1   (IC: 7235FF · 009E7B, 3.05 on F2F2F7)
+///   storyRingGradient   the signature, with its IC stops
+///   (theme.accent       009E7B     16FFCB     008567     16FFCB     no role: not a UI colour, #2282 § 3)
 /// ```
 ///
 /// The rules the owner settled (#1124, #1169, #1178, #1190; #2062 on
-/// 2026-11-02):
-/// - **The primary is raspberry, almost everywhere** (#2062), the same in
-///   both appearances — 4.21:1 on white, 4.99:1 on black; Increased
-///   Contrast deepens it in the light (`C2105F`, 5.9:1) and lifts it in the
-///   dark (`F25C9A`, 6.8:1). It replaced #1169's pink.
+/// 2026-11-02; #2282 on 2026-11-11):
+/// - **The primary is `FF1358`, almost everywhere** (#2282), the same in
+///   both appearances — 3.83:1 on white, 5.49:1 on black: past a glyph's
+///   3:1 everywhere, and a filled button's semibold white label at 3.83.
+///   Text in it wears `brandText`, deeper in the light (`EB0045`, 4.55:1).
+///   Increased Contrast deepens both in the light (`C6003A`, 6.1:1) and
+///   lifts them in the dark (`FF5C8C`, 7.2:1). It replaced #2062's
+///   raspberry `EC1C75`.
 /// - **The UI is NEUTRAL** (#1169): neutrals stay the system's (labels,
 ///   backgrounds, fills, `Surface`), and so do the selected tab, secondary
 ///   buttons, chips, the segmented selection and in-text mentions (#1168).
@@ -41,35 +45,41 @@ import UIKit
 /// - **Every pill and badge is the solid primary** (the owner, 2026-11-02):
 ///   never a gradient, under a white count.
 /// - **A filled button wears white** (`onPrimary`) in both appearances.
-/// - **There is no secondary colour any more** (#2062). The violet appears
-///   only inside the signature gradient, as the mint does — which the loader
-///   wears (`loaderGradient`, #2147) (#2071: the gems wear the crown's
-///   yellow — `gem`, `gemText`, `gemGround`). Links,
-///   mentions and hashtags are a neutral grey (`entityInk`).
+/// - **The mint is the brand's second colour, not a UI colour** (#2282
+///   § 3): the icon, the launch logo and the signature's end. The theme
+///   holds it (`accent`, with a deep mint for light grounds) but no role
+///   reads it. The violet appears only inside the signature gradient
+///   (#2071: the gems wear the crown's yellow — `gem`, `gemText`,
+///   `gemGround`). Links, mentions and hashtags are a neutral grey
+///   (`entityInk`).
 /// - **Dark mode is not an inversion.** Every role has an Increased
 ///   Contrast value where its contrast is close to the line.
-/// - **The signature gradient is kept to a few places** (`brandGradient`):
-///   the launch logo and the app icon, both baked assets. White text never
-///   sits over its mint half, so no button wears it. The unseen-story ring
-///   wears its own two-stop gradient, raspberry → violet, no mint
-///   (`storyRingGradient`, #2089).
+/// - **The signature gradient is kept to a few places** (`brandGradient`,
+///   violet `7235FF` → mint `16FFCB`, #2282): the unseen-story ring
+///   (`storyRingGradient`, #2089) and the loader (`loaderGradient`, #2147).
+///   White text never sits over its mint half (1.30:1), so no button wears
+///   it.
 public enum Palette {
-    // MARK: - Primary: raspberry
+    // MARK: - Primary: FF1358
 
     /// Interactive glyphs, text buttons, switches, selection: the app's tint.
-    /// The same raspberry in both appearances (4.21:1 on white, 4.99:1 on
-    /// black); Increased Contrast takes it past 4.5:1 on either.
+    /// The same `FF1358` in both appearances (3.83:1 on white, 5.49:1 on
+    /// black, past a glyph's 3:1); Increased Contrast takes it past 6:1 on
+    /// either.
     public static let tint = dynamic(theme.primary)
 
-    /// Text that carries the accent (≥ 4.5:1): the tint itself, which
-    /// already reads as text. Mentions and hashtags do NOT wear it (#1168).
-    public static let brandText = dynamic(theme.primary)
+    /// Text that carries the primary (#2282): the primary's text shade,
+    /// deeper in the light (`EB0045`, 4.55:1 on white), the primary itself
+    /// in the dark (5.49:1 on black). Mentions and hashtags do NOT wear it
+    /// (#1168).
+    public static let brandText = dynamic(theme.primaryText)
 
     /// A prominent filled button's ground, an active chip.
     public static let primaryFill = dynamic(theme.primaryFill)
 
-    /// The label on `primaryFill`: white in both appearances (4.21:1, and
-    /// 5.9:1 on the Increased Contrast fill).
+    /// The label on `primaryFill`: white in both appearances (3.83:1, a
+    /// semibold label at the button's size; 6.07:1 on the Increased
+    /// Contrast fill).
     public static let onPrimary = dynamic(theme.onPrimary)
 
     /// `primaryFill` pressed or highlighted.
@@ -93,8 +103,8 @@ public enum Palette {
 
     /// Every unread mark, pill and badge — the tab bar's badges, the Messages
     /// selector's, the bell's dot, the inbox's unread pills, the profile
-    /// switcher's counts (#2062: solid, never a gradient): the raspberry, the
-    /// same in both appearances, under a white count (4.21:1; 5.9:1 with
+    /// switcher's counts (#2062: solid, never a gradient): the primary, the
+    /// same in both appearances, under a white count (3.83:1; 6.07:1 with
     /// Increased Contrast). The `.red` rule compares the system red.
     public static var counter: UIColor {
         switch rules.counters {
@@ -126,9 +136,9 @@ public enum Palette {
         /// The solid unread marks: the primary (decided, #2062), or the
         /// system red to compare.
         public var counters = Counters.accent
-        /// The unseen-story ring: its raspberry → violet gradient (decided
-        /// 2026-10-14, the mint dropped by #2089), or the solid accent to
-        /// compare.
+        /// The unseen-story ring: the signature gradient, violet → mint
+        /// (decided 2026-10-14; the signature itself since #2282), or the
+        /// solid accent to compare.
         public var storyRing = Ring.gradient
 
         public init() {}
@@ -161,23 +171,23 @@ public enum Palette {
 
     // MARK: - The loader (#1329)
 
-    /// The loader's gradient (#2147, the owner 2026-11-05): the app icon's
-    /// — raspberry → violet → mint, at the icon's own opacities — one layer
-    /// across the mark that the pills mask, so the left pill is raspberry,
-    /// the middle violet, the right mint. Real alpha, as the icon: pastel on
-    /// the light page, deeper on the dark one. With Increased Contrast, the
-    /// stops are opaque and the mint deepened (`loaderContrastStops`). The
-    /// same in both appearances otherwise: the mark is a logo, not text.
+    /// The loader's gradient (#2147, the owner 2026-11-05): the signature —
+    /// violet → mint since #2282, at the loader's own opacities — one layer
+    /// across the mark that the pills mask, so the left pill is violet, the
+    /// middle sky blue, the right mint. Real alpha: pastel on the light
+    /// page, deeper on the dark one. With Increased Contrast, the stops are
+    /// opaque and the mint deepened (`signatureContrastStops`). The same in
+    /// both appearances otherwise: the mark is a logo, not text.
     public static func loaderGradient(highContrast: Bool) -> [UIColor] {
-        guard !highContrast else { return theme.loaderContrastStops.map(rgb) }
-        return zip(theme.signatureGradient, theme.signatureOpacities).map { rgb($0).withAlphaComponent($1) }
+        guard !highContrast else { return theme.signatureContrastStops.map(rgb) }
+        return zip(theme.signatureGradient, theme.loaderOpacities).map { rgb($0).withAlphaComponent($1) }
     }
 
     /// Where the loader's stops sit: the signature's.
     public static var loaderGradientLocations: [NSNumber] { brandGradientLocations }
 
-    /// The loader's direction: the icon's blob's (`circle.svg`, `(0, 0.2) →
-    /// (1, 1.03)` in its box), in a layer's unit coordinates.
+    /// The loader's direction, in a layer's unit coordinates: `(0, 0.2) →
+    /// (1, 1.03)`, the old icon blob's (#2147), kept as the loader's own.
     public static let loaderGradientStart = CGPoint(x: 0, y: 0.2)
     public static let loaderGradientEnd = CGPoint(x: 1, y: 1.03)
 
@@ -229,23 +239,25 @@ public enum Palette {
     /// or a claim's alpha, under `gemText`.
     public static let gemGround = dynamic(theme.gemGround)
 
-    /// THE SIGNATURE GRADIENT (#2062): raspberry → violet → mint, the
-    /// launch logo's and the app icon's, bottom-left to top-right. ⚠️ White
-    /// text never sits over its mint half (1.5:1). No code draws it since
-    /// #2089 (the story ring has its own): it is the record of the baked
-    /// assets, checked by `BrandAssetsGuardTests`.
+    /// THE SIGNATURE GRADIENT (#2282, the owner 2026-11-11): violet
+    /// `7235FF` → mint `16FFCB`, through a sky blue, bottom-left to
+    /// top-right, interpolated in sRGB. The story ring and the loader wear
+    /// it. ⚠️ White text never sits over its mint half (1.30:1); it holds on
+    /// the violet end (5.72:1). The violet is never a UI colour on its own.
     public static let brandGradient: [UIColor] = theme.signatureGradient.map(rgb)
     /// Where each of `brandGradient`'s stops sits. Computed: `NSNumber` is
     /// not `Sendable`, so it cannot be a stored static.
     public static var brandGradientLocations: [NSNumber] { theme.signatureLocations.map { NSNumber(value: $0) } }
 
-    /// The unseen-story ring's gradient (#2089, the owner 2026-11-03):
-    /// raspberry → violet, no mint, along the signature's diagonal
-    /// (`brandGradientStart` → `brandGradientEnd`). The same in both
-    /// appearances.
-    public static let storyRingGradient: [UIColor] = theme.storyRingGradient.map(rgb)
-    /// Where each of `storyRingGradient`'s stops sits: 0 and 1.
-    public static var storyRingGradientLocations: [NSNumber] { theme.storyRingLocations.map { NSNumber(value: $0) } }
+    /// The unseen-story ring's gradient (#2089): the signature itself since
+    /// #2282, along its diagonal (`brandGradientStart` → `brandGradientEnd`),
+    /// the same in both appearances. With Increased Contrast, its mint end
+    /// deepens to 3:1 on the light page (`signatureContrastStops`), as the
+    /// loader's: each stop resolves per contrast setting.
+    public static let storyRingGradient: [UIColor] = zip(theme.signatureGradient, theme.signatureContrastStops)
+        .map { stop, contrastStop in dynamic(light: stop, dark: stop, lightIC: contrastStop, darkIC: contrastStop) }
+    /// Where each of `storyRingGradient`'s stops sits: the signature's.
+    public static var storyRingGradientLocations: [NSNumber] { brandGradientLocations }
 
     /// Where `brandGradient` (and the story ring's) runs, in a layer's unit
     /// space.
