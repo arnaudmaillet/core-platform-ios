@@ -413,8 +413,10 @@ struct TextPostComposePageTests {
         #expect(page.composer.children.first === page.panel, "never rebuilt, never re-parented")
         let caption = try #require(Self.all(CaptionBubbleCell.self, in: page.panel.view).first)
         #expect(Self.texts(in: caption).contains("Hello from the page"))
-        let empty = try #require(Self.all(CommentsEmptyPageCell.self, in: page.panel.view).first)
-        #expect(Self.texts(in: empty).contains(SnapCommentEmptyStateView.promptText))
+        // Published, it is a post: its panel follows the rule (#2287) and
+        // opens Popular — the caption first, no comments yet.
+        #expect(page.panel.showsPopular, "the published post has no tabs")
+        #expect(page.panel.visibleStreamKind == .popular)
 
         let leading = page.composer.navigationItem.leftBarButtonItems ?? []
         #expect(leading.first?.accessibilityLabel == "Close")

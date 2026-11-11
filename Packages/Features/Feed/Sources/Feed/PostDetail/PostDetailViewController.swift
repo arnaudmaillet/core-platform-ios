@@ -753,6 +753,11 @@ final class PostDetailViewController: UIViewController {
         composeBar.railFace = publishedRailFace
         refreshBoostTotal()
         onPostPublished?(entry)
+        // A post now: it has its two tabs and opens on Popular, the caption
+        // first (#2287, no threshold) — the draft had none. Whatever the
+        // writer scrolled while drafting, the post opens on Popular.
+        hasChosenOpeningTab = false
+        popularBecameAvailable()
     }
 
     /// The post did not go out. The composer cleared itself when the text was
