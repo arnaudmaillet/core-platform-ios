@@ -3,7 +3,7 @@ import DesignSystem
 import MediaCore
 import UIKit
 
-/// The text marker the map's bubble speaks for (`-map-text-bubble`, the
+/// The text marker the map's bubble speaks for (the text bubble, #2203, the
 /// owner, 2026-11-09): a little larger, over its neighbours, and its bubble
 /// round it (`MapTextBubbleView`). No ring and no wave: the bubble says
 /// which marker it is (the owner, 2026-11-09).

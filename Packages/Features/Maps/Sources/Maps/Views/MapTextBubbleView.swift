@@ -5,7 +5,7 @@ import PostGrid
 import UIKit
 import VoiceKitUI
 
-/// `-map-text-bubble` (the owner, 2026-11-09): the text marker nearest the
+/// The text bubble (#2203, the owner, 2026-11-09): the text marker nearest the
 /// map's centre opens a bubble round it — display first, the words where the
 /// post is. It unfolds out of the marker, both ways, the marker sliding to
 /// its LEFT end and the words appearing on its right (`MapFeaturedHalo`); it
