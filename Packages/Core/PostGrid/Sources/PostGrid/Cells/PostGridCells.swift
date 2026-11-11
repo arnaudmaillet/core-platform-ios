@@ -1495,38 +1495,72 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// caption leaving its air above the line rather than under it.
     public private(set) var fixedCaptionLines: Int?
 
-    /// How tall a TEXT card `width` wide stands when its caption is held to
-    /// `captionLines` and fills them — author band, caption, closing line
-    /// (with the like, repost and save on it) — measured on a real card, the
-    /// way `RevealDismissCardView` measures. What a lane of such cards is
-    /// sized to. Cached per width, line count and text size.
-    public static func fixedTextCardHeight(width: CGFloat, captionLines: Int) -> CGFloat {
+    /// How tall a card `width` wide stands in a lane of fixed-height cards:
+    /// the taller of a TEXT card whose caption is held to `captionLines` and
+    /// fills them — author band, caption, closing line (with the like, repost
+    /// and save on it) — and, with voice posts drawn, a VOICE card — the
+    /// band, the compact voice panel in the caption's place, the closing line
+    /// (#2274). Each is measured on a real card, the way
+    /// `RevealDismissCardView` measures. What a lane of such cards is sized
+    /// to. Cached per width, line count, text size and voice.
+    ///
+    /// ⚠️ THE VOICE PANEL IS NEVER SQUEEZED (#2274). Measured on a text card
+    /// alone, a lane was two caption lines tall (about 39 pt) where the
+    /// compact panel is 44 pt: the card held its height and the panel gave
+    /// way, its play glyph on its bottom edge (the owner's recording). The
+    /// words under a voice give way in a fixed card instead (they go: the
+    /// voice stands alone, `configure`), never the panel.
+    public static func fixedTextCardHeight(
+        width: CGFloat, captionLines: Int, showsVoice: Bool = VoicePostDisplay.areDrawn
+    ) -> CGFloat {
         guard width > 0 else { return 0 }
         // The app's text size, not the iPhone's: above the ceiling they differ
         // (#482), and a card measured at the iPhone's size came out taller
         // than the one drawn.
         let size = TextSizeCeiling.current ?? UIApplication.shared.preferredContentSizeCategory
-        let key = "\(width)|\(captionLines)|\(size.rawValue)"
+        let key = "\(width)|\(captionLines)|\(size.rawValue)|\(showsVoice)"
         if let cached = fixedHeights[key] { return cached }
-        let card = PostGridListRowCell(frame: CGRect(x: 0, y: 0, width: width, height: 200))
-        card.traitOverrides.preferredContentSizeCategory = size
         // Words enough to fill any cap at any width, and a name and handle on
         // the band, as every text card in a lane wears.
-        let post = GalleryPost(
+        var post = GalleryPost(
             id: PostID("fixed-height-probe"), kind: .text, isRepost: false, thumbnailURL: nil,
             caption: String(repeating: "Measured words fill every line of the card. ", count: 12),
             publishedAtMS: 0, authorID: ProfileID("probe"), authorName: "Name", authorHandle: "handle",
             reactionCount: 1, commentCount: 1
         )
-        card.configure(with: post, imagePipeline: measuringPipeline, captionLines: captionLines)
+        var height = measuredFixedHeight(of: post, width: width, captionLines: captionLines, category: size, showsVoice: false)
+        if showsVoice {
+            // The same post speaking: its compact panel in the caption's place.
+            post.voice = PostVoice(
+                assetID: "fixed-height-probe-voice", url: nil, duration: 59, waveform: VoiceView.genericLevels
+            )
+            let voiced = measuredFixedHeight(of: post, width: width, captionLines: captionLines, category: size, showsVoice: true)
+            height = max(height, voiced)
+        }
+        fixedHeights[key] = height
+        return height
+    }
+
+    /// `post`'s card at `width`, its caption held to `captionLines`, wired as
+    /// a lane wires it, measured.
+    private static func measuredFixedHeight(
+        of post: GalleryPost, width: CGFloat, captionLines: Int, category: UIContentSizeCategory, showsVoice: Bool
+    ) -> CGFloat {
+        let card = PostGridListRowCell(frame: CGRect(x: 0, y: 0, width: width, height: 200))
+        card.traitOverrides.preferredContentSizeCategory = category
+        card.configure(
+            with: post, imagePipeline: measuringPipeline, captionLines: captionLines,
+            showsVoice: showsVoice, showsEmbed: false
+        )
         card.showAuthorMenuControlAsScenery()
         card.showRowActionsAsScenery(repost: true, bookmark: true, saved: false)
         card.showStakeAsScenery(viewerStake: 0)
         let attributes = UICollectionViewLayoutAttributes(forCellWith: IndexPath(item: 0, section: 0))
         attributes.frame = CGRect(x: 0, y: 0, width: width, height: 200)
-        let height = card.preferredLayoutAttributesFitting(attributes).frame.height
-        fixedHeights[key] = height
-        return height
+        let fitted = card.preferredLayoutAttributesFitting(attributes).frame.height
+        // The probe's voice lets go of the hub it was bound to.
+        card.applyVoice(nil, for: nil)
+        return fitted
     }
 
     private static var fixedHeights: [String: CGFloat] = [:]
