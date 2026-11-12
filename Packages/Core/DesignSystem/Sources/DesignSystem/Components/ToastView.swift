@@ -100,17 +100,27 @@ import UIKit
 /// their own size — never scaled — held from the leading end and revealed
 /// by the widening capsule. It folds back the same way: the words and the
 /// action go, the capsule narrows to the circle round its mark as the glass
-/// dissolves, then it is removed. No slide and no scale (the morph and the
-/// slide of #1034 went with #2285). A swipe up carries it off and dissolves
-/// it on the way.
+/// dissolves, then it is removed. No slide (the morph and the slide of #1034
+/// went with #2285). A swipe up carries it off and dissolves it on the way.
+///
+/// THE POP (#2338, the owner, 2026-11-12, reversing #2285's "no scale" for
+/// the opening and the closing only): the circle starts at
+/// `Metrics.popStartScale` of its size and springs to it with a light
+/// bounce (`popBounce`, an overshoot to about `popOvershoot`) as it widens;
+/// the fold shrinks it back to `popStartScale`, with no bounce — a bounce on
+/// the way out reads as hesitation. Through the capsule's width and height
+/// constraints, centred where it stands; only the mark, which is not glass,
+/// scales by a transform. A close turned into a new toast starts from the
+/// size on screen, with no second pop.
 ///
 /// A new result while one is up takes over its capsule where it stands, and
 /// the WHOLE content blurs — the mark, the words and the action (#2285,
 /// `flowContent`); a new one while one is folding turns the fold around
 /// into the new toast.
 ///
-/// Under Reduce Motion (`MotionPreference`) there is no unfold: the glass
-/// materialises and the row fades, in place; a content change cross-fades.
+/// Under Reduce Motion (`MotionPreference`) there is no unfold and no pop:
+/// the glass materialises and the row fades, in place; a content change
+/// cross-fades.
 @MainActor
 public final class ToastView: UIView {
 
@@ -149,6 +159,18 @@ public final class ToastView: UIView {
         /// brief, so a touch quicker, with the same bounce.
         static let unfoldDuration: TimeInterval = 0.5
         static let unfoldBounce: CGFloat = 0.15
+        /// THE POP (#2338): the circle starts at this share of its size, and
+        /// the fold shrinks it back to it…
+        static let popStartScale: CGFloat = 0.85
+        /// …springing to its size on the unfold's duration with a light
+        /// bounce: an overshoot to about `popOvershoot`. (The issue's 0.25
+        /// is the system spring's bounce; from 0.85 it overshoots to 1.004,
+        /// which nobody sees. This is the bounce that lands the overshoot
+        /// asked for: `ToastBehaviourTests` measures it on the spring.)
+        static let popBounce: CGFloat = 0.61
+        static let popOvershoot: CGFloat = 1.04
+        /// The fold's spring: no bounce, no overshoot on the way out.
+        static let foldBounce: CGFloat = 0
         /// The words and the action fade in on the capsule's right as it
         /// opens (the map's: 0.3 s from 0.18 s, a touch quicker too).
         static let contentInDelay: TimeInterval = 0.15
@@ -359,6 +381,8 @@ public final class ToastView: UIView {
     /// While it unfolds or folds (#2285): the capsule's width, the side of
     /// the circle round its mark (`fold(_:)`)…
     private var foldWidth: NSLayoutConstraint?
+    /// …its height, while the circle is popped smaller (#2338)…
+    private var foldHeight: NSLayoutConstraint?
     /// …and the row held at its own width from the leading end, its
     /// trailing edge let go, so the capsule reveals it as it widens.
     private var rowHeld: NSLayoutConstraint?
@@ -526,6 +550,8 @@ public final class ToastView: UIView {
     /// much of its glass shows.
     struct Handover {
         let width: CGFloat
+        /// Its height on screen: mid-fold, the circle shrinking (#2338).
+        let height: CGFloat
         let content: [Leaving]
         let changedAt: CFTimeInterval
         let glass: CGFloat
@@ -546,7 +572,8 @@ public final class ToastView: UIView {
     /// folding, its close had already settled it.
     private func handOver() -> Handover {
         let handed = Handover(
-            width: widthOnScreen, content: takeContentOut(), changedAt: lastChange, glass: glassLevel
+            width: widthOnScreen, height: heightOnScreen, content: takeContentOut(),
+            changedAt: lastChange, glass: glassLevel
         )
         isTakenOver = true
         if isLeaving {
@@ -568,7 +595,7 @@ public final class ToastView: UIView {
         hasArrived = true
         apply(content)
         materialiseGlass(from: handover.glass)
-        flowContent(fromWidth: handover.width, leaving: handover.content)
+        flowContent(fromWidth: handover.width, fromHeight: handover.height, leaving: handover.content)
         countdown?.start()
     }
 
@@ -610,7 +637,16 @@ public final class ToastView: UIView {
         let rowOpacity = rowShown?.opacity ?? Float(row.alpha)
         return row.arrangedSubviews.map { view in
             let shown = view.layer.presentation()
-            let shownFrame = (shown?.frame ?? view.frame).offsetBy(dx: rowOrigin.x, dy: rowOrigin.y)
+            var shownFrame = (shown?.frame ?? view.frame).offsetBy(dx: rowOrigin.x, dy: rowOrigin.y)
+            // A mark caught in its pop (#2338) goes at its own size, where
+            // its centre showed: its frame scaled would fight its own size.
+            if let transform = shown?.transform, !CATransform3DIsIdentity(transform) {
+                let size = view.bounds.size
+                shownFrame = CGRect(
+                    x: shownFrame.midX - size.width / 2, y: shownFrame.midY - size.height / 2,
+                    width: size.width, height: size.height
+                )
+            }
             let opacity = (shown?.opacity ?? Float(view.alpha)) * rowOpacity
             let pieceRole = Self.role(of: view)
             // Whatever was carrying it (its fade, its slide) ends here.
@@ -643,6 +679,9 @@ public final class ToastView: UIView {
         /// How far the new mark slid to the leading end, from where the
         /// old one stood.
         var markSlide: CGFloat = 0
+        /// The width the capsule springs from, and to (#2338).
+        var fromWidth: CGFloat = 0
+        var toWidth: CGFloat = 0
     }
 
     private(set) var lastChangeMotion: ChangeMotion?
@@ -666,8 +705,14 @@ public final class ToastView: UIView {
     ///   disc.
     /// - Only real views and their pictures move, inside the glass.
     /// - A change mid-change starts from the width on screen (`lastChange`).
+    /// - ⚠️ NOTHING IN A CHANGE OUTRANKS THE SPRING (#2338): growing or
+    ///   shrinking, the capsule's first frame is `width`. The words hold
+    ///   their whole width, but their clip follows the room the capsule
+    ///   leaves them (`ToastWords.holdWhole`), and the row's ends give way
+    ///   below the spring's width: held at the words' whole width as a
+    ///   requirement, a capsule that grew jumped to its final width.
     /// - Under Reduce Motion: a cross-fade, no blur, no spring.
-    private func flowContent(fromWidth width: CGFloat, leaving: [Leaving]) {
+    private func flowContent(fromWidth width: CGFloat, fromHeight: CGFloat? = nil, leaving: [Leaving]) {
         flowGeneration += 1
         // ⚠️ THE LATEST WINS, FROM WHAT IS ON SCREEN (the owner, 2026-11-06,
         // a toggle spammed: pieces of three states piled in one capsule, an
@@ -692,6 +737,9 @@ public final class ToastView: UIView {
         // then jumped whole).
         let words = textSlot
         words?.holdWhole()
+        // The spring's own start, so the arriving pieces are laid out where
+        // they show on its first frame. Nothing in the row is required
+        // wider: it gives way, never this.
         let startsAt = widthAnchor.constraint(equalToConstant: width)
         startsAt.isActive = true
         superview?.layoutIfNeeded()
@@ -719,10 +767,13 @@ public final class ToastView: UIView {
                 self.superview?.layoutIfNeeded()
             }
         } else {
-            startSwell(from: width, to: finalSize.width, height: finalSize.height, swells: !midChange)
+            startSwell(
+                from: width, to: finalSize.width, height: finalSize.height,
+                fromHeight: fromHeight.flatMap { $0 > 0 ? $0 : nil } ?? finalSize.height, swells: !midChange
+            )
         }
 
-        var motion = ChangeMotion()
+        var motion = ChangeMotion(fromWidth: width, toWidth: finalSize.width)
         if reduces {
             motion.crossFades = true
             crossFadeContent(out: shown.map(\.view), in: arriving + [words].compactMap { $0 })
@@ -888,6 +939,9 @@ public final class ToastView: UIView {
         let from: CGFloat
         let to: CGFloat
         let height: CGFloat
+        /// The height on screen it springs from: a close turned around
+        /// mid-shrink, a swell turned around (#2338).
+        let fromHeight: CGFloat
         let depth: CGFloat
         let width: NSLayoutConstraint
         let tall: NSLayoutConstraint
@@ -909,17 +963,21 @@ public final class ToastView: UIView {
     /// capsule swells — up to its crest at an eighth of a second, back by a
     /// quarter, a touch under, settled by half (`AppButton`'s measured
     /// curve) — about its centre, frame by frame through its constraints.
-    private func startSwell(from: CGFloat, to: CGFloat, height: CGFloat, swells: Bool = true) {
+    private func startSwell(from: CGFloat, to: CGFloat, height: CGFloat, fromHeight: CGFloat? = nil, swells: Bool = true) {
         // Just under required: a capsule at its widest keeps its cap
-        // (`maximumWidth`) and swells in height alone.
+        // (`maximumWidth`) and swells in height alone. Above everything in
+        // the row (#2338): the row's ends give way to it, at
+        // `.required - 2` and `- 3`, and the words' clip follows it.
         let width = widthAnchor.constraint(equalToConstant: from)
-        let tall = heightAnchor.constraint(equalToConstant: height)
+        // Required: the minimum height (`.required - 1`) must not hold a
+        // capsule springing up from a smaller circle. Nothing required caps
+        // the height.
+        let tall = heightAnchor.constraint(equalToConstant: fromHeight ?? height)
         width.priority = .required - 1
-        tall.priority = .required - 1
         NSLayoutConstraint.activate([width, tall])
         let reach = min(1, abs(to - from) / Self.swellReach)
         swell = Swell(
-            start: CACurrentMediaTime(), from: from, to: to, height: height,
+            start: CACurrentMediaTime(), from: from, to: to, height: height, fromHeight: fromHeight ?? height,
             depth: swells ? Self.swellBase + (Self.swellMost - Self.swellBase) * reach : 0, width: width, tall: tall
         )
         let link = CADisplayLink(target: SwellTick(self), selector: #selector(SwellTick.tick))
@@ -939,9 +997,10 @@ public final class ToastView: UIView {
         let progress = AppButtonBlur.springProgress(at: time, duration: Self.flowDuration, bounce: 0.1)
         let grown = 1 + swell.depth * Self.swellShare(at: time)
         swell.width.constant = (swell.from + (swell.to - swell.from) * progress) * grown
-        swell.tall.constant = swell.height * grown
+        let base = swell.fromHeight + (swell.height - swell.fromHeight) * progress
+        swell.tall.constant = base * grown
         // About its centre: the top hangs up by half the growth.
-        slide?.constant = restConstant - (swell.height * grown - swell.height) / 2
+        slide?.constant = restConstant - (base * grown - swell.height) / 2
         superview?.layoutIfNeeded()
     }
 
@@ -988,6 +1047,8 @@ public final class ToastView: UIView {
 
     /// The capsule's width as it shows — mid-spring, where the spring is.
     private var widthOnScreen: CGFloat { layer.presentation()?.bounds.width ?? bounds.width }
+    /// Its height as it shows — mid-pop, mid-shrink, mid-swell.
+    private var heightOnScreen: CGFloat { layer.presentation()?.bounds.height ?? bounds.height }
 
     /// It arrived in the capsule of the toast it replaced (tests)…
     private(set) var tookOver = false
@@ -1008,11 +1069,12 @@ public final class ToastView: UIView {
         // The same flow as a replacement: one capsule changing its mind.
         // Mid-unfold, from where the unfold has it.
         let width = widthOnScreen
+        let height = heightOnScreen
         if hasArrived, width > 0 {
             let old = takeContentOut()
             settleUnfold()
             apply(content)
-            flowContent(fromWidth: width, leaving: old)
+            flowContent(fromWidth: width, fromHeight: height, leaving: old)
         } else {
             apply(content)
         }
@@ -1209,6 +1271,12 @@ public final class ToastView: UIView {
         // (`textInset`), which matters at large text sizes. Below required;
         // the unfold lets the trailing edge go and holds the row at its own
         // width from the leading end (`fold(_:)`).
+        //
+        // The ends give way below the capsule's own width in a change
+        // (`startSwell`, `.required - 1`, #2338): a capsule springing from
+        // narrower than the mark and the action lets the row run past its
+        // trailing end — the leading one holds the mark — and reveals it as
+        // it opens, rather than jumping to the row's width.
         let edges = [
             row.topAnchor.constraint(equalTo: backdrop.contentView.topAnchor, constant: Spacing.xs / 2),
             row.bottomAnchor.constraint(equalTo: backdrop.contentView.bottomAnchor, constant: -Spacing.xs / 2),
@@ -1216,6 +1284,8 @@ public final class ToastView: UIView {
             trailing,
         ]
         edges.forEach { $0.priority = .required - 1 }
+        leading.priority = .required - 2
+        trailing.priority = .required - 3
         row.translatesAutoresizingMaskIntoConstraints = false
         backdrop.contentView.addSubview(row)
         NSLayoutConstraint.activate(edges)
@@ -1282,7 +1352,7 @@ public final class ToastView: UIView {
         // The words' slot takes the room between the mark and the control;
         // the words hold their own width at its middle, in a clip a change
         // opens from there (`flowContent`).
-        let texts = ToastWords(label: title)
+        let texts = ToastWords(label: title, bleed: Metrics.glyphGap)
         textSlot = texts
 
         var arranged: [UIView] = []
@@ -1505,6 +1575,15 @@ public final class ToastView: UIView {
     /// The content row: never scaled, never moved by a transform (#2285).
     /// Tests.
     var debugRow: UIStackView { row }
+    /// The words' slot. Tests (#2338).
+    var debugWords: ToastWords? { textSlot }
+    /// The change under way lands now, at rest: its spring, its swell, its
+    /// hold. Tests (#2338).
+    func debugEndChange() {
+        stopSwell()
+        textSlot?.settle()
+        superview?.layoutIfNeeded()
+    }
     #endif
 
     // MARK: - The whole message (#1449)
@@ -1705,10 +1784,18 @@ public final class ToastView: UIView {
     /// goes with the leading end; the words and the action fade in on its
     /// right at their own size, held from the leading end and revealed as
     /// it widens; the glass materialises (`effect` set in the animation),
-    /// the shadow with it. No slide, no scale.
+    /// the shadow with it. No slide.
     ///
-    /// Under Reduce Motion: no unfold — the glass materialises and the row
-    /// fades in, in place.
+    /// THE POP (#2338): the circle starts at `popStartScale` of its size and
+    /// springs to it with a light bounce (`popBounce`) while it widens —
+    /// one motion, two springs: the width on the unfold's, the height (and
+    /// the top, so it stays centred) on the pop's, each through its own
+    /// constraint in its own animation block, so the two add up. The mark
+    /// scales with the pop by a transform (it is not glass); the words and
+    /// the action never scale.
+    ///
+    /// Under Reduce Motion: no unfold, no pop — the glass materialises and
+    /// the row fades in, in place.
     private func animateIn() {
         // Land the resting layout first: what the unfold opens to, and what
         // the circle is measured from.
@@ -1740,7 +1827,7 @@ public final class ToastView: UIView {
         let mark = leadingMark
         let others = row.arrangedSubviews.filter { $0 !== mark }
         row.alpha = 1
-        fold(true)
+        fold(true, scale: Metrics.popStartScale)
         superview?.layoutIfNeeded()
         unfoldedFrom = Fold(capsule: frame, mark: mark.map { $0.convert($0.bounds, to: self) })
         mark?.alpha = 0
@@ -1749,14 +1836,24 @@ public final class ToastView: UIView {
         unfoldEnds = now + Metrics.unfoldDuration
         let options: UIView.AnimationOptions = [.allowUserInteraction, .beginFromCurrentState]
         UIView.animate(springDuration: Metrics.unfoldDuration, bounce: Metrics.unfoldBounce, options: options) {
-            // The row is let go at once: it lands at the very width it was
-            // held at, so it keeps that width all the way — only the hold's
-            // first layout, the circle, needed it.
-            self.fold(false)
+            // The width, on the unfold's spring. The row is let go at once:
+            // it lands at the very width it was held at, so it keeps that
+            // width all the way — only the hold's first layout, the circle,
+            // needed it. The height stays the popped circle's here.
+            self.foldWidth?.isActive = false
+            self.foldWidth = nil
+            self.rowLeading?.constant = self.restLeading
             self.releaseRow()
             self.superview?.layoutIfNeeded()
             if let glass { self.backdrop.effect = glass }
             self.layer.shadowOpacity = Metrics.shadowOpacity
+        }
+        UIView.animate(springDuration: Metrics.unfoldDuration, bounce: Metrics.popBounce, options: options) {
+            // The pop: the height and the top on its bouncier spring — the
+            // circle centred where it stands — and the mark's scale.
+            self.fold(false)
+            self.slide?.constant = self.restConstant
+            self.superview?.layoutIfNeeded()
         }
         UIView.animate(withDuration: Metrics.markInDuration, delay: 0, options: [.curveEaseOut, .allowUserInteraction]) {
             mark?.alpha = 1
@@ -1771,26 +1868,40 @@ public final class ToastView: UIView {
     }
 
     /// Folds the capsule to the circle round its mark (`true`), or lets it
-    /// go back to its width (`false`) — through its width constraint, never
-    /// a transform on glass. Folded, the row is held at its own width from
-    /// the leading end (`holdRow`), the mark centred in the circle: the
-    /// disc sits `inset` from the end as at rest, the smaller loader moves
-    /// in to the middle. The side is the capsule's resting height: a circle
-    /// as tall as the toast, from the first frame (#2285).
-    private func fold(_ folded: Bool) {
+    /// go back to its width (`false`) — through its width and height
+    /// constraints, never a transform on glass. Folded, the row is held at
+    /// its own width from the leading end (`holdRow`), the mark centred in
+    /// the circle: the disc sits `inset` from the end as at rest, the
+    /// smaller loader moves in to the middle. The side is the capsule's
+    /// resting height (#2285) times `scale` (#2338: the pop's start, the
+    /// fold's end), the circle centred where the capsule stands — its top
+    /// lowered by half what it lost — and the mark scaled with it.
+    private func fold(_ folded: Bool, scale: CGFloat = 1) {
         foldWidth?.isActive = false
         foldWidth = nil
+        foldHeight?.isActive = false
+        foldHeight = nil
         guard folded else {
             rowLeading?.constant = restLeading
+            leadingMark?.transform = .identity
             return
         }
         holdRow()
         let side = max(bounds.height, Metrics.minimumHeight)
-        let width = widthAnchor.constraint(equalToConstant: side)
+        let circle = min(side * scale, Metrics.maximumWidth)
+        let width = widthAnchor.constraint(equalToConstant: circle)
         width.isActive = true
         foldWidth = width
+        if circle != side {
+            // Required, as the width: nothing required holds the height.
+            let tall = heightAnchor.constraint(equalToConstant: circle)
+            tall.isActive = true
+            foldHeight = tall
+            slide?.constant = restConstant + (bounds.height - circle) / 2
+        }
         if let mark = leadingMark, mark.bounds.width > 0 {
-            rowLeading?.constant = (side - mark.bounds.width) / 2
+            rowLeading?.constant = (circle - mark.bounds.width) / 2
+            mark.transform = scale == 1 ? .identity : CGAffineTransform(scaleX: scale, y: scale)
         }
     }
 
@@ -1825,6 +1936,7 @@ public final class ToastView: UIView {
         }
         fold(false)
         releaseRow()
+        slide?.constant = restConstant
         layer.shadowOpacity = Metrics.shadowOpacity
     }
 
@@ -1973,7 +2085,10 @@ public final class ToastView: UIView {
         // THE FOLD (#2285): the words and the action go, the capsule narrows
         // back to the circle round its mark — the mark sliding back to its
         // middle — as the glass dissolves; the mark goes last; then it is
-        // removed. From where it stands: a fold can begin mid-unfold.
+        // removed. From where it stands: a fold can begin mid-unfold. The
+        // circle shrinks to `popStartScale` on the way, centred where it
+        // stands, on a spring with no bounce (#2338): the Dynamic Island
+        // leaves without overshoot.
         let mark = leadingMark
         let others = row.arrangedSubviews.filter { $0 !== mark }
         glassRamp = GlassRamp(from: glassNow, to: 0, start: now, duration: Metrics.foldDuration, bounce: 0)
@@ -1989,12 +2104,12 @@ public final class ToastView: UIView {
             mark?.alpha = 0
         }
         let folds = {
-            self.fold(true)
+            self.fold(true, scale: Metrics.popStartScale)
             self.superview?.layoutIfNeeded()
             self.dissolve()
         }
         UIView.animate(
-            springDuration: Metrics.foldDuration, bounce: 0, options: [.beginFromCurrentState],
+            springDuration: Metrics.foldDuration, bounce: Metrics.foldBounce, options: [.beginFromCurrentState],
             animations: folds, completion: gone
         )
     }
