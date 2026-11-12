@@ -1,0 +1,266 @@
+import CoreNavigation
+import DesignSystem
+import Testing
+import UIKit
+@testable import Chat
+
+/// **The Chats / Requests / Suggestions selector is in the bar, right of the
+/// bell, as on For You (#2337, the owner 2026-11-12).** No band at the foot
+/// any more: the tab bar alone.
+@MainActor
+struct InboxSelectorInBarTests {
+    /// A page with a count on its segment.
+    private final class Surface: UIViewController, InboxSurface {
+        let category: MessagesCategory
+        var chrome = InboxSurfaceChrome()
+        var onChromeChange: ((InboxSurfaceChrome) -> Void)?
+        func surfaceDidBecomeActive() {}
+        init(_ category: MessagesCategory) {
+            self.category = category
+            super.init(nibName: nil, bundle: nil)
+        }
+        @available(*, unavailable)
+        required init?(coder: NSCoder) { fatalError() }
+        func publish(_ badge: Int) {
+            chrome.badgeCount = badge
+            onChromeChange?(chrome)
+        }
+    }
+
+    private func inbox() -> (MessagesInboxViewController, [Surface]) {
+        let surfaces = [Surface(.all), Surface(.requests), Surface(.suggestions)]
+        return (MessagesInboxViewController(surfaces: surfaces), surfaces)
+    }
+
+    /// Loaded and laid out at an iPhone 17 Pro's width, so the selector is
+    /// fitted to a real bar width.
+    private func layOut(_ screen: MessagesInboxViewController) {
+        screen.loadViewIfNeeded()
+        screen.view.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+        screen.view.setNeedsLayout()
+        screen.view.layoutIfNeeded()
+    }
+
+    private func bell() -> UIBarButtonItem {
+        let item = UIBarButtonItem(customView: UIView())
+        item.accessibilityLabel = "Bell"
+        return item
+    }
+
+    /// `[bell][selector]`: the bell, the separator that keeps them two
+    /// platters, then the selector — For You's recipe: a `.navigationTitle`
+    /// strip in the item's platter, under a stable identifier, the three
+    /// pages' titles in order.
+    @Test func theLeadingGroupIsTheBellThenTheSelector() throws {
+        let (screen, _) = inbox()
+        let bell = bell()
+        screen.setLeadingAccessoryItem(bell)
+        layOut(screen)
+
+        let leading = try #require(screen.navigationItem.leftBarButtonItems)
+        #expect(leading.count == 3)
+        #expect(leading[0] === bell)
+        #expect(leading[1].customView == nil && leading[1].identifier == nil, "a separator between the two")
+        let item = leading[2]
+        #expect(item.identifier == "messages.inbox.selector")
+        let strip = try #require(item.customView as? PagedTabBar)
+        #expect(strip === screen.debugSelector)
+        #expect(strip.style == .navigationTitle)
+        #expect(strip.hosting == .platter, "a capsule drawn inside the item's own glass")
+        #expect(strip.currentTitles == ["Chats", "Requests", "Suggestions"])
+        #expect(screen.navigationItem.titleView == nil, "the selector is not in the title slot")
+    }
+
+    /// ⚠️ ONE ITEM, ONE IDENTIFIER, WHATEVER THE COUNTS. A count widens its
+    /// segment; the selector re-fits in place — the same item, around the
+    /// same strip, under the same identifier (a re-minted item lost its strip
+    /// on the simulator, `BarSelectorItem`).
+    @Test func theSelectorsIdentifierIsStableAcrossACount() throws {
+        let (screen, surfaces) = inbox()
+        screen.setLeadingAccessoryItem(bell())
+        layOut(screen)
+        let before = try #require(screen.navigationItem.leftBarButtonItems?.last)
+        let strip = try #require(before.customView as? PagedTabBar)
+        let width = strip.intrinsicContentSize.width
+
+        surfaces[1].publish(6)
+
+        let after = try #require(screen.navigationItem.leftBarButtonItems?.last)
+        #expect(after === before, "the selector's item was re-minted")
+        #expect(after.identifier == before.identifier)
+        #expect(after.customView === strip, "a new strip where the same one belongs")
+        #expect(strip.intrinsicContentSize.width > width, "the count did not widen the selector")
+        #expect(screen.navigationItem.leftBarButtonItems?.count == 3)
+    }
+
+    /// ⚠️ NO BAND AT THE FOOT, EVER: not on appearing, not after a search
+    /// opened and closed. The tab bar controller's `bottomAccessory` is
+    /// shell-wide; Messages leaves it alone (the profile keeps its own).
+    @Test func noBottomAccessoryIsInstalled() {
+        let (screen, _) = inbox()
+        let tabs = UITabBarController()
+        tabs.viewControllers = [UINavigationController(rootViewController: screen)]
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        window.rootViewController = tabs
+        window.isHidden = false
+        defer { window.isHidden = true }
+        window.layoutIfNeeded()
+
+        screen.beginAppearanceTransition(true, animated: false)
+        screen.endAppearanceTransition()
+        #expect(tabs.bottomAccessory == nil, "Messages put a band up")
+        #expect(screen.navigationItem.leftBarButtonItems?.last?.identifier
+            == MessagesInboxViewController.selectorItemID)
+
+        let search = UISearchController()
+        screen.willPresentSearchController(search)
+        screen.willDismissSearchController(search)
+        #expect(tabs.bottomAccessory == nil, "a search close put a band up")
+    }
+
+    /// The pager drives the selector and the selector drives the pager: a
+    /// swipe that settles moves the pill, a tap on a segment moves the page.
+    @Test func thePagerAndTheSelectorStayInStep() {
+        let (screen, _) = inbox()
+        screen.loadViewIfNeeded()
+        let strip = screen.debugSelector
+
+        screen.debugSettle(on: 2)
+        #expect(strip.selectedIndex == 2, "a settled swipe left the pill behind")
+
+        strip.debugSimulateTap(at: 1)
+        #expect(screen.debugActiveIndex == 1, "a tap on Requests did not page")
+        #expect(strip.selectedIndex == 1)
+    }
+
+    /// The width rule (#2337): never more than the room the bell leaves —
+    /// 15pt when the titles fit, 13pt otherwise, a scroll past that — and
+    /// never less than one bubble.
+    @Test func theSelectorTakesNoMoreThanTheBarLeaves() {
+        let (screen, surfaces) = inbox()
+        screen.setLeadingAccessoryItem(bell())
+        layOut(screen)
+        surfaces[0].publish(99)
+        surfaces[1].publish(43)
+
+        let strip = screen.debugSelector
+        let room = BarSelectorBudget(barWidth: 402,
+                                     leadingWidths: [BarSelectorBudget.platter]).room
+        #expect(strip.intrinsicContentSize.width <= room - strip.hosting.overhang * 2 + 0.5)
+        #expect(strip.intrinsicContentSize.width >= strip.intrinsicContentSize.height)
+        let fitsAtRegular = strip.preferredWidth(at: .regular) <= room - strip.hosting.overhang * 2 + 0.5
+        #expect(strip.titleSize == (fitsAtRegular ? .regular : .compact))
+    }
+
+    // MARK: - In a real navigation bar
+
+    /// ⚠️ **THE BELL AND THE SELECTOR ARE IN THE BAR — NOT SWEPT INTO A
+    /// `•••`.** The first cut's budget promised more room than iOS 27 gives a
+    /// leading group, and the iPhone 18 Pro simulator showed a lone `•••`
+    /// platter where `[bell][selector]` belonged. Hosted here as the shell
+    /// hosts it — in a navigation controller, in a window, the shell's bell
+    /// (an image item), counts on two segments — at an iPhone 17/18 Pro's
+    /// width and an SE's: both views are in the navigation bar, inside its
+    /// bounds, the bell before the selector, and no overflow control.
+    @Test(arguments: [CGSize(width: 402, height: 874), CGSize(width: 375, height: 667)])
+    func theBellAndTheSelectorAreInTheBar(size: CGSize) async throws {
+        let (screen, surfaces) = inbox()
+        // The shell's bell, as `NotificationsBell.makeItem` makes it: an
+        // image item in a bubble of its own.
+        let bellItem = BarItems.icon(
+            id: BarItems.SharedID.notificationsBell, image: UIImage(systemName: "bell"),
+            label: "Notifications", action: {}
+        )
+        bellItem.tintColor = .label
+        bellItem.sharesBackground = false
+        screen.setLeadingAccessoryItem(bellItem)
+        let navigation = UINavigationController(rootViewController: screen)
+        let window = UIWindow(frame: CGRect(origin: .zero, size: size))
+        window.rootViewController = navigation
+        window.isHidden = false
+        defer { window.isHidden = true }
+        surfaces[0].publish(7)
+        surfaces[1].publish(3)
+        window.layoutIfNeeded()
+
+        // The bar hosts its items over a few turns; a swept group is
+        // narrowed from `viewDidAppear` on (`recoverSelectorFromOverflow`).
+        let bar = navigation.navigationBar
+        let strip = screen.debugSelector
+        for _ in 0..<100 where strip.window == nil || bellFrame(in: bar, leftOf: strip) == nil {
+            try await Task.sleep(for: .milliseconds(50))
+            window.layoutIfNeeded()
+            bar.layoutIfNeeded()
+        }
+
+        let label = "\(Int(size.width))pt"
+        #expect(strip.window != nil, "\(label): the selector is in no window — swept into a •••")
+        #expect(strip.isDescendant(of: bar), "\(label): the selector is not in the navigation bar")
+        let stripFrame = strip.convert(strip.bounds, to: bar)
+        #expect(stripFrame.width >= 1 && stripFrame.minX >= -0.5 && stripFrame.maxX <= bar.bounds.width + 0.5,
+                "\(label): the selector at \(stripFrame) in a \(bar.bounds.width)pt bar")
+        #expect(navigation.topViewController?.navigationItem.leftBarButtonItems?.first === bellItem,
+                "\(label): the bell does not lead the group")
+        let bellRect = try #require(bellFrame(in: bar, leftOf: strip),
+                                     "\(label): the bell is not in the navigation bar")
+        #expect(bellRect.minX >= -0.5 && bellRect.maxX <= stripFrame.minX + 0.5,
+                "\(label): the bell at \(bellRect), the selector at \(stripFrame)")
+        #expect(descendant(of: bar, where: { $0.accessibilityLabel == "More" }) == nil,
+                "\(label): an overflow control in the bar")
+    }
+
+    /// Where the bell is in the bar, in the bar's space.
+    ///
+    /// ⚠️ **NOT A VIEW WHOSE `accessibilityLabel` READS "Notifications".** An
+    /// image item's label lives on the `UIBarButtonItem`; the view UIKit
+    /// draws it with did not carry it (the first version of this lookup
+    /// found nothing at either width while the bell was on screen). So:
+    ///   1. the accessibility tree, as XCUITest reads it — a view, or an
+    ///      element a view vends (`accessibilityElements`), labelled or
+    ///      identified as the bell;
+    ///   2. else the control UIKit made for the item: a `UIControl` in the
+    ///      bar, on screen, wholly left of the selector and outside it — the
+    ///      group's only other platter.
+    private func bellFrame(in bar: UINavigationBar, leftOf strip: UIView) -> CGRect? {
+        let stripFrame = strip.convert(strip.bounds, to: bar)
+        func isBell(_ element: NSObject) -> Bool {
+            element.accessibilityLabel == "Notifications"
+                || (element as? UIAccessibilityIdentification)?.accessibilityIdentifier
+                    == BarItems.SharedID.notificationsBell
+        }
+        func onScreen(_ frame: CGRect) -> Bool { frame.width > 1 && frame.height > 1 }
+        var found: CGRect?
+        func walk(_ view: UIView) {
+            guard found == nil, view.window != nil, !view.isHidden, view !== strip else { return }
+            if isBell(view) {
+                let frame = view.convert(view.bounds, to: bar)
+                if onScreen(frame) { found = frame; return }
+            }
+            for case let element as NSObject in view.accessibilityElements ?? [] where !(element is UIView) {
+                guard isBell(element) else { continue }
+                let frame = bar.convert(element.accessibilityFrame, from: nil)
+                if onScreen(frame) { found = frame; return }
+            }
+            view.subviews.forEach(walk)
+        }
+        walk(bar)
+        if let found { return found }
+        // The control UIKit made for the image item.
+        let control = descendant(of: bar) { view in
+            guard view is UIControl, view.window != nil, !view.isHidden,
+                  view !== strip, !view.isDescendant(of: strip), !strip.isDescendant(of: view)
+            else { return false }
+            let frame = view.convert(view.bounds, to: bar)
+            return frame.width >= 24 && frame.maxX <= stripFrame.minX + 0.5 && frame.minX >= -0.5
+        }
+        return control.map { $0.convert($0.bounds, to: bar) }
+    }
+
+    private func descendant(of root: UIView, where matches: (UIView) -> Bool) -> UIView? {
+        if matches(root) { return root }
+        for subview in root.subviews {
+            if let found = descendant(of: subview, where: matches) { return found }
+        }
+        return nil
+    }
+}

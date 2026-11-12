@@ -116,11 +116,13 @@ final class PillDragAudit {
 
     /// The bar the viewer can actually touch.
     ///
-    /// The accessory first, because that is where every root screen's selector
-    /// lives now; then the top view controller's own view, which is where a
-    /// pushed screen with `hidesBottomBarWhenPushed` keeps its own. A bar with
-    /// no window, or one behind a presented screen, is not something a finger
-    /// can reach and is not what this reports.
+    /// The accessory first, where the profile's selector lives; then the
+    /// navigation bar, where the paged tab roots wear theirs right of the
+    /// bell (For You, and Messages since #2337); then the top view
+    /// controller's own view, which is where a pushed screen with
+    /// `hidesBottomBarWhenPushed` keeps its own. A bar with no window, or one
+    /// behind a presented screen, is not something a finger can reach and is
+    /// not what this reports.
     private func visibleBar() -> PagedTabBar? {
         if let accessory = tabBarController.bottomAccessory?.contentView,
            let bar = firstBar(in: accessory) {
@@ -128,6 +130,17 @@ final class PillDragAudit {
         }
         var candidate = tabBarController.selectedViewController
         if let nav = candidate as? UINavigationController {
+            // ⚠️ BY THE SCREEN'S OWN BAR ITEMS, NOT BY WALKING THE BAR. A walk
+            // down `nav.navigationBar` found nothing for the inbox's strip
+            // (`bar=0` for 21s, #2337) — the same lesson `HeaderSelectorAudit`
+            // records for the toolbar: UIKit hosts a bar item's custom view in
+            // containers of its own. The item names its view exactly.
+            if nav.presentedViewController == nil, !nav.isNavigationBarHidden,
+               let item = nav.topViewController?.navigationItem {
+                let hosts = ((item.leftBarButtonItems ?? []) + (item.rightBarButtonItems ?? []))
+                    .compactMap(\.customView)
+                if let bar = hosts.lazy.compactMap({ self.firstBar(in: $0) }).first { return bar }
+            }
             candidate = nav.presentedViewController ?? nav.topViewController
         }
         return candidate?.view.flatMap(firstBar)
