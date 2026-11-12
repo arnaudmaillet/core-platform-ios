@@ -226,12 +226,14 @@ struct InteractionLatencyHarnessTests {
         return (window, nav)
     }
 
-    /// Waits for the response to be COMMITTED (up to 30 s: a CI simulator
+    /// Waits for the response to be COMMITTED (up to 240 s: a CI simulator
     /// under parallel suites can starve the main actor for seconds), then
     /// ends the input itself. Nothing hangs on the harness's own window,
     /// which the suite lengthens so it never drops a late response.
     private func nextRecord(after count: Int) async throws -> InteractionLatencyTracker.Record {
-        for _ in 0..<3000 where !InteractionLatency.hasCommittedResponse && InteractionLatency.records.count <= count {
+        let deadline = ContinuousClock.now + .seconds(240)
+        while !InteractionLatency.hasCommittedResponse, InteractionLatency.records.count <= count,
+              ContinuousClock.now < deadline {
             try await Task.sleep(for: .milliseconds(10))
         }
         // One more turn for the frame's phase to be read, then the end.
@@ -247,7 +249,11 @@ struct InteractionLatencyHarnessTests {
     private func install() {
         InteractionLatency.install(log: false, hud: false)
         InteractionLatency.countsOnly = { $0 is Destination || $0 is UIButton }
-        InteractionLatency.responseWindow = 60
+        // Longer than any starvation: a CI runner under parallel suites once
+        // held the main actor past a 60 s window, and the input was dropped
+        // with "no response" before the deferred push could land. The test
+        // ends the input itself (`nextRecord`), so the window never decides.
+        InteractionLatency.responseWindow = 600
     }
 
     /// Nothing is hooked without the argument.
