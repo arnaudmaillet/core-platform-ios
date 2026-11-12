@@ -19,9 +19,9 @@ extension ForYouGridPage: PostGridPage {
         let withheld = withheldPosts
         switch state {
         case .loading:
-            render(ForYouViewModel.PageState.loading)
+            render(ForYouPageState.loading)
         case .content(let posts):
-            render(ForYouViewModel.PageState.content(posts.filter { !withheld.contains($0.id) }))
+            render(ForYouPageState.content(posts.filter { !withheld.contains($0.id) }))
         // Through the cold load's gate, as `render`'s states (#1900): a lock
         // shown before the delay had the bones land under it, and "taking
         // longer" replace it at 10 s.

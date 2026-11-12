@@ -229,7 +229,7 @@ final class ForYouPostListViewController: UIViewController {
     /// `newPosts` are the rows headed "New" — the SAME set the For You
     /// header's badge counts, handed over rather than re-derived, so the "New"
     /// count and the number on the header the viewer came from are one answer.
-    func render(_ state: ForYouViewModel.PageState, newPosts: Set<PostID>) {
+    func render(_ state: ForYouPageState, newPosts: Set<PostID>) {
         loadViewIfNeeded()
         page.setNewPosts(newPosts)
         page.render(state)

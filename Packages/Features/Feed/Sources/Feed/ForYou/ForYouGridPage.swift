@@ -240,7 +240,7 @@ final class ForYouGridPage: UIView {
     /// inbox is). The page is TOLD this rather than deriving it, so the "New"
     /// header's count and the badge on the For You header the viewer tapped
     /// cannot be two answers to one question — see
-    /// `ForYouViewModel.Snapshot.followingNew` / `.friendsUnseen`. Empty on
+    /// `ForYouSnapshot.followingNew` / `.friendsUnseen`. Empty on
     /// every other page, which is therefore one plain run.
     private var newPostIDs: Set<PostID> = []
 
@@ -3305,7 +3305,7 @@ final class ForYouGridPage: UIView {
         onRefresh?()
     }
 
-    func render(_ state: ForYouViewModel.PageState) {
+    func render(_ state: ForYouPageState) {
         // ⚠️ THE COLD SKELETON IS THE GATE'S (#1770): a page that answers
         // within the delay never shows a bone, and what answers after it
         // waits out the bones' minimum.
@@ -3315,7 +3315,7 @@ final class ForYouGridPage: UIView {
         renderNow(state)
     }
 
-    private func renderNow(_ state: ForYouViewModel.PageState) {
+    private func renderNow(_ state: ForYouPageState) {
         // The sections or the new run's count may have moved under the bar —
         // and a row's neighbours with them, so its hairlines (#2243).
         defer {

@@ -15,7 +15,7 @@ import UIKit
 /// # What it is, and what it borrows
 ///
 /// A `ForYouGridPage` in its `.grid` style over For You's own corpus — the
-/// media-only state (`ForYouViewModel.Snapshot.media`), the same posts the
+/// media-only state (`ForYouSnapshot.media`), the same posts the
 /// tab's chunks draw from — driven by `ForYouViewController`, which forwards
 /// each snapshot, the paging spinner and the refresh while this screen is on
 /// the stack. One view model, so the gallery and the list page the same
@@ -143,7 +143,7 @@ final class DiscoverGalleryViewController: UIViewController {
 
     // MARK: - Content, from the host
 
-    func render(_ state: ForYouViewModel.PageState) {
+    func render(_ state: ForYouPageState) {
         loadViewIfNeeded()
         page.render(state)
         feedContinuation.answered()
