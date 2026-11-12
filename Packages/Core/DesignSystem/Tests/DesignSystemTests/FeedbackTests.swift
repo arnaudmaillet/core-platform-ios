@@ -281,6 +281,10 @@ struct FeedbackTests {
 
     /// Every toast is announced — and again when its `id` updates it — with
     /// its words, a turn later, without moving VoiceOver's focus.
+    /// This test's words, said by no other suite (see below).
+    private static let announcedLoading = "Posting the announced one…"
+    private static let announcedDone = "Posted the announced one"
+
     @Test func eachToastIsAnnounced() async {
         let (root, screen) = shell()
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
@@ -295,14 +299,16 @@ struct FeedbackTests {
         let previous = ToastView.postAnnouncement
         ToastView.postAnnouncement = { heard.append($0.string) }
         _ = recordingHaptics {
-            Feedback.loading("Posting…", id: "post", from: screen)
-            Feedback.success("Posted", from: screen, id: "post")
+            Feedback.loading(Self.announcedLoading, id: "announce-post", from: screen)
+            Feedback.success(Self.announcedDone, from: screen, id: "announce-post")
         }
         #expect(heard.isEmpty, "announced inline, where a menu's dismissal drops it")
         // The announcement is a later turn of the main actor, so this awaits
         // it. No other suite swaps `postAnnouncement`; their toasts may be
-        // heard meanwhile, and only these two count.
-        let ours = ["Posting…", "Posted"]
+        // heard meanwhile, and only these two count — so they say words no
+        // other suite says: ToastStackTests' own "Posting…" was heard in the
+        // middle once (develop's backstop, 2026-11-11).
+        let ours = [Self.announcedLoading, Self.announcedDone]
         for _ in 0..<200 where heard.filter(ours.contains).count < 2 {
             try? await Task.sleep(for: .milliseconds(5))
         }
