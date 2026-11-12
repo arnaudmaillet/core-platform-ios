@@ -484,9 +484,11 @@ final class CommentRowView: UIView {
     private weak var attachmentContent: UIView?
     /// The attachment drawn, nil for none.
     private(set) var shownAttachment: CommentAttachment?
-    /// A voice comment's voice: the shared component, full size, at the
-    /// text column's width (the slot's). Built when first shown.
-    private lazy var attachmentVoiceView = VoiceView(size: .full)
+    /// A voice comment's voice: the shared component, full size, its panel's
+    /// width saying its length (#2329) — leading-aligned, from the narrowest
+    /// up to the text column's width (the slot's) at 30 s — as a voice
+    /// post's caption. Built when first shown.
+    private lazy var attachmentVoiceView = VoiceView(size: .full, widthFollowsLength: true)
     /// The neutral line of a kind this build can't draw, on a comment with
     /// no words of its own. Built when first shown.
     private lazy var unsupportedAttachmentLabel: UILabel = {
@@ -519,8 +521,9 @@ final class CommentRowView: UIView {
     static func voicePlaybackID(commentID: String) -> String { "comment-\(commentID)" }
 
     /// Draws `attachment` in the slot, by kind:
-    /// - **a voice:** the shared voice view, with the seconds timer (a
-    ///   comment is public, as a post: "12″", #2294), bound to the hub; the
+    /// - **a voice:** the shared voice view, its width by its length, with
+    ///   the seconds timer (a comment is public, as a post: "12″", #2294),
+    ///   bound to the hub; the
     ///   body's words, if any, under it — as on a voice post's caption;
     /// - **a kind this build doesn't know:** nothing when the comment has
     ///   words (they speak for it), the neutral line otherwise — never a
@@ -533,7 +536,9 @@ final class CommentRowView: UIView {
             let id = Self.voicePlaybackID(commentID: commentID)
             if attachmentVoiceID != nil, attachmentVoiceID != id || !bindsVoicePlayback { releaseAttachmentVoice() }
             let view = attachmentVoiceView
-            view.role = .post(author: authorName.isEmpty ? nil : authorName)
+            // A comment's role: a post's seconds ("12″"), read "Voice
+            // comment by Ava, 13 seconds".
+            view.role = .comment(author: authorName.isEmpty ? nil : authorName)
             let levels = voice.waveform.isEmpty ? nil : voice.waveform
             if bindsVoicePlayback {
                 Self.voiceHub.bind(view, id: id, url: voice.url, duration: voice.duration, levels: levels)

@@ -219,6 +219,21 @@ struct VoiceComponentTests {
         #expect(voice.accessibilityCustomActions?.map(\.name).contains("Play") == true)
     }
 
+    /// A voice comment (#2309) reads as a comment, worded as a post, and
+    /// keeps a post's seconds.
+    @Test func voiceOverReadsAComment() {
+        #expect(VoiceView.accessibilityLabel(role: .comment(author: "Ava"), senderName: nil, duration: 12.6, unplayed: false)
+            == "Voice comment by Ava, 13 seconds")
+        #expect(VoiceView.accessibilityLabel(role: .comment(author: nil), senderName: nil, duration: 1, unplayed: true)
+            == "Voice comment, 1 second", "a comment has no played / not played")
+        #expect(VoiceView.TimerStyle(role: .comment(author: "Ava")) == .seconds)
+        let voice = VoiceView(size: .full)
+        voice.role = .comment(author: "Ava")
+        voice.configure(VoiceView.State(levels: nil, duration: 12.6))
+        #expect(voice.accessibilityLabel == "Voice comment by Ava, 13 seconds")
+        #expect(voice.debugTimerText == "12\u{2033}")
+    }
+
     @Test func theGenericWaveformHasAShape() {
         #expect(VoiceView.genericLevels.count == 100)
         #expect(Set(VoiceView.genericLevels).count > 5)

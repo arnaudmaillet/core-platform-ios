@@ -145,10 +145,14 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
         case compact
     }
 
-    /// Whose voice it is, for VoiceOver: a message (its sender) or a post.
+    /// Whose voice it is, for VoiceOver: a message (its sender), a post or
+    /// a post's comment (#2309).
     public enum Role: Equatable, Sendable {
         case message
         case post(author: String?)
+        /// A voice comment (#2309): public and up to a minute, as a post —
+        /// the seconds timer, no unplayed dot — read as a comment.
+        case comment(author: String?)
     }
 
     /// What the trailing slot shows (#2274).
@@ -524,11 +528,11 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
         case seconds
 
         /// The style of the voice `role` says: a message's clock, a post's
-        /// seconds.
+        /// or a comment's seconds.
         public init(role: Role) {
             switch role {
             case .message: self = .clock
-            case .post: self = .seconds
+            case .post, .comment: self = .seconds
             }
         }
     }
@@ -1549,7 +1553,8 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
     }
 
     /// What VoiceOver reads (#2104, #2205): "Voice message from Ava, 12
-    /// seconds, not played"; "Voice post by Ava, 32 seconds".
+    /// seconds, not played"; "Voice post by Ava, 32 seconds"; "Voice comment
+    /// by Ava, 13 seconds" (#2309).
     public static func accessibilityLabel(
         role: Role, senderName: String?, duration: TimeInterval, unplayed: Bool
     ) -> String {
@@ -1558,6 +1563,8 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
         switch role {
         case .post(let author):
             return author.map { "Voice post by \($0), \(length)" } ?? "Voice post, \(length)"
+        case .comment(let author):
+            return author.map { "Voice comment by \($0), \(length)" } ?? "Voice comment, \(length)"
         case .message:
             let from = senderName.map { "Voice message from \($0)" } ?? "Your voice message"
             let heard = unplayed ? "not played" : "played"

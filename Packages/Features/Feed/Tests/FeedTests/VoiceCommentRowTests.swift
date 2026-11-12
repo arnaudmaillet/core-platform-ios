@@ -85,7 +85,9 @@ struct VoiceCommentRowTests {
             row.configure(with: Self.model(body: "Had to say this one out loud 😂", attachment: .voice(Self.voice)))
             let voice = try #require(row.debugAttachmentVoiceView, "no voice drawn")
             #expect(voice.size == .full)
+            #expect(voice.role == .comment(author: "Ava Moreau"))
             #expect(voice.timerStyle == .seconds)
+            #expect(voice.accessibilityLabel == "Voice comment by Ava Moreau, 13 seconds")
             #expect(voice.debugTimerText == "12\u{2033}", "a comment's voice in seconds (#2294)")
             #expect(row.debugShowsBody, "the words went")
             #expect(row.debugUnsupportedAttachmentLine == nil)
@@ -94,10 +96,18 @@ struct VoiceCommentRowTests {
             _ = Self.laidOut(row)
             let voiceFrame = voice.convert(voice.bounds, to: row)
             let bodyFrame = row.bodyTextLabel.convert(row.bodyTextLabel.bounds, to: row)
-            #expect(voiceFrame.height > 20, "the voice took no room: \(voiceFrame)")
+            #expect(voiceFrame.height >= VoiceView.panelHeight(for: .full) - 0.5, "the voice took no room: \(voiceFrame)")
             #expect(voiceFrame.maxY <= bodyFrame.minY + 0.5, "the words are not under the voice: \(voiceFrame) / \(bodyFrame)")
             #expect(abs(voiceFrame.minX - bodyFrame.minX) < 0.5, "the voice is not on the text column")
-            #expect(abs(voiceFrame.width - bodyFrame.width) < 1, "the voice is not the text column's width")
+            #expect(abs(voiceFrame.width - bodyFrame.width) < 1, "the voice's room is not the text column")
+            // Its panel says its length (#2329): leading-aligned, narrower
+            // than the column at 12 s, as a voice post's caption.
+            #expect(voice.widthFollowsLength)
+            let panel = voice.debugPanelFrame
+            let expected = VoiceView.panelWidth(forLength: Self.voice.duration, available: voiceFrame.width)
+            #expect(abs(panel.width - expected) < 1, "panel \(panel.width), by length \(expected)")
+            #expect(panel.width < voiceFrame.width - 1, "a 12 s voice took the whole column")
+            #expect(abs(panel.minX) < 0.5, "the panel is not leading-aligned")
         }
     }
 
