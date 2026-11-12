@@ -6,6 +6,7 @@ import CoreNetworking
 import CoreNetworkingMocks
 import FeedInterface
 import Foundation
+import TestSupport
 import Testing
 import UIKit
 @testable import Chat
@@ -51,12 +52,6 @@ struct ChannelsTests {
             showsGroups: groups,
             showsChannels: channels
         )
-    }
-
-    private func settle(until condition: () -> Bool) async {
-        for _ in 0..<300 where !condition() {
-            try? await Task.sleep(for: .milliseconds(10))
-        }
     }
 
     private func loadedCatalog(_ repository: ChatRepository) async -> InboxCatalog {

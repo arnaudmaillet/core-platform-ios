@@ -3,6 +3,7 @@ import CoreModels
 import CoreNetworking
 import CoreNetworkingMocks
 import Foundation
+import TestSupport
 import Testing
 @testable import Chat
 
@@ -60,16 +61,6 @@ private actor PagedDirectory: PeopleDirectoryProviding {
 
 @MainActor
 struct InboxPeoplePagingTests {
-    /// Whether `condition` came to hold within `looks` looks — a budget of
-    /// looks, not wall-clock time, so a starved runner spends none of it.
-    private func settle(looks: Int = 3_000, until condition: () async -> Bool) async -> Bool {
-        for _ in 0..<looks {
-            await Task.yield()
-            if await condition() { return true }
-            try? await Task.sleep(for: .milliseconds(10))
-        }
-        return await condition()
-    }
 
     private func idle() async {
         for _ in 0..<20 { await Task.yield() }

@@ -6,6 +6,7 @@ import CoreNetworkingMocks
 import FeedInterface
 import Foundation
 import MediaCore
+import TestSupport
 import Testing
 import UIKit
 @testable import Chat
@@ -38,12 +39,6 @@ struct GroupChatsTests {
             showsGroups: groups,
             showsChannels: false
         )
-    }
-
-    private func settle(until condition: () -> Bool) async {
-        for _ in 0..<300 where !condition() {
-            try? await Task.sleep(for: .milliseconds(10))
-        }
     }
 
     private func inbox(_ repository: ChatRepository) async throws -> [Conversation] {

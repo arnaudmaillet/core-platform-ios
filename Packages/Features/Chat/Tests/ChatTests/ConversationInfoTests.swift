@@ -8,6 +8,7 @@ import DesignSystem
 import FeedInterface
 import Foundation
 import HeroPage
+import TestSupport
 import Testing
 import UIKit
 @testable import Chat
@@ -57,12 +58,6 @@ struct ConversationInfoTests {
     private final class BellRecorder {
         var muted = false
         var asked: [(Bool, Date?)] = []
-    }
-
-    private func settle(_ condition: () -> Bool) async {
-        for _ in 0..<300 where !condition() {
-            try? await Task.sleep(for: .milliseconds(10))
-        }
     }
 
     private func group(_ id: String, _ repository: ChatRepository? = nil) async -> GroupInfoViewModel {
