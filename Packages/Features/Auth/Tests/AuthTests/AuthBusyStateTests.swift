@@ -77,13 +77,18 @@ private final class InstantApple: FederatedSignInProviding {
 @MainActor
 struct AuthBusyStateTests {
     private func start(_ signUp: GatedSignUp, picking method: SignInMethod) throws -> UINavigationController {
-        let flow = LoginFlowCoordinator(
-            signUp: signUp, federated: InstantApple(), homeCountry: { "FR" }
-        ).start()
-        let navigation = try #require(flow as? UINavigationController)
+        try startFlow(signUp, picking: method).navigation
+    }
+
+    /// The flow and its coordinator, for a suite that reads its guards.
+    private func startFlow(
+        _ signUp: GatedSignUp, picking method: SignInMethod
+    ) throws -> (navigation: UINavigationController, coordinator: LoginFlowCoordinator) {
+        let coordinator = LoginFlowCoordinator(signUp: signUp, federated: InstantApple(), homeCountry: { "FR" })
+        let navigation = try #require(coordinator.start() as? UINavigationController)
         let methods = try #require(navigation.viewControllers.first as? MethodSelectionViewController)
         methods.onMethodSelected?(method)
-        return navigation
+        return (navigation, coordinator)
     }
 
     /// Gives a second, wrongly sent request every chance to reach the gate
@@ -114,7 +119,7 @@ struct AuthBusyStateTests {
 
     @Test func aRefusedSMSClearsTheBusyStateAndLetsTheNextTapSend() async throws {
         let signUp = GatedSignUp()
-        let navigation = try start(signUp, picking: .phone)
+        let (navigation, coordinator) = try startFlow(signUp, picking: .phone)
         let phone = try #require(navigation.flowTop as? PhoneAuthViewController)
 
         phone.onSendCode?("+33612345678", "+33 6 12 34 56 78")
@@ -128,6 +133,10 @@ struct AuthBusyStateTests {
         phone.onSendCode?("+33612345678", "+33 6 12 34 56 78")
         try #require(await settle { await signUp.held == 1 })
         #expect(await signUp.verifications == 2, "a failed send does not lock the button for good")
+        // The refused call's task has long finished: the retry still holds
+        // its guard — released once per call, never by the call before it.
+        await letStrayCallsLand()
+        #expect(coordinator.callsInFlight.contains(.sendCode), "the refused call released the retry's guard")
         await signUp.open()
     }
 
