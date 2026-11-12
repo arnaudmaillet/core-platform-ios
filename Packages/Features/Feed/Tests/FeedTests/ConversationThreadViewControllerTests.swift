@@ -131,6 +131,21 @@ struct ConversationThreadViewControllerTests {
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         window.rootViewController = navigation
         window.isHidden = false
+        // ⚠️ NOT THE SYSTEM KEYBOARD. Its guide is app-wide: a suite running
+        // alongside that focuses a field (on CI, with no hardware keyboard)
+        // lifted this field by the keyboard's height, and the slack, the
+        // clearance and the toolbar gap with it — the same numbers on every
+        // starved run (#2392). The composer rests on a keyboard parked below
+        // the screen; the keyboard tests move one of their own
+        // (`SnapActionColumnLayoutTests.fakeKeyboard`).
+        // A screen with no composer on show (a reader's channel, say) has
+        // nothing to park.
+        if screen.debugComposeBar.isDescendant(of: screen.view) {
+            _ = SnapActionColumnLayoutTests.fakeKeyboard(
+                in: screen.view, for: screen.debugComposeBar,
+                top: max(screen.view.bounds.height, window.bounds.height) + 100
+            )
+        }
         screen.view.layoutIfNeeded()
         return (screen, driver, accessory, window)
     }
