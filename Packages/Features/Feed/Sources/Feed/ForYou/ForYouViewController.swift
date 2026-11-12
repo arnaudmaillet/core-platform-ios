@@ -97,7 +97,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     private(set) weak var friendsList: ForYouPostListViewController?
     /// The last snapshot rendered, so a screen pushed between two publishes
     /// opens on what is loaded rather than on a skeleton.
-    private var lastSnapshot: ForYouViewModel.Snapshot?
+    private var lastSnapshot: ForYouSnapshot?
     /// Which lead sections the screen showed last time (#1756): a cold load
     /// draws the Friends row's and the shelf's skeletons only for a section
     /// that was there, so no bone vanishes because its section is empty.
@@ -105,7 +105,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     /// The lead's skeleton timing (#1756): bones after 0.15 s, held 0.3 s.
     private let leadGate = SkeletonGate()
     /// The rows the reveal waits to draw while the bones finish their minimum.
-    private var pendingLead: ForYouViewModel.Rails?
+    private var pendingLead: ForYouRails?
     private static let presenceScreen = "foryou"
     private let prewarm: ([PostID]) async -> Void
     /// Warms a post's first page of comments into the panel's synchronous
@@ -542,7 +542,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
 
     /// The Friends row and the shelf, from the view model's rows — once the
     /// lead's bones have had their minimum.
-    private func renderLead(_ rows: ForYouViewModel.Rails, state: ForYouViewModel.PageState) {
+    private func renderLead(_ rows: ForYouRails, state: ForYouPageState) {
         if state == .loading {
             if !leadGate.isLoading, pendingLead == nil, friendsRow.stories.isEmpty, shelf.cards.isEmpty {
                 beginLeadSkeleton()
@@ -573,7 +573,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         }
     }
 
-    private func applyLead(_ rows: ForYouViewModel.Rails) {
+    private func applyLead(_ rows: ForYouRails) {
         friendsRow.placeholderCount = 0
         friendsRow.render(rows.friends, newCount: rows.friendsBadge)
         if shelf.apply(.init(
@@ -1103,7 +1103,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
 
     /// A friend's face: their profile, and Unfollow. No Report —
     /// a face is a person, not a post, and a post is reported from the post.
-    private func storyMenuElements(for story: ForYouViewModel.FriendStory) -> [UIMenuElement] {
+    private func storyMenuElements(for story: ForYouFriendStory) -> [UIMenuElement] {
         let author = story.authorID
         let stub = ProfileIdentityStub(handle: story.handle, displayName: story.name)
         var elements: [UIMenuElement] = [profileAction { [weak self] in
@@ -2234,7 +2234,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     /// other, the avatar seen over the media as it grew. The post opens as a
     /// window out of the face's own outline, the page itself from the first
     /// frame, and closes onto the avatar's picture (`ForYouRowOrigins`).
-    func openStory(_ story: ForYouViewModel.FriendStory) {
+    func openStory(_ story: ForYouFriendStory) {
         guard canOpenFromRow, let openPostHero,
               let origin = ForYouRowOrigins.story(
                   story, friends: friendsRow, page: page, host: view,

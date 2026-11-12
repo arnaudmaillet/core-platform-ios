@@ -42,7 +42,7 @@ enum ForYouRowOrigins {
     ///
     /// `nil` for a friend with nothing to open.
     static func story(
-        _ story: ForYouViewModel.FriendStory,
+        _ story: ForYouFriendStory,
         friends: FriendsStoriesRow,
         page: ForYouGridPage,
         host: UIView,
