@@ -3,7 +3,7 @@ import Foundation
 /// THE BRAND'S RAW COLOURS, IN ONE PLACE (#2062). Every hex the app draws
 /// its brand in is here and nowhere else: `Palette`'s roles derive from
 /// `BrandTheme.current`, and the assets that hold a colour outside the code
-/// (`AccentColor`, the launch logo, the app icon) are checked by
+/// (`AccentColor`, the launch picture, the app icon) are checked by
 /// `BrandAssetsGuardTests`.
 ///
 /// **Changing the theme** (`dev/BRAND_PALETTE.md`, "Changing the theme"):
@@ -110,20 +110,24 @@ public struct BrandTheme: Sendable, Equatable {
     /// stop sits (0…1), interpolated in sRGB: the violet to the mint
     /// (#2282, the owner 2026-11-11), without the primary — a gradient from
     /// the primary to the mint goes grey in the middle. The unseen-story
-    /// ring (#2089) and the loader (#2147) wear it. ⚠️ The violet appears
-    /// only inside it, never as a UI colour on its own.
+    /// ring (#2089) wears it; the loader left it (#2340). ⚠️ The violet
+    /// appears only inside it, never as a UI colour on its own.
     public let signatureGradient: [UInt32]
     public let signatureLocations: [Double]
-    /// The signature with Increased Contrast, for the ring and the loader
-    /// alike: opaque, its mint end deepened to reach 3:1 on the light page
-    /// (`F2F2F7`) — the mint itself is 1.16:1 there. The crown's precedent
-    /// (#2071), as #2147 did.
+    /// The signature with Increased Contrast, for the ring: opaque, its
+    /// mint end deepened to reach 3:1 on the light page (`F2F2F7`) — the
+    /// mint itself is 1.16:1 there. The crown's precedent (#2071), as #2147
+    /// did.
     public let signatureContrastStops: [UInt32]
-    /// Each stop's opacity in the loader (#2147): what makes it soft, the
-    /// colours mixing into the ground under them — pastel on the light page,
-    /// deeper on the dark one. The loader's own since #2282 (it was read
-    /// from the old icon's blob, which had the same softness).
-    public let loaderOpacities: [Double]
+    /// The loader's three pills, left to right (#2340, the owner
+    /// 2026-11-12): the primary, then the same hue less saturated at each
+    /// step (HSB S 0.93 → 0.65 → 0.42, B 1), so the three read as one
+    /// gradient and never as a disabled grey. Opaque, the same in both
+    /// appearances: the mark is a logo, not text. With Increased Contrast
+    /// all three take the primary's own IC value (`primary.lightIC`,
+    /// `primary.darkIC`). It replaced the signature masked by the pills
+    /// (#2147, #2282).
+    public let loaderSteps: [UInt32]
 
     /// The theme the app draws in.
     public static let current = coral
@@ -154,7 +158,7 @@ public struct BrandTheme: Sendable, Equatable {
         signatureGradient: [0x7235FF, 0x16FFCB],
         signatureLocations: [0, 1],
         signatureContrastStops: [0x7235FF, 0x009E7B],
-        loaderOpacities: [0.75, 0.55]
+        loaderSteps: [0xFF1358, 0xFF598A, 0xFF94B3]
     )
 }
 
@@ -177,7 +181,7 @@ extension BrandTheme {
 /// same, so they live beside it (`RawHueGuardTests`).
 public enum BrandNeutrals {
     /// The grouped page's light grey (`systemGroupedBackground` in the
-    /// light), which the loader's leads are mixed toward.
+    /// light), where the brand's contrast is measured.
     public static let pageLight: UInt32 = 0xF2F2F7
 }
 

@@ -192,54 +192,77 @@ struct AppLoaderTests {
         #expect(view.debugAnimationCount == 1, "the dots do not pulse")
     }
 
-    /// The signature (#2147, the owner 2026-11-05; violet → mint since
-    /// #2282): one layer across the mark, the theme's colours at the
-    /// loader's own opacities — today's softness — the pills its mask, so
-    /// the left one is violet, the middle sky blue, the right mint.
-    @Test func thePillsMaskTheSignature() {
+    /// The primary in three steps (#2340, the owner 2026-11-12): one opaque
+    /// colour per pill, the primary first, then the same hue less saturated
+    /// at each step, in both appearances.
+    @Test(arguments: [UIUserInterfaceStyle.light, .dark])
+    func thePillsWearThePrimaryInThreeSteps(_ style: UIUserInterfaceStyle) {
         let (view, window) = loader()
         defer { window.isHidden = true }
+        view.traitOverrides.userInterfaceStyle = style
+        view.layoutIfNeeded()
         let theme = BrandTheme.current
-        let gradient = view.debugPillGradient
-        #expect(view.debugPillsMaskTheGradient, "the pills do not mask the gradient")
-        let drawn = (gradient.colors as? [CGColor] ?? []).map(Self.rgba)
-        #expect(drawn.map(\.hex) == [0x7235FF, 0x16FFCB], "not the signature, violet → mint")
-        let expected = zip(theme.signatureGradient, theme.loaderOpacities).map { ($0, $1) }
-        #expect(drawn.count == expected.count)
-        for (stop, (colour, opacity)) in zip(drawn, expected) {
-            #expect(stop.hex == colour)
-            #expect(abs(stop.alpha - opacity) < 0.01, "real alpha: \(stop.alpha) vs \(opacity)")
+        let drawn = view.debugPillColors.map(Self.rgba)
+        #expect(drawn.map(\.hex) == theme.loaderSteps)
+        #expect(drawn.map(\.hex) == [0xFF1358, 0xFF598A, 0xFF94B3], "not the primary's three steps")
+        #expect(drawn.first?.hex == theme.primary.light, "the left pill is not the primary")
+        #expect(drawn.allSatisfy { $0.alpha > 0.99 }, "a pill is not opaque")
+        #expect(view.debugPillOpacity == 1)
+        // One hue, each step less saturated than the one before, never grey.
+        let hsb = drawn.map { Self.hsb($0.hex) }
+        for (a, b) in zip(hsb, hsb.dropFirst()) {
+            #expect(abs(a.hue - b.hue) < 0.005, "the steps leave the primary's hue")
+            #expect(b.saturation < a.saturation, "a step is not less saturated than the one before")
+            #expect(b.brightness > 0.99)
         }
-        #expect(theme.loaderOpacities == [0.75, 0.55], "the loader's softness changed")
-        #expect(gradient.locations?.map(\.doubleValue) == theme.signatureLocations)
-        #expect(gradient.startPoint == CGPoint(x: 0, y: 0.2) && gradient.endPoint == CGPoint(x: 1, y: 1.03),
-                "not the loader's direction")
-        #expect(gradient.frame.size == view.bounds.size, "the gradient does not span the mark")
+        #expect((hsb.last?.saturation ?? 0) > 0.35, "the last step reads as a grey")
     }
 
-    /// The leads: the same gradient, masked by them, at their share.
-    @Test func theLeadsMaskTheSameGradientAtTheirShare() {
+    /// The leads: each its pill's colour, at their lower opacity.
+    @Test func eachLeadWearsItsPillsColourAtItsShare() {
         let (view, window) = loader()
         defer { window.isHidden = true }
-        #expect(view.debugLeadsMaskTheGradient)
-        #expect(view.debugLeadGradient.opacity == Palette.loaderLeadOpacity)
-        #expect((view.debugLeadGradient.colors as? [CGColor])?.map(Self.rgba).map(\.hex)
-                == (view.debugPillGradient.colors as? [CGColor])?.map(Self.rgba).map(\.hex))
+        #expect(view.debugLeadOpacity == Palette.loaderLeadOpacity)
+        #expect(Palette.loaderLeadOpacity < 1)
+        #expect(view.debugLeadColors.map(Self.rgba).map(\.hex) == view.debugPillColors.map(Self.rgba).map(\.hex))
+        #expect(view.debugLeadColors.count == AppLoaderGeometry.pillCount)
     }
 
-    /// Increased Contrast: the stops opaque, the mint end deepened past 3:1
-    /// on the light page — the mint itself is 1.16:1 there (#2282).
-    @Test func increasedContrastMakesTheStopsOpaqueAndTheMintLegible() {
+    /// Reduce Motion's three dots are the same pills: the same three
+    /// colours.
+    @Test func reducedMotionsDotsWearTheThreeSteps() {
+        let (view, window) = loader(reducesMotion: true)
+        defer { window.isHidden = true }
+        view.startAnimating()
+        #expect(view.debugPillColors.map(Self.rgba).map(\.hex) == BrandTheme.current.loaderSteps)
+    }
+
+    /// Increased Contrast: the three pills in the primary's IC value, opaque
+    /// — `C6003A` in the light, `FF5C8C` in the dark.
+    @Test(arguments: [(UIUserInterfaceStyle.light, UInt32(0xC6003A)), (UIUserInterfaceStyle.dark, UInt32(0xFF5C8C))])
+    func increasedContrastTakesThePrimarysValue(_ style: UIUserInterfaceStyle, _ expected: UInt32) {
         let (view, window) = loader()
         defer { window.isHidden = true }
+        view.traitOverrides.userInterfaceStyle = style
         view.traitOverrides.accessibilityContrast = .high
         view.layoutIfNeeded()
-        let stops = (view.debugPillGradient.colors as? [CGColor] ?? []).map(Self.rgba)
-        #expect(stops.map(\.hex) == BrandTheme.current.signatureContrastStops)
-        #expect(stops.map(\.hex) == [0x7235FF, 0x009E7B], "not the signature with its deep mint end")
+        let theme = BrandTheme.current
+        let stops = view.debugPillColors.map(Self.rgba)
+        #expect(stops.map(\.hex) == Array(repeating: expected, count: 3))
+        #expect(expected == (style == .dark ? theme.primary.darkIC : theme.primary.lightIC))
         #expect(stops.allSatisfy { $0.alpha > 0.99 }, "not opaque")
-        let mint = stops.last?.hex ?? 0
-        #expect(Self.contrast(mint, 0xF2F2F7) >= 3, "the mint is \(Self.contrast(mint, 0xF2F2F7)):1 on the light page")
+        let page: UInt32 = style == .dark ? 0x000000 : 0xF2F2F7
+        #expect(Self.contrast(expected, page) >= 3, "\(Self.contrast(expected, page)):1 on the page")
+        #expect(view.debugLeadColors.map(Self.rgba).map(\.hex) == stops.map(\.hex))
+    }
+
+    private static func hsb(_ hex: UInt32) -> (hue: CGFloat, saturation: CGFloat, brightness: CGFloat) {
+        var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        UIColor(
+            red: CGFloat(hex >> 16 & 0xFF) / 255, green: CGFloat(hex >> 8 & 0xFF) / 255,
+            blue: CGFloat(hex & 0xFF) / 255, alpha: 1
+        ).getHue(&h, saturation: &s, brightness: &b, alpha: &a)
+        return (h, s, b)
     }
 
     private static func rgba(_ color: CGColor) -> (hex: UInt32, alpha: Double) {
