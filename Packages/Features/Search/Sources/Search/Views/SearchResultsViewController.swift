@@ -114,7 +114,7 @@ final class SearchResultsViewController: UIViewController {
     /// Nil in a composition without the shell's claim sheet — the badge is then
     /// a read-out, not a control.
     private let makeWalletSheet: (@MainActor () -> UIViewController)?
-    private let walletObservers = SearchNotificationObserverBag()
+    private let walletObservers = NotificationTokens()
 
     /// What the field asks for: everything the bar has left beside the back
     /// button, floored at one perfect bubble.
@@ -1015,16 +1015,6 @@ extension SearchResultsViewController {
         }
         #endif
     }
-}
-
-/// ⚠️ A BOX, BECAUSE A `@MainActor` SCREEN'S `deinit` MAY NOT READ ITS OWN
-/// STORED TOKENS under Swift 6. Feed keeps one of these for the same reason and
-/// it is internal to Feed, so Search carries its own rather than reaching
-/// across a package for five lines.
-final class SearchNotificationObserverBag: @unchecked Sendable {
-    private var tokens: [any NSObjectProtocol] = []
-    func add(_ token: any NSObjectProtocol) { tokens.append(token) }
-    deinit { tokens.forEach(NotificationCenter.default.removeObserver) }
 }
 
 // MARK: - How it is left (#1144)

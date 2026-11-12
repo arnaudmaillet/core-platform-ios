@@ -230,7 +230,7 @@ final class ForYouGridPage: UIView {
     var hostedState: PostGridPageState?
     /// The record those posts are read from: the app's; a test's own.
     var withheldPosts: UnavailablePosts = .shared
-    let withheldObservation = NotificationObservation()
+    let withheldObservation = NotificationTokens()
     /// The order the view model handed over, kept so an append can be
     /// recognised as one before arrangement permutes it.
     private var rawPosts: [GalleryPost] = []

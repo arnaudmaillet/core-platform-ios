@@ -1,3 +1,4 @@
+import CoreModels
 import CoreStorage
 import DesignSystem
 import UIKit
@@ -13,7 +14,7 @@ final class TextPostDraftsViewController: UIViewController {
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Int, String>!
     private let emptyState = EmptyStateView()
-    private let observers = NotificationObserverTokenBag()
+    private let observers = NotificationTokens()
 
     private static let ageFormatter: RelativeDateTimeFormatter = {
         let formatter = RelativeDateTimeFormatter()
@@ -51,13 +52,13 @@ final class TextPostDraftsViewController: UIViewController {
         )
         emptyState.isUserInteractionEnabled = false
         emptyState.pin(to: view)
-        observers.tokens = [
+        observers.replace(with: [
             NotificationCenter.default.addObserver(
                 forName: PostDraftStore.didChangeNotification, object: store, queue: .main
             ) { [weak self] _ in
                 MainActor.assumeIsolated { self?.reload(animated: true) }
             },
-        ]
+        ])
         reload(animated: false)
     }
 

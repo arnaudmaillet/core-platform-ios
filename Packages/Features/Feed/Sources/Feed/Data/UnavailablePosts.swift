@@ -25,13 +25,13 @@ public final class UnavailablePosts {
     static let idsKey = "ids"
 
     private(set) var ids: Set<PostID> = []
-    private let viewerObservation = NotificationObservation()
+    private let viewerObservation = NotificationTokens()
 
     init() {
-        viewerObservation.token = NotificationCenter.default.addObserver(forName: .viewerDidChange, object: nil, queue: .main) {
+        viewerObservation.add(NotificationCenter.default.addObserver(forName: .viewerDidChange, object: nil, queue: .main) {
             [weak self] _ in
             MainActor.assumeIsolated { self?.ids.removeAll() }
-        }
+        })
     }
 
     func contains(_ id: PostID) -> Bool { ids.contains(id) }

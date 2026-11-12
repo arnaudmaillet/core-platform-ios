@@ -154,7 +154,7 @@ final class SnapCommentsSheetSession: NSObject, UISheetPresentationControllerDel
     private var keyboardRestTop: CGFloat?
     /// The keyboard is animating away: the sheet is UIKit's again.
     private var isKeyboardHiding = false
-    private let keyboardObservers = NotificationObserverBag()
+    private let keyboardObservers = NotificationTokens()
 
     /// - Parameters:
     ///   - walletBadge: the balance for the sheet's bar, nil for none (a
@@ -1708,7 +1708,7 @@ final class SnapCommentsSheetViewController: UIViewController, UINavigationBarDe
     private lazy var closeItem = BarItems.icon(
         id: Self.closeItemID, image: UIImage(systemName: "xmark"), label: "Close comments"
     ) { [weak self] in self?.onClose?() }
-    private let keyboardObservers = NotificationObserverBag()
+    private let keyboardObservers = NotificationTokens()
     /// Whether a keyboard is up (or coming up) over the sheet.
     private(set) var isKeyboardUp = false
     /// The panel to the sheet's bottom at rest; to its resting height while

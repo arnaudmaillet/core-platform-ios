@@ -188,7 +188,7 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
     private let makeWalletSheet: (@MainActor () -> UIViewController)?
     /// Held in a bag rather than a property: a main-actor screen's `deinit`
     /// is nonisolated and may not even read one to unregister it.
-    private let walletObservers = NotificationObserverBag()
+    private let walletObservers = NotificationTokens()
     /// The follow state as last rendered, so the dock hand-over can redraw
     /// the button without asking the caller's store again.
     private var followState = false

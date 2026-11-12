@@ -1281,7 +1281,7 @@ final class CommentsInputBar: UIView {
     /// Removes the keyboard observers on release — a nonisolated deinit
     /// cannot touch main-actor state, so the tokens live in a bag whose
     /// own deinit does the unregistering (the VC-side pattern).
-    private let keyboardObservers = NotificationObserverTokenBag()
+    private let keyboardObservers = NotificationTokens()
     private var fieldHeight: NSLayoutConstraint!
     /// The stake's claim on the bar's top — off while `showsStake` is false.
     private var stakeStationConstraints: [NSLayoutConstraint] = []
@@ -1472,7 +1472,7 @@ final class CommentsInputBar: UIView {
 
         // The keyboard axis: the page-swipe gate, the idle-dismiss seam and
         // the ceiling through transforms (`refreshKeyboardCeiling`).
-        keyboardObservers.tokens = [
+        keyboardObservers.replace(with: [
             NotificationCenter.default.addObserver(
                 forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main
             ) { [weak self] note in
@@ -1504,7 +1504,7 @@ final class CommentsInputBar: UIView {
                     self.setKeyboardOpen(false)
                 }
             },
-        ]
+        ])
 
         // The avatar stack, outside in: glass bubble → face (monogram with
         // the picture layered over it) → a transparent button spanning the
@@ -3257,21 +3257,5 @@ extension CommentsInputBar: UITextViewDelegate {
         updateFieldAction()
         updateFieldHeight(animated: true)
         onTextChange?(self.textView.plainText)
-    }
-}
-
-/// Holds notification tokens and unregisters them on its own deallocation
-/// (when the owning object is released). `@unchecked Sendable` so its
-/// `deinit` may run off the main actor; `removeObserver` is itself
-/// thread-safe, and the tokens are only mutated on the main actor at setup
-/// time.
-///
-/// Internal rather than file-private: the comments view controller needs the
-/// same escape hatch for its active-profile observer, and a nonisolated
-/// `deinit` cannot touch main-actor state to unregister by hand.
-final class NotificationObserverTokenBag: @unchecked Sendable {
-    var tokens: [NSObjectProtocol] = []
-    deinit {
-        for token in tokens { NotificationCenter.default.removeObserver(token) }
     }
 }

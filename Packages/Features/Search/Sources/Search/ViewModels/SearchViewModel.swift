@@ -133,7 +133,7 @@ public final class SearchViewModel {
     /// screen re-draws the person's row ("Following", or their followers).
     private var followSubscription: FollowGraphSubscription?
     /// Hears `.viewerDidChange` for as long as this model lives (#978).
-    private var viewerObservation: NotificationObservation?
+    private var viewerObservation: NotificationTokens?
 
     public convenience init(
         repository: any SearchProviding,
@@ -202,9 +202,11 @@ public final class SearchViewModel {
         followSubscription = followEvents?.subscribeOnMain { [weak self] change in
             self?.applyFollowChange(change)
         }
-        viewerObservation = NotificationObservation(center: notificationCenter, name: .viewerDidChange) { [weak self] in
+        let viewerTokens = NotificationTokens(center: notificationCenter)
+        viewerTokens.observe(.viewerDidChange) { [weak self] in
             self?.viewerDidChange()
         }
+        viewerObservation = viewerTokens
     }
 
     /// A follow the graph accepted elsewhere (a profile pushed from these
@@ -1235,21 +1237,4 @@ public final class SearchViewModel {
             onPeoplePagingChange?(false)
         }
     }
-}
-
-/// A block observer on a notification center, removed when this goes — so an
-/// owner on the main actor needs no `deinit` of its own to unregister.
-final class NotificationObservation: @unchecked Sendable {
-    private let center: NotificationCenter
-    private let token: NSObjectProtocol
-
-    /// `handler` runs on the main actor, on the main queue.
-    init(center: NotificationCenter, name: Notification.Name, handler: @escaping @MainActor () -> Void) {
-        self.center = center
-        token = center.addObserver(forName: name, object: nil, queue: .main) { _ in
-            MainActor.assumeIsolated { handler() }
-        }
-    }
-
-    deinit { center.removeObserver(token) }
 }

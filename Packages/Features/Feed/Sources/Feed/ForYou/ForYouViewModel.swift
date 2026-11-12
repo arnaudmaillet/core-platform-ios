@@ -188,7 +188,7 @@ public final class ForYouViewModel {
     /// The posts the server withholds from this viewer, learnt on a feed
     /// (#2048): their tiles leave the grid and the rows.
     private let unavailablePosts: UnavailablePosts?
-    private let unavailableObservation = NotificationObservation()
+    private let unavailableObservation = NotificationTokens()
 
     public init(
         repository: any ForYouProviding,
@@ -213,12 +213,12 @@ public final class ForYouViewModel {
             self?.dropDeleted(change)
         }
         if let unavailablePosts {
-            unavailableObservation.token = NotificationCenter.default.addObserver(
+            unavailableObservation.add(NotificationCenter.default.addObserver(
                 forName: UnavailablePosts.didChange, object: unavailablePosts, queue: .main
             ) { [weak self] note in
                 let ids = note.userInfo?[UnavailablePosts.idsKey] as? Set<PostID> ?? []
                 MainActor.assumeIsolated { self?.drop(ids) }
-            }
+            })
         }
     }
 

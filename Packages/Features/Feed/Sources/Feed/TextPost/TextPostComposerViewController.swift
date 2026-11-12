@@ -70,8 +70,8 @@ final class TextPostComposerViewController: UIViewController {
     /// The least the sheet may rest at, as a detent value — see
     /// `makeRestingDetent`. Nil while the medium height is enough.
     private var restingFloor: CGFloat?
-    private let keyboardObservers = NotificationObserverTokenBag()
-    private let draftObservers = NotificationObserverTokenBag()
+    private let keyboardObservers = NotificationTokens()
+    private let draftObservers = NotificationTokens()
 
     // MARK: The writing chrome
 
@@ -101,7 +101,7 @@ final class TextPostComposerViewController: UIViewController {
     private var isSortAvailable = false
     private let walletBadge = WalletBadgeButton()
     private var walletBadgeItem: UIBarButtonItem?
-    private let walletObservers = NotificationObserverTokenBag()
+    private let walletObservers = NotificationTokens()
     /// The saved pile: the app's one (`shared`) outside tests.
     private let bookmarks: PostBookmarkStore
     private lazy var bookmarkItem = SnapFooterToolbar.makeSaveItem { [weak self] in self?.toggleBookmark() }
@@ -311,13 +311,13 @@ final class TextPostComposerViewController: UIViewController {
         panel.onComposingChange = { [weak self] _ in self?.refreshSwipeGuard() }
         // …and so does a store change: deleting the draft that is open turns
         // its text back into writing that nothing else keeps.
-        draftObservers.tokens = [
+        draftObservers.replace(with: [
             NotificationCenter.default.addObserver(
                 forName: PostDraftStore.didChangeNotification, object: drafts, queue: .main
             ) { [weak self] _ in
                 MainActor.assumeIsolated { self?.refreshSwipeGuard() }
             },
-        ]
+        ])
         observeKeyboard()
         installVoiceComposer()
         installShowcase()
@@ -625,7 +625,7 @@ final class TextPostComposerViewController: UIViewController {
     // MARK: - Keyboard
 
     private func observeKeyboard() {
-        keyboardObservers.tokens = [
+        keyboardObservers.replace(with: [
             NotificationCenter.default.addObserver(
                 forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main
             ) { [weak self] note in
@@ -644,7 +644,7 @@ final class TextPostComposerViewController: UIViewController {
                     self.keyboardWillHide()
                 }
             },
-        ]
+        ])
     }
 
     /// ⚠️ THE SHEET GROWS WITH THE KEYBOARD. At its medium height the keyboard
@@ -862,13 +862,13 @@ final class TextPostComposerViewController: UIViewController {
         // bar the same frozen wrapper (the feed's measured finding).
         walletBadge.onFittedWidthChange = { [weak self] in self?.refreshWalletItem() }
         refreshWalletBadge()
-        walletObservers.tokens = [
+        walletObservers.replace(with: [
             NotificationCenter.default.addObserver(
                 forName: WalletStore.didChangeNotification, object: wallet, queue: .main
             ) { [weak self] _ in
                 MainActor.assumeIsolated { self?.refreshWalletBadge() }
             },
-        ]
+        ])
         return item
     }
 

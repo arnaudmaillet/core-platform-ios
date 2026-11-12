@@ -403,7 +403,7 @@ final class SnapFeedViewController: UIViewController {
     private weak var flightChrome: SnapChromeView?
     /// Unregisters its notification tokens when this VC (and thus the bag) is
     /// released — a nonisolated deinit can't touch the VC's main-actor state.
-    private let appObservers = NotificationObserverBag()
+    private let appObservers = NotificationTokens()
 
     /// Builds the comments panel's content (the comments-only detail) for a
     /// post — injected by the feature builder so this VC needs none of the
@@ -693,14 +693,14 @@ final class SnapFeedViewController: UIViewController {
         viewModel.onStateChange = { [weak self] state in self?.render(state) }
         // A post learnt unavailable on ANOTHER surface leaves this feed's
         // pages too (#2048) — at once, but for the page on show.
-        unavailableObservation.token = NotificationCenter.default.addObserver(
+        unavailableObservation.add(NotificationCenter.default.addObserver(
             forName: UnavailablePosts.didChange, object: viewModel.unavailablePosts, queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
                 self.viewModel.dropUnavailable(except: self.activePostID)
             }
-        }
+        })
         // The like pill's count is the post's live one (#896): a like placed
         // on a card, in the comments bar or on this rail, a realtime tick —
         // whoever moved it, the page showing the post re-draws it.
@@ -3408,7 +3408,7 @@ final class SnapFeedViewController: UIViewController {
     /// The last state rendered — rendered again when the kept page goes.
     private var lastRenderState: FeedViewModel.RenderState?
     /// Hears posts learnt unavailable on other surfaces (#2048).
-    private let unavailableObservation = NotificationObservation()
+    private let unavailableObservation = NotificationTokens()
     #if DEBUG
     /// "This post isn't available" toasts shown (#2048).
     private(set) var debugUnavailableToastsShown = 0

@@ -1,5 +1,6 @@
 import AuthInterface
 import CoreContracts
+import CoreModels
 import CoreNetworking
 import CoreStorage
 import Foundation
@@ -162,7 +163,7 @@ public final class LikeOutboxSender {
     private var isSending = false
     private var timer: Timer?
     /// Removed with the sender (the token bag's deinit, not a main-actor one).
-    private let observers = NotificationObserverTokenBag()
+    private let observers = NotificationTokens()
     /// Whose recoveries flush the outbox; read by `start()`. Tests hand in
     /// their own — ⚠️ never flip `.shared`, other suites listen to it.
     var connectivity: ConnectivityMonitor = .shared
@@ -181,7 +182,7 @@ public final class LikeOutboxSender {
     /// a batch falls due.
     public func start() {
         let center = NotificationCenter.default
-        observers.tokens = [
+        observers.replace(with: [
             center.addObserver(forName: LikeOutbox.didChangeNotification, object: outbox, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.schedule() }
             },
@@ -201,7 +202,7 @@ public final class LikeOutboxSender {
                     self?.schedule()
                 }
             }
-        ]
+        ])
         schedule()
     }
 
