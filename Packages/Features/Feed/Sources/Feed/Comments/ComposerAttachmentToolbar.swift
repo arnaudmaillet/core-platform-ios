@@ -24,7 +24,8 @@ import UIKit
 ///   bubble around (`ownBackground`: the control it stands for, the own
 ///   bubble, draws its own glass), and the composer lays the toolbar so the
 ///   anchor sits exactly under the own bubble (`CommentsInputBar
-///   .alignAttachmentBar`). The capsule narrows into it, under the own
+///   .alignAttachmentBar`, re-read after each of the toolbar's own passes,
+///   `onLayout`). The capsule narrows into it, under the own
 ///   bubble's glass.
 /// - Writing: `[anchor]` alone; done writing: the three back. The field's
 ///   end follows in the same turn, on the toolbar's measured spring
@@ -150,6 +151,20 @@ final class ComposerAttachmentToolbar: UIToolbar {
     /// only its items do — the flexible space takes up the rest.
     static func width(count: Int) -> CGFloat {
         capsuleWidth(count: count) + CommentsInputBar.Metrics.controlSize + 96
+    }
+
+    /// After each of the toolbar's own layout passes, its items placed: the
+    /// composer reads the anchor there (`CommentsInputBar
+    /// .attachmentBarDidLayOut`) — its own pass runs before the toolbar's,
+    /// and read from it the anchor stood a margin short of the own bubble.
+    var onLayout: (() -> Void)?
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        // The items stand in the toolbar's subviews, which lay out after
+        // this returns: placed now, so the anchor reads where it lands.
+        for subview in subviews { subview.layoutIfNeeded() }
+        onLayout?()
     }
 
     /// Only the capsule takes a touch: the rest of the toolbar overlays the

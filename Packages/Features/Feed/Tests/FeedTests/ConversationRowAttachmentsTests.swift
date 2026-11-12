@@ -130,7 +130,12 @@ struct ConversationRowAttachmentsTests {
         let capsule = ComposerAttachmentToolbar.capsuleWidth(count: 2)
         #expect(abs(bar.debugFieldTrailingInset - (Self.step + capsule + Spacing.sm)) < 0.5)
         #expect(abs(own.frame.minX - (field.maxX + capsule + 2 * Spacing.sm)) < 0.5, "own bubble \(own.frame), field \(field)")
-        // The anchor under the own bubble, whatever the toolbar's margins.
+        // The anchor under the own bubble, whatever the toolbar's margins —
+        // read once both levels are laid out: the toolbar places its items
+        // in its own pass, after the bar's, and the bar follows it.
+        toolbar.layoutIfNeeded()
+        bar.layoutIfNeeded()
+        toolbar.layoutIfNeeded()
         let anchorView = toolbar.anchorView
         let anchorCentre = anchorView.convert(CGPoint(x: anchorView.bounds.midX, y: anchorView.bounds.midY), to: bar)
         #expect(abs(anchorCentre.x - own.frame.midX) < 1 && abs(anchorCentre.y - own.frame.midY) < 1,

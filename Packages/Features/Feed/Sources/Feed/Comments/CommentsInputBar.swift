@@ -538,6 +538,12 @@ final class CommentsInputBar: UIView {
         let bar = ComposerAttachmentToolbar(sources: sources, tint: Self.restingTint) { [weak self] id in
             self?.attachmentTapped(id)
         }
+        // ⚠️ THE TOOLBAR PLACES ITS ITEMS IN ITS OWN PASS, after ours — and
+        // its first one may come later still, once its items are installed.
+        // Read from our pass only, the anchor was not where the toolbar
+        // finally put it, and the capsule stood a margin (15.5 pt) short of
+        // the own bubble. Each of its passes re-reads the anchor.
+        bar.onLayout = { [weak self] in self?.attachmentBarDidLayOut() }
         bar.translatesAutoresizingMaskIntoConstraints = false
         bar.maximumContentSizeCategory = .large
         insertSubview(bar, belowSubview: rowActionButton)
@@ -566,10 +572,12 @@ final class CommentsInputBar: UIView {
     /// resting place: the toolbar keeps margins of its own, read off its
     /// layout rather than assumed. Settled passes only — never inside an
     /// animation, which would slide the capsule. Returns whether it moved.
-    private func alignAttachmentBar() -> Bool {
+    /// `laysOutToolbar`: from our pass, the toolbar is laid out first; from
+    /// its own (`attachmentBarDidLayOut`), it just was.
+    private func alignAttachmentBar(laysOutToolbar: Bool = true) -> Bool {
         guard let bar = attachmentBar, let trailing = attachmentBarTrailing, let centreY = attachmentBarCentreY,
               UIView.inheritedAnimationDuration == 0, bar.bounds.width > 0 else { return false }
-        UIView.performWithoutAnimation { bar.layoutIfNeeded() }
+        if laysOutToolbar { UIView.performWithoutAnimation { bar.layoutIfNeeded() } }
         let anchor = bar.anchorView
         guard anchor.superview != nil, anchor.bounds.width > 0 else { return false }
         let centre = anchor.convert(CGPoint(x: anchor.bounds.midX, y: anchor.bounds.midY), to: self)
@@ -584,6 +592,14 @@ final class CommentsInputBar: UIView {
         trailing.constant += dx * layoutDirectionSign
         centreY.constant += dy
         return true
+    }
+
+    /// The toolbar has placed its items: the anchor read where they landed,
+    /// and the toolbar moved onto the own bubble on our next pass — a move
+    /// that keeps its size, so it lays nothing out again.
+    private func attachmentBarDidLayOut() {
+        guard alignAttachmentBar(laysOutToolbar: false) else { return }
+        setNeedsLayout()
     }
 
     /// The fold's spring: the toolbar's own, as the lab measured it at
