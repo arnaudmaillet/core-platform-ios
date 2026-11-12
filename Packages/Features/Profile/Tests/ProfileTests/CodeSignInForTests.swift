@@ -4,6 +4,7 @@ import CoreNetworking
 import CoreNetworkingMocks
 import Foundation
 @testable import Profile
+@testable import ProfileSettings
 
 /// How a test signs the demo account in since passwords went (#840): a code
 /// to its address, then `Login` with it.

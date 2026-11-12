@@ -5,6 +5,7 @@ import MediaCore
 import Testing
 import UIKit
 @testable import Profile
+@testable import ProfileSettings
 
 /// Edit Profile waits as its own form, redacted (#1774): the hero redacted,
 /// the field rows as bones, and the privacy rows real — every section in

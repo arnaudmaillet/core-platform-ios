@@ -11,6 +11,11 @@ import CoreStorage
 import DesignSystem
 import PostGrid
 import ProfileInterface
+// Settings, Account and the profile's data live in their own target (#2382,
+// stage 1). Re-exported so the app's `import Profile` reaches what it always
+// did (the account repository, `PasskeyOffer`, `SettingsLinks`…); stage 3
+// gives Settings an interface of its own and this goes.
+@_exported import ProfileSettings
 import UIKit
 
 /// The profile feature's entry point, resolved by the composition root and

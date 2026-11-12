@@ -2,6 +2,7 @@ import CoreModels
 import CoreNetworking
 import Foundation
 import PostGrid
+import ProfileSettings
 
 /// The profile gallery's source of truth (#846): the two corpora it reads
 /// (the authored fetch that Posts and Reposts split, and the tagged fetch),

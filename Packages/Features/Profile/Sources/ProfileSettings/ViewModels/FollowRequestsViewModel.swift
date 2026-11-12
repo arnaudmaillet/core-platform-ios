@@ -1,0 +1,56 @@
+import CoreModels
+import CoreNetworking
+import Foundation
+
+/// State for Settings → Privacy → Follow Requests (#396).
+@MainActor
+package final class FollowRequestsViewModel {
+    package enum Phase: Equatable {
+        case loading
+        case loaded([FollowRequest])
+        case failed
+    }
+
+    package private(set) var phase: Phase = .loading {
+        didSet { onChange?() }
+    }
+    /// Why the last load failed, kept beside `.failed` so the failed row
+    /// can say "You’re offline" when that is the cause (#794). Set before
+    /// the phase, so the redraw `.failed` triggers already reads it.
+    package private(set) var failure: NetworkFailure?
+    package var onChange: (() -> Void)?
+
+    private let requests: any FollowRequestsManaging
+
+    package init(requests: any FollowRequestsManaging) {
+        self.requests = requests
+    }
+
+    package func load() async {
+        if case .failed = phase { phase = .loading }
+        do {
+            phase = .loaded(try await requests.followRequests())
+        } catch {
+            failure = NetworkFailure.of(error)
+            phase = .failed
+        }
+    }
+
+    /// Approves and drops the row once the server agrees.
+    package func confirm(_ request: FollowRequest) async throws {
+        try await requests.approveFollowRequest(from: request.id)
+        drop(request)
+    }
+
+    /// Declines and drops the row once the server agrees. The requester isn't told.
+    package func delete(_ request: FollowRequest) async throws {
+        try await requests.declineFollowRequest(from: request.id)
+        drop(request)
+    }
+
+    private func drop(_ request: FollowRequest) {
+        if case .loaded(let current) = phase {
+            phase = .loaded(current.filter { $0.id != request.id })
+        }
+    }
+}

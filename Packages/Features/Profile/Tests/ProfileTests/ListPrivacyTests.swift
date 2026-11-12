@@ -6,6 +6,7 @@ import CoreNetworkingMocks
 import Foundation
 import Testing
 @testable import Profile
+@testable import ProfileSettings
 
 /// Server-side list privacy and RemoveFollower (#403, backend #720), end to
 /// end over the mock BFF.

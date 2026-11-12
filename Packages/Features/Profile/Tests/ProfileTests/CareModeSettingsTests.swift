@@ -3,6 +3,7 @@ import DesignSystem
 import Foundation
 import Testing
 @testable import Profile
+@testable import ProfileSettings
 
 /// Care Mode and the reaction band (#482): on switches the band off; off
 /// gives it back only if Care Mode took it.

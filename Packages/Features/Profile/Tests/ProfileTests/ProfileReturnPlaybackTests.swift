@@ -8,6 +8,7 @@ import Testing
 import UIKit
 @testable import Feed
 @testable import Profile
+@testable import ProfileSettings
 
 /// #951 on the profile, through the screen's open: the round trip's scope
 /// ends when an open is refused, and the open hands the shared flight the

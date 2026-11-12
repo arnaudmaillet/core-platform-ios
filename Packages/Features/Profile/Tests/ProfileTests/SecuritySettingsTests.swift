@@ -4,6 +4,7 @@ import Foundation
 import Testing
 import UIKit
 @testable import Profile
+@testable import ProfileSettings
 
 /// Settings → Security and Login (#384): how a session's device is named, the
 /// order sessions are listed in, and what revoking does to the list.

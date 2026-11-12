@@ -6,6 +6,7 @@ import CoreNetworkingMocks
 import Foundation
 import Testing
 @testable import Profile
+@testable import ProfileSettings
 
 /// Settings → What You See (#407, #413; backend #731, timeline #662):
 /// sensitive content, Personalised For You, the interests that rank it, and

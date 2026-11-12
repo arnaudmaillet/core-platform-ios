@@ -3,6 +3,7 @@ import Foundation
 import LocalStore
 import Testing
 @testable import Profile
+@testable import ProfileSettings
 
 /// Followers, Following and Friends open on their last first page (#1776):
 /// at the next visit or launch, with no skeleton, then revalidate in place.

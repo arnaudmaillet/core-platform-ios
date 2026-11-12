@@ -4,6 +4,7 @@ import MediaCore
 import Testing
 import UIKit
 @testable import Profile
+@testable import ProfileSettings
 
 /// The moderation lists' avatars after a fast scroll (#780): Muted, Blocked,
 /// Restricted and Follow Requests all load a row's picture through

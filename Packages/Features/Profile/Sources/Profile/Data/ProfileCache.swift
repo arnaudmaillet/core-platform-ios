@@ -2,6 +2,7 @@ import AuthInterface
 import CoreModels
 import Foundation
 import LocalStore
+import ProfileSettings
 
 /// Last-known profiles, keyed by id — the "stale" half of stale-while-revalidate.
 ///

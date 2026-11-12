@@ -4,6 +4,7 @@ import CoreModels
 import Foundation
 import Testing
 @testable import Profile
+@testable import ProfileSettings
 
 /// The Friends tab has no RPC behind it — `social_graph.v1` can list followers
 /// and list following and nothing else, so `ProfileRelationshipsRepository`

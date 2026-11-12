@@ -6,6 +6,7 @@ import Synchronization
 import Testing
 import UIKit
 @testable import Profile
+@testable import ProfileSettings
 
 /// Settings → Storage (#409, #899): the caches are measured and cleared by
 /// what the inventory OWNS, never by directory.

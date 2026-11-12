@@ -7,6 +7,7 @@ import DesignSystem
 import Foundation
 import Testing
 @testable import Profile
+@testable import ProfileSettings
 
 /// Settings → Ads and Data → consents (#395) and the erasure grace period
 /// (#402), end to end over the mock (backend #653).

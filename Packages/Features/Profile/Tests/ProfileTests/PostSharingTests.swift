@@ -6,6 +6,7 @@ import CoreNetworkingMocks
 import Foundation
 import Testing
 @testable import Profile
+@testable import ProfileSettings
 
 /// Settings → Privacy → Allow Downloads (#397, backend
 /// #809), over the mock. Show Like Counts is gone (#1713).

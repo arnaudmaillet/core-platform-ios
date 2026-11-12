@@ -1,0 +1,54 @@
+import CoreNetworking
+import DesignSystem
+
+extension Loadable {
+    /// What a settings read leaves on screen (#799).
+    ///
+    /// ⚠️ **A FAILED READ IS NEVER A VALUE.** Settings used to fold a failure
+    /// into a default — `try? … ?? false`, `?? "Not set"`, "nothing requested"
+    /// — so a dropped connection read as an adult account, an empty phone
+    /// number or an all-clear checkup. A read that fails is `.failed`, drawn
+    /// as the "Couldn't load … Tap to try again." row every Settings screen
+    /// already uses.
+    ///
+    /// A value already on screen outlives a later failed refresh: the screen
+    /// keeps showing what it last knew rather than trading a true value for
+    /// an error row. The caller reports that failure with a toast.
+    ///
+    /// `message` is the row's own wording; offline or a timeout says so
+    /// instead ("You’re offline. Tap to try again.", #794), so the row is
+    /// drawn from the phase's message, never from the constant.
+    package func refreshed(by result: Result<Content, any Error>, failure message: String) -> Loadable {
+        switch result {
+        case .success(let value): .content(value)
+        case .failure(let error):
+            content.map(Loadable.content) ?? .failed(message: FailureCopy.row(for: error, fallback: message))
+        }
+    }
+
+    /// True when the last read failed and there is nothing older to show.
+    package var isFailed: Bool {
+        if case .failed = self { return true }
+        return false
+    }
+}
+
+extension Result where Failure == any Error {
+    /// Why a settings read failed, nil when it worked or the error did not
+    /// come from the network — kept for the retry's toast (#794).
+    package var networkFailure: NetworkFailure? {
+        if case .failure(let error) = self { return NetworkFailure.of(error) }
+        return nil
+    }
+}
+
+/// Runs `read` and wraps its outcome, so a view model can hand it to
+/// `Loadable.refreshed(by:failure:)` without a `do`/`catch` per field.
+@MainActor
+package func settingsRead<Value: Sendable>(_ read: () async throws -> Value) async -> Result<Value, any Error> {
+    do {
+        return .success(try await read())
+    } catch {
+        return .failure(error)
+    }
+}

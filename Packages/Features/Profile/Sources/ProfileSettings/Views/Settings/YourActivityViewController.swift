@@ -1,0 +1,332 @@
+import CoreStorage
+import DesignSystem
+import UIKit
+
+/// Settings → Your Activity: Time Management (a daily limit and break
+/// reminders, #489), this iPhone's screen time for the last seven days, and
+/// Recently Deleted (#408). History clearing waits on the backend: no search
+/// or watch history is stored server-side yet (backend #663).
+///
+/// Everything here is measured and stored on the device; the reminders are
+/// raised by the app shell's `ScreenTimeCoordinator`.
+package final class YourActivityViewController: UIViewController {
+    private enum Section: Hashable {
+        case limits, usage, content, comingSoon
+    }
+
+    private enum Item: Hashable {
+        case dailyLimit, breakReminder
+        case today, week
+        case recentlyDeleted
+        case planned(String)
+    }
+
+    /// What still needs the server; Recently deleted joins when this
+    /// composition can't open it.
+    package var planned: [String] {
+        (makeRecentlyDeleted == nil ? ["Recently deleted"] : []) + ["Likes and history"]
+    }
+
+    /// Recently Deleted (#408); nil keeps it under Coming Soon.
+    private let makeRecentlyDeleted: (() -> UIViewController)?
+
+    private let store: ScreenTimeStore
+    private let calendar: Calendar
+    private let now: () -> Date
+    private var collectionView: UICollectionView!
+    private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
+
+    package init(
+        store: ScreenTimeStore = .standard,
+        calendar: Calendar = .current,
+        now: @escaping () -> Date = Date.init,
+        makeRecentlyDeleted: (() -> UIViewController)? = nil
+    ) {
+        self.makeRecentlyDeleted = makeRecentlyDeleted
+        self.store = store
+        self.calendar = calendar
+        self.now = now
+        super.init(nibName: nil, bundle: nil)
+        title = SettingsSection.activity.title
+        hidesBottomBarWhenPushed = true
+    }
+
+    @available(*, unavailable)
+    package required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    package override func viewDidLoad() {
+        super.viewDidLoad()
+        navigationItem.largeTitleDisplayMode = .never
+        var config = UICollectionLayoutListConfiguration(appearance: .insetGrouped)
+        config.headerMode = .supplementary
+        config.footerMode = .supplementary
+        collectionView = UICollectionView(
+            frame: view.bounds, collectionViewLayout: UICollectionViewCompositionalLayout.list(using: config)
+        )
+        collectionView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        collectionView.prefersSoftTopEdge()
+        collectionView.delegate = self
+        view.addSubview(collectionView)
+        configureDataSource()
+        applySnapshot()
+    }
+
+    package override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        reconfigure([.today, .week])
+    }
+
+    // MARK: - Copy
+
+    private static func header(_ section: Section) -> String {
+        switch section {
+        case .limits: "Time Management"
+        case .usage: "Screen Time"
+        case .content: "Content"
+        case .comingSoon: "Coming Soon"
+        }
+    }
+
+    private static func footer(_ section: Section) -> String {
+        switch section {
+        case .limits: "A reminder appears when you reach your daily limit, or after this long without a break. Applies to this iPhone."
+        case .usage: "Time with the app open, measured on this iPhone. It is never sent anywhere."
+        case .content: "Posts you delete can be restored for 30 days."
+        case .comingSoon: "These need a server update and aren't available yet."
+        }
+    }
+
+    package static func limitTitle(_ minutes: Int?) -> String {
+        guard let minutes else { return "Off" }
+        return ScreenTimeLedger.durationText(TimeInterval(minutes * 60))
+    }
+
+    // MARK: - List
+
+    private func configureDataSource() {
+        let registration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { [weak self] cell, _, item in
+            self?.configure(cell, for: item)
+        }
+        dataSource = UICollectionViewDiffableDataSource<Section, Item>(collectionView: collectionView) { collectionView, indexPath, item in
+            collectionView.dequeueConfiguredReusableCell(using: registration, for: indexPath, item: item)
+        }
+        let header = UICollectionView.SupplementaryRegistration<UICollectionViewListCell>(
+            elementKind: UICollectionView.elementKindSectionHeader
+        ) { [weak self] view, _, indexPath in
+            guard let section = self?.dataSource.sectionIdentifier(for: indexPath.section) else { return }
+            var content = UIListContentConfiguration.header()
+            content.text = Self.header(section)
+            view.contentConfiguration = content
+        }
+        let footer = UICollectionView.SupplementaryRegistration<UICollectionViewListCell>(
+            elementKind: UICollectionView.elementKindSectionFooter
+        ) { [weak self] view, _, indexPath in
+            guard let section = self?.dataSource.sectionIdentifier(for: indexPath.section) else { return }
+            var content = UIListContentConfiguration.footer()
+            content.text = Self.footer(section)
+            view.contentConfiguration = content
+        }
+        dataSource.supplementaryViewProvider = { collectionView, kind, indexPath in
+            kind == UICollectionView.elementKindSectionHeader
+                ? collectionView.dequeueConfiguredReusableSupplementary(using: header, for: indexPath)
+                : collectionView.dequeueConfiguredReusableSupplementary(using: footer, for: indexPath)
+        }
+    }
+
+    private func applySnapshot() {
+        var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
+        snapshot.appendSections([.limits, .usage])
+        snapshot.appendItems([.dailyLimit, .breakReminder], toSection: .limits)
+        snapshot.appendItems([.today, .week], toSection: .usage)
+        if makeRecentlyDeleted != nil {
+            snapshot.appendSections([.content])
+            snapshot.appendItems([.recentlyDeleted], toSection: .content)
+        }
+        snapshot.appendSections([.comingSoon])
+        snapshot.appendItems(planned.map(Item.planned), toSection: .comingSoon)
+        dataSource.apply(snapshot, animatingDifferences: false)
+    }
+
+    private func reconfigure(_ items: [Item]) {
+        guard dataSource != nil else { return }
+        var snapshot = dataSource.snapshot()
+        snapshot.reconfigureItems(items.filter { snapshot.indexOfItem($0) != nil })
+        dataSource.apply(snapshot, animatingDifferences: false)
+    }
+
+    private func configure(_ cell: UICollectionViewListCell, for item: Item) {
+        cell.accessories = []
+        let settings = store.settings
+        switch item {
+        case .dailyLimit:
+            cell.contentConfiguration = Self.valueContent(
+                "Daily Limit", symbol: "hourglass", value: Self.limitTitle(settings.dailyLimitMinutes)
+            )
+            cell.accessories = [menuAccessory(
+                choices: ScreenTimeSettings.dailyLimitChoices, selected: settings.dailyLimitMinutes
+            ) { [weak self] minutes in
+                self?.store.updateSettings { $0.dailyLimitMinutes = minutes }
+                self?.reconfigure([.dailyLimit])
+            }]
+        case .breakReminder:
+            cell.contentConfiguration = Self.valueContent(
+                "Break Reminder", symbol: "cup.and.saucer", value: Self.limitTitle(settings.breakReminderMinutes)
+            )
+            cell.accessories = [menuAccessory(
+                choices: ScreenTimeSettings.breakChoices, selected: settings.breakReminderMinutes
+            ) { [weak self] minutes in
+                self?.store.updateSettings { $0.breakReminderMinutes = minutes }
+                self?.reconfigure([.breakReminder])
+            }]
+        case .today:
+            let seconds = store.ledger.seconds(on: now(), calendar: calendar)
+            cell.contentConfiguration = Self.valueContent(
+                "Today", symbol: "clock", value: ScreenTimeLedger.durationText(seconds)
+            )
+        case .week:
+            let days = store.ledger.lastDays(7, endingOn: now(), calendar: calendar)
+            cell.contentConfiguration = ScreenTimeWeekConfiguration(days: days, calendar: calendar)
+        case .recentlyDeleted:
+            var content = UIListContentConfiguration.cell()
+            content.text = "Recently Deleted"
+            content.image = UIImage(systemName: "trash")
+            content.imageProperties.tintColor = .label
+            cell.contentConfiguration = content
+            cell.accessories = [.disclosureIndicator()]
+        case .planned(let title):
+            var content = UIListContentConfiguration.cell()
+            content.text = title
+            content.textProperties.color = .secondaryLabel
+            cell.contentConfiguration = content
+        }
+    }
+
+    private static func valueContent(_ text: String, symbol: String, value: String) -> UIListContentConfiguration {
+        var content = UIListContentConfiguration.valueCell()
+        content.text = text
+        content.secondaryText = value
+        content.image = UIImage(systemName: symbol)
+        content.imageProperties.tintColor = .label
+        return content
+    }
+
+    /// A pop-up menu over the row: Off, then each choice; the current one
+    /// checked.
+    private func menuAccessory(choices: [Int], selected: Int?, onChoose: @escaping (Int?) -> Void) -> UICellAccessory {
+        let options: [Int?] = [nil] + choices.map { $0 }
+        let actions = options.map { minutes in
+            UIAction(title: Self.limitTitle(minutes), state: minutes == selected ? .on : .off) { _ in onChoose(minutes) }
+        }
+        return .popUpMenu(UIMenu(children: actions), displayed: .always)
+    }
+}
+
+extension YourActivityViewController: UICollectionViewDelegate {
+    package func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
+        switch dataSource.itemIdentifier(for: indexPath) {
+        case .dailyLimit, .breakReminder, .recentlyDeleted: true
+        default: false
+        }
+    }
+
+    package func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        guard dataSource.itemIdentifier(for: indexPath) == .recentlyDeleted else { return }
+        collectionView.deselectItem(at: indexPath, animated: true)
+        if let screen = makeRecentlyDeleted?() {
+            navigationController?.pushViewController(screen, animated: true)
+        }
+    }
+}
+
+/// The last seven days as bars, today last and in the accent colour.
+package struct ScreenTimeWeekConfiguration: UIContentConfiguration, Hashable {
+    package let days: [ScreenTimeDay]
+    package let calendar: Calendar
+
+    package struct ScreenTimeDay: Hashable {
+        package let day: Date
+        package let seconds: TimeInterval
+    }
+
+    package init(days: [(day: Date, seconds: TimeInterval)], calendar: Calendar) {
+        self.days = days.map { ScreenTimeDay(day: $0.day, seconds: $0.seconds) }
+        self.calendar = calendar
+    }
+
+    package func makeContentView() -> any UIView & UIContentView { ScreenTimeWeekView(configuration: self) }
+    package func updated(for state: any UIConfigurationState) -> ScreenTimeWeekConfiguration { self }
+}
+
+package final class ScreenTimeWeekView: UIView, UIContentView {
+    package static let barAreaHeight: CGFloat = 80
+    private let stack = UIStackView()
+
+    package var configuration: any UIContentConfiguration {
+        didSet { apply() }
+    }
+
+    package init(configuration: ScreenTimeWeekConfiguration) {
+        self.configuration = configuration
+        super.init(frame: .zero)
+        stack.axis = .horizontal
+        stack.distribution = .fillEqually
+        stack.alignment = .bottom
+        stack.spacing = 8
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: layoutMarginsGuide.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: layoutMarginsGuide.trailingAnchor),
+            stack.topAnchor.constraint(equalTo: topAnchor, constant: 16),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -12),
+            stack.heightAnchor.constraint(greaterThanOrEqualToConstant: Self.barAreaHeight)
+        ])
+        isAccessibilityElement = true
+        apply()
+    }
+
+    @available(*, unavailable)
+    package required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    private func apply() {
+        guard let configuration = configuration as? ScreenTimeWeekConfiguration else { return }
+        stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        let peak = max(configuration.days.map(\.seconds).max() ?? 0, 60)
+        let formatter = DateFormatter()
+        formatter.calendar = configuration.calendar
+        formatter.setLocalizedDateFormatFromTemplate("EEEEE")
+        let spoken = DateFormatter()
+        spoken.calendar = configuration.calendar
+        spoken.setLocalizedDateFormatFromTemplate("EEEE")
+        for (index, day) in configuration.days.enumerated() {
+            let isToday = index == configuration.days.count - 1
+            let bar = UIView()
+            bar.backgroundColor = isToday ? .tintColor : .tertiaryLabel
+            bar.layer.cornerRadius = 3
+            bar.layer.cornerCurve = .continuous
+            let label = UILabel()
+            label.text = formatter.string(from: day.day)
+            label.font = .appFont(forTextStyle: .caption2)
+            label.adjustsFontForContentSizeCategory = true
+            label.textColor = isToday ? .label : .secondaryLabel
+            label.textAlignment = .center
+            let column = UIStackView(arrangedSubviews: [bar, label])
+            column.axis = .vertical
+            column.alignment = .fill
+            column.spacing = 6
+            let height = max(2, Self.barAreaHeight * CGFloat(day.seconds / peak))
+            bar.heightAnchor.constraint(equalToConstant: height).isActive = true
+            stack.addArrangedSubview(column)
+        }
+        accessibilityLabel = "Last 7 days"
+        accessibilityValue = configuration.days.map {
+            "\(spoken.string(from: $0.day)): \(ScreenTimeLedger.durationText($0.seconds))"
+        }.joined(separator: ", ")
+    }
+}
+
+// MARK: - How it is left (#1144)
+
+extension YourActivityViewController: StackScreen {
+    package var leaving: ScreenLeaving { .nativeBack }
+}

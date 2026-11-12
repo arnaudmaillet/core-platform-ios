@@ -8,6 +8,7 @@ import MediaCore
 import MediaPlayback
 import PostGrid
 import ProfileInterface
+import ProfileSettings
 import ShareSheet
 import UIKit
 

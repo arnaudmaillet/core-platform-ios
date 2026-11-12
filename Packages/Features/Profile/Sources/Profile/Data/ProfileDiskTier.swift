@@ -4,6 +4,7 @@ import Foundation
 import LocalStore
 import OSLog
 import PostGrid
+import ProfileSettings
 
 /// The device tier behind `ProfileCache` (#893): what a profile screen showed
 /// last, kept in the LocalStore so a cold start opens the viewer's own profile

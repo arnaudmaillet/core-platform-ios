@@ -7,6 +7,7 @@ import ProfileInterface
 import Testing
 import UIKit
 @testable import Profile
+@testable import ProfileSettings
 
 /// A `@handle` or a share link pushes the profile at once, and the profile
 /// resolves it behind its skeleton (#800).

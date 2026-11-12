@@ -1,5 +1,6 @@
 import MapsInterface
 import PostGrid
+import ProfileSettings
 import UIKit
 
 /// Builds the profile screen's menus from plain inputs (#846): the see-more

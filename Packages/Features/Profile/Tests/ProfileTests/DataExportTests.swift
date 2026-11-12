@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import Profile
+@testable import ProfileSettings
 
 /// Settings → Account → Download Your Data (#387).
 @MainActor

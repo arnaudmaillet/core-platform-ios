@@ -5,6 +5,7 @@ import ProfileInterface
 import Testing
 import UIKit
 @testable import Profile
+@testable import ProfileSettings
 
 /// Three profiles of one account: the active one first.
 private struct ThreeProfiles: ProfileSwitching {

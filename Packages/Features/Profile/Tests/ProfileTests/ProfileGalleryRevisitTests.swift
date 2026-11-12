@@ -5,6 +5,7 @@ import LocalStore
 import PostGrid
 import Testing
 @testable import Profile
+@testable import ProfileSettings
 
 // A revisited profile opens its posts at frame 0 (#887).
 

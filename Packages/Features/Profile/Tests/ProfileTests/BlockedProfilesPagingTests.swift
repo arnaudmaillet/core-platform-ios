@@ -7,6 +7,7 @@ import CoreNetworkingMocks
 import Foundation
 import Testing
 @testable import Profile
+@testable import ProfileSettings
 
 /// `blockedProfiles()` reads the whole block list through `TokenPager`: the
 /// first page with an empty token, the next with the token it handed back,

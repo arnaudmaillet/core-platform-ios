@@ -1,5 +1,6 @@
 import Testing
 @testable import Profile
+@testable import ProfileSettings
 
 /// The shape of Settings: eighteen sections in four scopes, in the order of
 /// `dev/ACCOUNT_SETTINGS_GAP_REPORT.md`, and the scope wording that tells the

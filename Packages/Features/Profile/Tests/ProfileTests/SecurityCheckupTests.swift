@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import Profile
+@testable import ProfileSettings
 
 /// Settings → Security and Login → Security Checkup (#418).
 @MainActor

@@ -5,6 +5,7 @@ import Testing
 import UIKit
 import HeroPage
 @testable import Profile
+@testable import ProfileSettings
 
 /// The banner — a band card across the top, or none (no poster any more) — the
 /// rule that picks one (the picture, never a setting), and the identity row
