@@ -23,8 +23,10 @@ struct LayeringGuardTests {
 
     /// Today's exceptions, each with its issue. The list may only shrink.
     static let allowed: [String: String] = [
-        // HeroPage reaches FeedInterface for `PostGridPage` alone (#2373).
-        "Core/HeroPage -> FeatureInterfaces/FeedInterface": "#2373",
+        // HeroPage reaches FeedInterface for `PostGridPage` alone, which
+        // names the feed's hero-flight types: it moves down with the thin
+        // FeedInterface (#2380, from #2373).
+        "Core/HeroPage -> FeatureInterfaces/FeedInterface": "#2380",
         // Profile's tests draw the profile on For You's real grid; the grid
         // moves to a Core package (#2379), then the edge goes (#2372).
         "Features/Profile -> Features/Feed": "#2372",
