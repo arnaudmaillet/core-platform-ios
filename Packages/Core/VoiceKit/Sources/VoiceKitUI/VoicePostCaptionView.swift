@@ -153,7 +153,7 @@ public final class VoicePostCaptionView: UIView {
     }
 
     /// Whether `touch` is the voice's own — on its play button, its waveform
-    /// or its speed chip — so a card's tap recognizer leaves it alone and the
+    /// or its speed — so a card's tap recognizer leaves it alone and the
     /// rest of the card keeps its action (#2208).
     public static func keepsTouch(_ touch: UITouch) -> Bool {
         var view = touch.view
