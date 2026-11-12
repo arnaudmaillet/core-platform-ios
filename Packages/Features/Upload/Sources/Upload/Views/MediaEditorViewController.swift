@@ -367,10 +367,14 @@ final class MediaEditorViewController: UIViewController {
     /// ⚠️ **AND THE ORDER READS BACKWARDS HERE.** Trailing items are laid out
     /// from the edge INWARDS, so the first one written is the RIGHTMOST: this
     /// array draws `[◀][▶][Next]`.
+    ///
+    /// ⚠️ THE SAME ITEMS ARE NOT HANDED OVER AGAIN (#2331): the bar keeps
+    /// what stays, and a list unchanged would restart a transition already
+    /// running (#756).
     private func showTheTrailingItem(animated: Bool = false) {
-        navigationItem.setRightBarButtonItems(
-            [isTypingText ? doneTypingItem : nextItem, redoItem, undoItem], animated: animated
-        )
+        let items = [isTypingText ? doneTypingItem : nextItem, redoItem, undoItem]
+        guard !(navigationItem.rightBarButtonItems ?? []).elementsEqual(items, by: ===) else { return }
+        navigationItem.setRightBarButtonItems(items, animated: animated)
     }
 
     /// ⚠️ **THE HEADER WALKS THE AUTHOR'S OWN HISTORY NOW, AND THE ONE-MODE
@@ -2496,7 +2500,10 @@ final class MediaEditorViewController: UIViewController {
     /// nothing for it to act on. It now lives in the crop tools themselves,
     /// where it is only reachable at exactly the moment it means something.
     private func showCropBarItems(_ isCropping: Bool, animated: Bool) {
-        navigationItem.setLeftBarButtonItems([saveDraftItem], animated: animated)
+        // The same draft item again is not handed over (#2331).
+        if navigationItem.leftBarButtonItems ?? [] != [saveDraftItem] {
+            navigationItem.setLeftBarButtonItems([saveDraftItem], animated: animated)
+        }
         showTheTrailingItem(animated: animated)
     }
 

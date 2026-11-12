@@ -2233,14 +2233,20 @@ final class SnapFeedViewController: UIViewController {
         var items = [backItem ?? leadingAccessoryItem].compactMap { $0 }
         // The sector's selector (#1703), just inboard of the bell.
         if backItem == nil, let selector = sectorSelectorItem {
-            items += items.isEmpty ? [selector] : [BarItems.separator(), selector]
+            items += items.isEmpty ? [selector] : [leadingSelectorSeparator, selector]
         }
         if engaged, isCommentSortAvailable {
-            items += items.isEmpty ? [sortItem] : [.fixedSpace(Spacing.sm), sortItem]
+            items += items.isEmpty ? [sortItem] : [leadingSortSpacer, sortItem]
         }
+        // ⚠️ THE SPACES ARE KEPT TOO (#2331): fresh ones made every run look
+        // changed, and the bar was handed the same items again.
         guard navigationItem.leftBarButtonItems ?? [] != items else { return }
         navigationItem.setLeftBarButtonItems(items, animated: animated)
     }
+
+    /// The leading run's spaces, kept as its items are (#2331).
+    private let leadingSelectorSeparator = BarItems.separator()
+    private let leadingSortSpacer = UIBarButtonItem.fixedSpace(Spacing.sm)
 
     /// Whether the engaged thread is long enough to be worth sorting — see
     /// `CommentSortPolicy`. Until it is, the sort is not in the bar at all, and

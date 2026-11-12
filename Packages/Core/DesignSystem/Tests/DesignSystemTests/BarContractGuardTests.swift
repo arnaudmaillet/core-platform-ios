@@ -14,6 +14,8 @@ import Testing
 ///   the bar) is the old wide pattern (R5).
 /// - `SnapNavControls.make…` builds icon `UIButton`s for bars (R1).
 /// - `morphNavigationBar(` cross-dissolves a bar by hand (R3).
+/// - A bar kept by `BarItemStore` (#2331) is handed its items only through
+///   the store, which keeps what stays and skips an unchanged list.
 ///
 /// ⚠️ A FAILURE HERE IS EITHER A NEW VIOLATION — build the item through
 /// `BarItems` — OR A FILE THAT GOT BETTER: lower its count below (or remove
@@ -32,6 +34,16 @@ struct BarContractGuardTests {
     /// None: the inbox and relationships searches moved to
     /// `UISearchController`, and the dissolve helper is deleted (#1679).
     static let barMorphDebt: [String: Int] = [:]
+
+    /// Hosts whose bars are kept by identifier (`BarItemStore`, #2331): an
+    /// item that stays keeps its instance, a state change is made in place,
+    /// and the bar is handed a group only when its list changes. A host
+    /// converted joins this list; a direct write here would hand the bar
+    /// items behind the store's back.
+    static let keptBarHosts: Set<String> = [
+        "Packages/Features/Profile/Sources/Profile/Views/ProfileCardViewController.swift",
+        "Packages/Features/Notifications/Sources/Notifications/Views/NotificationsViewController+Mute.swift",
+    ]
 
     /// Where custom-view items are MADE: the contract's own factory.
     static let factory = "Packages/Core/DesignSystem/Sources/DesignSystem/Components/BarItems.swift"
@@ -54,7 +66,38 @@ struct BarContractGuardTests {
         try expectWithinDebt(#"morphNavigationBar\("#, debt: Self.barMorphDebt)
     }
 
+    @Test func aKeptBarIsHandedItsItemsOnlyThroughItsStore() throws {
+        let write = try Regex(
+            #"set(ToolbarItems|LeftBarButtonItems|RightBarButtonItems|OwnTrailingBarItems)\(|\b(toolbarItems|leftBarButtonItems|rightBarButtonItems)\s*=(?!=)"#
+        )
+        var problems: [String] = []
+        for path in Self.keptBarHosts.sorted() {
+            let url = Self.root.appendingPathComponent(path)
+            let text = try String(contentsOf: url, encoding: .utf8)
+            #expect(text.contains("BarItemStore()"), "\(path) no longer keeps its bar in a BarItemStore")
+            let code = text.split(separator: "\n").filter {
+                !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//")
+            }
+            for line in code where line.contains(write) {
+                problems.append("\(path): \(line.trimmingCharacters(in: .whitespaces)) — apply it through the store")
+            }
+        }
+        #expect(problems.isEmpty, "\(problems.joined(separator: "\n"))")
+    }
+
     // MARK: - The scan
+
+    /// The repository's root.
+    private static var root: URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent() // DesignSystemTests
+            .deletingLastPathComponent() // Tests
+            .deletingLastPathComponent() // DesignSystem
+            .deletingLastPathComponent() // Core
+            .deletingLastPathComponent() // Packages
+            .deletingLastPathComponent() // repository root
+            .resolvingSymlinksInPath()
+    }
 
     private func expectWithinDebt(_ pattern: String, debt: [String: Int], exempt: Set<String> = []) throws {
         let regex = try Regex(pattern)
@@ -77,14 +120,7 @@ struct BarContractGuardTests {
     /// Every Swift source under `App/` and `Packages/` (tests left out), by
     /// repository-relative path, with how often `regex` occurs in it.
     private static func counts(of regex: Regex<AnyRegexOutput>) throws -> [String: Int] {
-        let root = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent() // DesignSystemTests
-            .deletingLastPathComponent() // Tests
-            .deletingLastPathComponent() // DesignSystem
-            .deletingLastPathComponent() // Core
-            .deletingLastPathComponent() // Packages
-            .deletingLastPathComponent() // repository root
-            .resolvingSymlinksInPath()
+        let root = Self.root
         var result: [String: Int] = [:]
         for folder in ["App", "Packages"] {
             let base = root.appendingPathComponent(folder)
