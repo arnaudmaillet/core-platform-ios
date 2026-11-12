@@ -15,6 +15,7 @@ Measured on iOS 27 (iPhone 18 Pro simulator, 2026-10-24):
 - A native item does not animate a change of its own title or style. Changing it in place, even inside `UIView.animate`, swaps in one frame.
 - A custom view in an item **without** `hidesSharedBackground` gets the bar's own bubble, press highlight and `.prominent` tint, and it can stretch.
 - Without identifiers, UIKit matches items by position across a rebuild.
+- An identifier is not enough (#2331, filmed on the profile card, 2026-11-11). UIKit runs its content transition (the blur out and back, about 3 frames) on a matched item that is a **new instance**, even when its title or glyph is the same. Requested turning back into Follow made Message and the QR flicker with it.
 
 ## The rules
 
@@ -22,7 +23,7 @@ Measured on iOS 27 (iPhone 18 Pro simulator, 2026-10-24):
 |---|---|---|
 | R1 | **Icons are native.** An icon-only control is never a `UIButton` (or any view) in a custom view. Two icons side by side are two items sharing the bar's platter, never a `UIStackView` of buttons. | `BarItems.icon(id:image:label:action:)` / `…menu:)` |
 | R2 | **Every item has an identifier**, stable and named by function (`<screen>.<role>`). An item that appears on several screens keeps one shared identifier. | every `BarItems` maker takes `id`; shared ones in `BarItems.SharedID` (wallet, search, bell) |
-| R3 | **UIKit animates.** A state change rebuilds the group and sets it animated. The trailing group goes through `setOwnTrailingBarItems`, so toasts keep their place. Never `UIView.animate` / `UIView.transition` around bar items or a bar, and never restyle an item's view in place. | `setToolbarItems(_:animated:)`, `navigationItem.setLeftBarButtonItems(_:animated:)`, `setOwnTrailingBarItems(_:animated:)` |
+| R3 | **UIKit animates, and only what changed (#2331).** An item that stays keeps its instance. A state-only change (a word, a prominence, a glyph, a loader) is made on the item in place, with no `set…Items`. The group is set animated only when its list of items changes (an item comes or goes, or the order changes), and the staying items are the same instances then too. The trailing group goes through `setOwnTrailingBarItems`. Never `UIView.animate` / `UIView.transition` around bar items or a bar. | `BarItemStore`: `item(_:make:update:)`, `separator(before:)`, `apply(toolbar:/leading:/trailing:…)`; `BarItems.update(stretched:…)` |
 | R4 | **No "•••".** A bar never overflows into UIKit's automatic overflow menu. Every bar fits an iPhone SE (375pt) at the app's largest text size (XXXL, `TextSizeCeiling`). A screen with conditional items states its width budget. | check on the SE simulator at XXXL; `-header-audit` |
 | R5 | **Wide items.** A control that takes the free width is a plain view holding its word, in an item whose bubble the bar draws. | `BarItems.stretched(id:title:prominent:action:)` (`StretchedBarLabel`) |
 | R6 | **Complex containers are the only other custom views.** These are views a stock item cannot draw, each with an identifier. Their content changes are theirs to animate. | `BarItems.container(id:view:)` |
@@ -42,8 +43,8 @@ Measured on iOS 27 (iPhone 18 Pro simulator, 2026-10-24):
 ## Checklist for a new screen with a bar
 
 1. Build every item through `BarItems`, and give each one an identifier by function.
-2. On a state change, rebuild the group and set it animated (`setOwnTrailingBarItems` for the trailing group). Add no animation of your own.
+2. Keep the bar's items in a `BarItemStore`, one per group. On a state change, dress the kept items in place, and hand the group over through the store, which sets it animated only when its list changed. Add no animation of your own.
 3. Icons are `BarItems.icon`, wide words are `BarItems.stretched`, and anything else is a listed container.
 4. Run the screen on the iPhone SE simulator at XXXL and check that nothing collapses into "•••".
-5. `BarContractGuardTests` fails on a new `UIBarButtonItem(customView:`, `hidesSharedBackground = true`, `SnapNavControls.make…` or `morphNavigationBar(` outside its baseline. A change that converts a screen lowers that baseline.
+5. `BarContractGuardTests` fails on a new `UIBarButtonItem(customView:`, `hidesSharedBackground = true`, `SnapNavControls.make…` or `morphNavigationBar(` outside its baseline. A change that converts a screen lowers that baseline. A screen whose bars are kept by a `BarItemStore` joins `keptBarHosts`, and the guard then fails on any direct `set…Items(` there.
 6. `-header-audit` prints a `CONTRACT` line per surface listing items with no identifier and controls in custom views.
