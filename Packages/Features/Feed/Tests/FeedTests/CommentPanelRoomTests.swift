@@ -71,8 +71,9 @@ private actor PagedComments: CommentsProviding {
 /// and the whole threads that fit between the bar and the composer, then "See
 /// all n comments", which turns to Recent; it is never paged. Recent loads
 /// its older pages only on its "Earlier comments" row, without moving the
-/// list. The tiers (#2042) are gone; the edge hand-off stays until the pull
-/// replaces it.
+/// list. The tiers (#2042) and the edge hand-off decided at the drag's start
+/// are gone: a stream that fits pages with the feed, one that scrolls goes on
+/// with the pull past its ends (`PostPullTests` for its rule).
 @MainActor
 @Suite(.serialized)
 struct CommentPanelRoomTests {
@@ -161,64 +162,6 @@ struct CommentPanelRoomTests {
         let threads = PopularCommentsCut.threads(of: items) { $0.first?.isUppercase == true }
         #expect(threads == [["A", "a1", "a2"], ["B"], ["C", "c1"]])
         #expect(PopularCommentsCut.threads(of: ["x1", "A"]) { $0.first?.isUppercase == true } == [["x1"], ["A"]])
-    }
-
-    // MARK: - The edge hand-off (#2042, #2058), until the pull replaces it
-
-    /// The hand-off is decided as the drag begins: at the bottom edge, heading
-    /// up more than sideways.
-    @Test func onlyAnUpwardDragFromTheBottomEdgeGoesToTheNextPost() {
-        let up = CGPoint(x: 0, y: -900)
-        #expect(CommentStream.dragGoesToNextPost(atBottomEdge: true, velocity: up, translation: .zero))
-        #expect(!CommentStream.dragGoesToNextPost(atBottomEdge: false, velocity: up, translation: .zero))
-        #expect(!CommentStream.dragGoesToNextPost(atBottomEdge: true, velocity: CGPoint(x: 0, y: 900), translation: .zero))
-        #expect(!CommentStream.dragGoesToNextPost(atBottomEdge: true, velocity: CGPoint(x: -900, y: -300), translation: .zero),
-                "a sideways drag is the tabs'")
-        #expect(CommentStream.dragGoesToNextPost(atBottomEdge: true, velocity: .zero, translation: CGPoint(x: 0, y: -12)))
-    }
-
-    /// The mirror (#2058): at the top edge, heading down more than sideways.
-    @Test func onlyADownwardDragFromTheTopEdgeGoesToThePreviousPost() {
-        let down = CGPoint(x: 0, y: 900)
-        #expect(CommentStream.dragGoesToPreviousPost(atTopEdge: true, velocity: down, translation: .zero))
-        #expect(!CommentStream.dragGoesToPreviousPost(atTopEdge: false, velocity: down, translation: .zero))
-        #expect(!CommentStream.dragGoesToPreviousPost(atTopEdge: true, velocity: CGPoint(x: 0, y: -900), translation: .zero))
-        #expect(!CommentStream.dragGoesToPreviousPost(atTopEdge: true, velocity: CGPoint(x: 900, y: 300), translation: .zero),
-                "a sideways drag is the tabs'")
-        #expect(CommentStream.dragGoesToPreviousPost(atTopEdge: true, velocity: .zero, translation: CGPoint(x: 0, y: 12)))
-    }
-
-    /// ⚠️ THE TOP EDGE PAGES BACK ON A LATER POST ONLY (#2058): on the first
-    /// the feed has no previous post to give, and the drag stays the stream's
-    /// — the close (the text page's dismissal, the media layout's pull-down).
-    @Test func theTopEdgePagesBackOnlyWhenTheFeedHasAPreviousPost() {
-        let down = CGPoint(x: 0, y: 900)
-        func handOff(top: Bool = true, bottom: Bool = false, _ velocity: CGPoint, pagesBack: Bool) -> CommentStream.EdgeHandOff? {
-            CommentStream.edgeHandOff(
-                atTopEdge: top, atBottomEdge: bottom, velocity: velocity, translation: .zero, pagesBack: pagesBack
-            )
-        }
-        #expect(handOff(down, pagesBack: true) == .previousPost)
-        #expect(handOff(down, pagesBack: false) == nil, "the first post keeps its close")
-        #expect(handOff(top: false, down, pagesBack: true) == nil, "mid-stream, the drag scrolls")
-        // A stream shorter than its room — a Popular that fits — is at both
-        // edges: each way goes on.
-        #expect(handOff(bottom: true, CGPoint(x: 0, y: -900), pagesBack: true) == .nextPost)
-        #expect(handOff(bottom: true, down, pagesBack: true) == .previousPost)
-    }
-
-    /// The feed is asked only for a drag that goes back: the router's answer
-    /// costs nothing on every other drag.
-    @Test func theFeedIsAskedOnlyForADragThatGoesBack() {
-        var asked = 0
-        func pagesBack() -> Bool { asked += 1; return true }
-        _ = CommentStream.edgeHandOff(
-            atTopEdge: true, atBottomEdge: true, velocity: CGPoint(x: 0, y: -900), translation: .zero, pagesBack: pagesBack()
-        )
-        _ = CommentStream.edgeHandOff(
-            atTopEdge: false, atBottomEdge: false, velocity: CGPoint(x: 0, y: 900), translation: .zero, pagesBack: pagesBack()
-        )
-        #expect(asked == 0)
     }
 
     // MARK: - On a panel
@@ -329,8 +272,8 @@ struct CommentPanelRoomTests {
     }
 
     /// When it all fits: every comment, no "See all", the stream no taller
-    /// than its room — it doesn't scroll, and the edge hand-off takes any
-    /// vertical drag on it.
+    /// than its room — it doesn't scroll, and the feed's paging takes any
+    /// vertical drag on it (`beginFittingStreamSwipe`).
     @Test func aPopularThatFitsShowsEverythingWithoutSeeAll() async {
         let (controller, window) = panel(PagedComments(count: 3, pageSize: 40))
         defer { window.isHidden = true }
@@ -338,6 +281,7 @@ struct CommentPanelRoomTests {
         #expect(await settle { Self.laidOut(stream) && Self.topLevelCount(stream.debugItems) == 3 })
         #expect(!stream.debugItems.contains(.seeAll))
         #expect(stream.streamIsAtTop && stream.streamIsAtBottom, "a stream that fits is at both edges")
+        #expect(stream.streamFitsItsRoom, "a stream that fits scrolls")
     }
 
     /// ⚠️ THE CAPTION IS NEVER CUT, AND POPULAR NEVER SHOWS ZERO: taller than
@@ -506,6 +450,183 @@ struct CommentPanelRoomTests {
         #expect(await settle { Self.laidOut(controller.popular) && Self.topLevelCount(controller.popular.debugItems) == 40 })
         #expect(!controller.popular.debugItems.contains(.seeAll))
         #expect(!controller.recent.debugItems.contains(.earlier))
+    }
+
+    // MARK: - The pull to the next / previous post (#2298 § 2)
+
+    /// What the feed was asked to do with the panel's pull.
+    private final class PullLog {
+        var commits: [PostPullDirection] = []
+        var pending: [() -> Void] = []
+        var offers: Set<PostPullDirection> = [.next, .previous]
+    }
+
+    /// Wires a pull whose feed offers `log.offers` and records each commit,
+    /// its completion held until the test lets the page settle.
+    private func wirePull(_ controller: PostDetailViewController, _ log: PullLog) {
+        controller.setPostPull(PostDetailViewController.PostPull(
+            target: { direction in
+                log.offers.contains(direction) ? PostPullTarget(authorName: "Kai Tanaka", monogram: "KT") : nil
+            },
+            commit: { direction, _, completion in
+                log.commits.append(direction)
+                log.pending.append(completion)
+            }
+        ))
+    }
+
+    /// Recent with more than its room holds: it scrolls.
+    private func scrollingRecent(_ log: PullLog) async -> (PostDetailViewController, UIWindow, CommentStream) {
+        let (controller, window) = panel(PagedComments(count: 40, pageSize: 30))
+        wirePull(controller, log)
+        controller.showStream(.recent, animated: false)
+        let stream = controller.recent
+        _ = await settle { Self.laidOut(stream) && stream.debugItems.first == .earlier && !stream.streamFitsItsRoom }
+        return (controller, window, stream)
+    }
+
+    /// ⚠️ A FINGER'S PULL PAST RECENT'S END, PAST THE THRESHOLD, GOES TO THE
+    /// NEXT POST: the pill out of the edge, "Next post", then "Release for the
+    /// next post"; on release the feed's page change, the stream held at its
+    /// end (the content kept where it stood) until the page has settled.
+    @Test func aFingersPullPastTheEndGoesToTheNextPost() async throws {
+        let log = PullLog()
+        let (_, window, stream) = await scrollingRecent(log)
+        defer { window.isHidden = true }
+        #expect(!stream.streamFitsItsRoom, "Recent of 30 comments fits its room")
+        let tail = stream.debugTailOffset
+        stream.debugPull(to: tail + 40, isTracking: true)
+        let pill = try #require(stream.debugPullPill, "no pill past the end")
+        #expect(pill.isShown && pill.direction == .next)
+        #expect(pill.debugLine == "Next post")
+        stream.debugPull(to: tail + PostPullRule.threshold + 10, isTracking: true)
+        #expect(pill.isArmed)
+        #expect(pill.debugLine == "Release for the next post")
+        stream.debugReleasePull()
+        #expect(log.commits == [.next])
+        #expect(stream.debugHoldsPull, "the stream was not held while the page changes")
+        #expect(abs(stream.collectionView.contentOffset.y - tail) < 1, "the stream is not held at its end")
+        #expect(stream.collectionView.transform.ty < 0, "the content did not stay where it stood")
+        log.pending.forEach { $0() }
+        #expect(!stream.debugHoldsPull)
+        #expect(!pill.isShown, "the pill outlived the page change")
+    }
+
+    /// Let go short of the threshold: nothing — no commit, the pill goes back.
+    @Test func aPullLetGoShortOfTheThresholdDoesNothing() async throws {
+        let log = PullLog()
+        let (_, window, stream) = await scrollingRecent(log)
+        defer { window.isHidden = true }
+        let tail = stream.debugTailOffset
+        stream.debugPull(to: tail + 30, isTracking: true)
+        stream.debugPull(to: tail + PostPullRule.threshold - 20, isTracking: true)
+        stream.debugReleasePull()
+        #expect(log.commits.isEmpty)
+        #expect(!stream.debugHoldsPull)
+        // The spring back, home.
+        stream.debugPull(to: tail + 20, isTracking: false)
+        stream.debugPull(to: tail, isTracking: false)
+        #expect(stream.debugPullPill?.isShown != true)
+    }
+
+    /// ⚠️ A FLING NEVER GOES: the list carried past its end with no finger on
+    /// it shows no pill and changes no post.
+    @Test func aFlingToTheEndShowsNoPill() async {
+        let log = PullLog()
+        let (_, window, stream) = await scrollingRecent(log)
+        defer { window.isHidden = true }
+        let tail = stream.debugTailOffset
+        stream.debugPull(to: tail + 60, isTracking: false)
+        stream.debugPull(to: tail + PostPullRule.threshold + 30, isTracking: false)
+        stream.debugReleasePull()
+        #expect(stream.debugPullPill?.isShown != true)
+        #expect(log.commits.isEmpty)
+    }
+
+    /// Recent's top — above its "Earlier comments" row — is an edge too: a
+    /// pull down past it goes to the previous post.
+    @Test func aPullPastTheTopGoesToThePreviousPost() async throws {
+        let log = PullLog()
+        let (_, window, stream) = await scrollingRecent(log)
+        defer { window.isHidden = true }
+        let top = -stream.collectionView.adjustedContentInset.top
+        stream.debugPull(to: top, isTracking: true)
+        stream.debugPull(to: top - 40, isTracking: true)
+        let pill = try #require(stream.debugPullPill)
+        #expect(pill.direction == .previous)
+        #expect(pill.debugLine == "Previous post")
+        stream.debugPull(to: top - PostPullRule.threshold - 10, isTracking: true)
+        #expect(pill.debugLine == "Release for the previous post")
+        stream.debugReleasePull()
+        #expect(log.commits == [.previous])
+        #expect(stream.collectionView.transform.ty > 0)
+    }
+
+    /// ⚠️ NO PILL WITH NOWHERE TO GO: the feed's last post (no next), the
+    /// first post's top (its close).
+    @Test func nowhereToGoShowsNoPill() async {
+        let log = PullLog()
+        log.offers = []
+        let (_, window, stream) = await scrollingRecent(log)
+        defer { window.isHidden = true }
+        let tail = stream.debugTailOffset
+        stream.debugPull(to: tail + 30, isTracking: true)
+        stream.debugPull(to: tail + PostPullRule.threshold + 10, isTracking: true)
+        stream.debugReleasePull()
+        let top = -stream.collectionView.adjustedContentInset.top
+        stream.debugPull(to: top - 30, isTracking: true)
+        stream.debugPull(to: top - PostPullRule.threshold - 10, isTracking: true)
+        stream.debugReleasePull()
+        #expect(stream.debugPullPill?.isShown != true)
+        #expect(log.commits.isEmpty)
+    }
+
+    /// A stream that fits has no pull: its swipe is the feed's paging.
+    @Test func aStreamThatFitsHasNoPull() async {
+        let log = PullLog()
+        let (controller, window) = panel(PagedComments(count: 3, pageSize: 40))
+        defer { window.isHidden = true }
+        wirePull(controller, log)
+        let stream = controller.popular
+        #expect(await settle { Self.laidOut(stream) && Self.topLevelCount(stream.debugItems) == 3 })
+        #expect(stream.streamFitsItsRoom)
+        let tail = stream.debugTailOffset
+        stream.debugPull(to: tail + 30, isTracking: true)
+        stream.debugPull(to: tail + PostPullRule.threshold + 10, isTracking: true)
+        stream.debugReleasePull()
+        #expect(stream.debugPullPill?.isShown != true)
+        #expect(log.commits.isEmpty)
+    }
+
+    /// The comments sheet (and any panel off the vertical feed) has no pull.
+    @Test func noPullWithoutTheFeed() async {
+        let (controller, window) = panel(PagedComments(count: 40, pageSize: 30), inFeed: false)
+        defer { window.isHidden = true }
+        controller.showStream(.recent, animated: false)
+        let stream = controller.recent
+        _ = await settle { Self.laidOut(stream) }
+        let tail = stream.debugTailOffset
+        stream.debugPull(to: tail + 30, isTracking: true)
+        stream.debugPull(to: tail + PostPullRule.threshold + 10, isTracking: true)
+        #expect(stream.debugPullPill == nil)
+        #expect(controller.view.accessibilityCustomActions?.isEmpty ?? true)
+    }
+
+    /// VoiceOver: the page offers "Next post" and "Previous post" — no pull
+    /// needed — and says so when there is nowhere to go.
+    @Test func voiceOverOffersTheNextAndThePreviousPost() throws {
+        let log = PullLog()
+        let (controller, window) = panel(PagedComments(count: 3, pageSize: 40))
+        defer { window.isHidden = true }
+        wirePull(controller, log)
+        let actions = try #require(controller.view.accessibilityCustomActions)
+        #expect(actions.map(\.name) == ["Next post", "Previous post"])
+        #expect(actions[0].actionHandler?(actions[0]) == true)
+        #expect(actions[1].actionHandler?(actions[1]) == true)
+        #expect(log.commits == [.next, .previous])
+        log.offers = [.next]
+        #expect(actions[1].actionHandler?(actions[1]) == false, "the first post went back")
+        #expect(log.commits == [.next, .previous])
     }
 
     // MARK: - The rows' height

@@ -449,9 +449,9 @@ final class CommentStream: NSObject {
     /// drag has nothing left to scroll, which is where a RESTING page's
     /// vertical slide-to-dismiss may claim the touch instead on the first
     /// post (the sheet idiom; see
-    /// `SnapFeedViewController.zoomVerticalDismissalPermitted`), and where a
-    /// later post pages back (#2058). Same top test the pull-dismiss arming
-    /// uses.
+    /// `SnapFeedViewController.zoomVerticalDismissalPermitted`); on a later
+    /// post, a pull past it goes back (#2298). Same top test the pull-dismiss
+    /// arming uses.
     var streamIsAtTop: Bool {
         collectionView.contentOffset.y <= -collectionView.contentInset.top + 0.5
     }
@@ -1355,14 +1355,22 @@ final class CommentStream: NSObject {
         }
     }
 
-    /// The drag that started at the stream's bottom edge heading up, or at
-    /// its top heading down on a later post: it moves the feed to the next
-    /// post or the previous one, as the composer's swipe does, while the
-    /// stream stays at its edge (`beginPageDriveIfAtTheEdge`). Nil for any
-    /// other drag.
-    private var pageDrive: (edge: CGFloat, handler: (CommentsInputBar.PageSwipePhase, CGFloat, CGFloat) -> Void)?
-    /// Set while the stream's offset is put back at its edge.
+    /// The drag on a stream its room holds whole (#2298 § 1): it pages the
+    /// feed, as the composer's swipe does, while the stream stays where it
+    /// rests (`beginFittingStreamSwipe`). Nil for any other drag.
+    private var pageDrive: (rest: CGFloat, handler: (CommentsInputBar.PageSwipePhase, CGFloat, CGFloat) -> Void)?
+    /// Set while the stream's offset is put back where it is held.
     private var isHoldingEdge = false
+
+    // MARK: - The pull (#2298 § 2)
+
+    /// The pull past the stream's ends, read frame by frame.
+    private var pull = PostPullTracker()
+    /// Its pill, built on the first pull, over the stream in its page.
+    private var pullPill: PostPullPill?
+    /// A committed pull: the offset the stream is held at while the feed
+    /// changes page, the content kept where it stood by a translation.
+    private var pullHold: CGFloat?
 
     // MARK: - The room (#2298)
 
@@ -2154,120 +2162,81 @@ extension CommentStream: UICollectionViewDelegate {
         }
     }
 
-    /// The list's OVERSHOOT past its top drives the collapse back to the
-    /// media layout, continuously and in both directions.
-    ///
-    /// Reading `contentOffset` rather than the pan is what keeps the two
-    /// surfaces welded: the rubber band and the fade are the same number, so
-    /// the content cannot slide while the layer sits still. It also makes
-    /// the cancel free — when a released pull springs back, UIKit animates
-    /// the offset home and these callbacks walk the transition back to rest
-    /// with it, no separate animation to write or to keep in sync.
-    ///
-    /// Arming is unconditional by construction: overshoot exists only at the
-    /// top, so a drag anywhere else reports zero and drives nothing.
+    /// A drag begins: a row's text selection ends, and on a stream its room
+    /// holds whole the feed takes the drag (`beginFittingStreamSwipe`).
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
         if threadChrome { rowContextMenu.endTextSelection() }
-        beginPageDriveIfAtTheEdge(scrollView)
+        beginFittingStreamSwipe(scrollView)
     }
 
-    // MARK: - The next post from the edge (#2042, #2058)
+    // MARK: - A stream that fits pages with the feed (#2298 § 1)
 
-    /// ⚠️ DECIDED AS THE DRAG BEGINS (the owner, 2026-11-02): on a page in a
-    /// vertical feed, at the bottom edge of what is shown — Popular's end
-    /// ("See all"), Recent's newest — with the keyboard down, an upward drag
-    /// is the screen's. A fling that reaches the edge mid-drag stops there;
-    /// the next swipe goes on, so a reader flicking through comments never
-    /// leaves the post by accident. A Popular that fits its room (#2298) is
-    /// at both edges at once: any vertical drag on it pages the feed.
+    /// ⚠️ A STREAM ITS ROOM HOLDS WHOLE DOES NOT SCROLL (#2298 § 1, the owner
+    /// 2026-11-11): a Popular that fits, a short Recent. On a page in a
+    /// vertical feed, with the keyboard down, a vertical drag on it is the
+    /// feed's own paging, following the finger exactly as on a media post —
+    /// up to the next post; down to the previous one on a later post only:
+    /// the feed's router answers (`pagesBackFromTop`), so the first post
+    /// keeps its close (the text page's dismissal, #2058).
     ///
-    /// The mirror at the TOP edge (#2058): a downward drag beginning there
-    /// goes to the previous post, on a later post only — the feed's router
-    /// answers (`pagesBackFromTop`), so the first post keeps its close (the
-    /// text page's dismissal, the media layout's pull-down).
-    ///
-    /// Kept until #2298's second part, the pull past the end, replaces it.
-    private func beginPageDriveIfAtTheEdge(_ scrollView: UIScrollView) {
+    /// A stream that scrolls has no such hand-off any more (the edge decided
+    /// at the drag's start, #2042/#2058, is gone): its ends go on with the
+    /// pull (`readPull`).
+    private func beginFittingStreamSwipe(_ scrollView: UIScrollView) {
         pageDrive = nil
-        guard cutsToRoom, let handler = composeBar.onPageSwipe, !composeBar.isKeyboardOpen else { return }
+        guard cutsToRoom, pullHold == nil, let handler = composeBar.onPageSwipe, !composeBar.isKeyboardOpen,
+              streamFitsItsRoom else { return }
         let pan = scrollView.panGestureRecognizer
-        switch Self.edgeHandOff(
-            atTopEdge: streamIsAtTop, atBottomEdge: streamIsAtBottom,
+        guard PostPullRule.fittingStreamSwipe(
             velocity: pan.velocity(in: scrollView), translation: pan.translation(in: scrollView),
             pagesBack: pagesBackFromTop
-        ) {
-        case .nextPost: pageDrive = (tailOffset, handler)
-        case .previousPost: pageDrive = (-scrollView.contentInset.top, handler)
-        case nil: return
-        }
+        ) != nil else { return }
+        pageDrive = (scrollView.contentOffset.y, handler)
         handler(.began, 0, 0)
     }
 
-    /// Where a drag beginning at an edge goes.
-    enum EdgeHandOff: Equatable {
-        case nextPost
-        case previousPost
-    }
-
-    /// The edge hand-off, decided as the drag begins: up from the bottom edge
-    /// to the next post; down from the top edge to the previous one when the
-    /// feed has one to give (`pagesBack`, asked only then). A stream shorter
-    /// than its room is at both edges at once. Nil: the stream's own drag.
-    /// Pure, for tests.
-    static func edgeHandOff(
-        atTopEdge: Bool, atBottomEdge: Bool, velocity: CGPoint, translation: CGPoint,
-        pagesBack: @autoclosure () -> Bool
-    ) -> EdgeHandOff? {
-        if dragGoesToNextPost(atBottomEdge: atBottomEdge, velocity: velocity, translation: translation) {
-            return .nextPost
-        }
-        if dragGoesToPreviousPost(atTopEdge: atTopEdge, velocity: velocity, translation: translation), pagesBack() {
-            return .previousPost
-        }
-        return nil
-    }
-
-    /// Whether a drag beginning now goes to the next post: the stream at its
-    /// bottom edge, the finger heading up more than sideways. Pure, for tests.
-    static func dragGoesToNextPost(atBottomEdge: Bool, velocity: CGPoint, translation: CGPoint) -> Bool {
-        guard atBottomEdge else { return false }
-        let upward = velocity.y < 0 || (velocity.y == 0 && translation.y < 0)
-        return upward && abs(velocity.y) >= abs(velocity.x)
-    }
-
-    /// The mirror: the stream at its top edge, the finger heading down more
-    /// than sideways. Whether that post has a previous one is the feed's to
-    /// say. Pure, for tests.
-    static func dragGoesToPreviousPost(atTopEdge: Bool, velocity: CGPoint, translation: CGPoint) -> Bool {
-        guard atTopEdge else { return false }
-        let downward = velocity.y > 0 || (velocity.y == 0 && translation.y > 0)
-        return downward && abs(velocity.y) >= abs(velocity.x)
-    }
-
-    /// The page drive's frame: the stream back at its edge, the finger's
+    /// The page drive's frame: the stream held where it rests, the finger's
     /// travel handed to the feed.
     private func drivePage(_ scrollView: UIScrollView) {
         guard let drive = pageDrive, !isHoldingEdge else { return }
-        isHoldingEdge = true
-        scrollView.contentOffset.y = drive.edge
-        isHoldingEdge = false
+        holdOffset(scrollView, at: drive.rest)
         let pan = scrollView.panGestureRecognizer
         drive.handler(.changed, pan.translation(in: scrollView.superview).y, pan.velocity(in: scrollView.superview).y)
+    }
+
+    private func holdOffset(_ scrollView: UIScrollView, at offset: CGFloat) {
+        guard abs(scrollView.contentOffset.y - offset) > 0.01 else { return }
+        isHoldingEdge = true
+        scrollView.contentOffset.y = offset
+        isHoldingEdge = false
     }
 
     func scrollViewWillEndDragging(
         _ scrollView: UIScrollView, withVelocity velocity: CGPoint, targetContentOffset: UnsafeMutablePointer<CGPoint>
     ) {
-        guard let drive = pageDrive else { return }
-        pageDrive = nil
-        targetContentOffset.pointee.y = drive.edge
-        let pan = scrollView.panGestureRecognizer
-        drive.handler(.ended, pan.translation(in: scrollView.superview).y, pan.velocity(in: scrollView.superview).y)
+        if let drive = pageDrive {
+            pageDrive = nil
+            targetContentOffset.pointee.y = drive.rest
+            let pan = scrollView.panGestureRecognizer
+            drive.handler(.ended, pan.translation(in: scrollView.superview).y, pan.velocity(in: scrollView.superview).y)
+            return
+        }
+        releasePull(
+            scrollView, targetContentOffset: targetContentOffset,
+            velocity: scrollView.panGestureRecognizer.velocity(in: scrollView.superview).y
+        )
+    }
+
+    func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+        // A committed pull stays held, whatever UIKit set out to do.
+        if let held = pullHold { holdOffset(scrollView, at: held) }
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
         if pageDrive != nil { return drivePage(scrollView) }
         guard !isHoldingEdge else { return }
+        if let held = pullHold { return holdOffset(scrollView, at: held) }
+        readPull(scrollView, isTracking: scrollView.isTracking)
         // The reader's own scroll decides whether the stream holds its
         // resting end (#2007): away from it, the rows stay where they are.
         if scrollView.isTracking || scrollView.isDecelerating {
@@ -2288,6 +2257,163 @@ extension CommentStream: UICollectionViewDelegate {
         finishLanding(landingGeneration)
     }
 
+}
+
+// MARK: - The pull to the next / previous post (#2298 § 2)
+
+extension CommentStream {
+    /// Whether the stream's room holds it whole: it does not scroll (#2298
+    /// § 1). Read from the geometry, never from the offset, so it holds
+    /// through a bounce.
+    var streamFitsItsRoom: Bool {
+        let insets = collectionView.adjustedContentInset
+        return collectionView.contentSize.height + insets.top + insets.bottom <= collectionView.bounds.height + 0.5
+    }
+
+    /// ⚠️ THE PULL PAST THE ENDS OF A STREAM THAT SCROLLS (#2298 § 2, the
+    /// owner 2026-11-11), replacing the edge decided at the drag's start
+    /// (#2042, #2058): the list rubber-bands — UIKit's own bounce, untouched
+    /// — and the pill comes out of the edge with the target post's author,
+    /// filling with the overscroll (`PostPullRule`). Only under the finger: a
+    /// fling reaching the end bounces with no pill (`PostPullTracker`). No
+    /// pill with nowhere to go — the feed's last post, the first post's top
+    /// (its close), the keyboard up (`PostDetailViewController
+    /// .postPullTarget`), a stream that fits (its swipe is the feed's), the
+    /// comments sheet (no pull wired).
+    func readPull(_ scrollView: UIScrollView, isTracking: Bool) {
+        guard cutsToRoom, host.postPull != nil else { return }
+        let insets = scrollView.adjustedContentInset
+        let over = PostPullRule.overscroll(
+            offsetY: scrollView.contentOffset.y, topInset: insets.top, bottomInset: insets.bottom,
+            contentHeight: scrollView.contentSize.height, viewport: scrollView.bounds.height
+        )
+        let fits = streamFitsItsRoom
+        var beginning: PostPullTarget?
+        let reading = pull.update(top: over.top, bottom: over.bottom, isTracking: isTracking) { direction in
+            guard !fits, let target = host.postPullTarget(direction) else { return false }
+            beginning = target
+            return true
+        }
+        guard let reading else {
+            pullPill?.retract()
+            return
+        }
+        let pill = pullPill ?? makePullPill()
+        if let beginning {
+            pill.configure(direction: reading.direction, target: beginning, pipeline: imagePipeline)
+            pill.prepare()
+        }
+        pill.apply(reading)
+        placePullPill(pill, direction: reading.direction, pulled: reading.pulled)
+    }
+
+    private func makePullPill() -> PostPullPill {
+        let pill = PostPullPill()
+        pageView.addSubview(pill)
+        pullPill = pill
+        return pill
+    }
+
+    /// In the gap the pull opens, out of the edge it was pulled past: over
+    /// the composer for the next post, under the bar for the previous one —
+    /// never on the rows' side of a small gap.
+    private func placePullPill(_ pill: PostPullPill, direction: PostPullDirection, pulled: CGFloat) {
+        let bounds = pageView.bounds
+        let insets = collectionView.adjustedContentInset
+        let height = PostPullPill.height
+        let centreY: CGFloat
+        switch direction {
+        case .next:
+            let edge = bounds.maxY - insets.bottom
+            centreY = min(edge - height / 2 - Spacing.sm, edge - pulled / 2)
+        case .previous:
+            let edge = bounds.minY + insets.top
+            centreY = max(edge + height / 2 + Spacing.sm, edge + pulled / 2)
+        }
+        let width = pill.width(limit: bounds.width - 2 * Spacing.lg)
+        let place = {
+            pill.bounds = CGRect(x: 0, y: 0, width: width, height: height)
+            pill.center = CGPoint(x: bounds.midX, y: centreY)
+        }
+        // The words grow at the threshold: the capsule widens with a spring.
+        let widens = pill.bounds.width > 0 && abs(pill.bounds.width - width) > 0.5
+        guard widens, pill.window != nil, !MotionPreference.reducesMotion else {
+            UIView.performWithoutAnimation(place)
+            pill.layoutIfNeeded()
+            return
+        }
+        pill.center = CGPoint(x: bounds.midX, y: centreY)
+        UIView.animate(withDuration: 0.3, delay: 0, usingSpringWithDamping: 0.8, initialSpringVelocity: 0,
+                       options: [.beginFromCurrentState, .allowUserInteraction]) {
+            place()
+            pill.layoutIfNeeded()
+        }
+    }
+
+    /// The finger lets go. Armed: the feed's own page change to that post,
+    /// continuing from where the content stands — the stream held at its end
+    /// and the content kept in place by a translation of the overscroll, so
+    /// nothing springs back first and nothing jumps; the page leaves as it
+    /// is, its pill with it. Short of the threshold: UIKit's spring back,
+    /// the pill retracting with it (`readPull`), and nothing else.
+    func releasePull(
+        _ scrollView: UIScrollView, targetContentOffset: UnsafeMutablePointer<CGPoint>, velocity: CGFloat
+    ) {
+        guard let direction = pull.release() else { return }
+        guard let postPull = host.postPull else { return }
+        let insets = scrollView.adjustedContentInset
+        let top = -insets.top
+        let tail = max(top, scrollView.contentSize.height + insets.bottom - scrollView.bounds.height)
+        let end = direction == .next ? tail : top
+        let displacement = end - scrollView.contentOffset.y
+        pullHold = end
+        targetContentOffset.pointee.y = end
+        holdOffset(scrollView, at: end)
+        collectionView.transform = CGAffineTransform(translationX: 0, y: displacement)
+        postPull.commit(direction, velocity) { [weak self] in self?.finishPull() }
+    }
+
+    /// The committed pull's page change settled: the stream given back as it
+    /// rests, its pill gone.
+    private func finishPull() {
+        guard pullHold != nil else { return }
+        pullHold = nil
+        pull.reset()
+        pullPill?.clear()
+        guard collectionView.transform != .identity else { return }
+        // Off screen by now when the page changed; on screen, the content
+        // settles back to its end.
+        guard collectionView.window != nil, !MotionPreference.reducesMotion else {
+            collectionView.transform = .identity
+            return
+        }
+        UIView.animate(withDuration: 0.35, delay: 0, usingSpringWithDamping: 0.9, initialSpringVelocity: 0,
+                       options: [.beginFromCurrentState, .allowUserInteraction]) {
+            self.collectionView.transform = .identity
+        }
+    }
+
+    #if DEBUG
+    /// The stream moved to `offset` as a finger (`isTracking`) or a fling
+    /// would leave it, and the pull read there. Tests.
+    func debugPull(to offset: CGFloat, isTracking: Bool) {
+        holdOffset(collectionView, at: offset)
+        readPull(collectionView, isTracking: isTracking)
+    }
+
+    /// The finger lets go of the pull. Tests.
+    func debugReleasePull(velocity: CGFloat = 0) {
+        var target = collectionView.contentOffset
+        releasePull(collectionView, targetContentOffset: &target, velocity: velocity)
+    }
+
+    /// The pull's pill, once built. Tests.
+    var debugPullPill: PostPullPill? { pullPill }
+    /// Whether a committed pull holds the stream. Tests.
+    var debugHoldsPull: Bool { pullHold != nil }
+    /// The offset that shows the last row. Tests.
+    var debugTailOffset: CGFloat { tailOffset }
+    #endif
 }
 
 /// A gesture delegate that lets its recogniser see only the touches whose
