@@ -104,14 +104,14 @@ struct ConversationThreadMediaTests {
         let (screen, driver, window) = screen()
         defer { window.isHidden = true }
         let bar = screen.debugComposeBar
-        let sources = bar.debugAttachmentItems
+        let sources = bar.debugAttachmentButtons
         #expect(sources.map(\.accessibilityLabel) == ["Camera", "Photo Library"])
         #expect(sources.map(\.accessibilityIdentifier) == [
             ConversationThreadViewController.cameraID, ConversationThreadViewController.libraryID,
         ])
         #expect(bar.debugShowsAttachments, "an empty field at rest hides its attachments")
 
-        for item in sources { item.primaryAction?.performWithSender(nil, target: nil) }
+        for button in sources { button.sendActions(for: .primaryActionTriggered) }
         #expect(driver.picked == [.camera, .library])
 
         let items = try #require(screen.toolbarItems)
@@ -124,7 +124,7 @@ struct ConversationThreadMediaTests {
     @Test func aTextOnlyThreadHasNoMediaButtons() {
         let (screen, _, window) = screen(sendsMedia: false)
         defer { window.isHidden = true }
-        #expect(screen.debugComposeBar.debugAttachmentItems.isEmpty)
+        #expect(screen.debugComposeBar.debugAttachmentButtons.isEmpty)
         #expect(!screen.debugComposeBar.debugShowsAttachments)
         #expect(toolbarActions(screen).compactMap(\.accessibilityLabel) == ["Pin conversation", "More actions"])
     }

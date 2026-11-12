@@ -51,6 +51,15 @@ final class SnapGlassColumn: UIView {
     /// The reveal from the anchor in two steps, like the native toolbar: one
     /// capsule over every item first, then the split after this delay.
     var anchoredRevealDelay: Double = 0.12
+    /// Whether a reveal from the anchor takes that first step. Off, the new
+    /// bubbles are born straight from the anchor's — the composer's capsule
+    /// (#2344), whose anchor stands under a glass of its own that one
+    /// capsule over everything would cover.
+    var revealsInOneCapsule = true
+    /// Which way the bubbles stand: the action column's, top to bottom, or
+    /// the composer's row (#2344), leading to trailing. It decides only a
+    /// bubble's thickness — the frames are the caller's either way.
+    var axis: NSLayoutConstraint.Axis = .vertical
     /// Between two separate shapes: the union's smoothing.
     var gap: CGFloat = 12 {
         didSet { applySpacing() }
@@ -98,9 +107,10 @@ final class SnapGlassColumn: UIView {
         contents[id] = content
     }
 
-    /// The thickness of a bubble: the column's width.
+    /// The thickness of a bubble: the column's width, or the row's height.
     private var thickness: CGFloat {
-        shapes.joined().map(\.frame.width).max() ?? 44
+        let sides = shapes.joined().map { axis == .vertical ? $0.frame.width : $0.frame.height }
+        return sides.max() ?? 44
     }
 
     // MARK: - Touches
@@ -183,7 +193,7 @@ final class SnapGlassColumn: UIView {
         let oldIDs = Set(shapes.joined().map(\.id))
         let newIDs = Set(wanted.joined().map(\.id))
         // The reveal from the anchor: one capsule over every item first.
-        if let anchor = anchorID, oldIDs.contains(anchor), newIDs.contains(anchor),
+        if revealsInOneCapsule, let anchor = anchorID, oldIDs.contains(anchor), newIDs.contains(anchor),
            wanted.count > 1, !newIDs.isSubset(of: oldIDs) {
             transition(to: [Array(wanted.joined())], deferring: newIDs.subtracting(oldIDs))
             let split = DispatchWorkItem { [weak self] in
@@ -503,6 +513,8 @@ final class SnapGlassColumn: UIView {
     #if DEBUG
     /// The bubbles standing now (the absorbed ones excluded), in bounds.
     var debugShapes: [CGRect] { blobs.filter { !$0.dying }.map(\.target) }
+    /// The bubbles' glass as drawn now, in bounds (a covered one retracted).
+    var debugDrawnShapes: [CGRect] { blobs.filter { !$0.dying }.map(\.view.frame) }
     #endif
 
     // MARK: - Spring
