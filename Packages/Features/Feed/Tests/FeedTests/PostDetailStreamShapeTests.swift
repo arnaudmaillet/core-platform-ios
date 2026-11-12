@@ -112,7 +112,8 @@ struct PostDetailStreamShapeTests {
         let (controller, _, _) = try await makeStream(Self.spreadAcrossDays)
         let bar = try #require(Self.firstView(CommentsInputBar.self, in: controller.view))
         bar.draftText = "Nice one"
-        let color = bar.debugFieldActionButton.configuration?.baseForegroundColor
+        #expect(bar.debugOwnBubbleSymbol == CommentsInputBar.sendSymbol)
+        let color = bar.debugRowActionButton.configuration?.baseForegroundColor
         for style in [UIUserInterfaceStyle.light, .dark] {
             let traits = UITraitCollection(userInterfaceStyle: style)
             #expect(color?.resolvedColor(with: traits) == CommentsInputBar.sendTint.resolvedColor(with: traits))

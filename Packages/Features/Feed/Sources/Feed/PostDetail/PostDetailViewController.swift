@@ -301,6 +301,11 @@ final class PostDetailViewController: UIViewController {
     /// A failed first load, with its way out (#797).
     private let statusView = EmptyStateView()
 
+    /// The one composer (#2308), on the comments' contract
+    /// (`ComposerConfiguration.comments`, its default): no voice, no
+    /// attachments, the post's column. The sheet declares no column
+    /// (`setComposerBare`); a text post's draft declares a voice post's
+    /// voice (`TextPostComposerViewController`) until it is published.
     let composeBar = CommentsInputBar()
 
     private var composeBottomDefault: NSLayoutConstraint?
@@ -309,8 +314,9 @@ final class PostDetailViewController: UIViewController {
     /// stands its stake and rail slot ON the media layout's like and repost
     /// bubbles — same size, same screen coordinates — so opening and closing
     /// the comments crossfades two bubbles that never move. The slot wears
-    /// the post's sound (`publishedRailFace`); the waveform and the send
-    /// arrow are in the field.
+    /// the post's sound (`publishedRailFace`); the composer's own bubble —
+    /// the emote button, the send over a draft — stands beside it, on the
+    /// row (#2308).
     ///
     /// - AT REST the bar's input row sits on the toolbar like every composer's
     ///   (`SnapActionColumn.inputRestingGap`) and the bar lifts its column to
@@ -804,6 +810,9 @@ final class PostDetailViewController: UIViewController {
     /// visibility held (a published post's audience is settled), and the
     /// post's sound in the rail slot.
     private func becomePublished(_ entry: FeedEntry) {
+        // A post's comments don't record (#2308; voice comments are #2309):
+        // the draft's voice post goes with the draft.
+        composeBar.configuration.voice = .none
         composeBar.defaultPlaceholder = nil
         composeBar.sendAccessibilityLabel = nil
         composeBar.visibilityMenu = nil
@@ -1610,13 +1619,13 @@ final class PostDetailViewController: UIViewController {
         composeBar.postActions.onShare = onShare
     }
 
-    /// The composer alone — the avatar and the field, no column: no stake,
-    /// no slot, no post actions (the comments sheet, #2087, the owner
-    /// 2026-11-03). The field takes the column's width, as it does on a page
-    /// with no slot (#1999).
+    /// The composer alone — the avatar, the field and the own bubble, no
+    /// column: no stake, no slot, no post actions (the comments sheet, #2087,
+    /// the owner 2026-11-03). The row takes the column's width, as it does on
+    /// a page with no slot (#1999). The sheet's contract (#2308).
     func setComposerBare() {
+        composeBar.configuration = .commentsSheet
         composeBar.hostsActionColumn = true
-        composeBar.showsStake = false
         setPostActions(shown: false, saved: false, onSave: nil)
         railShareAction = nil
         railShareHoldArms = false

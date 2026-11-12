@@ -60,14 +60,12 @@ final class ConversationThreadViewController: UIViewController {
     )
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
     private let contextMenu = ThreadRowContextMenu()
-    /// The post's composer, in its conversation's shape (the owner,
-    /// 2026-11-07, Telegram's): no column slot — the voice note and the send
-    /// are the input row's own bubble at its end (`actsFromOwnBubble`), which
-    /// rides the keyboard with the field. The camera and the library stand
-    /// between the field and that bubble, hidden while the reader writes
-    /// (`attachmentSources`, #2305). The pin and the bell are the footer's,
-    /// the way back to the newest message floats over the composer
-    /// (`returnButton`).
+    /// The app's one composer (#2308), from the conversation's contract
+    /// (`composerConfiguration`): a message's voice where the driver sends
+    /// voice, the camera and the library as its attachments (#2305), no
+    /// column. The row, the own bubble and the hold are every host's. The
+    /// pin and the bell are the footer's, the way back to the newest message
+    /// floats over the composer (`returnButton`).
     private let composeBar = CommentsInputBar()
     /// The leftward swipe's push of the peer's profile (#1525).
     private(set) var swipeArbiter: SwipeStageArbiter?
@@ -868,12 +866,9 @@ final class ConversationThreadViewController: UIViewController {
         // The reply state's natural exit, as on the post: the keyboard retired
         // over an empty field.
         composeBar.onIdleDismiss = { [weak self] in self?.driver.cancelReply() }
+        // No column: a conversation has nothing to like, and no slot.
+        composeBar.configuration = composerConfiguration()
         installVoiceComposer()
-        // No stake: a conversation has nothing to like, and no column slot:
-        // the row's own bubble is the voice and the send.
-        composeBar.showsStake = false
-        composeBar.railFace = .noSlot
-        composeBar.actsFromOwnBubble = true
         renderPinned(isPinned)
         returnButton.addAction(UIAction { [weak self] _ in self?.scrollToBottom(animated: true) }, for: .primaryActionTriggered)
         composeBar.onVoiceOverlayChange = { [weak self] records in
@@ -980,7 +975,7 @@ final class ConversationThreadViewController: UIViewController {
         let more = SnapFooterToolbar.makeMoreItem(menu: overflowMenu())
         moreItem = more
         toolbarItems = footerItems()
-        composeBar.attachmentSources = attachmentSources()
+        composeBar.configuration = composerConfiguration()
         toolbarShape = ToolbarShape(
             isChannel: group?.isChannel == true, isGroup: group != nil, canPost: group?.canPost != false
         )
@@ -1082,6 +1077,17 @@ final class ConversationThreadViewController: UIViewController {
     /// `[avatar][field][📷][🖼][☺]`, hidden while the reader writes — for a
     /// thread whose driver sends media. A list of sources, not a pair of
     /// buttons: the conversation's declared attachments (#2308).
+    /// The conversation's composer contract (#2308): what differs from a
+    /// post's comments, and nothing else — a message's voice (five minutes)
+    /// where the screen is the full conversation and its driver sends voice,
+    /// the camera and the library (#2305), no column.
+    func composerConfiguration() -> ComposerConfiguration {
+        .conversation(voice: recordsVoice ? .message : .none, attachments: attachmentSources())
+    }
+
+    /// Whether the field's hold records a voice message (#2102).
+    var recordsVoice: Bool { mode == .full && driver.sendsVoice }
+
     private func attachmentSources() -> [ComposerAttachmentSource] {
         // A channel's reader sends nothing (#2215).
         guard mode == .full, driver.sendsMedia, group?.canPost != false else { return [] }
@@ -2987,10 +2993,11 @@ extension ConversationThreadViewController {
 
 extension ConversationThreadViewController {
     /// The composer records when the screen is the full conversation and
-    /// its driver sends voice: the empty field's long press (#2183).
+    /// its driver sends voice (`recordsVoice`, declared in the contract):
+    /// the empty field's long press (#2183), a message's five minutes.
     func installVoiceComposer() {
-        guard mode == .full, driver.sendsVoice, voiceComposer == nil else { return }
-        let composer = VoiceComposer(draftKey: driver.presenceKey ?? peer.id?.rawValue)
+        guard recordsVoice, voiceComposer == nil else { return }
+        let composer = VoiceComposer(for: .message, draftKey: driver.presenceKey ?? peer.id?.rawValue)
         composer.onSend = { [weak self] take in self?.driver.send(voice: take) }
         composer.onHint = { [weak self] hint in
             guard let self else { return }

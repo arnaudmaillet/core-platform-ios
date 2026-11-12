@@ -599,6 +599,27 @@ struct TextPostComposePageTests {
         page.drafts.delete(withVoice.id)
     }
 
+    /// The draft's composer declares a voice post's voice (#2308): its field
+    /// records a minute, the own bubble and the post's column as on every
+    /// post. Published, the page is a post's comments again, whose field
+    /// records nothing (voice comments are #2309). Without `-voice-posts`,
+    /// no voice at all.
+    @Test func theDraftDeclaresAPostsVoiceUntilItIsPublished() async throws {
+        let page = try await openPage(recordsVoice: true)
+        let bar = page.panel.composeBar
+        #expect(bar.configuration.voice == .post)
+        #expect(bar.configuration.column == .post)
+        #expect(bar.speaksFromField)
+        #expect(page.composer.voiceComposer?.recorder.limit == TextPostVoice.maximumDuration)
+
+        try await publish(page)
+        #expect(bar.configuration.voice == .none, "a published post's comments record")
+        #expect(!bar.speaksFromField)
+
+        let plain = try await openPage()
+        #expect(plain.panel.composeBar.configuration.voice == .none)
+    }
+
     /// Without `-voice-posts` the composer has no bar to record on, and a
     /// draft saved over keeps the voice it had.
     @Test func withoutVoicePostsADraftKeepsItsVoice() async throws {

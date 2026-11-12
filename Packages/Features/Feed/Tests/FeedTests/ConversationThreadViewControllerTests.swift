@@ -429,7 +429,8 @@ struct ConversationThreadViewControllerTests {
         let (screen, _, _, _) = makeScreen()
         let bar = try #require(Self.firstView(CommentsInputBar.self, in: screen.view))
         bar.draftText = "On my way"
-        let color = bar.debugFieldActionButton.configuration?.baseForegroundColor
+        #expect(bar.debugOwnBubbleSymbol == CommentsInputBar.sendSymbol)
+        let color = bar.debugRowActionButton.configuration?.baseForegroundColor
         for style in [UIUserInterfaceStyle.light, .dark] {
             let traits = UITraitCollection(userInterfaceStyle: style)
             #expect(color?.resolvedColor(with: traits) == CommentsInputBar.sendTint.resolvedColor(with: traits))
@@ -673,8 +674,8 @@ struct ConversationThreadViewControllerTests {
     }
 
     /// The composer's own bubble ends the input row, the field's height,
-    /// right of the field — the voice note over an empty field, the send
-    /// over a draft — and no button is left in the field.
+    /// right of the field — the emote button over an empty field, the send
+    /// over a draft (#2308: every host's).
     @Test func theOwnBubbleEndsTheInputRow() throws {
         let (screen, _, _, window) = makeScreen()
         screen.view.layoutIfNeeded()
@@ -683,10 +684,8 @@ struct ConversationThreadViewControllerTests {
         #expect(composer.stake == nil)
         #expect(abs(bubble.maxY - composer.field.maxY) < 0.5, "\(bubble) vs field \(composer.field)")
         #expect(bubble.minX >= composer.field.maxX, "the bubble overlaps the field")
-        #expect(composer.bar.debugRowActionButton.accessibilityLabel != nil)
-        #expect(composer.bar.debugRowActionButton.accessibilityLabel == composer.bar.debugFieldActionButton.accessibilityLabel,
-                "the bubble wears the field action's face")
-        #expect(!composer.bar.debugFieldActionShows, "a button is still in the field")
+        #expect(composer.bar.debugRowActionButton.accessibilityLabel == "Emotes")
+        #expect(composer.bar.debugOwnBubbleSymbol == CommentsInputBar.emoteSymbol)
     }
 
     /// Keyboard up, the input row rides it — the field and its own bubble,
@@ -767,28 +766,28 @@ struct ConversationThreadViewControllerTests {
     }
 
     /// A draft is sendable with the keyboard down (a shared link or an emote
-    /// lands in the field to be sent), and an empty field wears the waveform,
-    /// keyboard up or down.
+    /// lands in the field to be sent), and an empty field's own bubble is the
+    /// emote button, keyboard up or down.
     @Test func aDraftIsSendableWithTheKeyboardDown() throws {
         let (screen, driver, _, _) = makeScreen()
         let bar = try #require(Self.firstView(CommentsInputBar.self, in: screen.view))
-        let action = bar.debugFieldActionButton
+        let action = bar.debugRowActionButton
 
-        // Empty, keyboard down: the waveform.
-        #expect(bar.debugFieldActionSymbol == CommentsInputBar.waveformSymbol)
+        // Empty, keyboard down: the emote button.
+        #expect(bar.debugOwnBubbleSymbol == CommentsInputBar.emoteSymbol)
 
         // A draft with the keyboard down: SEND.
         bar.draftText = "https://example.test/p/1"
-        #expect(bar.debugFieldActionSymbol == CommentsInputBar.sendSymbol)
+        #expect(bar.debugOwnBubbleSymbol == CommentsInputBar.sendSymbol)
         #expect(action.isEnabled)
 
         // Keyboard up over the draft: still send.
         bar.setKeyboardOpen(true)
-        #expect(bar.debugFieldActionSymbol == CommentsInputBar.sendSymbol)
+        #expect(bar.debugOwnBubbleSymbol == CommentsInputBar.sendSymbol)
 
-        // Emptied with the keyboard up: the waveform — no dismiss-keyboard face.
+        // Emptied with the keyboard up: the emote button — no dismiss-keyboard face.
         bar.draftText = ""
-        #expect(bar.debugFieldActionSymbol == CommentsInputBar.waveformSymbol)
+        #expect(bar.debugOwnBubbleSymbol == CommentsInputBar.emoteSymbol)
         #expect(bar.subviews.compactMap { $0 as? UIButton }.allSatisfy { $0.accessibilityLabel != "Dismiss keyboard" })
 
         bar.draftText = "Sent with the keyboard down"
@@ -799,18 +798,18 @@ struct ConversationThreadViewControllerTests {
 
     /// ⚠️ NO SPINNER IN THE FIELD (#886): the sent message's own bubble says
     /// it is on its way, so the composer is ready for the next one the
-    /// moment a text leaves — emptied, wearing the waveform, never busy.
+    /// moment a text leaves — emptied, wearing the emote button, never busy.
     @Test func theComposerIsReadyTheMomentATextLeaves() throws {
         let (screen, driver, _, _) = makeScreen()
         let bar = try #require(Self.firstView(CommentsInputBar.self, in: screen.view))
-        let action = bar.debugFieldActionButton
+        let action = bar.debugRowActionButton
 
         bar.draftText = "One"
         action.sendActions(for: .primaryActionTriggered)
         #expect(bar.draftText.isEmpty)
         #expect(bar.isSending == false, "the composer waits on the send")
-        #expect(action.configuration?.showsActivityIndicator == false, "a spinner in the field")
-        #expect(bar.debugFieldActionSymbol == CommentsInputBar.waveformSymbol)
+        #expect(action.configuration?.showsActivityIndicator == false, "a spinner in the bubble")
+        #expect(bar.debugOwnBubbleSymbol == CommentsInputBar.emoteSymbol)
         #expect(action.isEnabled)
 
         bar.draftText = "Two"
@@ -918,16 +917,16 @@ struct ConversationThreadViewControllerTests {
                 "shown again mid-fade, the way back stayed invisible")
     }
 
-    /// The composer has no column slot: its own bubble is the voice note and
-    /// the send, and the pin is the footer's (#2305).
+    /// The composer has no column (#2308: the conversation's contract): its
+    /// own bubble is the emote button and the send, and the pin is the
+    /// footer's (#2305).
     @Test func theComposersOwnBubbleAndThePinInTheBar() throws {
         let (screen, driver, _, window) = makeScreen(phase: .content(Self.longTranscript))
         defer { window.isHidden = true }
         window.layoutIfNeeded()
         #expect(screen.debugRailFace == .noSlot)
-        #expect(screen.debugComposeBar.actsFromOwnBubble)
+        #expect(screen.debugComposeBar.configuration.column == .none)
         #expect(screen.debugComposeBar.debugShowsRowAction)
-        #expect(!screen.debugComposeBar.debugFieldActionShows, "no button left in the field")
         #expect(screen.toolbarItems?.contains { $0 === screen.debugPinItem } == true)
         #expect(screen.navigationItem.rightBarButtonItems?.contains { $0 === screen.debugPinItem } != true)
         #expect(screen.debugPinItem.isEnabled)

@@ -92,11 +92,18 @@ final class VoiceComposer {
         strip.onSeek = { [weak self] fraction in self?.seekListenBack(to: fraction) }
     }
 
+    /// A recorder for the voice a host declares in its composer contract
+    /// (`ComposerConfiguration.voice`, #2308): its limit and its timer.
+    convenience init(for voice: ComposerConfiguration.Voice, draftKey: String?) {
+        self.init(draftKey: draftKey, limit: voice.limit, timerStyle: voice.timerStyle)
+    }
+
     /// The bar it records from and the view the mic and the lock float in.
+    /// The bar records where its host's contract declares a voice
+    /// (`ComposerConfiguration.voice`): this only listens to its hold.
     func attach(to bar: CommentsInputBar, host: UIView) {
         self.bar = bar
         self.host = host
-        bar.holdsToRecord = true
         bar.onVoiceHold = { [weak self] event in self?.handle(event) }
         if let key = draftKey, let kept = Self.drafts.removeValue(forKey: key) {
             draft = kept

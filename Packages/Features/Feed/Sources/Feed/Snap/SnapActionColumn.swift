@@ -22,11 +22,11 @@ import UIKit
 ///   glass (`SnapGlassColumn`), and the like and the post's actions fold
 ///   into the sound bubble, which stays in place; closing the comments
 ///   reveals them from it. A text page's composer draws its own stake pill
-///   and rail slot on the same frames, as before. The voice note is a waveform INSIDE
-///   the field, beside the emote button, and it becomes the SEND arrow while
-///   there is text (a symbol replace).
-/// - The Messages thread: no stake (a conversation has nothing to like), and
-///   the rail slot is a PIN for the conversation, on the field line.
+///   and rail slot on the same frames, as before. The composer's OWN BUBBLE
+///   (#2308) stands on the row just before the slot: the emote button over
+///   an empty field, the SEND arrow while there is text (a symbol replace).
+/// - The Messages thread and the comments sheet: no column (a conversation
+///   has nothing to like); the row's own bubble ends it.
 ///
 /// The like pill and the dropped lower bubble began behind `-snap-like-pill`
 /// (#669) and became the layout on 2026-10-08 (#680).

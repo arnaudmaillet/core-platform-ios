@@ -106,7 +106,6 @@ final class SnapCommentsDetachedComposer {
         // keys rise (`keyboardWillShow`).
         bar.showsAvatar = true
         bar.draftText = source.draftText
-        bar.onVoiceNote = source.onVoiceNote
         let frame = source.convert(source.bounds, to: window)
         let sheetFrame = sheetView.map { $0.convert($0.bounds, to: window) } ?? window.bounds
         restingBottom = frame.maxY

@@ -150,12 +150,15 @@ final class TextPostComposerViewController: UIViewController {
     /// The thread's hold-to-record on the text composer, with a voice post's
     /// minute: a first message can be a voice, a voice then words (the words
     /// typed so far go with it as its caption), or words alone as before.
+    ///
+    /// The composer's contract declares it (#2308): the draft's field records
+    /// a voice post (a minute, in seconds) — the hold, the own bubble and the
+    /// rest are every host's. Published, the page is a post's comments again,
+    /// whose field does not record (`PostDetailViewController.becomePublished`).
     private func installVoiceComposer() {
         guard panel.viewModel.acceptsVoice, voiceComposer == nil else { return }
-        let composer = VoiceComposer(
-            draftKey: "text-post-voice", limit: TextPostVoice.maximumDuration,
-            timerStyle: VoiceView.TimerStyle(role: .post(author: nil))
-        )
+        panel.composeBar.configuration.voice = .post
+        let composer = VoiceComposer(for: .post, draftKey: "text-post-voice")
         composer.onSend = { [weak self] take in
             guard let self else { return }
             panel.viewModel.publishVoice(

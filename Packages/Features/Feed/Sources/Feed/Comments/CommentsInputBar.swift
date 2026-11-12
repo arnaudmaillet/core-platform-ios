@@ -6,28 +6,32 @@ import UIKit
 import CoreModels
 import CoreNavigation
 
-/// The comments composer — and, since the conversation became the text post's
-/// screen, the MESSAGES composer too — in the app's native Liquid Glass
-/// grammar: a floating glass capsule field that grows with its text, with the
-/// voice note and the send arrow INSIDE it. (It began as a replica of the
-/// chat's own input bar, which is gone: this is the one composer now.)
+/// THE ONE COMPOSER (#2308): a post's comments and a conversation's
+/// messages — and the text post's first message — in the app's native Liquid
+/// Glass grammar, built from ONE contract (`configuration`,
+/// `ComposerConfiguration`) where each host declares only what differs: its
+/// voice, its attachments, its emote panel and its column. One layout, one
+/// behaviour, every host: tap to type, hold to talk where the host's voice
+/// records, the own bubble at the row's end.
 ///
 /// AN INPUT ROW AND A TRAILING COLUMN, one view:
 ///
-///     ——————————————————————╭stake╮
-///     ——————————————————————╰─────╯
-///     [avatar][field   ☺ 〰/↑][sound/pin]
+///     ——————————————————————————————╭stake╮
+///     ——————————————————————————————╰─────╯
+///     [avatar][field  ☺][📎…][☺/↑][sound/pin]
 ///
-/// The INPUT ROW — avatar and field — is the bar's bottom edge at rest: a host
-/// rests the bar `SnapActionColumn.inputRestingGap` above its footer line,
-/// which is `SnapActionColumn.glassGap` above the toolbar's glass (asked
-/// 2026-10-01: the field sat too far above the toolbar). The trailing COLUMN —
-/// the rail slot and the stake (boost) bubble over it — is the ACTION COLUMN's
-/// two bubbles (`SnapActionColumn`): both the comment band's height, one md
-/// apart, standing exactly on the media layout's like pill and sound bubble.
-/// The slot rests on the field's line (#669), and the avatar, the field and
-/// the slot are one row of `SnapActionColumn.bubbleSize` (#680). The stake (a
-/// pill, #669) holds its station over the slot, and a growing
+/// The INPUT ROW — avatar, field, the host's attachments and the own bubble
+/// — is the bar's bottom edge at rest: a host rests the bar
+/// `SnapActionColumn.inputRestingGap` above its footer line, which is
+/// `SnapActionColumn.glassGap` above the toolbar's glass (asked 2026-10-01:
+/// the field sat too far above the toolbar). The trailing COLUMN (a post's,
+/// `ComposerConfiguration.Column.post`) — the rail slot and the stake
+/// (boost) bubble over it — is the ACTION COLUMN's two bubbles
+/// (`SnapActionColumn`): both the comment band's height, one md apart,
+/// standing exactly on the media layout's like pill and sound bubble. The
+/// slot rests on the field's line (#669), and the avatar, the field, the own
+/// bubble and the slot are one row of `SnapActionColumn.bubbleSize` (#680).
+/// The stake (a pill, #669) holds its station over the slot, and a growing
 /// field rises BESIDE it. Everything is INSIDE the bar's bounds at rest, so
 /// the bar's height (and `restingHeight(for:)`) include it and every host's
 /// clearance follows; the empty run left of the column is NOT part of the bar
@@ -35,26 +39,20 @@ import CoreNavigation
 ///
 /// **THE KEYBOARD MOVES THE INPUT ROW, NEVER THE COLUMN** (asked 2026-10-02).
 /// The host pins the BAR at its resting place for good and hands it the
-/// keyboard's guide (`riseWithKeyboard(of:)`): only the avatar and the field
-/// ride the keyboard's top, above the bar's own bounds, and the column's
-/// bubbles stay on the media layout's coordinates (the keyboard covers them).
-/// As the row rises clear of the column it WIDENS into the column's width —
-/// a function of how far it has risen (`riseProgress(lift:clearance:)`), read
-/// off the solved layout on every pass, so it follows the keyboard's own
-/// animation and an interactive dismissal frame by frame.
+/// keyboard's guide (`riseWithKeyboard(of:)`): only the row — the avatar,
+/// the field, the attachments and the own bubble — rides the keyboard's top,
+/// above the bar's own bounds, and the column's bubbles stay on the media
+/// layout's coordinates (the keyboard covers them). As the row rises clear
+/// of the column it WIDENS into the column's width — a function of how far
+/// it has risen (`riseProgress(lift:clearance:)`), read off the solved
+/// layout on every pass, so it follows the keyboard's own animation and an
+/// interactive dismissal frame by frame.
 ///
-/// The slot wears the host's action — REPOST on a post, PIN in a conversation,
-/// nothing on a post that does not exist yet (`railFace`) — and nothing else:
-/// typing never changes it. The field's trailing button is the voice note's
-/// WAVEFORM over an empty field and the SEND arrow over a draft (a symbol
-/// replace), beside the emote button.
-///
-/// `showsStake = false` (a conversation: there is nothing to like) leaves the
-/// column the slot alone.
-///
-/// A conversation's row (`actsFromOwnBubble`) ends in its own bubble, and the
-/// host's attachments stand between the field and it, hidden while the
-/// reader writes (`attachmentSources`, #2305): `[avatar][field][📷][🖼][☺]`.
+/// The slot wears the host's action — REPOST on a post, nothing on a post
+/// that does not exist yet (`railFace`) — and nothing else: typing never
+/// changes it. The OWN BUBBLE is the emote button over an empty field and
+/// the SEND over a draft (a symbol replace), on every host (#2308: the
+/// comments' inline waveform and send are gone).
 final class CommentsInputBar: UIView {
     /// Fired with trimmed, non-empty text; the field clears itself first.
     var onSend: ((String) -> Void)?
@@ -67,14 +65,45 @@ final class CommentsInputBar: UIView {
     /// Fired by the boost menu's Undo entry — the host refunds the session
     /// spend (it owns the tally and the wallet; the bar only shows the door).
     var onBoostUndo: (() -> Void)?
-    /// Fired by the WAVEFORM inside the field, beside the emote button: the
-    /// voice-note seam. Unwired for now — an honest affordance whose capture
-    /// flow does not exist yet.
-    var onVoiceNote: (() -> Void)?
 
-    /// The voice hold (#2102, #2183), conversations only: the empty field's
-    /// long press (`speaksFromField`). A post's comments have none and keep
-    /// `onVoiceNote`'s tap on the waveform.
+    // MARK: The contract (#2308)
+
+    /// What this host declares — its voice, its attachments, its emote panel
+    /// and its column — and nothing else: the row, the own bubble, tap to
+    /// type, hold to talk and the attachments' rule are the composer's, the
+    /// same for every host. A post's comments by default.
+    var configuration: ComposerConfiguration = .comments {
+        didSet { applyConfiguration(from: oldValue) }
+    }
+
+    private func applyConfiguration(from old: ComposerConfiguration) {
+        if !ComposerConfiguration.sameEntries(configuration.attachments, old.attachments) {
+            rebuildAttachmentButtons()
+        }
+        if configuration.column != old.column { applyColumn() }
+        guard configuration.voice != old.voice else { return }
+        // The field's hold exists only where it records: a comment's field
+        // keeps UIKit's own long press alone.
+        if speaksFromField {
+            field.addGestureRecognizer(fieldVoiceHold)
+        } else {
+            field.removeGestureRecognizer(fieldVoiceHold)
+        }
+        updateFieldAction()
+        applyPlaceholder()
+    }
+
+    /// No column (a conversation, the comments sheet): no stake, no slot, no
+    /// post actions — whatever the column's faces were last set to.
+    private func applyColumn() {
+        guard configuration.column == .none else { return }
+        showsStake = false
+        showsPostActions = false
+        railFace = .noSlot
+    }
+
+    /// The voice hold (#2102, #2183): the empty field's long press, wherever
+    /// the host's voice records (`speaksFromField`).
     enum VoiceHoldEvent: Equatable {
         /// The empty field's long press began.
         case began
@@ -89,24 +118,16 @@ final class CommentsInputBar: UIView {
         case accessibilityStart
     }
 
-    /// Whether this composer records (#2102): with `actsFromOwnBubble`, the
-    /// empty field's long press does (`speaksFromField`). Off: the
-    /// waveform's tap is `onVoiceNote`.
-    var holdsToRecord = false {
-        didSet {
-            updateFieldAction()
-            applyPlaceholder()
-        }
-    }
+    /// The recorder's ear (`VoiceComposer.attach`).
     var onVoiceHold: ((VoiceHoldEvent) -> Void)?
 
     private var voiceHoldStart: CGPoint = .zero
 
-    /// "Hold for voice, tap to type" (the owner, 2026-11-07): in a
-    /// conversation (`speaksFromField`) a long press on the empty field
-    /// records — the bubble grows into the mic as its own hold did — and a
-    /// tap writes. Later than a tap (0.3 s); a draft keeps the field's
-    /// native long press (the loupe, the selection).
+    /// "Hold for voice, tap to type" (the owner, 2026-11-07): where the
+    /// host's voice records (`speaksFromField`) a long press on the empty
+    /// field records — the own bubble grows into the mic — and a tap writes.
+    /// Later than a tap (0.3 s); a draft keeps the field's native long press
+    /// (the loupe, the selection).
     private lazy var fieldVoiceHold: UILongPressGestureRecognizer = {
         let hold = UILongPressGestureRecognizer(target: self, action: #selector(voiceHeld(_:)))
         hold.minimumPressDuration = 0.3
@@ -115,31 +136,20 @@ final class CommentsInputBar: UIView {
     }()
 
     /// Where the mic and the lock stand while the field's hold records: the
-    /// conversation's own bubble, which grows into the mic (#2102).
-    var voiceHoldAnchor: UIView { actsFromOwnBubble ? rowActionButton : fieldActionButton }
+    /// own bubble, which grows into the mic (#2102).
+    var voiceHoldAnchor: UIView { rowActionButton }
 
-    /// A conversation's composer (#2102; the owner, 2026-11-07, Telegram's):
-    /// the field's action leaves the field for a glass bubble of its own at
-    /// the row's end — the emote button over an empty field while the field
-    /// itself records on a long press (`speaksFromField`), the send over a
-    /// draft. The bubble belongs to the INPUT ROW: it rides
-    /// the keyboard with the avatar and the field, where the column's slot
-    /// stays down under the keyboard. The host shows no slot (`.noSlot`).
-    var actsFromOwnBubble = false {
-        didSet {
-            guard actsFromOwnBubble != oldValue else { return }
-            applyOwnBubble()
-        }
-    }
+    /// THE OWN BUBBLE (#2102, the owner, 2026-11-07, Telegram's; every host
+    /// since #2308): a glass bubble of its own at the row's end — the emote
+    /// button over an empty field, the send over a draft. It belongs to the
+    /// INPUT ROW: it rides the keyboard with the avatar and the field, where
+    /// a post's column stays down under the keyboard.
     private let rowActionButton = UIButton(configuration: .glass())
 
-    /// A conversation with voice messages (#2102; the owner, 2026-11-07):
-    /// the voice is the FIELD's long press, so the own bubble at rest is the
-    /// emote button (the field's own emote button goes until there is a
-    /// draft), and the send over a draft — where the emote button comes
-    /// back into the field.
-    var speaksFromField: Bool { actsFromOwnBubble && holdsToRecord }
-    private var fieldActionWidth: NSLayoutConstraint!
+    /// Whether the empty field's long press records: the host's voice
+    /// (`ComposerConfiguration.voice`). Off — a post's comments until #2309
+    /// — the field only writes, and nothing promises a voice.
+    var speaksFromField: Bool { configuration.voice.records }
     /// The field's emote button's width: 0 while it is gone
     /// (`updateEmoteToggle`), so the text and the placeholder run on.
     private var emoteToggleWidth: NSLayoutConstraint!
@@ -155,22 +165,9 @@ final class CommentsInputBar: UIView {
     private var emoteToggleLeaving = false
     /// Whether the bar has had a real layout: the first is never animated.
     private var hasLaidOutOnce = false
-    /// `speaksFromField` as of the last update: a change of mode is not a
-    /// draft's, and does not animate.
-    private var emoteToggleSpeaks = false
     /// The own bubble steps aside while a locked or paused take covers the
     /// field (it carries its own send): the field takes the row's width.
     private var rowActionStepsAside = false
-
-    private func applyOwnBubble() {
-        fieldActionButton.isHidden = actsFromOwnBubble || (voiceOverlay != nil && voiceOverlayCoversButton)
-        fieldActionWidth.constant = actsFromOwnBubble ? 0 : Metrics.fieldActionSide
-        rowActionButton.isHidden = !actsFromOwnBubble || rowActionStepsAside
-        if actsFromOwnBubble { field.addGestureRecognizer(fieldVoiceHold) } else { field.removeGestureRecognizer(fieldVoiceHold) }
-        updateFieldAction()
-        applyPlaceholder()
-        setNeedsLayout()
-    }
 
     /// The own bubble steps aside or comes back as glass does (the owner,
     /// 2026-11-07): the field stretches over its place, or gives it back, in
@@ -238,7 +235,7 @@ final class CommentsInputBar: UIView {
     /// Its glass is sized by its constraints, never a transform: it redraws
     /// at every size, as a system bubble swells.
     func beginVoiceHold() {
-        guard actsFromOwnBubble, !voiceHolding else { return }
+        guard !voiceHolding else { return }
         voiceHolding = true
         voiceHoldReturning = false
         if holdGlyphLeaving {
@@ -285,8 +282,8 @@ final class CommentsInputBar: UIView {
         voiceHoldSwell = 1
         voiceHoldTrash = false
         // A locked or paused take has already sent the bubble aside: its
-        // mic leaves with it — no waveform over the take's send (filmed,
-        // 2026-11-07). Otherwise the waveform rides home on the glyph.
+        // mic leaves with it — no resting face over the take's send (filmed,
+        // 2026-11-07). Otherwise the resting face rides home on the glyph.
         voiceHoldReturning = !rowActionStepsAside
         if rowActionStepsAside { carryHoldGlyphAway() }
         applyVoiceHoldFace()
@@ -401,7 +398,7 @@ final class CommentsInputBar: UIView {
             if var home = bubbleImage(sends: sends) {
                 // The emote face carries its own size (`emoteToggleConfiguration`),
                 // which the button draws as is: the button's would shrink it.
-                let carriesItsSize = speaksFromField && !sends
+                let carriesItsSize = !sends
                 if !carriesItsSize, let drawn = rowActionButton.imageView?.preferredSymbolConfiguration {
                     home = home.applyingSymbolConfiguration(drawn) ?? home
                 }
@@ -420,46 +417,42 @@ final class CommentsInputBar: UIView {
             if !holdGlyphLeaving { holdGlyph.isHidden = true }
             if replaces { face.symbolContentTransition = quick }
             face.image = bubbleImage(sends: hasDraft || isSending)
+            face.baseForegroundColor = hasDraft || isSending ? Self.sendTint : Self.restingTint
             face.showsActivityIndicator = isSending
             rowActionButton.tintColor = nil
         }
         rowActionButton.configuration = face
     }
 
-    /// The own bubble's room at the row's end: its side and the gap before it.
+    /// The own bubble's room at the row's end: its side and the gap before
+    /// it — none while it steps aside, or while there is no input row (a
+    /// guest's sign-up, a post that takes no comments).
     private var ownBubbleInset: CGFloat {
-        actsFromOwnBubble && !rowActionStepsAside ? Metrics.controlSize + Spacing.sm : 0
+        rowActionStepsAside || field.isHidden ? 0 : Metrics.controlSize + Spacing.sm
     }
 
-    // MARK: The attachments (#2305)
+    /// Where the own bubble RESTS: at the row's end, short of a post's slot
+    /// by the slot's room as the rise leaves it (`applyRise`) — so the
+    /// bubble rides the keyboard with the row and stands beside the column
+    /// at rest. The bubble's hold grows and slides it about this place, and
+    /// the attachments are counted from it, so the hold never moves them.
+    private let ownBubbleSlot = UILayoutGuide()
+    private var ownBubbleSlotTrailing: NSLayoutConstraint!
 
-    /// What the reader can attach from the input row, in the row's order:
-    /// one glass bubble per entry, the own bubble's size and spacing,
-    /// BETWEEN THE FIELD AND THE OWN BUBBLE —
-    ///
-    ///     [avatar][field][📷][🖼][☺]
-    ///
-    /// — never right of it: hiding them would make the own bubble jump.
-    /// Between, the field widens into their place and the own bubble never
-    /// moves. Empty by default, so a host that declares none (a post's
-    /// comments) keeps its row exactly; drawn only beside the own bubble
-    /// (`actsFromOwnBubble`), whose place they are counted from.
-    ///
-    /// A LIST, NOT A PAIR (#2308): the conversation declares `[camera,
-    /// library]`, and a later host — comments with photos — declares its own
-    /// with no change here.
-    var attachmentSources: [ComposerAttachmentSource] = [] {
-        didSet {
-            // The same entries, perhaps new actions: the bubbles stay — a
-            // tap reads its action off the list (`attachmentTapped`).
-            guard attachmentSources.map(\.id) != oldValue.map(\.id)
-                || zip(attachmentSources, oldValue).contains(where: {
-                    $0.symbol != $1.symbol || $0.accessibilityLabel != $1.accessibilityLabel
-                })
-            else { return }
-            rebuildAttachmentButtons()
-        }
-    }
+    // MARK: The attachments (#2305, #2308)
+
+    // What the reader can attach from the input row is the host's LIST
+    // (`ComposerConfiguration.attachments`), in the row's order: one glass
+    // bubble per entry, the own bubble's size and spacing, BETWEEN THE FIELD
+    // AND THE OWN BUBBLE —
+    //
+    //     [avatar][field][📷][🖼][☺]
+    //
+    // — never right of it: hiding them would make the own bubble jump.
+    // Between, the field widens into their place and the own bubble never
+    // moves. A host that declares none (a post's comments) keeps its row
+    // exactly. The same entries with new actions keep their bubbles: a tap
+    // reads its action off the list (`attachmentTapped`).
     private var attachmentButtons: [UIButton] = []
     /// What the bubbles were last told — not `isHidden`, which stays false
     /// through their way out.
@@ -469,21 +462,29 @@ final class CommentsInputBar: UIView {
     /// size, as the own bubble's.
     static let attachmentConfiguration = UIImage.SymbolConfiguration(pointSize: 17, weight: .medium)
 
-    /// Whether the attachments show (#2305, Messenger's rule): only while the
-    /// reader is NOT writing — the field not being edited, and holding no
-    /// draft (text, or a voice take on its way or held), even with the
+    /// Whether the attachments show (#2305, Messenger's rule; the contract's
+    /// one rule for every host's list, #2308): only while the reader is NOT
+    /// writing — the field not being edited, and the draft empty (no text,
+    /// no voice take on its way or held, later no attachment), even with the
     /// keyboard down: a half-written message never gets a narrowed field.
     /// Pure, for tests.
-    static func showsAttachments(hasSources: Bool, isEditing: Bool, hasDraft: Bool, holdsVoiceTake: Bool) -> Bool {
-        hasSources && !isEditing && !hasDraft && !holdsVoiceTake
+    static func showsAttachments(hasSources: Bool, isEditing: Bool, draft: ComposerDraftContents) -> Bool {
+        hasSources && !isEditing && draft.isEmpty
+    }
+
+    /// What the draft holds now.
+    private var draftContents: ComposerDraftContents {
+        var contents: ComposerDraftContents = []
+        if hasDraft { contents.insert(.text) }
+        if voiceOverlay != nil || voiceHolding { contents.insert(.voiceTake) }
+        return contents
     }
 
     private var attachmentsWanted: Bool {
         Self.showsAttachments(
-            hasSources: !attachmentButtons.isEmpty && actsFromOwnBubble && !field.isHidden,
+            hasSources: !attachmentButtons.isEmpty && !field.isHidden,
             isEditing: textView.isFirstResponder,
-            hasDraft: hasDraft,
-            holdsVoiceTake: voiceOverlay != nil || voiceHolding
+            draft: draftContents
         )
     }
 
@@ -493,19 +494,20 @@ final class CommentsInputBar: UIView {
     }
 
     /// One bubble per entry, each on the row's line and riding the keyboard
-    /// with the field, counted from the bar's trailing edge — past the own
-    /// bubble's place — so the bubble's hold (which grows and slides it)
+    /// with the field, counted from the own bubble's RESTING place
+    /// (`ownBubbleSlot`), so the bubble's hold (which grows and slides it)
     /// never moves them.
     private func rebuildAttachmentButtons() {
         for button in attachmentButtons { button.removeFromSuperview() }
-        let sources = attachmentSources
+        let sources = configuration.attachments
         attachmentButtons = sources.map { makeAttachmentButton(for: $0) }
         let step = Metrics.controlSize + Spacing.sm
         for (index, button) in attachmentButtons.enumerated() {
             insertSubview(button, belowSubview: rowActionButton)
             NSLayoutConstraint.activate([
                 button.trailingAnchor.constraint(
-                    equalTo: trailingAnchor, constant: -step * CGFloat(sources.count - index)
+                    equalTo: ownBubbleSlot.leadingAnchor,
+                    constant: -Spacing.sm - step * CGFloat(sources.count - 1 - index)
                 ),
                 button.bottomAnchor.constraint(equalTo: field.bottomAnchor),
                 button.widthAnchor.constraint(equalToConstant: Metrics.controlSize),
@@ -526,7 +528,7 @@ final class CommentsInputBar: UIView {
         face.cornerStyle = .capsule
         face.image = UIImage(systemName: source.symbol)
         face.preferredSymbolConfigurationForImage = Self.attachmentConfiguration
-        face.baseForegroundColor = Self.waveformTint
+        face.baseForegroundColor = Self.restingTint
         let button = UIButton(configuration: face)
         button.translatesAutoresizingMaskIntoConstraints = false
         button.accessibilityLabel = source.accessibilityLabel
@@ -541,7 +543,7 @@ final class CommentsInputBar: UIView {
 
     /// A bubble's tap: the action its entry carries now.
     private func attachmentTapped(_ id: String) {
-        attachmentSources.first { $0.id == id }?.action()
+        configuration.attachments.first { $0.id == id }?.action()
     }
 
     /// The attachments in or out, as the reader starts or stops writing:
@@ -633,7 +635,6 @@ final class CommentsInputBar: UIView {
     var debugFieldHoldBegins: Bool { gestureRecognizerShouldBegin(fieldVoiceHold) }
     /// The field's text view, for its VoiceOver actions.
     var debugTextView: UITextView { textView }
-    var debugFieldActionShows: Bool { !fieldActionButton.isHidden }
     /// The attachments' bubbles, in the row's order (#2305).
     var debugAttachmentButtons: [UIButton] { attachmentButtons }
     /// Whether the attachments show — or are on their way in.
@@ -649,9 +650,10 @@ final class CommentsInputBar: UIView {
     func debugTapVoiceDelete() { voiceDeleteButton.sendActions(for: .primaryActionTriggered) }
     #endif
 
-    /// Shows a recording strip or bar in the field's place (#2102): the text,
-    /// the emote button — and the field's own button when `coversButton`
-    /// (the locked and paused bars carry their own). Nil gives the field back.
+    /// Shows a recording strip or bar in the field's place (#2102): the text
+    /// and the emote button — and the own bubble steps aside when
+    /// `coversButton` (the locked and paused bars carry their own send). Nil
+    /// gives the field back.
     func showVoiceOverlay(_ overlay: UIView?, coversButton: Bool = false) {
         // The row is the take's: the attachments go (#2305) — once the
         // strip is laid out, whichever way this returns.
@@ -662,8 +664,7 @@ final class CommentsInputBar: UIView {
         let showing = overlay != nil
         voiceOverlayCoversButton = coversButton
         updateEmoteToggle()
-        fieldActionButton.isHidden = actsFromOwnBubble || (showing && coversButton)
-        if actsFromOwnBubble { setRowActionAside(showing && coversButton) }
+        setRowActionAside(showing && coversButton)
         onVoiceOverlayChange?(showing)
         setFieldWordsShown(!showing, animated: animated)
         if let previous, previous !== overlay { retireVoiceOverlay(previous, animated: animated) }
@@ -723,8 +724,7 @@ final class CommentsInputBar: UIView {
 
     private func voiceOverlayTrailingConstraint(for overlay: UIView, coversButton: Bool) -> NSLayoutConstraint {
         overlay.trailingAnchor.constraint(
-            equalTo: coversButton ? field.contentView.trailingAnchor : fieldActionButton.leadingAnchor,
-            constant: coversButton ? -Spacing.xs : 0
+            equalTo: field.contentView.trailingAnchor, constant: coversButton ? -Spacing.xs : 0
         )
     }
 
@@ -875,6 +875,9 @@ final class CommentsInputBar: UIView {
     /// never change meaning under the thumb).
     var railFace: RailFace = .empty {
         didSet {
+            // No column (`ComposerConfiguration.Column.none`): no slot,
+            // whatever a host's page state asks.
+            if configuration.column == .none, railFace != .noSlot { railFace = .noSlot }
             guard railFace != oldValue else { return }
             applyRailFace()
             // The slot came or went (#1790): the field's edge moves with the
@@ -953,6 +956,7 @@ final class CommentsInputBar: UIView {
     let postActions = SnapPostActionsCapsule()
     var showsPostActions = false {
         didSet {
+            if configuration.column == .none, showsPostActions { showsPostActions = false }
             guard showsPostActions != oldValue else { return }
             applyPostActions()
         }
@@ -970,6 +974,7 @@ final class CommentsInputBar: UIView {
     /// there is nothing there to like. The slot stays where it was.
     var showsStake = true {
         didSet {
+            if configuration.column == .none, showsStake { showsStake = false }
             guard showsStake != oldValue else { return }
             applyStakeStation()
         }
@@ -1029,9 +1034,10 @@ final class CommentsInputBar: UIView {
         return min(1, lift / clearance)
     }
 
-    /// The field's trailing edge from the bar's at `progress`: the column's
-    /// width and the gap before it at rest (0), nothing at 1. Pure, for tests.
-    /// With no slot (#1790), the field reaches the bar's trailing margin.
+    /// The SLOT'S ROOM at the row's end at `progress` — what the own bubble
+    /// (and the field after it) stands short of: the column's width and the
+    /// gap before it at rest (0), nothing at 1. Pure, for tests. With no slot
+    /// (#1790), the own bubble reaches the bar's trailing margin.
     @MainActor static func fieldTrailingInset(progress: CGFloat, keepsSlot: Bool = true) -> CGFloat {
         guard keepsSlot else { return 0 }
         let rest = SnapActionColumn.bubbleSize + Spacing.sm
@@ -1079,13 +1085,7 @@ final class CommentsInputBar: UIView {
         /// room for its widest face, the keyboard glyph (about 39pt at 20pt
         /// and the large scale, `emoteToggleConfiguration`).
         static let emoteToggleWidth: CGFloat = 40
-        /// The field's trailing button is the field's trailing CAP: a 38pt
-        /// square flush with the field's end, so its glyph is concentric
-        /// with the capsule's round end. The send disc (29pt) used to stand
-        /// in a 30pt column 4pt in from the edge — no margin at all, and its
-        /// sides came out shaved (asked 2026-10-02).
-        @MainActor static var fieldActionSide: CGFloat { controlSize }
-        /// The smallest touch target the field's two buttons answer to —
+        /// The smallest touch target the field's emote button answers to —
         /// UIKit's 44pt, reached by `hitTest` around their drawn frames,
         /// which the 38pt line cannot hold.
         static let minimumHitSide: CGFloat = 44
@@ -1165,17 +1165,6 @@ final class CommentsInputBar: UIView {
     }()
     /// The rail button's glass, put back when the face leaves the sound.
     private var railGlassConfiguration: UIButton.Configuration?
-    /// The field's trailing button, after the emote button: the voice note's
-    /// WAVEFORM over an empty field, the SEND arrow over a draft (or while one
-    /// is in flight) — one button, its glyph swapped with a symbol replace,
-    /// keyboard up or down. A draft is sendable with the keyboard down: a
-    /// shared link or an emote lands in the field precisely to be sent.
-    ///
-    /// Send used to take the RAIL slot (repost/pin → send while typing), and
-    /// before that a glass button of its own beside the field. Both are gone
-    /// (asked 2026-10-02): the column never changes meaning under the thumb,
-    /// and the send arrow sits where the eye already is, in the field.
-    private let fieldActionButton = UIButton(configuration: .plain())
     /// A guest's whole input row: one glass button over the avatar's and the
     /// field's span, in their place — a guest has no one to post as and
     /// nothing to type until they sign up (`applyGuestFace`). Built only for
@@ -1210,18 +1199,17 @@ final class CommentsInputBar: UIView {
     /// the two layouts reads as ONE bubble.
     private static let glyphConfiguration = UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
 
-    /// The field button's two faces. Send is the filled arrow in a disc —
-    /// iMessage's own, at home inside a field — in `sendTint`; the waveform
-    /// is the field's quiet ink, like the emote button beside it.
-    static let waveformSymbol = "waveform"
+    /// The own bubble's faces. Send is the filled arrow in a disc —
+    /// iMessage's own — in `sendTint`; at rest, the emote button's smile
+    /// (the keyboard while the panel is up), in the row's quiet ink.
     static let sendSymbol = "arrow.up.circle.fill"
-    /// Every glyph in the field has a POINT SIZE of its own — see the
-    /// trailing buttons' constraints in `init`.
-    static let waveformConfiguration = UIImage.SymbolConfiguration(pointSize: 17, weight: .semibold)
+    static let emoteSymbol = "face.smiling"
+    static let keyboardSymbol = "keyboard"
+    /// Every glyph in the row has a POINT SIZE of its own: one size at every
+    /// text size, as a bar's.
     static let sendConfiguration = UIImage.SymbolConfiguration(pointSize: 24, weight: .semibold)
     /// A step up, as the row's buttons draw theirs (a glass button scales
-    /// its symbols to the large scale): the face matched the waveform and
-    /// the send beside it no longer (the owner, 2026-11-07). 20pt since
+    /// its symbols to the large scale) (the owner, 2026-11-07). 20pt since
     /// 2026-11-08 (the owner: larger, in the field and in the bubble).
     static let emoteToggleConfiguration = UIImage.SymbolConfiguration(pointSize: 20, weight: .medium, scale: .large)
     /// The send arrow's colour, on every host: the brand's tint (#1124),
@@ -1230,11 +1218,11 @@ final class CommentsInputBar: UIView {
     /// while the post's was coloured (asked 2026-10-02: one colour for every
     /// composer).
     static let sendTint: UIColor = Palette.tint
-    /// The waveform's ink: the field's quiet one, the emote button's.
-    static let waveformTint: UIColor = .secondaryLabel
+    /// The row's quiet ink at rest: the emote faces and the attachments.
+    static let restingTint: UIColor = .secondaryLabel
 
-    /// The waveform ↔ send swap, both ways: the old glyph shrinks away and
-    /// the new one grows into its place, at 2.5× the system's speed — about
+    /// The emote ↔ send swap, both ways: the old glyph shrinks away and the
+    /// new one grows into its place, at 2.5× the system's speed — about
     /// 0.13 s end to end, filmed at 60 fps (asked 2026-10-02: at the default
     /// speed, about 0.3 s, it trailed the typing). `.offUp` was filmed too
     /// and rejected: the old glyph vanished at once but the new one took
@@ -1244,18 +1232,15 @@ final class CommentsInputBar: UIView {
     )
     static let fieldActionTransitionSpeed: Double = 2.5
 
-    /// The field button's face, COLOUR BAKED IN. Each glyph carries its own
-    /// ink (`.alwaysOriginal`), so the button's tint plays no part in what
-    /// is drawn: the replace swaps a grey waveform for a blue arrow as one
-    /// image change. With the glyphs templated, the colour rode the image
-    /// view's tint — a channel of its own, applied apart from the replace —
-    /// and the leaving waveform flashed blue (or the arriving arrow grey) in
-    /// the frames between the two.
-    static func fieldActionImage(sends: Bool) -> UIImage? {
-        UIImage(
-            systemName: sends ? sendSymbol : waveformSymbol,
-            withConfiguration: sends ? sendConfiguration : waveformConfiguration
-        )?.withTintColor(sends ? sendTint : waveformTint, renderingMode: .alwaysOriginal)
+    /// The send face, COLOUR BAKED IN (`.alwaysOriginal`), as the rest face
+    /// is (`bubbleImage`): the replace swaps a grey smile for a blue arrow as
+    /// one image change. With the glyphs templated, the colour rode the
+    /// image view's tint — a channel of its own, applied apart from the
+    /// replace — and the leaving glyph flashed blue (or the arriving one
+    /// grey) in the frames between the two.
+    static var sendImage: UIImage? {
+        UIImage(systemName: sendSymbol, withConfiguration: sendConfiguration)?
+            .withTintColor(sendTint, renderingMode: .alwaysOriginal)
     }
 
     override init(frame: CGRect) {
@@ -1276,35 +1261,23 @@ final class CommentsInputBar: UIView {
         emoteToggle.translatesAutoresizingMaskIntoConstraints = false
         field.contentView.addSubview(textView)
         field.contentView.addSubview(emoteToggle)
-        // The field's own button: after the emote button, at the field's end
-        // — the voice note's place in iMessage's own field, and its send's.
-        var action = UIButton.Configuration.plain()
-        action.contentInsets = .zero
-        action.symbolContentTransition = Self.fieldActionTransition
-        fieldActionButton.configuration = action
-        fieldActionButton.addAction(UIAction { [weak self] _ in self?.fieldActionTapped() }, for: .primaryActionTriggered)
-        fieldActionButton.translatesAutoresizingMaskIntoConstraints = false
-        field.contentView.addSubview(fieldActionButton)
-        fieldActionWidth = fieldActionButton.widthAnchor.constraint(equalToConstant: Metrics.fieldActionSide)
         emoteToggleWidth = emoteToggle.widthAnchor.constraint(equalToConstant: Metrics.emoteToggleWidth)
         NSLayoutConstraint.activate([
             textView.leadingAnchor.constraint(equalTo: field.contentView.leadingAnchor),
             textView.topAnchor.constraint(equalTo: field.contentView.topAnchor),
             textView.bottomAnchor.constraint(equalTo: field.contentView.bottomAnchor),
             textView.trailingAnchor.constraint(equalTo: emoteToggle.leadingAnchor),
-            emoteToggle.trailingAnchor.constraint(equalTo: fieldActionButton.leadingAnchor),
+            // The field's end is the emote button's: the send and the voice
+            // are the own bubble's, outside the field (#2308).
+            emoteToggle.trailingAnchor.constraint(equalTo: field.contentView.trailingAnchor),
             emoteToggle.bottomAnchor.constraint(equalTo: field.contentView.bottomAnchor),
             emoteToggleWidth,
             emoteToggle.heightAnchor.constraint(equalToConstant: Metrics.controlSize),
-            fieldActionButton.trailingAnchor.constraint(equalTo: field.contentView.trailingAnchor),
-            fieldActionButton.bottomAnchor.constraint(equalTo: field.contentView.bottomAnchor),
-            fieldActionWidth,
-            fieldActionButton.heightAnchor.constraint(equalToConstant: Metrics.fieldActionSide),
         ])
         // The trailing glyphs hold one size at every text size, as a bar's
         // do: the field grows with the text, but its buttons stay the 38pt
         // line's, and a glyph that scaled with the text overflowed them (the
-        // emote face and the waveform had no size of their own). The large
+        // emote face had no size of its own). The large
         // content viewer is the accessibility answer instead — a long press
         // at the accessibility sizes shows the glyph big.
         //
@@ -1314,7 +1287,7 @@ final class CommentsInputBar: UIView {
         // spilling out of the 38pt cap. Capping the buttons' size category
         // holds every face, glyph or spinner, at its default size.
         emoteToggle.setPreferredSymbolConfiguration(Self.emoteToggleConfiguration, forImageIn: .normal)
-        for button in [emoteToggle, fieldActionButton] {
+        for button in [emoteToggle, rowActionButton] {
             button.maximumContentSizeCategory = .large
             button.showsLargeContentViewer = true
             button.scalesLargeContentImage = true
@@ -1377,12 +1350,11 @@ final class CommentsInputBar: UIView {
         visibilityButton.showsMenuAsPrimaryAction = true
         visibilityButton.isHidden = true
 
-        // ONE glyph, swapped in place: pin ↔ pinned is a symbol REPLACE on the
-        // button's own image, so the bubble never blinks or moves.
-        // The conversation's own action bubble (`actsFromOwnBubble`).
+        // The own bubble (#2308, every host): ONE glyph, swapped in place —
+        // emote ↔ send is a symbol REPLACE on the button's own image, so the
+        // bubble never blinks or moves.
         rowActionButton.configuration?.cornerStyle = .capsule
         rowActionButton.configuration?.symbolContentTransition = Self.fieldActionTransition
-        rowActionButton.isHidden = true
         rowActionButton.addAction(UIAction { [weak self] _ in self?.fieldActionTapped() }, for: .primaryActionTriggered)
 
         railButton.configuration?.cornerStyle = .capsule
@@ -1462,7 +1434,17 @@ final class CommentsInputBar: UIView {
         addSubview(railButton)
         addSubview(rowActionButton)
         rowActionButton.translatesAutoresizingMaskIntoConstraints = false
-        rowActionTrailing = rowActionButton.trailingAnchor.constraint(equalTo: trailingAnchor)
+        addLayoutGuide(ownBubbleSlot)
+        ownBubbleSlotTrailing = ownBubbleSlot.trailingAnchor.constraint(
+            equalTo: trailingAnchor, constant: -Self.fieldTrailingInset(progress: 0)
+        )
+        NSLayoutConstraint.activate([
+            ownBubbleSlotTrailing,
+            ownBubbleSlot.bottomAnchor.constraint(equalTo: field.bottomAnchor),
+            ownBubbleSlot.widthAnchor.constraint(equalToConstant: Metrics.controlSize),
+            ownBubbleSlot.heightAnchor.constraint(equalToConstant: Metrics.controlSize),
+        ])
+        rowActionTrailing = rowActionButton.trailingAnchor.constraint(equalTo: ownBubbleSlot.trailingAnchor)
         rowActionBottom = rowActionButton.bottomAnchor.constraint(equalTo: field.bottomAnchor)
         rowActionWidth = rowActionButton.widthAnchor.constraint(equalToConstant: Metrics.controlSize)
         rowActionHeight = rowActionButton.heightAnchor.constraint(equalToConstant: Metrics.controlSize)
@@ -1509,7 +1491,7 @@ final class CommentsInputBar: UIView {
         postActions.isHidden = true
         addSubview(postActions)
         fieldTrailing = field.trailingAnchor.constraint(
-            equalTo: trailingAnchor, constant: -Self.fieldTrailingInset(progress: 0)
+            equalTo: trailingAnchor, constant: -(Self.fieldTrailingInset(progress: 0) + Metrics.controlSize + Spacing.sm)
         )
         let fieldAtRest = field.bottomAnchor.constraint(equalTo: restingInputRow.bottomAnchor)
         fieldAtRest.priority = .defaultHigh
@@ -1608,7 +1590,7 @@ final class CommentsInputBar: UIView {
         // The field's voice hold (#2183): over an empty field at rest, nothing
         // on its way. Focused, the field writes (2026-11-08).
         if gestureRecognizer === fieldVoiceHold {
-            return actsFromOwnBubble && holdsToRecord && !hasDraft && !isSending && voiceOverlay == nil
+            return speaksFromField && onVoiceHold != nil && !hasDraft && !isSending && voiceOverlay == nil
                 && !textView.isFirstResponder
         }
         guard gestureRecognizer === swipeRecognizer,
@@ -1659,7 +1641,7 @@ final class CommentsInputBar: UIView {
     func fieldButton(near point: CGPoint) -> UIButton? {
         guard isUserInteractionEnabled, !isHidden, alpha > 0.01, takesComments else { return nil }
         var best: (button: UIButton, distance: CGFloat)?
-        for button in [emotes.toggleButton, fieldActionButton] {
+        for button in [emotes.toggleButton] {
             guard !button.isHidden, button.isEnabled, button.isUserInteractionEnabled,
                   button.bounds.width > 0 else { continue }
             let frame = button.convert(button.bounds, to: self)
@@ -1834,7 +1816,8 @@ final class CommentsInputBar: UIView {
     }
 
     /// Reads the input row's lift off the solved layout — the keyboard's
-    /// ceiling has already placed the field — and widens the field by it.
+    /// ceiling has already placed the field — and widens the row by it: the
+    /// own bubble moves into the slot's room, the field after it.
     /// Returns whether the width moved, so the caller lays out again in the
     /// SAME pass: a keyboard animating in lays out once, inside its own
     /// animation, and the width has to land in that block to ride the
@@ -1852,11 +1835,20 @@ final class CommentsInputBar: UIView {
         }
         #endif
         riseProgress = progress
-        let inset = Self.fieldTrailingInset(progress: progress, keepsSlot: keepsRailSlot) + ownBubbleInset
-            + attachmentsInset
-        guard abs(fieldTrailing.constant + inset) > 0.01 else { return false }
-        fieldTrailing.constant = -inset
-        return true
+        // The slot's room, as the rise leaves it: the own bubble stands
+        // short of it, and the attachments and the field short of the bubble.
+        let slot = Self.fieldTrailingInset(progress: progress, keepsSlot: keepsRailSlot)
+        let inset = slot + ownBubbleInset + attachmentsInset
+        var moved = false
+        if abs(ownBubbleSlotTrailing.constant + slot) > 0.01 {
+            ownBubbleSlotTrailing.constant = -slot
+            moved = true
+        }
+        if abs(fieldTrailing.constant + inset) > 0.01 {
+            fieldTrailing.constant = -inset
+            moved = true
+        }
+        return moved
     }
 
     /// The input row's top — the field's top edge, which rises as it grows
@@ -2058,18 +2050,16 @@ final class CommentsInputBar: UIView {
         !textView.plainText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    /// The field button's tap: send over a draft (nothing while one is in
-    /// flight), the voice-note seam over an empty field — keyboard up or down.
+    /// The own bubble's tap: send over a draft (nothing while one is in
+    /// flight); over an empty field it is the emote button — the panel or
+    /// the keyboard, as the field's own emote button does. Keyboard up or
+    /// down, every host.
     private func fieldActionTapped() {
         if hasDraft {
             sendTapped()
-        } else if speaksFromField, !isSending {
-            // The bubble at rest is the emote button: the panel or the
-            // keyboard, as the field's own button does.
+        } else if !isSending {
             emotes.toggle()
             updateFieldAction()
-        } else if !isSending {
-            onVoiceNote?()
         }
     }
 
@@ -2221,6 +2211,9 @@ final class CommentsInputBar: UIView {
         signUpButton?.isHidden = !isGuest || !takesComments
         avatarBubble.isHidden = isGuest || !takesComments
         field.isHidden = isGuest || !takesComments
+        // The own bubble is the input row's: it goes with the field.
+        rowActionButton.isHidden = field.isHidden || rowActionStepsAside
+        setNeedsLayout()
         updateAttachments()
     }
 
@@ -2286,9 +2279,15 @@ final class CommentsInputBar: UIView {
         sendTapped()
     }
 
-    /// Wears `other`'s look — its viewer, its prompt (a reply's included),
-    /// its column — for a bar that stands in for it (`SnapCommentsDetachedComposer`).
+    /// Wears `other`'s look — its contract, its viewer, its prompt (a
+    /// reply's included), its column — for a bar that stands in for it
+    /// (`SnapCommentsDetachedComposer`). Its voice excepted: the stand-in
+    /// edits text over the keys, where the field never records, and the
+    /// recorder is `other`'s.
     func mirrorLook(of other: CommentsInputBar) {
+        var look = other.configuration
+        look.voice = .none
+        configuration = look
         hostsActionColumn = other.hostsActionColumn
         showsStake = other.showsStake
         railFace = other.railFace
@@ -2305,8 +2304,8 @@ final class CommentsInputBar: UIView {
 
     /// `-composer-draft <text>` (DEBUG): puts `<text>` in the draft ~2 s after
     /// the bar is SHOWN (on screen, every ancestor opaque — an engagement's
-    /// bar waits offstage at alpha 0), then empties it ~6 s later: the field
-    /// button's two faces (send over a draft, the waveform over an empty
+    /// bar waits offstage at alpha 0), then empties it ~6 s later: the
+    /// own bubble's two faces (send over a draft, the emote over an empty
     /// field) and the rail's one, without a keyboard, which the simulator does
     /// not show. Prints `[composer-draft] <epoch s> <step>` with the faces at
     /// each step.
@@ -2318,11 +2317,11 @@ final class CommentsInputBar: UIView {
         let text = arguments[index + 1]
         let report: @MainActor (String) -> Void = { [weak self] step in
             guard let self else { return }
-            let ink = self.fieldActionButton.imageView?.tintColor.resolvedColor(with: self.traitCollection)
-            let face = "rail=\(self.debugRailSymbol ?? "-") field=\(self.fieldActionSymbol ?? "-")"
-                + " label=\(self.fieldActionButton.accessibilityLabel ?? "-")"
+            let ink = self.rowActionButton.imageView?.tintColor.resolvedColor(with: self.traitCollection)
+            let face = "rail=\(self.debugRailSymbol ?? "-") bubble=\(self.ownBubbleSymbol ?? "-")"
+                + " label=\(self.rowActionButton.accessibilityLabel ?? "-")"
                 + " ink=\(ink.map { String(describing: $0) } ?? "-")"
-                + " dimmed=\(self.fieldActionButton.tintAdjustmentMode == .dimmed)"
+                + " dimmed=\(self.rowActionButton.tintAdjustmentMode == .dimmed)"
             let frame = self.window.map { self.convert(self.bounds, to: $0) } ?? .zero
             // stderr: unbuffered, so a detached `--stderr=` sink is live.
             FileHandle.standardError.write(Data(
@@ -2370,7 +2369,7 @@ final class CommentsInputBar: UIView {
         let line = String(
             format: "[composer-kbd] %.3f %@ rise=%.3f field=%@ rail=%@ stake=%@ bar=%@ face=%@ rail.face=%@\n",
             CACurrentMediaTime(), step, riseProgress, rect(field), rect(railButton),
-            rect(boostButton), rect(self), fieldActionSymbol ?? "-", debugRailSymbol ?? "-"
+            rect(boostButton), rect(self), ownBubbleSymbol ?? "-", debugRailSymbol ?? "-"
         )
         FileHandle.standardError.write(Data(line.utf8))
     }
@@ -2726,16 +2725,13 @@ final class CommentsInputBar: UIView {
         boostButton.layer.add(shake, forKey: "boost.denied")
     }
 
-    /// The field button's two faces:
+    /// The own bubble's two faces (#2308, every host):
     ///   has text (or a send in flight) → ↑ send
-    ///   empty                          → 〰 waveform (voice note)
-    /// The keyboard plays no part. The waveform stays up while nothing is
-    /// typed, and a draft is sendable with the keyboard down: a shared link or
-    /// an emote lands in the field precisely to be sent, and a voice note over
-    /// a draft turned the one action there into a "not available" notice.
-    /// Every write goes through the button's configuration, whose
-    /// `symbolContentTransition` (`fieldActionTransition`) replaces the old
-    /// glyph with the new one.
+    ///   empty                          → ☺ the emote button (⌨ while the panel is up)
+    /// The keyboard plays no part: a draft is sendable with the keyboard
+    /// down — a shared link or an emote lands in the field precisely to be
+    /// sent. The field itself holds no button any more: the comments' inline
+    /// waveform (a voice that didn't work) and send are gone.
     ///
     /// ONE configuration write per change, applied on the spot. Each
     /// `configuration?.x = …` is a write of its own, and the image and the
@@ -2744,59 +2740,43 @@ final class CommentsInputBar: UIView {
     /// (`updateFieldHeight`), stretching the swap to the spring's length.
     private func updateFieldAction() {
         let sends = hasDraft || isSending
-        let symbol = sends ? Self.sendSymbol : Self.waveformSymbol
-        guard var face = fieldActionButton.configuration else { return }
-        if fieldActionSymbol != symbol {
-            fieldActionSymbol = symbol
-            face.image = Self.fieldActionImage(sends: sends)
+        ownBubbleSymbol = sends ? Self.sendSymbol : (emotes.isShowingPanel ? Self.keyboardSymbol : Self.emoteSymbol)
+        // Not while a finger holds it (`applyVoiceHoldFace`).
+        if !voiceHolding, !voiceHoldReturning, !rowActionStepsAside, var bubble = rowActionButton.configuration {
+            bubble.image = bubbleImage(sends: sends)
             // The spinner's ink (the glyphs carry their own).
-            face.baseForegroundColor = sends ? Self.sendTint : Self.waveformTint
-        }
-        face.showsActivityIndicator = isSending
-        if face != fieldActionButton.configuration {
-            fieldActionButton.configuration = face
-            fieldActionButton.layoutIfNeeded()
-        }
-        fieldActionButton.accessibilityLabel = sends
-            ? sendAccessibilityLabel ?? "Send comment"
-            : "Record voice comment"
-        fieldActionButton.isEnabled = !isSending
-        // The conversation's own bubble wears the same face — not while a
-        // finger holds it (`applyVoiceHoldFace`).
-        if actsFromOwnBubble {
-            if !voiceHolding, !voiceHoldReturning, !rowActionStepsAside, var bubble = rowActionButton.configuration {
-                bubble.image = bubbleImage(sends: sends)
-                bubble.showsActivityIndicator = isSending
-                if bubble != rowActionButton.configuration { rowActionButton.configuration = bubble }
+            bubble.baseForegroundColor = sends ? Self.sendTint : Self.restingTint
+            bubble.showsActivityIndicator = isSending
+            if bubble != rowActionButton.configuration {
+                rowActionButton.configuration = bubble
+                // Applied on the spot, outside the growth spring a line
+                // break runs next — never on the first pass (from the corner).
+                if hasLaidOutOnce { rowActionButton.layoutIfNeeded() }
             }
-            rowActionButton.accessibilityLabel = speaksFromField && !sends
-                ? (emotes.isShowingPanel ? "Keyboard" : "Emotes")
-                : fieldActionButton.accessibilityLabel
-            rowActionButton.isEnabled = !isSending
         }
+        rowActionButton.accessibilityLabel = sends
+            ? sendAccessibilityLabel ?? "Send comment"
+            : (emotes.isShowingPanel ? "Keyboard" : "Emotes")
+        rowActionButton.isEnabled = !isSending
         updateEmoteToggle()
         updateAttachments()
     }
 
-    /// The field's emote button: gone while a take covers the field, and —
-    /// in a conversation that speaks from the field — until there is a
-    /// draft: the bubble is the emote button then.
+    /// The field's emote button: gone while a take covers the field, and
+    /// until there is a draft — the own bubble is the emote button then
+    /// (every host, #2308).
     ///
     /// It comes and goes in sight (the owner, 2026-11-08): a scale with a
     /// bounce and a fade, about its own centre. At once under a take or with
     /// Reduce Motion.
     private func updateEmoteToggle() {
         guard emoteToggleWidth != nil else { return }
-        let hidden = voiceOverlay != nil || (speaksFromField && !hasDraft)
+        let hidden = voiceOverlay != nil || !hasDraft
         let width = hidden && voiceOverlay == nil ? 0 : Metrics.emoteToggleWidth
         let button = emotes.toggleButton
-        // Only a draft coming or going moves it: the bar setting up its mode
-        // (a conversation's field that speaks) puts it in place at once.
-        let changes = emoteToggleShown != !hidden || emoteToggleSpeaks != speaksFromField
-        let animates = emoteToggleShown != !hidden && emoteToggleSpeaks == speaksFromField
-            && voiceOverlay == nil && window != nil && !MotionPreference.reducesMotion
+        let changes = emoteToggleShown != !hidden
+        let animates = changes && voiceOverlay == nil && window != nil && !MotionPreference.reducesMotion
         emoteToggleShown = !hidden
-        emoteToggleSpeaks = speaksFromField
         if animates {
             animateEmoteToggle(shown: !hidden, width: width)
         } else if !changes {
@@ -2823,7 +2803,7 @@ final class CommentsInputBar: UIView {
             }
         }
         textView.accessibilityCustomActions = speaksFromField && !hasDraft && !textView.isFirstResponder
-            ? [UIAccessibilityCustomAction(name: "Record voice message") { [weak self] _ in
+            ? [UIAccessibilityCustomAction(name: configuration.voice.recordActionName) { [weak self] _ in
                 self?.onVoiceHold?(.accessibilityStart)
                 return true
             }]
@@ -2892,19 +2872,22 @@ final class CommentsInputBar: UIView {
     }
 
     /// The own bubble's glyph: the send over a draft; at rest the emote
-    /// button's — its smile, or the keyboard while the panel is up — where
-    /// the voice is the field's (`speaksFromField`), the waveform otherwise.
+    /// button's — its smile, or the keyboard while the panel is up.
     private func bubbleImage(sends: Bool) -> UIImage? {
-        guard !sends, speaksFromField else { return Self.fieldActionImage(sends: sends) }
-        return UIImage(
-            systemName: emotes.isShowingPanel ? "keyboard" : "face.smiling",
-            withConfiguration: Self.emoteToggleConfiguration
-        )?.withTintColor(Self.waveformTint, renderingMode: .alwaysOriginal)
+        Self.ownBubbleImage(sends: sends, panelUp: emotes.isShowingPanel)
     }
 
-    /// The symbol the field button wears, so an unchanged face is not
-    /// re-applied (a re-applied image would replay the replace).
-    private var fieldActionSymbol: String?
+    /// The own bubble's face, COLOUR BAKED IN: the send in the brand's tint,
+    /// the emote faces in the row's quiet ink. Pure, for tests.
+    static func ownBubbleImage(sends: Bool, panelUp: Bool) -> UIImage? {
+        guard !sends else { return sendImage }
+        return UIImage(
+            systemName: panelUp ? keyboardSymbol : emoteSymbol, withConfiguration: emoteToggleConfiguration
+        )?.withTintColor(restingTint, renderingMode: .alwaysOriginal)
+    }
+
+    /// The symbol the own bubble wears at rest or over a draft.
+    private var ownBubbleSymbol: String?
 
     /// The rail button's face: the host's action, never anything the draft
     /// says. Hidden on a draft post (`.empty`), whose slot holds no bubble.
@@ -3026,12 +3009,11 @@ final class CommentsInputBar: UIView {
     /// The sound face's cover and whether it is turning now (#692).
     var debugRailCover: SoundRecordGlass { railRecord }
     var debugRailIsSpinning: Bool { railRecord.isSpinning }
-    /// The waveform / send button inside the field.
-    var debugFieldActionButton: UIButton { fieldActionButton }
     /// The symbol the rail button wears.
     var debugRailSymbol: String? { railButton.isHidden ? nil : railFaceSymbol }
-    /// The symbol the field button wears.
-    var debugFieldActionSymbol: String? { fieldActionSymbol }
+    /// The symbol the own bubble wears at rest or over a draft: the send,
+    /// the emote button's smile, or the keyboard (#2308).
+    var debugOwnBubbleSymbol: String? { ownBubbleSymbol }
     /// The field, for the specs that measure it.
     var debugField: UIView { field }
     /// The avatar's bubble, in the bar's space.
@@ -3057,12 +3039,12 @@ final class CommentsInputBar: UIView {
     /// that first pass, and nothing asked again — a draft set before the bar
     /// was laid out (a shared link's prefill) stayed one line tall until some
     /// unrelated layout came along (iOS 26 test host: for good). The text's
-    /// width is the field's less the two trailing buttons, known as soon as
+    /// width is the field's less the emote button's slot, known as soon as
     /// the field is placed. Returns whether the height moved without an
     /// animation, for `layoutSubviews` to apply it in the same pass.
     @discardableResult
     private func updateFieldHeight(animated: Bool = false) -> Bool {
-        let textWidth = field.bounds.width - Metrics.emoteToggleWidth - Metrics.fieldActionSide
+        let textWidth = field.bounds.width - Metrics.emoteToggleWidth
         guard textWidth > 0 else { return false }
         // The text size may have moved the line's height.
         let centred = Self.fieldInsets(for: textView.font)
@@ -3116,7 +3098,7 @@ final class CommentsInputBar: UIView {
     }
 }
 
-/// The waveform's hold asks the bar whether it may begin (#2102).
+/// The field's voice hold asks the bar whether it may begin (#2102).
 extension CommentsInputBar: UIGestureRecognizerDelegate {}
 
 extension CommentsInputBar: UITextViewDelegate {

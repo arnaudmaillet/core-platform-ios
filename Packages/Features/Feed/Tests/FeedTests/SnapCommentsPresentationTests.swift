@@ -598,51 +598,53 @@ struct SnapCommentsPresentationTests {
     }
 
 
-    /// The field button's two faces: the WAVEFORM over an empty field and
-    /// SEND over a draft — the keyboard plays no part. There is no ✕ (the
-    /// exit moved to the toolbar), no dismiss-keyboard chevron (a tap on the
-    /// stream retires the keyboard), and no send anywhere outside the field.
+    /// The own bubble's two faces (#2308, every host): the EMOTE button over
+    /// an empty field and SEND over a draft — the keyboard plays no part.
+    /// There is no ✕ (the exit moved to the toolbar), no dismiss-keyboard
+    /// chevron (a tap on the stream retires the keyboard), and no voice: a
+    /// comment's field doesn't record yet (#2309), and nothing promises it.
     /// Every host's bar is the same here, the pushed comments screen's too.
     @Test func composerFieldButtonFollowsTheText() throws {
         let bar = CommentsInputBar()
         bar.onPageSwipe = { _, _, _ in }
-        let action = bar.debugFieldActionButton
+        let action = bar.debugRowActionButton
         func button(_ label: String) -> UIButton? {
             bar.subviews.compactMap { $0 as? UIButton }.first { $0.accessibilityLabel == label }
         }
 
-        // Keyboard closed, empty: the waveform — and NO close affordance
-        // anywhere on the bar.
-        #expect(bar.debugFieldActionSymbol == CommentsInputBar.waveformSymbol)
-        #expect(action.accessibilityLabel == "Record voice comment")
+        // Keyboard closed, empty: the emote button — and NO close
+        // affordance, and no voice, anywhere on the bar.
+        #expect(bar.debugOwnBubbleSymbol == CommentsInputBar.emoteSymbol)
+        #expect(action.accessibilityLabel == "Emotes")
         #expect(button("Close comments") == nil)
+        #expect(button("Record voice comment") == nil)
 
         // Keyboard closed, text drafted: send — a draft is sendable with the
         // keyboard down.
         bar.draftText = "draft"
-        #expect(bar.debugFieldActionSymbol == CommentsInputBar.sendSymbol)
+        #expect(bar.debugOwnBubbleSymbol == CommentsInputBar.sendSymbol)
         #expect(action.accessibilityLabel == "Send comment")
         #expect(action.isEnabled)
 
         // Keyboard up over the draft: still send.
         bar.setKeyboardOpen(true)
-        #expect(bar.debugFieldActionSymbol == CommentsInputBar.sendSymbol)
+        #expect(bar.debugOwnBubbleSymbol == CommentsInputBar.sendSymbol)
 
-        // Text cleared with the keyboard up: the WAVEFORM, never a
+        // Text cleared with the keyboard up: the emote button, never a
         // dismiss-keyboard chevron.
         bar.draftText = ""
-        #expect(bar.debugFieldActionSymbol == CommentsInputBar.waveformSymbol)
+        #expect(bar.debugOwnBubbleSymbol == CommentsInputBar.emoteSymbol)
         #expect(button("Dismiss keyboard") == nil)
 
-        // Keyboard retires: still the waveform.
+        // Keyboard retires: still the emote button.
         bar.setKeyboardOpen(false)
-        #expect(bar.debugFieldActionSymbol == CommentsInputBar.waveformSymbol)
+        #expect(bar.debugOwnBubbleSymbol == CommentsInputBar.emoteSymbol)
 
-        // No send button outside the field, on any bar.
+        // No other send on the bar.
         #expect(button("Send comment") == nil)
         let pushed = CommentsInputBar()
         #expect(pushed.subviews.compactMap { $0 as? UIButton }.allSatisfy { $0.accessibilityLabel != "Send comment" })
-        #expect(pushed.debugFieldActionSymbol == CommentsInputBar.waveformSymbol)
+        #expect(pushed.debugOwnBubbleSymbol == CommentsInputBar.emoteSymbol)
     }
 
     // MARK: - Screen chrome
@@ -1157,34 +1159,34 @@ struct SnapCommentsPresentationTests {
 
     /// TEXT-POST parity: a text engagement wires the page-swipe drive and
     /// nothing else, and its bar must behave exactly like a media post's —
-    /// the waveform over an empty field (keyboard up or down), send the
+    /// the emote button over an empty field (keyboard up or down), send the
     /// moment text is entered, and a rail slot that never changes with it.
     @Test func textPostBarMatchesTheMediaBar() throws {
         let bar = CommentsInputBar()
         bar.onPageSwipe = { _, _, _ in } // feed engagement, text post
         bar.railFace = .repost
-        let action = bar.debugFieldActionButton
+        let action = bar.debugRowActionButton
 
-        // Keyboard down: the waveform, exactly as on media.
-        #expect(action.accessibilityLabel == "Record voice comment")
+        // Keyboard down: the emote button, exactly as on media.
+        #expect(action.accessibilityLabel == "Emotes")
         #expect(bar.debugRailSymbol == PostActionSymbol.repost)
 
-        // Keyboard up over an empty field: still the waveform.
+        // Keyboard up over an empty field: still the emote button.
         bar.setKeyboardOpen(true)
-        #expect(action.accessibilityLabel == "Record voice comment")
+        #expect(action.accessibilityLabel == "Emotes")
 
-        // Text entered: send, in the field; the rail is still the repost.
+        // Text entered: send, in the own bubble; the rail is still the repost.
         bar.draftText = "hi"
         #expect(action.accessibilityLabel == "Send comment")
         #expect(action.isEnabled)
         #expect(bar.debugRailSymbol == PostActionSymbol.repost)
-        // Cleared with the keyboard still up: back to the waveform.
+        // Cleared with the keyboard still up: back to the emote button.
         bar.draftText = ""
-        #expect(action.accessibilityLabel == "Record voice comment")
+        #expect(action.accessibilityLabel == "Emotes")
 
         // …and it stays once the keyboard retires.
         bar.setKeyboardOpen(false)
-        #expect(action.accessibilityLabel == "Record voice comment")
+        #expect(action.accessibilityLabel == "Emotes")
     }
 
     /// The 2-level thread order: each top-level comment immediately
