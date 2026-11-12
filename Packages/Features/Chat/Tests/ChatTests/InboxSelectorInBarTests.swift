@@ -201,10 +201,10 @@ struct InboxSelectorInBarTests {
                 "\(label): the selector at \(stripFrame) in a \(bar.bounds.width)pt bar")
         #expect(navigation.topViewController?.navigationItem.leftBarButtonItems?.first === bellItem,
                 "\(label): the bell does not lead the group")
-        let bellFrame = try #require(bellFrame(in: bar, leftOf: strip),
+        let bellRect = try #require(bellFrame(in: bar, leftOf: strip),
                                      "\(label): the bell is not in the navigation bar")
-        #expect(bellFrame.minX >= -0.5 && bellFrame.maxX <= stripFrame.minX + 0.5,
-                "\(label): the bell at \(bellFrame), the selector at \(stripFrame)")
+        #expect(bellRect.minX >= -0.5 && bellRect.maxX <= stripFrame.minX + 0.5,
+                "\(label): the bell at \(bellRect), the selector at \(stripFrame)")
         #expect(descendant(of: bar, where: { $0.accessibilityLabel == "More" }) == nil,
                 "\(label): an overflow control in the bar")
     }

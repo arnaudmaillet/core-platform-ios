@@ -540,8 +540,7 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         let budget = selectorBudget
         let strip = categoryBar
         let line = String(
-            format: "[inbox-selector] %@ barW=%.0f room=%.0f ceiling=%.0f regular=%.0f compact=%.0f "
-                + "stated=%.0f size=%@ trim=%.0f hosted=%@ leading=%d",
+            format: "[inbox-selector] %@ barW=%.0f room=%.0f ceiling=%.0f regular=%.0f compact=%.0f stated=%.0f size=%@ trim=%.0f hosted=%@ leading=%d",
             moment, budget.barWidth, budget.room, selector.ceiling(for: budget),
             strip.preferredWidth(at: .regular), strip.preferredWidth(at: .compact),
             strip.intrinsicContentSize.width, strip.titleSize == .regular ? "regular" : "compact",

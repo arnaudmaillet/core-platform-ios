@@ -333,8 +333,7 @@ final class HeaderSelectorAudit {
         // them being a space (no view, no glyph, no word).
         if let tab = AppTab(rawValue: surface), let expected = expectedHost[tab], let located {
             if located.host != expected {
-                finding.problems.append("selector in the \(located.host.rawValue), "
-                    + "expected in the \(expected.rawValue)")
+                finding.problems.append("selector in the \(located.host.rawValue), expected in the \(expected.rawValue)")
             } else if expected == .navigationBar, nav.viewControllers.count == 1 {
                 let shown = (item?.leftBarButtonItems ?? [])
                     .filter { $0.customView != nil || $0.image != nil || $0.title != nil }
