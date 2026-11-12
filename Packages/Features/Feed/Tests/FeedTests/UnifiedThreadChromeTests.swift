@@ -4,6 +4,7 @@ import MediaCore
 import Testing
 import UIKit
 @testable import Feed
+@testable import ThreadKit
 
 /// A TEXT post's resting comments (`threadChrome: true`): threads grouped
 /// under a pinned day pill in Recent order, one section in Trending, and the

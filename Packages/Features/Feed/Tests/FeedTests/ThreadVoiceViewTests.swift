@@ -5,6 +5,7 @@ import Testing
 import UIKit
 import VoiceKitUI
 @testable import Feed
+@testable import ThreadKit
 
 /// The voice message's bubble (#2104) — the neutral panel since #2241.
 @MainActor

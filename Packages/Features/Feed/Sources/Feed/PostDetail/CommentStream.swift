@@ -8,6 +8,7 @@ import FeedInterface
 import MediaCore
 import PostGrid
 import ProfileInterface
+import ThreadKit
 import UIKit
 
 /// The stream's diffable identity space. Content is looked up at cell-

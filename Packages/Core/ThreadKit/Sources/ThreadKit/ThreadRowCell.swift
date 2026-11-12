@@ -1,5 +1,4 @@
 import DesignSystem
-import FeedInterface
 import UIKit
 import VoiceKitUI
 
@@ -20,16 +19,16 @@ import VoiceKitUI
 ///    reply in a conversation (#753);
 ///  - an optional photo or video under it, for a conversation's media
 ///    message (#681).
-final class ThreadRowCell: UICollectionViewCell {
+public final class ThreadRowCell: UICollectionViewCell {
     /// The platter's margin around the row's content when lifted.
-    static let liftPadding: CGFloat = Spacing.sm
-    static let liftCornerRadius: CGFloat = 16
+    public static let liftPadding: CGFloat = Spacing.sm
+    public static let liftCornerRadius: CGFloat = 16
 
-    let row = CommentRowView(installsContextMenu: false)
+    public let row = CommentRowView(installsContextMenu: false)
     /// A media message's photo or video (#681); hidden otherwise.
-    let mediaView = ThreadMediaView()
+    public let mediaView = ThreadMediaView()
     /// A voice message (#2104); hidden otherwise.
-    let voiceView = ThreadVoiceView.thread()
+    public let voiceView = ThreadVoiceView.thread()
     private let liftPlate = UIView()
     private let quoteView = ThreadQuoteView(indented: false)
     private let stack = UIStackView()
@@ -37,12 +36,12 @@ final class ThreadRowCell: UICollectionViewCell {
     private var selection: SelectableTextOverlay?
 
     /// The quote strip was tapped — the host scrolls to the original.
-    var onQuoteTap: (() -> Void)? {
+    public var onQuoteTap: (() -> Void)? {
         get { quoteView.onTap }
         set { quoteView.onTap = newValue }
     }
 
-    override init(frame: CGRect) {
+    public override init(frame: CGRect) {
         super.init(frame: frame)
         liftPlate.backgroundColor = .clear
         liftPlate.layer.cornerRadius = Self.liftCornerRadius
@@ -83,17 +82,17 @@ final class ThreadRowCell: UICollectionViewCell {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     /// Measured at the layout's width (`fittedAtLayoutWidth`): a message or a
     /// comment's body never keeps a height measured too wide.
-    override func preferredLayoutAttributesFitting(
+    public override func preferredLayoutAttributesFitting(
         _ layoutAttributes: UICollectionViewLayoutAttributes
     ) -> UICollectionViewLayoutAttributes {
         fittedAtLayoutWidth(layoutAttributes) ?? super.preferredLayoutAttributesFitting(layoutAttributes)
     }
 
-    override func prepareForReuse() {
+    public override func prepareForReuse() {
         super.prepareForReuse()
         // Back to a comment, with nothing pending — see the row's own.
         row.prepareForReuse()
@@ -121,7 +120,7 @@ final class ThreadRowCell: UICollectionViewCell {
 
     /// What the row says of its delivery now; nil for a delivered or someone
     /// else's message. Internal for tests.
-    var delivery: ConversationThreadDelivery? {
+    public var delivery: ConversationThreadDelivery? {
         switch row.delivery {
         case .sending: .sending
         case .failed: .failed
@@ -139,9 +138,9 @@ final class ThreadRowCell: UICollectionViewCell {
     /// in for the time is now the only sign it is on its way.
     /// How long a send may take before its loader shows — the conversation's
     /// `sendingLoaderDelay`; zero shows it at once.
-    var loaderDelay: TimeInterval = 0
+    public var loaderDelay: TimeInterval = 0
 
-    func setDelivery(_ delivery: ConversationThreadDelivery?, time: String? = nil) {
+    public func setDelivery(_ delivery: ConversationThreadDelivery?, time: String? = nil) {
         let awaiting: CommentRowView.Delivery? = switch delivery {
         case .sending: .sending
         case .failed: .failed
@@ -158,36 +157,36 @@ final class ThreadRowCell: UICollectionViewCell {
 
     /// Delivered: the spinner scales out and the time bounces in in its place
     /// (#725) — see `CommentRowView.playDelivered`.
-    func playDelivered(revealing time: String, carryingSpinner: Bool = true) {
+    public func playDelivered(revealing time: String, carryingSpinner: Bool = true) {
         row.playDelivered(revealing: time, carryingSpinner: carryingSpinner)
         accessibilityValue = nil
     }
 
     /// Internal for tests — the row's.
-    var isBouncingInSpinner: Bool { row.isBouncingInSpinner }
-    var isScalingOutSpinner: Bool { row.isScalingOutSpinner }
-    var isBouncingInTime: Bool { row.isBouncingInTime }
-    var sendingSpinnerView: AppLoaderView { row.sendingSpinnerView }
-    var debugHeaderWidthFloor: CGFloat { row.debugHeaderWidthFloor }
+    public var isBouncingInSpinner: Bool { row.isBouncingInSpinner }
+    public var isScalingOutSpinner: Bool { row.isScalingOutSpinner }
+    public var isBouncingInTime: Bool { row.isBouncingInTime }
+    public var sendingSpinnerView: AppLoaderView { row.sendingSpinnerView }
+    public var debugHeaderWidthFloor: CGFloat { row.debugHeaderWidthFloor }
 
     // MARK: - Arrival and departure (#920)
 
     /// How long a message's arrival takes to land — a delivery that comes back
     /// sooner waits for it (`ConversationThreadViewController`).
-    static let arrivalDuration = CommentRowView.Variant.message.effect.appearDuration
+    public static let arrivalDuration = CommentRowView.Variant.message.effect.appearDuration
 
     /// How long a delivery takes to play — the loader out, then the time in —
     /// which a delivered row's swap waits for too.
-    static var deliveryRevealDuration: TimeInterval { CommentRowView.deliveryRevealDuration }
+    public static var deliveryRevealDuration: TimeInterval { CommentRowView.deliveryRevealDuration }
 
     /// The row arrives with its effect (#920): a message rises in from the
     /// composer, a comment bounces in.
-    func playArrival() {
+    public func playArrival() {
         row.playAppear(in: contentView)
     }
 
     /// The row leaves with its effect; the host removes it in `completion`.
-    func playDeparture(completion: @escaping () -> Void) {
+    public func playDeparture(completion: @escaping () -> Void) {
         row.playDisappear(in: contentView, completion: completion)
     }
 
@@ -196,7 +195,7 @@ final class ThreadRowCell: UICollectionViewCell {
     /// A voice message stands right under the name line, beside the avatar,
     /// where a body would be — not under the avatar (the owner's device
     /// check, 2026-11-06: too far from the name).
-    var tucksVoice = false {
+    public var tucksVoice = false {
         didSet {
             guard tucksVoice != oldValue else { return }
             placeVoice()
@@ -214,7 +213,7 @@ final class ThreadRowCell: UICollectionViewCell {
     }
 
     /// Shows (or, with nil, hides) the message this one answers.
-    func setQuote(_ quote: (author: String, snippet: String)?) {
+    public func setQuote(_ quote: (author: String, snippet: String)?) {
         quoteView.isHidden = quote == nil
         if let quote { quoteView.configure(author: quote.author, snippet: quote.snippet) }
         if quote == nil { onQuoteTap = nil }
@@ -223,7 +222,7 @@ final class ThreadRowCell: UICollectionViewCell {
     // MARK: - The lift
 
     /// What the context menu lifts: the plate, with the platter's own fill.
-    func liftPreview() -> UITargetedPreview {
+    public func liftPreview() -> UITargetedPreview {
         LiftedPreview.targeted(
             view: liftPlate,
             cornerRadius: Self.liftCornerRadius,
@@ -232,12 +231,12 @@ final class ThreadRowCell: UICollectionViewCell {
     }
 
     /// Whether `point` (cell coordinates) lands on the row's lifted shape.
-    func liftContains(_ point: CGPoint) -> Bool {
+    public func liftContains(_ point: CGPoint) -> Bool {
         liftPlate.convert(liftPlate.bounds, to: self).contains(point)
     }
 
     /// A brief wash over the row — where a quote tap lands.
-    func flash() {
+    public func flash() {
         liftPlate.backgroundColor = .tertiarySystemFill
         UIView.animate(withDuration: 0.6, delay: 0.25, options: [.allowUserInteraction]) {
             self.liftPlate.backgroundColor = .clear
@@ -246,18 +245,18 @@ final class ThreadRowCell: UICollectionViewCell {
 
     // MARK: - Select Text
 
-    func beginTextSelection() {
+    public func beginTextSelection() {
         let overlay = selection ?? SelectableTextOverlay(label: row.bodyTextLabel, host: row)
         selection = overlay
         overlay.begin()
     }
 
-    func endTextSelection() {
+    public func endTextSelection() {
         selection?.end()
     }
 
     /// Whether a touch on `view` belongs to the selection in progress.
-    func selectionContains(_ view: UIView?) -> Bool {
+    public func selectionContains(_ view: UIView?) -> Bool {
         selection?.contains(view) ?? false
     }
 }
@@ -266,8 +265,8 @@ final class ThreadRowCell: UICollectionViewCell {
 /// that takes the reader to the original. On a conversation's row it rides
 /// the header line, right of the time (#753, `indented: false`); indented,
 /// it is a line of its own at the row's text column.
-final class ThreadQuoteView: UIView {
-    var onTap: (() -> Void)?
+public final class ThreadQuoteView: UIView {
+    public var onTap: (() -> Void)?
 
     private let bar = UIView()
     private let label = UILabel()
@@ -275,7 +274,7 @@ final class ThreadQuoteView: UIView {
     /// type-driven size.
     private var barLeading: NSLayoutConstraint?
 
-    init(indented: Bool = true) {
+    public init(indented: Bool = true) {
         super.init(frame: .zero)
         bar.backgroundColor = .tertiaryLabel
         bar.layer.cornerRadius = 1
@@ -322,9 +321,9 @@ final class ThreadQuoteView: UIView {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    func configure(author: String, snippet: String) {
+    public func configure(author: String, snippet: String) {
         let text = NSMutableAttributedString(
             string: author,
             attributes: [.font: UIFont.scaledFont(forTextStyle: .footnote, weight: .semibold)]

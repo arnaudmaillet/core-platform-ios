@@ -4,6 +4,7 @@ import MediaCore
 import Testing
 import UIKit
 @testable import Feed
+@testable import ThreadKit
 
 /// **The viewer's own comments (#921, #2007).** They lead the ranked order —
 /// right under the caption, in their own chronology; the rank orders everyone

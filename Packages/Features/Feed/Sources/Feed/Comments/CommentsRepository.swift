@@ -5,6 +5,7 @@ import CoreNetworking
 import CryptoKit
 import Foundation
 import LocalStore
+import ThreadKit
 
 public enum CommentsError: Error, Equatable, Sendable {
     case notAuthenticated

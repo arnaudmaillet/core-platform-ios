@@ -8,6 +8,7 @@ import EntityStore
 import FeedInterface
 import Foundation
 import MediaCore
+import ThreadKit
 import UIKit
 
 /// The slice of the realtime client the feed consumes; a seam for tests.

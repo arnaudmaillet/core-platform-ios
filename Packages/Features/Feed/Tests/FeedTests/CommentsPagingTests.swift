@@ -6,6 +6,7 @@ import CoreNetworkingMocks
 import Foundation
 import Testing
 @testable import Feed
+@testable import ThreadKit
 
 // The comments stream, page by page (#589).
 

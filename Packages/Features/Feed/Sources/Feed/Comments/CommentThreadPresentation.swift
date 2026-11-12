@@ -1,4 +1,5 @@
 import Foundation
+import ThreadKit
 
 /// One renderable unit of the threaded comments stream.
 enum CommentStreamItem: Equatable {

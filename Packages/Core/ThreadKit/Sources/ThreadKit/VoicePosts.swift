@@ -16,13 +16,13 @@ public enum VoicePosts {
     public static func playbackID(_ postID: PostID) -> String { VoicePlaybackHub.postID(postID.rawValue) }
 
     /// The longest caption the share card's text carries (#2208).
-    static let shareCaptionLimit = 80
+    public static let shareCaptionLimit = 80
 
     /// What a voice post's share says where no player is drawn (#2208): "🎙
     /// Voice post · 32″", or its words marked and cut at
     /// `shareCaptionLimit`; nil for a post that does not speak, or with the
     /// switch off. Pure.
-    static func shareText(caption: String?, voice: PostVoice?, showsVoice: Bool = areDrawn) -> String? {
+    public static func shareText(caption: String?, voice: PostVoice?, showsVoice: Bool = areDrawn) -> String? {
         guard showsVoice, let voice else { return nil }
         let words = caption?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let shown = words.count > shareCaptionLimit ? String(words.prefix(shareCaptionLimit)) + "…" : words

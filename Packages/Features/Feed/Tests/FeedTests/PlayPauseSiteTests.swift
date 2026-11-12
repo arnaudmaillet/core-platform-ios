@@ -2,6 +2,7 @@ import DesignSystem
 import Testing
 import UIKit
 @testable import Feed
+@testable import ThreadKit
 
 /// Every play and pause the feed draws is the owner's (#2276):
 /// `UIImage(systemName:)` finds no custom symbol, and the control would

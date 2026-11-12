@@ -4,6 +4,7 @@ import CoreNavigation
 import CoreNetworking
 import EntityStore
 import Foundation
+import ThreadKit
 
 /// The comments' two orders (#2007): Recent, the server's chronology; Popular,
 /// its ranking (`ListTopLevel` POPULARITY) — each a tab of the panel.

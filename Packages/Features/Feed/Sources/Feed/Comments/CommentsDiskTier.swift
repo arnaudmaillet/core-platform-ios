@@ -2,6 +2,7 @@ import CoreModels
 import Foundation
 import LocalStore
 import OSLog
+import ThreadKit
 
 /// The device tier behind the comments' first pages (#893): a post opened in
 /// an earlier session opens its comments on the last page it showed, then

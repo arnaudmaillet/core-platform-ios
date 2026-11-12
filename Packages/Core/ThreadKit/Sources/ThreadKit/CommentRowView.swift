@@ -29,11 +29,11 @@ import VoiceKitUI
 ///
 /// A comment's ATTACHMENT (#2309) is drawn by kind in a slot between the
 /// header and the body — see `showAttachment`.
-final class CommentRowView: UIView {
+public final class CommentRowView: UIView {
     private enum Metrics {
-        static let avatarGap: CGFloat = Spacing.sm
+        public static let avatarGap: CGFloat = Spacing.sm
         /// Between the name line and the body.
-        static let lineSpacing: CGFloat = 2
+        public static let lineSpacing: CGFloat = 2
     }
 
     /// The avatar's diameter: EXACTLY the name line, the gap under it and the
@@ -41,7 +41,7 @@ final class CommentRowView: UIView {
     /// belongs to rather than hanging off the top of them. Derived from the
     /// two fonts the row draws (`appFont`, the app's scale, #2149) rather than
     /// fixed, so it follows Dynamic Type.
-    static func avatarSize(for traits: UITraitCollection?) -> CGFloat {
+    public static func avatarSize(for traits: UITraitCollection?) -> CGFloat {
         let header = UIFont.appFont(forTextStyle: .footnote, compatibleWith: traits)
         let body = UIFont.appFont(forTextStyle: .body, compatibleWith: traits)
         return ceil(ceil(header.lineHeight) + Metrics.lineSpacing + body.lineHeight)
@@ -49,24 +49,24 @@ final class CommentRowView: UIView {
 
     /// The name line's height: what a row whose body is not text (a voice
     /// message) keeps above it.
-    static func nameLineHeight(for traits: UITraitCollection?) -> CGFloat {
+    public static func nameLineHeight(for traits: UITraitCollection?) -> CGFloat {
         ceil(UIFont.appFont(forTextStyle: .footnote, compatibleWith: traits).lineHeight)
     }
 
     /// The level-2 indentation: replies step in by one avatar column (avatar
     /// + its gap), the standard thread offset — a reply's avatar starts where
     /// its parent's text does.
-    static func replyIndent(for traits: UITraitCollection?) -> CGFloat {
+    public static func replyIndent(for traits: UITraitCollection?) -> CGFloat {
         avatarSize(for: traits) + 8
     }
 
     /// Exposed for layout tests: the leading inset a reply row applies.
-    static var replyIndent: CGFloat { replyIndent(for: nil) }
+    public static var replyIndent: CGFloat { replyIndent(for: nil) }
     /// The avatar column, shared with the caption bubble row so the two
     /// align to the point — that alignment is what makes the caption read
     /// as the thread's first message.
-    static var avatarSize: CGFloat { avatarSize(for: nil) }
-    static var avatarGap: CGFloat { Metrics.avatarGap }
+    public static var avatarSize: CGFloat { avatarSize(for: nil) }
+    public static var avatarGap: CGFloat { Metrics.avatarGap }
 
     /// The shared identity disc — the SAME component the chat inbox, the
     /// compose picker, and the profile relationship lists draw, at this
@@ -113,32 +113,32 @@ final class CommentRowView: UIView {
     /// Avatar tapped — push the author's profile. On the caption's marked
     /// face it is `PersonOpening`'s tap (#2145): the profile card where the
     /// host binds the face, the profile otherwise.
-    var onAvatarTap: (() -> Void)? {
+    public var onAvatarTap: (() -> Void)? {
         didSet { captionOpening?.openCard = onAvatarTap }
     }
     /// The caption's face HELD (#2145, role 1): the profile, pushed. Nil: no
     /// hold. Never on a comment's row.
-    var onAvatarHold: (() -> Void)? {
+    public var onAvatarHold: (() -> Void)? {
         didSet { captionOpening?.openProfile = onAvatarHold }
     }
     /// The header's ♥ tapped. Like state is the HOST's affair (session-
     /// local optimistic toggle — the bookmark posture; comment.v1 carries
     /// no like API yet).
-    var onLikeTap: (() -> Void)?
+    public var onLikeTap: (() -> Void)?
     /// Row tapped — enter the composer's reply state for this thread.
-    var onReplyTap: (() -> Void)?
+    public var onReplyTap: (() -> Void)?
     /// Context-menu actions. Share presents the system sheet. Block and
     /// report are seams with no comment moderation backend yet
     /// (`ReportSubject` has no comment case) — and ⚠️ an unset seam is NOT
     /// drawn (#801): a Report row that files nothing lets the user believe a
     /// safety report went out. See `moderationMenu(onBlock:onReport:)`.
-    var onShare: (() -> Void)?
-    var onBlock: (() -> Void)?
-    var onReport: (() -> Void)?
+    public var onShare: (() -> Void)?
+    public var onBlock: (() -> Void)?
+    public var onReport: (() -> Void)?
     /// A held comment on the viewer's own post (#416): approve (true) or
     /// decline (false). Nil hides the actions — anyone else's comment, or
     /// a review already on its way.
-    var onReview: ((_ approve: Bool) -> Void)?
+    public var onReview: ((_ approve: Bool) -> Void)?
 
     /// `installsContextMenu: false` is `ThreadRowCell`'s row: the long press
     /// belongs to the stream there, which lifts the pressed row itself
@@ -147,7 +147,7 @@ final class CommentRowView: UIView {
     ///
     /// `marksAuthor: true` is `CaptionBubbleCell`'s row (#2300): the post's
     /// author's face, wearing the relation mark its host binds.
-    init(installsContextMenu: Bool = true, marksAuthor: Bool = false) {
+    public init(installsContextMenu: Bool = true, marksAuthor: Bool = false) {
         if marksAuthor {
             let face = RelationMarkedAvatarView(diameter: CommentRowView.avatarSize, size: .avatar)
             markedFace = face
@@ -193,16 +193,16 @@ final class CommentRowView: UIView {
     }
 
     /// The body's label — what Select Text lays its overlay over.
-    var bodyTextLabel: UILabel { bodyLabel }
+    public var bodyTextLabel: UILabel { bodyLabel }
 
     /// The text column: the header, then the body.
     private var textStack: UIStackView?
     /// What stands between the header and the body (#2207): a voice post's
     /// voice, the caption's own words under it.
-    private(set) var bodyAccessory: UIView?
+    public private(set) var bodyAccessory: UIView?
 
     /// Puts `view` under the header, above the body — nil takes it away.
-    func setBodyAccessory(_ view: UIView?) {
+    public func setBodyAccessory(_ view: UIView?) {
         guard view !== bodyAccessory else { return }
         bodyAccessory?.removeFromSuperview()
         bodyAccessory = view
@@ -216,10 +216,10 @@ final class CommentRowView: UIView {
 
     /// What stands under the body (#2216): a channel showcase's card, the
     /// author's words above it.
-    private(set) var bodyFooter: UIView?
+    public private(set) var bodyFooter: UIView?
 
     /// Puts `view` under the body — nil takes it away.
-    func setBodyFooter(_ view: UIView?) {
+    public func setBodyFooter(_ view: UIView?) {
         guard view !== bodyFooter else { return }
         bodyFooter?.removeFromSuperview()
         bodyFooter = view
@@ -228,33 +228,33 @@ final class CommentRowView: UIView {
         textStack.setCustomSpacing(Spacing.sm, after: bodyLabel)
     }
     /// The name · time line, for what sits beside the time (#725).
-    var headerTextLabel: UILabel { headerLabel }
+    public var headerTextLabel: UILabel { headerLabel }
     /// The avatar's picture on show, nil while the monogram shows. Tests.
-    var debugAvatarImage: UIImage? { avatarView.shownPicture }
+    public var debugAvatarImage: UIImage? { avatarView.shownPicture }
 
     // MARK: - The post's author's mark (#2300)
 
     /// The relation mark the caption's face wears — `.none` on a comment's
     /// row, which wears none.
-    var authorMark: PersonPill.Badge { markedFace?.mark ?? .none }
+    public var authorMark: PersonPill.Badge { markedFace?.mark ?? .none }
 
     /// Wears `mark` on the caption's face, as the host's binding draws it.
     /// A comment's row has no mark to wear.
-    func setAuthorMark(_ mark: PersonPill.Badge, animated: Bool) {
+    public func setAuthorMark(_ mark: PersonPill.Badge, animated: Bool) {
         markedFace?.setMark(mark, animated: animated)
     }
 
     /// The caption face's "+" tapped: the host follows (#2300).
-    var onAuthorFollowTap: (() -> Void)? {
+    public var onAuthorFollowTap: (() -> Void)? {
         get { markedFace?.onFollowTapped }
         set { markedFace?.onFollowTapped = newValue }
     }
 
     #if DEBUG
     /// The caption face's badge, nil on a comment's row. Tests.
-    var debugAuthorBadge: RelationBadgeView? { markedFace?.badge }
+    public var debugAuthorBadge: RelationBadgeView? { markedFace?.badge }
     /// The caption face's tap and hold, nil on a comment's row. Tests.
-    var debugCaptionOpening: PersonOpening? { captionOpening }
+    public var debugCaptionOpening: PersonOpening? { captionOpening }
     #endif
 
     // MARK: - Variant and effect (#920)
@@ -263,7 +263,7 @@ final class CommentRowView: UIView {
     /// post's comments alike — avatar, name, time (or the pending loader) and
     /// content — and what differs between the two is decided here, not by two
     /// rows kept in step by hand.
-    enum Variant: Equatable, Sendable {
+    public enum Variant: Equatable, Sendable {
         /// A chat message: no ♥ (there is nothing to like it with on the wire,
         /// and a control that does nothing is worse than none); it rises in
         /// from the composer.
@@ -272,16 +272,16 @@ final class CommentRowView: UIView {
         /// in.
         case comment
 
-        var showsLikeControl: Bool { self == .comment }
+        public var showsLikeControl: Bool { self == .comment }
         /// The variant's own arrival and departure.
-        var effect: ThreadRowEffect { self == .message ? .fadeUp : .bounceIn }
+        public var effect: ThreadRowEffect { self == .message ? .fadeUp : .bounceIn }
     }
 
     /// Restated by the host on every configure: a recycled row can change
     /// surface (a text page's liftable comments use the conversation's cell),
     /// and `prepareForReuse` puts it back to `.comment`. Setting it also resets
     /// `effect` to the variant's own.
-    var variant: Variant = .comment {
+    public var variant: Variant = .comment {
         didSet {
             likeButton.isHidden = !variant.showsLikeControl
             effect = variant.effect
@@ -291,17 +291,17 @@ final class CommentRowView: UIView {
     /// How the row arrives and leaves: a parameter of the row, the variant's
     /// own by default (`Variant.effect`) — a host may set another after the
     /// variant.
-    var effect: ThreadRowEffect = Variant.comment.effect
+    public var effect: ThreadRowEffect = Variant.comment.effect
 
     /// Plays `effect`'s arrival on `container`, the view that carries the row
     /// on screen (a cell's content view).
-    func playAppear(in container: UIView, completion: (() -> Void)? = nil) {
+    public func playAppear(in container: UIView, completion: (() -> Void)? = nil) {
         effect.playAppear(on: container, completion: completion)
     }
 
     /// Plays `effect`'s departure on `container`; the host removes the row in
     /// `completion`.
-    func playDisappear(in container: UIView, completion: (() -> Void)? = nil) {
+    public func playDisappear(in container: UIView, completion: (() -> Void)? = nil) {
         effect.playDisappear(on: container, completion: completion)
     }
 
@@ -316,7 +316,7 @@ final class CommentRowView: UIView {
     /// It takes the line's spare width and gives way first — its hugging and
     /// compression sit under the header label's, so the time never
     /// truncates for it.
-    func installHeaderAccessory(_ accessory: UIView) {
+    public func installHeaderAccessory(_ accessory: UIView) {
         guard let headerRow, accessory.superview == nil else { return }
         accessory.setContentHuggingPriority(UILayoutPriority(249), for: .horizontal)
         accessory.setContentCompressionResistancePriority(UILayoutPriority(700), for: .horizontal)
@@ -325,7 +325,7 @@ final class CommentRowView: UIView {
     }
 
     /// Test/preview convenience: build and configure in one step.
-    convenience init(model: CommentDisplayModel) {
+    public convenience init(model: CommentDisplayModel) {
         self.init()
         configure(with: model)
     }
@@ -333,7 +333,7 @@ final class CommentRowView: UIView {
     /// Points the row at a comment. Everything textual lands SYNCHRONOUSLY,
     /// including the monogram — the row is fully readable on the frame it
     /// appears, and only the picture arrives later.
-    func configure(with model: CommentDisplayModel, imagePipeline: ImagePipeline? = nil) {
+    public func configure(with model: CommentDisplayModel, imagePipeline: ImagePipeline? = nil) {
         // A held comment says so — to its author, who is waiting, and to the
         // post's owner, who decides.
         headerLabel.text = model.isHeld
@@ -378,7 +378,7 @@ final class CommentRowView: UIView {
     /// — the post's like lives on the toolbar, and two places to like one post
     /// is one too many. Everything a comment can do is switched off here rather
     /// than left wired to a nil handler, so a stray tap cannot find it.
-    func configureAsPostCaption(
+    public func configureAsPostCaption(
         authorName: String,
         timestamp: String,
         caption: String,
@@ -414,7 +414,7 @@ final class CommentRowView: UIView {
         )
         config?.baseForegroundColor = .secondaryLabel
         if let count {
-            var title = AttributedString(SnapSubtitleView.countText(Int(count)))
+            var title = AttributedString(ThreadCounts.countText(Int(count)))
             title.font = UIFont.appFont(forTextStyle: .caption1)
             config?.attributedTitle = title
         } else {
@@ -437,7 +437,7 @@ final class CommentRowView: UIView {
 
     /// Cell recycling: drop the in-flight fetch, the picture, and the
     /// identity it belonged to. Called from `CommentCell.prepareForReuse`.
-    func prepareForReuse() {
+    public func prepareForReuse() {
         avatarView.reset()
         // The previous post's author's mark never rides a recycled row: the
         // host binds the next one (#2300).
@@ -471,7 +471,7 @@ final class CommentRowView: UIView {
         resetDelivery()
     }
 
-    static let heldMarker = "Held for review"
+    public static let heldMarker = "Held for review"
 
     // MARK: - The attachment slot (#2309)
 
@@ -483,7 +483,7 @@ final class CommentRowView: UIView {
     /// What the slot holds now, nil when it is empty.
     private weak var attachmentContent: UIView?
     /// The attachment drawn, nil for none.
-    private(set) var shownAttachment: CommentAttachment?
+    public private(set) var shownAttachment: CommentAttachment?
     /// A voice comment's voice: the shared component, full size, its panel's
     /// width saying its length (#2329) — leading-aligned, from the narrowest
     /// up to the text column's width (the slot's) at 30 s — as a voice
@@ -501,24 +501,24 @@ final class CommentRowView: UIView {
         return label
     }()
     /// The id the shown voice plays under, nil while none is bound.
-    private(set) var attachmentVoiceID: String?
+    public private(set) var attachmentVoiceID: String?
 
     /// The app's one voice hub (`VoicePlaybackHub`): one voice at a time,
     /// app-wide, the feed's video and sound paused while it speaks
     /// (`VoiceAudioFocus`). Tests put their own in.
-    static var voiceHub: VoicePlaybackHub = .shared
+    public static var voiceHub: VoicePlaybackHub = .shared
 
     /// Whether the row binds its voice to the hub. Off for a row that is
     /// only measured (`CommentStream`'s sizing cell): it draws the voice at
     /// rest and never takes part in playback.
-    var bindsVoicePlayback = true
+    public var bindsVoicePlayback = true
 
     /// The neutral line for an attachment this build can't draw (#2309).
-    static let unsupportedAttachmentText = "Unsupported attachment"
+    public static let unsupportedAttachmentText = "Unsupported attachment"
 
     /// The id a comment's voice plays under in the hub — one per comment,
     /// wherever it is drawn (the text page, the sheet, a preview).
-    static func voicePlaybackID(commentID: String) -> String { "comment-\(commentID)" }
+    public static func voicePlaybackID(commentID: String) -> String { "comment-\(commentID)" }
 
     /// Draws `attachment` in the slot, by kind:
     /// - **a voice:** the shared voice view, its width by its length, with
@@ -588,12 +588,12 @@ final class CommentRowView: UIView {
     /// The row left the screen — a list's `didEndDisplaying`, its sheet or
     /// page closed: its voice stops where it is, keeping its place, unless
     /// shown elsewhere on screen.
-    func attachmentLeftScreen() {
+    public func attachmentLeftScreen() {
         guard attachmentVoiceID != nil else { return }
         Self.voiceHub.viewLeftScreen(attachmentVoiceView)
     }
 
-    override func didMoveToWindow() {
+    public override func didMoveToWindow() {
         super.didMoveToWindow()
         if window == nil { attachmentLeftScreen() }
     }
@@ -601,28 +601,28 @@ final class CommentRowView: UIView {
     /// Whether a press at `point` (the row's coordinates) is the voice's own
     /// — its play button, its waveform, its speed chip: the row's tap and
     /// long press leave it alone.
-    func attachmentKeepsPress(at point: CGPoint) -> Bool {
+    public func attachmentKeepsPress(at point: CGPoint) -> Bool {
         guard attachmentContent === attachmentVoiceView, !attachmentSlot.isHidden else { return false }
         return attachmentVoiceView.keepsPress(at: convert(point, to: attachmentVoiceView))
     }
 
     #if DEBUG
     /// The attachment's voice on show, nil otherwise. Tests.
-    var debugAttachmentVoiceView: VoiceView? {
+    public var debugAttachmentVoiceView: VoiceView? {
         attachmentContent === attachmentVoiceView && !attachmentSlot.isHidden ? attachmentVoiceView : nil
     }
     /// The neutral line on show, nil otherwise. Tests.
-    var debugUnsupportedAttachmentLine: String? {
+    public var debugUnsupportedAttachmentLine: String? {
         attachmentContent === unsupportedAttachmentLabel && !attachmentSlot.isHidden
             ? unsupportedAttachmentLabel.text : nil
     }
     /// Whether the body's label shows. Tests.
-    var debugShowsBody: Bool { !bodyLabel.isHidden }
+    public var debugShowsBody: Bool { !bodyLabel.isHidden }
     #endif
 
     /// Approve and Decline, as one inline group leading a held comment's
     /// menu — shared by the row's own menu and the stream's.
-    static func reviewActions(_ review: @escaping (_ approve: Bool) -> Void) -> UIMenu {
+    public static func reviewActions(_ review: @escaping (_ approve: Bool) -> Void) -> UIMenu {
         UIMenu(options: .displayInline, children: [
             UIAction(title: "Approve Comment", image: UIImage(systemName: "checkmark.circle")) { _ in review(true) },
             UIAction(
@@ -635,7 +635,7 @@ final class CommentRowView: UIView {
     /// something (#801). Nil when neither has a handler: a moderation row
     /// that files nothing is worse than no row, because the user believes
     /// something was filed. Shared by the row's own menu and the stream's.
-    static func moderationMenu(onBlock: (() -> Void)?, onReport: (() -> Void)?) -> UIMenu? {
+    public static func moderationMenu(onBlock: (() -> Void)?, onReport: (() -> Void)?) -> UIMenu? {
         var children: [UIMenuElement] = []
         if let onBlock {
             children.append(UIAction(
@@ -652,7 +652,7 @@ final class CommentRowView: UIView {
 
     /// The row's own long-press menu: review (a held comment), Share, and
     /// whichever moderation actions are wired.
-    func menuElements() -> [UIMenuElement] {
+    public func menuElements() -> [UIMenuElement] {
         let review: [UIMenuElement] = onReview.map { [Self.reviewActions($0)] } ?? []
         let share = UIAction(title: "Share Comment", image: UIImage(systemName: "square.and.arrow.up")) {
             [weak self] _ in self?.onShare?()
@@ -688,13 +688,13 @@ final class CommentRowView: UIView {
     /// filled glyph in its colour, when liked (#1128; no overlay since
     /// #1186); the quiet outline otherwise. The counter shows
     /// only a real number (zero renders bare — no lying "0").
-    func setLiked(_ liked: Bool, count: Int) {
+    public func setLiked(_ liked: Bool, count: Int) {
         var config = likeButton.configuration
         let glyph = UIImage.SymbolConfiguration(pointSize: 12, weight: .semibold)
         config?.image = LikesSymbol.likeImage(staked: liked, glyph)
         config?.baseForegroundColor = .secondaryLabel
         if count > 0 {
-            var title = AttributedString(SnapSubtitleView.countText(count))
+            var title = AttributedString(ThreadCounts.countText(count))
             title.font = UIFont.appFont(forTextStyle: .caption1)
             config?.attributedTitle = title
         } else {
@@ -719,7 +719,7 @@ final class CommentRowView: UIView {
     /// an ellipsis in a row two lines tall, and the next measure closed the
     /// row up: the tier's last comment jumped on "More". The body's width
     /// is the row's less the indent, the disc and the gap.
-    override func layoutSubviews() {
+    public override func layoutSubviews() {
         let width = Self.bodyWidth(
             rowWidth: bounds.width, indent: rowLeading?.constant ?? 0,
             avatar: Self.avatarSize(for: traitCollection)
@@ -731,7 +731,7 @@ final class CommentRowView: UIView {
     }
 
     /// The body's width in a row `rowWidth` wide. Pure, for tests.
-    static func bodyWidth(rowWidth: CGFloat, indent: CGFloat, avatar: CGFloat) -> CGFloat {
+    public static func bodyWidth(rowWidth: CGFloat, indent: CGFloat, avatar: CGFloat) -> CGFloat {
         rowWidth - indent - avatar - Metrics.avatarGap
     }
 
@@ -739,7 +739,7 @@ final class CommentRowView: UIView {
 
     /// What the time slot says of the row's delivery. Nil is a delivered row,
     /// or anyone else's: it shows its time.
-    enum Delivery: Equatable, Sendable {
+    public enum Delivery: Equatable, Sendable {
         /// On its way: a small spinner stands in the time's place. The row is
         /// at full ink (#919) — the spinner is the only sign.
         case sending
@@ -749,27 +749,27 @@ final class CommentRowView: UIView {
     }
 
     /// What the row says of its delivery now. Internal for tests.
-    private(set) var delivery: Delivery?
+    public private(set) var delivery: Delivery?
 
     /// The view laid out before a delivery animation starts, so the spinner and
     /// the time's reveal leave from where they are drawn. A cell sets itself:
     /// a freshly dequeued row has no frame of its own yet. Nil lays out the row.
-    weak var layoutHost: UIView?
+    public weak var layoutHost: UIView?
 
     private let sendingSpinner = AppLoaderView(size: .medium)
     private let failedMark = UIImageView(image: UIImage(systemName: "exclamationmark.circle.fill"))
 
     /// The spinner is drawn at the time's size, not a control's (#725).
-    static let spinnerScale = CGAffineTransform(scaleX: 0.6, y: 0.6)
+    public static let spinnerScale = CGAffineTransform(scaleX: 0.6, y: 0.6)
     /// Room between the time and the spinner or the mark.
-    static let indicatorGap: CGFloat = 0
+    public static let indicatorGap: CGFloat = 0
 
     /// Shows the delivery in the time's place: a spinner while the row is on
     /// its way, a red mark when it failed, the time once delivered. `time`:
     /// what the line will say once delivered — its width is held while the
     /// spinner or the mark stands in it (see `reserveHeaderWidth`). The header
     /// is configured WITHOUT the time while the row awaits delivery.
-    func setDelivery(_ delivery: Delivery?, time: String? = nil) {
+    public func setDelivery(_ delivery: Delivery?, time: String? = nil) {
         // A row that never awaited anything (every comment, every message from
         // someone else) builds none of the machinery below.
         guard delivery != nil || installedDeliveryIndicators else { return }
@@ -825,7 +825,7 @@ final class CommentRowView: UIView {
     /// How long a send may take before its loader shows; zero shows it at
     /// once. The conversation sets it (`ConversationThreadViewController
     /// .sendingLoaderDelay`).
-    var loaderDelay: TimeInterval = 0
+    public var loaderDelay: TimeInterval = 0
 
     /// Whether the sending loader has been drawn for the current send.
     private var isLoaderShown = true
@@ -865,13 +865,13 @@ final class CommentRowView: UIView {
     }
 
     /// Whether the spinner is on its way in. Internal for tests.
-    private(set) var isBouncingInSpinner = false
+    public private(set) var isBouncingInSpinner = false
     /// Whether the spinner is on its way out. Internal for tests.
-    private(set) var isScalingOutSpinner = false
+    public private(set) var isScalingOutSpinner = false
     /// Whether the time is on its way in. Internal for tests.
-    private(set) var isBouncingInTime = false
+    public private(set) var isBouncingInTime = false
 
-    var sendingSpinnerView: AppLoaderView { sendingSpinner }
+    public var sendingSpinnerView: AppLoaderView { sendingSpinner }
 
     /// Delivered: the spinner — carried over from the pending row this one
     /// replaces — scales out, and the time it stood in for bounces in in its
@@ -880,7 +880,7 @@ final class CommentRowView: UIView {
     /// `carryingSpinner: false` plays it on the pending row itself, the
     /// moment the server answers — from wherever its spinner is, mid
     /// bounce-in included — while its delivered row waits to take its place.
-    func playDelivered(revealing time: String, carryingSpinner: Bool = true) {
+    public func playDelivered(revealing time: String, carryingSpinner: Bool = true) {
         installDeliveryIndicatorsIfNeeded()
         let label = headerLabel
         let current = label.text ?? ""
@@ -940,9 +940,9 @@ final class CommentRowView: UIView {
     /// The loader's way out, then the time's way in: one after the other, so
     /// the whole delivery takes their sum — what a host holding the delivered
     /// row's swap waits for (`ConversationThreadViewController`).
-    static let loaderOutDuration: TimeInterval = 0.25
-    static let timeInDuration: TimeInterval = 0.5
-    static var deliveryRevealDuration: TimeInterval { loaderOutDuration + timeInDuration }
+    public static let loaderOutDuration: TimeInterval = 0.25
+    public static let timeInDuration: TimeInterval = 0.5
+    public static var deliveryRevealDuration: TimeInterval { loaderOutDuration + timeInDuration }
 
     /// Bumped by every delivery played and every recycling, so a loader's
     /// way out that ends late reveals nothing on a row that moved on.
@@ -1022,7 +1022,7 @@ final class CommentRowView: UIView {
     }
 
     /// The width the header line holds. Tests.
-    var debugHeaderWidthFloor: CGFloat { installedDeliveryIndicators ? headerWidthFloor.constant : 0 }
+    public var debugHeaderWidthFloor: CGFloat { installedDeliveryIndicators ? headerWidthFloor.constant : 0 }
 
     private static func textWidth(_ text: String, in label: UILabel) -> CGFloat {
         (text as NSString).size(withAttributes: [.font: label.font as Any]).width
@@ -1072,7 +1072,7 @@ final class CommentRowView: UIView {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     private func buildLayout() {
         // The picture overlays the disc and inherits its circle — the
@@ -1169,7 +1169,7 @@ final class CommentRowView: UIView {
 ///
 /// What it does not share is a comment's affordances — see
 /// `CommentRowView.configureAsPostCaption`.
-final class CaptionBubbleCell: UICollectionViewCell {
+public final class CaptionBubbleCell: UICollectionViewCell {
     /// The post's author's face wears the relation mark (#2300).
     private let row = CommentRowView(marksAuthor: true)
     /// A voice post's caption (#2207): the shared voice component, full size,
@@ -1181,54 +1181,54 @@ final class CaptionBubbleCell: UICollectionViewCell {
         return view
     }()
     /// The voice shown, and the id it plays under.
-    private(set) var shownVoiceID: String?
+    public private(set) var shownVoiceID: String?
     /// The app's one voice hub; tests put their own in.
-    static var playbackHub: VoicePlaybackHub = .shared
+    public static var playbackHub: VoicePlaybackHub = .shared
     private var hub: VoicePlaybackHub { Self.playbackHub }
     /// A channel showcase's caption (#2216): the author's words, then the
     /// shared embed card, full size, its action live. Built when first shown.
     private lazy var embedView = PostEmbedView()
     /// The embed shown, if any.
-    private(set) var shownEmbed: PostEmbed?
+    public private(set) var shownEmbed: PostEmbed?
 
     /// The avatar was tapped — the host pushes the author's profile, or,
     /// where the screen binds the face (a text page in the feed, #2300), opens
     /// the profile card: a person beside content (#2145).
-    var onAvatarTap: (() -> Void)? {
+    public var onAvatarTap: (() -> Void)? {
         get { row.onAvatarTap }
         set { row.onAvatarTap = newValue }
     }
 
     /// The avatar was held (#2145, role 1): the profile, pushed. Nil: no hold.
-    var onAvatarHold: (() -> Void)? {
+    public var onAvatarHold: (() -> Void)? {
         get { row.onAvatarHold }
         set { row.onAvatarHold = newValue }
     }
 
     /// The face's "+" was tapped (#2300): the host follows the author.
-    var onAuthorFollowTap: (() -> Void)? {
+    public var onAuthorFollowTap: (() -> Void)? {
         get { row.onAuthorFollowTap }
         set { row.onAuthorFollowTap = newValue }
     }
 
     /// The relation mark the author's face wears now.
-    var authorMark: PersonPill.Badge { row.authorMark }
+    public var authorMark: PersonPill.Badge { row.authorMark }
 
     /// Wears `mark` on the author's face — the screen's binding's answer.
-    func setAuthorMark(_ mark: PersonPill.Badge, animated: Bool) {
+    public func setAuthorMark(_ mark: PersonPill.Badge, animated: Bool) {
         row.setAuthorMark(mark, animated: animated)
     }
 
     #if DEBUG
     /// The author face's badge. Tests.
-    var debugAuthorBadge: RelationBadgeView? { row.debugAuthorBadge }
+    public var debugAuthorBadge: RelationBadgeView? { row.debugAuthorBadge }
     /// A tap on the author's face, as a finger's would land. Tests.
-    func debugTapAuthor() { row.debugCaptionOpening?.debugTap() }
+    public func debugTapAuthor() { row.debugCaptionOpening?.debugTap() }
     /// A hold on the author's face, recognised. Tests.
-    func debugHoldAuthor() { row.debugCaptionOpening?.debugHold() }
+    public func debugHoldAuthor() { row.debugCaptionOpening?.debugHold() }
     #endif
 
-    override init(frame: CGRect) {
+    public override init(frame: CGRect) {
         super.init(frame: frame)
         row.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(row)
@@ -1242,9 +1242,9 @@ final class CaptionBubbleCell: UICollectionViewCell {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    override func prepareForReuse() {
+    public override func prepareForReuse() {
         super.prepareForReuse()
         showVoice(nil, postID: nil, authorName: "")
         showEmbed(nil, imagePipeline: nil)
@@ -1282,15 +1282,15 @@ final class CaptionBubbleCell: UICollectionViewCell {
 
     /// The page stopped owning the screen — the row left the window: its
     /// voice stops where it is, and keeps its place (#2207).
-    override func didMoveToWindow() {
+    public override func didMoveToWindow() {
         super.didMoveToWindow()
         if window == nil, let shownVoiceID { hub.stop(shownVoiceID) }
     }
 
     #if DEBUG
-    var debugVoiceView: VoiceView? { shownVoiceID == nil ? nil : voiceView }
-    var debugEmbedView: PostEmbedView? { shownEmbed == nil ? nil : embedView }
-    var debugShowsBody: Bool { !row.bodyTextLabel.isHidden }
+    public var debugVoiceView: VoiceView? { shownVoiceID == nil ? nil : voiceView }
+    public var debugEmbedView: PostEmbedView? { shownEmbed == nil ? nil : embedView }
+    public var debugShowsBody: Bool { !row.bodyTextLabel.isHidden }
     #endif
 
     /// Measures this row at the width the layout is actually going to give it,
@@ -1309,7 +1309,7 @@ final class CaptionBubbleCell: UICollectionViewCell {
     /// So the width comes from the ATTRIBUTES, which are authoritative, and the
     /// layout is forced through synchronously before measuring, so nothing
     /// downstream can hand back a cached one-line height.
-    override func preferredLayoutAttributesFitting(
+    public override func preferredLayoutAttributesFitting(
         _ layoutAttributes: UICollectionViewLayoutAttributes
     ) -> UICollectionViewLayoutAttributes {
         fittedAtLayoutWidth(layoutAttributes) ?? super.preferredLayoutAttributesFitting(layoutAttributes)
@@ -1323,7 +1323,7 @@ final class CaptionBubbleCell: UICollectionViewCell {
     /// seeded row that showed an empty disc and no name until the fetch
     /// returned would be a hole in the object the reveal is carrying the eye
     /// to. The feed knows the name and the picture already.
-    func configureSeed(
+    public func configureSeed(
         caption: String, timestamp: String, authorName: String, monogram: String,
         avatarURL: URL?, likeCount: Int64?, imagePipeline: ImagePipeline?,
         voice: PostVoice? = nil, postID: PostID? = nil, embed: PostEmbed? = nil
@@ -1344,7 +1344,7 @@ final class CaptionBubbleCell: UICollectionViewCell {
     /// from the toolbar while this row is on screen. The host passes whichever
     /// number is currently true (the live one once the post has landed, the
     /// opener's until then), and `nil` when nobody has said.
-    func configure(
+    public func configure(
         with model: PostDetailDisplayModel,
         imagePipeline: ImagePipeline?,
         likeCount: Int64? = nil
@@ -1370,10 +1370,10 @@ final class CaptionBubbleCell: UICollectionViewCell {
 /// context-menu interaction allocated on the main thread for every row that
 /// scrolled past — and, with no `prepareForReuse` anywhere, no place to
 /// cancel an avatar fetch that outlived its row.
-final class CommentCell: UICollectionViewCell {
-    let row = CommentRowView()
+public final class CommentCell: UICollectionViewCell {
+    public let row = CommentRowView()
 
-    override init(frame: CGRect) {
+    public override init(frame: CGRect) {
         super.init(frame: frame)
         row.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(row)
@@ -1387,9 +1387,9 @@ final class CommentCell: UICollectionViewCell {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    override func prepareForReuse() {
+    public override func prepareForReuse() {
         super.prepareForReuse()
         row.prepareForReuse()
         // An arrival in flight (#920) does not follow the cell.
@@ -1398,7 +1398,7 @@ final class CommentCell: UICollectionViewCell {
         contentView.alpha = 1
     }
 
-    override func preferredLayoutAttributesFitting(
+    public override func preferredLayoutAttributesFitting(
         _ layoutAttributes: UICollectionViewLayoutAttributes
     ) -> UICollectionViewLayoutAttributes {
         fittedAtLayoutWidth(layoutAttributes) ?? super.preferredLayoutAttributesFitting(layoutAttributes)
@@ -1412,7 +1412,7 @@ extension UICollectionViewCell {
     /// the width it last carried, and a multi-line body measured too wide
     /// keeps a one-line height, its end cut by an ellipsis (filmed on a tier
     /// coming in, #2042). Nil without a width to measure at.
-    func fittedAtLayoutWidth(_ layoutAttributes: UICollectionViewLayoutAttributes) -> UICollectionViewLayoutAttributes? {
+    public func fittedAtLayoutWidth(_ layoutAttributes: UICollectionViewLayoutAttributes) -> UICollectionViewLayoutAttributes? {
         let width = layoutAttributes.frame.width
         guard width > 0 else { return nil }
         if abs(bounds.width - width) > 0.5 { bounds.size.width = width }
@@ -1434,7 +1434,7 @@ extension CommentRowView: UIGestureRecognizerDelegate {
     /// belongs to a control (the like button), the avatar or the header's
     /// accessory (a reply's quote, #753) — their actions stay exclusive
     /// instead of firing alongside the reply.
-    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+    public func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
         guard gestureRecognizer.view === self else { return true }
         // The voice's own press (#2309): play, seek, speed — not a reply.
         if attachmentKeepsPress(at: touch.location(in: self)) { return false }
@@ -1449,7 +1449,7 @@ extension CommentRowView: UIGestureRecognizerDelegate {
 }
 
 extension CommentRowView: UIContextMenuInteractionDelegate {
-    func contextMenuInteraction(
+    public func contextMenuInteraction(
         _ interaction: UIContextMenuInteraction,
         configurationForMenuAtLocation location: CGPoint
     ) -> UIContextMenuConfiguration? {
@@ -1465,18 +1465,18 @@ extension CommentRowView: UIContextMenuInteractionDelegate {
 /// part of the thread it toggles: "View N more replies… ∨" while
 /// collapsed, "Hide replies ∧" while expanded — one row, two faces, the
 /// inverse actions of the same fold.
-final class CommentThreadToggleRow: UIView {
-    enum Kind: Hashable {
+public final class CommentThreadToggleRow: UIView {
+    public enum Kind: Hashable, Sendable {
         case expand(hidden: Int)
         case collapse
     }
 
-    var onTap: (() -> Void)?
+    public var onTap: (() -> Void)?
     /// The thread this seam folds — the host finds the surviving seam
     /// after a collapse re-render to keep the user's place.
-    let parentID: String
+    public let parentID: String
 
-    init(kind: Kind, parentID: String) {
+    public init(kind: Kind, parentID: String) {
         self.parentID = parentID
         super.init(frame: .zero)
         let label = UILabel()
@@ -1520,7 +1520,7 @@ final class CommentThreadToggleRow: UIView {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     @objc private func tapped() { onTap?() }
 }
@@ -1532,28 +1532,28 @@ final class CommentThreadToggleRow: UIView {
 /// constants (avatar size, indent, header/body stack recipe), and bone
 /// widths cycle organic fractions so the stack reads as content hydrating,
 /// not a repeated stamp.
-final class CommentSkeletonRowView: UIView {
+public final class CommentSkeletonRowView: UIView {
     private enum Metrics {
-        static let headerHeight: CGFloat = 11
-        static let bodyHeight: CGFloat = 13
+        public static let headerHeight: CGFloat = 11
+        public static let bodyHeight: CGFloat = 13
     }
 
     /// The trailing band the real row's like control (count + ♥) occupies.
     /// Skeletons only mimic ORGANIC content — avatar, name/time, body —
     /// so this band stays empty: no bone ever shimmers where the
     /// structural heart will stand.
-    static let likeColumnReservation: CGFloat = 28
+    public static let likeColumnReservation: CGFloat = 28
 
     /// The media bone of a message row: the thread's picture card, at its
     /// resting size.
-    static let mediaBoneSize = CGSize(width: 180, height: 132)
+    public static let mediaBoneSize = CGSize(width: 180, height: 132)
 
     /// - Parameters:
     ///   - reservesLikeColumn: a comment's row keeps the like column clear; a
     ///     message row has none (#1774).
     ///   - showsMedia: a media bone under the body — a message row whose
     ///     conversation had pictures last time (#1774).
-    init(index: Int, reservesLikeColumn: Bool = true, showsMedia: Bool = false) {
+    public init(index: Int, reservesLikeColumn: Bool = true, showsMedia: Bool = false) {
         super.init(frame: .zero)
         isUserInteractionEnabled = false
 
@@ -1597,7 +1597,7 @@ final class CommentSkeletonRowView: UIView {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 }
 
 /// The comments-only stream's empty page: the app's shared `EmptyStateView`
@@ -1622,7 +1622,7 @@ final class CommentSkeletonRowView: UIView {
 /// The height is resolved once, from geometry that is already final on frame
 /// 0 (`PostDetailViewController.currentEmptyPageFit`), and this cell returns it
 /// unchanged for the life of the configuration.
-final class CommentsEmptyPageCell: UICollectionViewCell {
+public final class CommentsEmptyPageCell: UICollectionViewCell {
     private let empty = EmptyStateView()
 
     /// The row's height, decided by the owner. `preferredLayoutAttributesFitting`
@@ -1634,7 +1634,7 @@ final class CommentsEmptyPageCell: UICollectionViewCell {
     private lazy var emptyTop = empty.topAnchor.constraint(equalTo: contentView.topAnchor)
     private lazy var emptyBottom = empty.bottomAnchor.constraint(equalTo: contentView.bottomAnchor)
 
-    override init(frame: CGRect) {
+    public override init(frame: CGRect) {
         super.init(frame: frame)
         empty.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(empty)
@@ -1647,7 +1647,7 @@ final class CommentsEmptyPageCell: UICollectionViewCell {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     /// `blockOffset` moves the block off the row's centre — down when
     /// positive — for a row whose centre is not the centre of the space the
@@ -1656,7 +1656,7 @@ final class CommentsEmptyPageCell: UICollectionViewCell {
     /// `actionTitle` and `action`: the block's button — the failed stream's
     /// Try Again (#798). Both or neither; `blockHeight` must be asked with the
     /// same `actionTitle`, or the row is sized for a block without it.
-    func configure(
+    public func configure(
         symbolName: String,
         title: String,
         subtitle: String,
@@ -1696,7 +1696,7 @@ final class CommentsEmptyPageCell: UICollectionViewCell {
     /// `contentSizeCategory` as an override. Without it the block would be
     /// measured at the app's size while a screen that caps or overrides its
     /// own size draws it at another.
-    static func blockHeight(
+    public static func blockHeight(
         symbolName: String,
         title: String,
         subtitle: String,
@@ -1733,7 +1733,7 @@ final class CommentsEmptyPageCell: UICollectionViewCell {
     /// The height, locked. Laid out synchronously first so what UIKit is
     /// handed on frame 0 is byte-identical to what the settled layout would
     /// produce — there is no second answer for a later pass to find.
-    override func preferredLayoutAttributesFitting(
+    public override func preferredLayoutAttributesFitting(
         _ layoutAttributes: UICollectionViewLayoutAttributes
     ) -> UICollectionViewLayoutAttributes {
         let width = layoutAttributes.frame.width

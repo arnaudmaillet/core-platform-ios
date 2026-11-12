@@ -7,6 +7,7 @@ import MediaCore
 import Testing
 import UIKit
 @testable import Feed
+@testable import ThreadKit
 
 /// The thread's send states and bell (#719): a text on its way shows a spinner
 /// in its time's place at full ink (#919), a failed one a red mark that retries on a tap,

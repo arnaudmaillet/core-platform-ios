@@ -10,6 +10,7 @@ import MediaCore
 import Testing
 import UIKit
 @testable import Feed
+@testable import ThreadKit
 
 /// A source that takes voice comments (#2309): it records every upload and
 /// every create, in order, can hold an upload until told and fail creates.

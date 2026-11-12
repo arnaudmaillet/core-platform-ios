@@ -6,6 +6,7 @@ import FeedInterface
 import MediaCore
 import MediaPlayback
 import PostGrid
+import ThreadKit
 import UIKit
 
 /// A SHELF OF POSTS (#1271): a titled section, a row of media cards and a row

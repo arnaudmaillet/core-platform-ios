@@ -6,6 +6,7 @@ import CoreNetworkingMocks
 import Foundation
 import Testing
 @testable import Feed
+@testable import ThreadKit
 
 // Comment likes are point stakes, like a post's (#637).
 

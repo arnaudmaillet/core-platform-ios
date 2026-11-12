@@ -18,10 +18,10 @@ import UIKit
 /// anywhere else on the stream, a new long press, or the start of a drag ends
 /// it.
 @MainActor
-final class ThreadRowContextMenu: NSObject {
+public final class ThreadRowContextMenu: NSObject {
     /// The menu for the row at an index path, or nil for rows that have none
     /// (a caption, a skeleton, a fold seam).
-    var menuProvider: ((IndexPath) -> UIMenu?)?
+    public var menuProvider: ((IndexPath) -> UIMenu?)?
 
     private weak var collectionView: UICollectionView?
     /// The row being lifted, for the two preview callbacks.
@@ -35,14 +35,14 @@ final class ThreadRowContextMenu: NSObject {
         return tap
     }()
 
-    func install(on collectionView: UICollectionView) {
+    public func install(on collectionView: UICollectionView) {
         self.collectionView = collectionView
         collectionView.addInteraction(UIContextMenuInteraction(delegate: self))
         collectionView.addGestureRecognizer(dismissSelectionTap)
     }
 
     /// Turns the row at `indexPath` into selectable text, ending any other.
-    func beginTextSelection(at indexPath: IndexPath) {
+    public func beginTextSelection(at indexPath: IndexPath) {
         endTextSelection()
         guard let cell = collectionView?.cellForItem(at: indexPath) as? ThreadRowCell else { return }
         cell.beginTextSelection()
@@ -50,7 +50,7 @@ final class ThreadRowContextMenu: NSObject {
         dismissSelectionTap.isEnabled = true
     }
 
-    func endTextSelection() {
+    public func endTextSelection() {
         selectingCell?.endTextSelection()
         selectingCell = nil
         dismissSelectionTap.isEnabled = false
@@ -75,7 +75,7 @@ final class ThreadRowContextMenu: NSObject {
     /// dismissal; a "next run-loop turn" hop guessed at its length and, when
     /// the guess was short, the presentation was refused (or dropped by a
     /// `presentedViewController` guard) — the tap did nothing, silently.
-    func afterMenuDismissal(_ work: @escaping () -> Void) {
+    public func afterMenuDismissal(_ work: @escaping () -> Void) {
         guard isMenuUp || isMenuDismissing else { return work() }
         afterDismissal.append(work)
     }
@@ -89,7 +89,7 @@ final class ThreadRowContextMenu: NSObject {
 }
 
 extension ThreadRowContextMenu: UIContextMenuInteractionDelegate {
-    func contextMenuInteraction(
+    public func contextMenuInteraction(
         _ interaction: UIContextMenuInteraction,
         configurationForMenuAtLocation location: CGPoint
     ) -> UIContextMenuConfiguration? {
@@ -114,7 +114,7 @@ extension ThreadRowContextMenu: UIContextMenuInteractionDelegate {
         return configuration
     }
 
-    func contextMenuInteraction(
+    public func contextMenuInteraction(
         _ interaction: UIContextMenuInteraction,
         configuration: UIContextMenuConfiguration,
         highlightPreviewForItemWithIdentifier identifier: any NSCopying
@@ -122,7 +122,7 @@ extension ThreadRowContextMenu: UIContextMenuInteractionDelegate {
         liftedCell?.liftPreview()
     }
 
-    func contextMenuInteraction(
+    public func contextMenuInteraction(
         _ interaction: UIContextMenuInteraction,
         configuration: UIContextMenuConfiguration,
         dismissalPreviewForItemWithIdentifier identifier: any NSCopying
@@ -136,7 +136,7 @@ extension ThreadRowContextMenu: UIContextMenuInteractionDelegate {
     /// Displayed, not merely configured: a press that lifts before the menu
     /// shows ends nothing, so a flag set at configuration could stay up for
     /// good and hold every later action back.
-    func contextMenuInteraction(
+    public func contextMenuInteraction(
         _ interaction: UIContextMenuInteraction,
         willDisplayMenuFor configuration: UIContextMenuConfiguration,
         animator: (any UIContextMenuInteractionAnimating)?
@@ -144,7 +144,7 @@ extension ThreadRowContextMenu: UIContextMenuInteractionDelegate {
         isMenuUp = true
     }
 
-    func contextMenuInteraction(
+    public func contextMenuInteraction(
         _ interaction: UIContextMenuInteraction,
         willEndFor configuration: UIContextMenuConfiguration,
         animator: (any UIContextMenuInteractionAnimating)?
@@ -159,7 +159,7 @@ extension ThreadRowContextMenu: UIContextMenuInteractionDelegate {
 extension ThreadRowContextMenu: UIGestureRecognizerDelegate {
     /// Taps inside the selected text stay the text view's — handles, the
     /// callout's anchor — and everything else on the stream ends the session.
-    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+    public func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
         !(selectingCell?.selectionContains(touch.view) ?? false)
     }
 }

@@ -2,6 +2,7 @@ import CoreModels
 import Foundation
 import Testing
 @testable import Feed
+@testable import ThreadKit
 
 /// The view model of a post that does not exist yet — the "+" menu's Text Post.
 ///

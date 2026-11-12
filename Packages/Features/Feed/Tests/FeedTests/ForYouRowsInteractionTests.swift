@@ -7,6 +7,7 @@ import PostGrid
 import Testing
 import UIKit
 @testable import Feed
+@testable import ThreadKit
 
 /// How For You's rows answer a finger (2026-09-29 follow-up): the headers push
 /// through their OWN tap path, a long press lifts a preview whose commit opens

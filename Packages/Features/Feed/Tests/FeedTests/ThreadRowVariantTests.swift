@@ -4,6 +4,7 @@ import MediaCore
 import Testing
 import UIKit
 @testable import Feed
+@testable import ThreadKit
 
 /// **One row for a message and a comment (#920).** `CommentRowView` draws the
 /// avatar, the name, the time or the loader in its place, and the content for

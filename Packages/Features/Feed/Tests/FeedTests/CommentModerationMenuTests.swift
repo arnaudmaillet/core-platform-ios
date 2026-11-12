@@ -1,6 +1,7 @@
 import Testing
 import UIKit
 @testable import Feed
+@testable import ThreadKit
 
 /// A comment's Block and Report are drawn only when they do something
 /// (#801): there is no comment report flow yet, so today they are hidden in

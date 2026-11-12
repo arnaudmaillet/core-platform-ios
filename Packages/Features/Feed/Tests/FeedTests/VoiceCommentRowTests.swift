@@ -4,6 +4,7 @@ import Testing
 import UIKit
 import VoiceKitUI
 @testable import Feed
+@testable import ThreadKit
 
 private final class NoVoicePostFeed: FeedProviding, @unchecked Sendable {
     func cachedFirstPage() async -> [FeedEntry]? { nil }

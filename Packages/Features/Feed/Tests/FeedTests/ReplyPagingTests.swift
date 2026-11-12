@@ -6,6 +6,7 @@ import CoreNetworkingMocks
 import Foundation
 import Testing
 @testable import Feed
+@testable import ThreadKit
 
 // A thread's replies: its two most popular with the page, the rest on
 // demand (#637).

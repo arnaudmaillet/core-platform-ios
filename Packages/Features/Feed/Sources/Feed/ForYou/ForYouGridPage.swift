@@ -6,6 +6,7 @@ import FeedInterface
 import MediaCore
 import MediaPlayback
 import PostGrid
+import ThreadKit
 import UIKit
 
 /// One format page of the For You pager: a **real scrolling** collection view

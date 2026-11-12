@@ -4,6 +4,7 @@ import MediaCore
 import Testing
 import UIKit
 @testable import Feed
+@testable import ThreadKit
 
 /// A comment's (or a message's) avatar spans EXACTLY the name line and the
 /// body's first line, so it stands centred on the two lines it belongs to.

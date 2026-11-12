@@ -3,6 +3,7 @@ import CoreStorage
 import Foundation
 import Testing
 @testable import Feed
+@testable import ThreadKit
 
 /// The viewer's media-comment preferences (#410) applied where a post's band
 /// and zone are built: switches, muted words and accounts, and the rule that

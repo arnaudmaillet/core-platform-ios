@@ -1,6 +1,7 @@
 import Testing
 import UIKit
 @testable import Feed
+@testable import ThreadKit
 
 /// A reply's quote rides the row's header line, right of the time (#753) —
 /// not a line of its own above the row.

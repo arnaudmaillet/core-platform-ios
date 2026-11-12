@@ -8,6 +8,7 @@ import PostGrid
 import Testing
 import UIKit
 @testable import Feed
+@testable import ThreadKit
 
 /// The Following section as TWO INDEPENDENT ROWS (the user's call, 3 October
 /// 2026): media cards in one horizontal scroller, text posts as the LIST's own

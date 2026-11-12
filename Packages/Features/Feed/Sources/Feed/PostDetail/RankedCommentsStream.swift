@@ -1,5 +1,6 @@
 import CoreModels
 import Foundation
+import ThreadKit
 
 /// The Popular tab's stream (#2007): a post's comments in the server's
 /// popularity order (`ListTopLevel` POPULARITY, #977) — most liked first,

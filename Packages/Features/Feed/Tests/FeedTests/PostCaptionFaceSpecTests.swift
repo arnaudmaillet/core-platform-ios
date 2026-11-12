@@ -5,6 +5,7 @@ import PostGrid
 import Testing
 import UIKit
 @testable import Feed
+@testable import ThreadKit
 
 /// **THE SPECIFICATION FOR THE CAPTION ROW: it is a comment.**
 ///

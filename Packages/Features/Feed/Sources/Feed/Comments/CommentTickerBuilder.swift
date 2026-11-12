@@ -1,6 +1,7 @@
 import CoreModels
 import DesignSystem
 import Foundation
+import ThreadKit
 
 /// One bubble of the snap feed's comment ticker: a short comment reduced to
 /// exactly what the conveyor renders.

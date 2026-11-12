@@ -1,6 +1,7 @@
 import CoreModels
 import MediaCore
 import PostGrid
+import ThreadKit
 import UIKit
 
 /// Something that draws an author's relation badge: the page's author row,

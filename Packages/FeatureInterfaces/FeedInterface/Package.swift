@@ -14,12 +14,15 @@ let package = Package(
         .package(path: "../../Core/MediaCore"),
         .package(path: "../../Core/CoreNavigation"),
         // `OverSheetFeedHost` closes its sheet once (`closePresentation`, #1144).
-        .package(path: "../../Core/DesignSystem")
+        .package(path: "../../Core/DesignSystem"),
+        // The thread rows and the conversation's row values (#2380).
+        .package(path: "../../Core/ThreadKit")
     ],
     targets: [
         .target(
             name: "FeedInterface",
-            dependencies: ["CoreModels", "PostGrid", "CoreNavigation", "DesignSystem", "MediaCore"]
+            dependencies: [
+                "ThreadKit", "CoreModels", "PostGrid", "CoreNavigation", "DesignSystem", "MediaCore"]
         )
     ]
 )

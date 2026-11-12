@@ -5,6 +5,7 @@ import DesignSystem
 import EntityStore
 import FeedInterface
 import MediaCore
+import ThreadKit
 import UIKit
 import VoiceKit
 import VoiceKitUI

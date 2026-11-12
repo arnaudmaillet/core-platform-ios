@@ -7,6 +7,7 @@ import MediaCore
 import DesignSystem
 import FeedInterface
 import ProfileInterface
+import ThreadKit
 import UIKit
 
 final class PostDetailViewController: UIViewController {

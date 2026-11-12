@@ -75,7 +75,7 @@ public struct CommentEntry: Equatable, Sendable, Identifiable {
     public var oneLineText: String { CommentAttachment.oneLineText(body: body, attachment: attachment) }
 
     /// This comment once its post's owner approved it: shown to everyone.
-    func released() -> CommentEntry {
+    public func released() -> CommentEntry {
         CommentEntry(
             id: id, authorID: authorID, authorName: authorName, authorHandle: authorHandle,
             authorAvatarURL: authorAvatarURL, authorAvatarFrameID: authorAvatarFrameID, body: body,

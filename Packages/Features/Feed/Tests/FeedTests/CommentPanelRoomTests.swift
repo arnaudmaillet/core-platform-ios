@@ -4,6 +4,7 @@ import MediaCore
 import Testing
 import UIKit
 @testable import Feed
+@testable import ThreadKit
 
 private final class NoPostFeed: FeedProviding, @unchecked Sendable {
     func cachedFirstPage() async -> [FeedEntry]? { nil }

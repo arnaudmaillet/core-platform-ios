@@ -6,6 +6,7 @@ import CoreNetworkingMocks
 import Foundation
 import Testing
 @testable import Feed
+@testable import ThreadKit
 
 // The band's later pages (#2005): asked when it runs low, guarded, and
 // shared with the comments panel.

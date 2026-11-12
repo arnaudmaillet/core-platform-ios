@@ -2,6 +2,7 @@ import CoreStorage
 import DesignSystem
 import EmoteKit
 import MediaCore
+import ThreadKit
 import UIKit
 
 /// The subtitle zone: semantic comments rendered one at a time, directly
@@ -508,9 +509,7 @@ final class SnapSubtitleView: UIView {
     /// Compact engagement figure — the engagement rail's old recipe,
     /// verbatim, so counts read identically wherever they resurface.
     /// Internal (not private) for tests.
-    static func countText(_ count: Int) -> String {
-        count >= 1000 ? String(format: "%.1fk", Double(count) / 1000) : String(count)
-    }
+    static func countText(_ count: Int) -> String { ThreadCounts.countText(count) }
 
     /// One cue's opacity segment. `fadingIn` opens with the lead-in + ramp
     /// (content announcing itself); otherwise the segment is a flat clamp

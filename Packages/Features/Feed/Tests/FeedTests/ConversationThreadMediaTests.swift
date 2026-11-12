@@ -4,6 +4,7 @@ import MediaCore
 import Testing
 import UIKit
 @testable import Feed
+@testable import ThreadKit
 
 /// The conversation's photos and videos (#681): the composer row's camera
 /// and library (#2305), the media bubble in its three states, and the retry.

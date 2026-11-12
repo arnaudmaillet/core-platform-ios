@@ -10,6 +10,7 @@ import FeedInterface
 import MediaPlayback
 import PostGrid
 import ShareSheet
+import ThreadKit
 import UIKit
 
 /// The feed feature's entry point, resolved by the composition root and
