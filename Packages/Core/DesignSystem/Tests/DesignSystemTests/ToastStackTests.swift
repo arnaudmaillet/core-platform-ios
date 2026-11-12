@@ -144,12 +144,17 @@ struct ToastStackTests {
             #expect(muted.superview == nil, "the closing capsule is still there")
             #expect(container.subviews.compactMap { $0 as? ToastView } == [on], "two capsules on the line")
             #expect(on.tookOver)
-            // From where the fold has it: between its circle and its width.
+            // From where the fold has it: between its circle — shrunk to
+            // `popStartScale` (#2338) — and its width.
             let turnedAt = on.takeOverWidth ?? 0
-            let circle = ToastView.Metrics.minimumHeight - 0.5
+            let circle = ToastView.Metrics.minimumHeight * ToastView.Metrics.popStartScale - 0.5
             #expect(turnedAt >= circle, "turned around at \(turnedAt)")
             #expect(turnedAt <= restingWidth + 0.5, "turned around at \(turnedAt)")
             #expect(on.unfoldedFrom == nil, "it unfolded from scratch")
+            // From the size on screen, without a second pop (#2338).
+            #expect(on.bounds.height >= circle, "it started below the circle: \(on.bounds.height)")
+            #expect(on.bounds.height <= ToastView.Metrics.minimumHeight + 0.5, "it popped again: \(on.bounds.height)")
+            #expect(on.debugMark?.transform == .identity, "the new mark popped again")
             #expect(commits == 1, "the closed undo was settled again")
         }
     }
