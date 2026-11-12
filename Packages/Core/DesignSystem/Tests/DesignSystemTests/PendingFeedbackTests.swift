@@ -43,11 +43,22 @@ struct PendingFeedbackTests {
     }
 
     /// The screen gone: nothing said, and no loading toast left behind.
-    @Test func aScreenGoneSaysNothing() {
+    @Test func aScreenGoneSaysNothing() throws {
         let time = ManualLoadingClock()
-        var screen: UIViewController? = UIViewController()
-        let pending = PendingFeedback("Following @ava…", from: screen!, clock: time.clock)
-        screen = nil
+        // ⚠️ THE SCREEN REALLY GONE: made and dropped inside its own pool. A
+        // bare `screen = nil` only drops this frame's reference — an
+        // autoreleased one (the compiler's choice, which differs between
+        // Xcode versions) kept it alive past the grace on CI's Xcode 26, and
+        // the loading toast showed (develop's backstop, 2026-11-11).
+        weak var gone: UIViewController?
+        var made: PendingFeedback?
+        autoreleasepool {
+            let screen = UIViewController()
+            gone = screen
+            made = PendingFeedback("Following @ava…", from: screen, clock: time.clock)
+        }
+        try #require(gone == nil, "the premise: the screen is gone")
+        let pending = try #require(made)
         time.advance(LoadingTiming.loaderGrace)
         #expect(!pending.isShowingLoading)
         #expect(pending.succeed("Following @ava") == nil)
