@@ -6,9 +6,8 @@ import UIKit
 @testable import Maps
 
 /// The rounded text bubble (#2330, behind `-map-bubble-rounded`): it unfolds
-/// from the round into a rounded rectangle — the top-left corner concentric
-/// with the marker, 18 pt elsewhere — the marker at its top-left whatever
-/// its height. With the flag off, today's bubble, unchanged. Each bubble is
+/// from the round into a rounded rectangle — the four corners at one radius,
+/// 18 pt (#2347) — the marker at its top-left whatever its height. With the flag off, today's bubble, unchanged. Each bubble is
 /// told which it is (`isRounded`), so no test touches the flag itself.
 @MainActor
 struct MapBubbleRoundedTests {
@@ -82,24 +81,21 @@ struct MapBubbleRoundedTests {
 
     // MARK: - Flag on
 
-    /// Folded, a circle round the marker; unfolded, the top-left corner
-    /// concentric with the marker and 18 pt at the other three — the one-line
-    /// bubble, as tall as the marker and its padding, included.
+    /// Folded, a circle round the marker; unfolded, the four corners at
+    /// `roundedCorner`, 18 pt — the top-left no rounder than the others
+    /// (#2347) — the one-line bubble, as tall as the marker and its padding,
+    /// included.
     @Test func roundedCornersPerState() {
         let window = Self.window()
         defer { window.isHidden = true }
         for kind in [Kind.oneLine, .threeLines, .showcase] {
             let bubble = Self.bubble(kind, rounded: true, in: window)
             #expect(bubble.isRounded)
-            let unfolded = MapTextBubbleView.Corners(
-                topLeft: Self.concentric, topRight: MapTextBubbleView.roundedCorner,
-                bottomLeft: MapTextBubbleView.roundedCorner, bottomRight: MapTextBubbleView.roundedCorner
-            )
+            let unfolded = MapTextBubbleView.Corners(all: MapTextBubbleView.roundedCorner)
             #expect(MapTextBubbleView.corners(for: bubble.bounds.size, markerSide: Self.side, isRounded: true) == unfolded,
                     "\(kind)")
             let drawn = Self.drawn(bubble)
-            #expect(abs(drawn[0] - Self.concentric) < 0.5, "\(kind): top-left \(drawn[0])")
-            for radius in drawn.dropFirst() {
+            for radius in drawn {
                 #expect(abs(radius - MapTextBubbleView.roundedCorner) < 0.5, "\(kind): \(drawn)")
             }
 
@@ -110,6 +106,20 @@ struct MapBubbleRoundedTests {
                 == MapTextBubbleView.Corners(all: folded / 2), "\(kind): folded is not a circle")
             for radius in Self.drawn(bubble) {
                 #expect(abs(radius - folded / 2) < 0.5, "\(kind): folded \(Self.drawn(bubble))")
+            }
+        }
+    }
+
+    /// At every size the unfold and the fold pass through, the four corners
+    /// share one radius (#2347): no frame with one corner rounder than the
+    /// others.
+    @Test func roundedCornersAreOneRadiusAtEverySize() {
+        let folded = Self.side + 2 * Self.padding
+        for width in stride(from: folded, through: folded + 260, by: 13) {
+            for height in stride(from: folded, through: folded + 140, by: 7) {
+                let radii = MapTextBubbleView.corners(for: CGSize(width: width, height: height),
+                                                      markerSide: Self.side, isRounded: true)
+                #expect(radii == MapTextBubbleView.Corners(all: radii.topLeft), "\(width)×\(height): \(radii)")
             }
         }
     }
