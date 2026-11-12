@@ -428,6 +428,10 @@ open class HeroHeaderView: UIView {
 
     public override func didMoveToWindow() {
         super.didMoveToWindow()
+        // The window's text size (`TextSizeCeiling`'s override) reaches the
+        // header here first: its name's lines follow at once (#2334), not
+        // only on a later trait change.
+        applyNameLines()
         applyBandCard()
         if let bandAvatarLine, bandAvatarLine.constant != bandAvatarLineConstant {
             bandAvatarLine.constant = bandAvatarLineConstant

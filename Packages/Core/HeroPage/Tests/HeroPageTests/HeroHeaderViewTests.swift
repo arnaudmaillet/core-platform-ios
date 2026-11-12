@@ -133,9 +133,14 @@ struct HeroHeaderViewTests {
     /// The name (#2334): title2 bold, on ONE line at the default size,
     /// shrinking to 0.85 before its "…"; on TWO at the app's largest size,
     /// which every accessibility size is drawn as (#482).
+    ///
+    /// ⚠️ IN A WINDOW carrying the text size (`hostedHeader`): off one, the
+    /// test host ignores the override and the name stays at the default
+    /// size, on the default line count.
     @Test(arguments: textSizes)
     func theNameIsTitle2BoldOnOneLineUntilTheLargestSize(_ textSize: UIContentSizeCategory) throws {
-        let header = makeHeader(textSize: textSize)
+        let (header, window) = hostedHeader(textSize: textSize)
+        defer { window.isHidden = true }
         let font = try #require(header.debugNameFont)
         let weight = (font.fontDescriptor.object(forKey: .traits) as? [UIFontDescriptor.TraitKey: Any])?[.weight] as? CGFloat
         #expect((weight ?? 0) >= UIFont.Weight.bold.rawValue - 0.01, "the name is not bold: \(String(describing: weight))")
@@ -147,7 +152,27 @@ struct HeroHeaderViewTests {
         }
         #expect(header.debugNameLineCount == (large ? 1 : 2), "\(textSize.rawValue): \(header.debugNameLineCount) lines")
         #expect(header.debugNameShrinks == large, "\(textSize.rawValue): shrinks \(header.debugNameShrinks)")
-        #expect(header.debugNameMinimumScaleFactor == 0.85)
+        // UILabel keeps the factor as a Float: 0.8500000238.
+        #expect(abs(header.debugNameMinimumScaleFactor - 0.85) < 0.001, "\(header.debugNameMinimumScaleFactor)")
+    }
+
+    /// A header in a window carrying `textSize` (the app's way: a trait
+    /// override on the window, `TextSizeCeiling`), measured and laid out
+    /// there. The caller hides the window.
+    private func hostedHeader(
+        textSize: UIContentSizeCategory, width: CGFloat = 393
+    ) -> (HeroHeaderView, UIWindow) {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: width, height: 900))
+        window.traitOverrides.preferredContentSizeCategory = textSize
+        let header = makeHeader(width: width)
+        window.addSubview(header)
+        header.frame.size.height = header.systemLayoutSizeFitting(
+            CGSize(width: width, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required, verticalFittingPriority: .fittingSizeLevel
+        ).height
+        header.setNeedsLayout()
+        header.layoutIfNeeded()
+        return (header, window)
     }
 
     /// Every accessibility size and the largest standard one keep two lines;
@@ -167,7 +192,8 @@ struct HeroHeaderViewTests {
     @Test(arguments: textSizes)
     func theHandleStaysOnItsOwnLineUnderTheName(_ textSize: UIContentSizeCategory) {
         for title in ["Lena", "Maximilian Alexander Christopher Montgomery-Wellington"] {
-            let header = makeHeader(textSize: textSize)
+            let (header, window) = hostedHeader(textSize: textSize)
+            defer { window.isHidden = true }
             header.configure(with: HeroHeaderContent(title: title, subtitle: "@lena", counterValues: ["1", "2"]))
             header.setNeedsLayout()
             header.layoutIfNeeded()
