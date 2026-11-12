@@ -50,6 +50,15 @@ struct SettingsCatalogTests {
         }
     }
 
+    /// The reaction band has no Background row any more (#2339): the capsules
+    /// it tinted are gone, the letters wear their own outline. The
+    /// subtitles keep theirs.
+    @Test func theReactionBandHasNoBackgroundRow() {
+        #expect(AppPreferencesViewController.items(in: .band) == [.bandSwitch, .opacity, .speed, .dontCoverPeople])
+        #expect(!AppPreferencesViewController.footer(.band).contains("Background"))
+        #expect(AppPreferencesViewController.items(in: .subtitles) == [.subtitlesSwitch, .subtitleBackground])
+    }
+
     /// Save Battery in Low Power Mode sits on its own under App and Device and says
     /// what Low Power Mode changes, and that the viewer's own settings come
     /// back (#1808).

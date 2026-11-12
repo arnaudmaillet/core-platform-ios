@@ -95,13 +95,10 @@ struct CommentPreferencesStreamTests {
         #expect(preferences.bandOpacity == 1)
     }
 
-    @Test func backgroundsDefaultToTodaysLookAndAreClamped() {
+    @Test func theSubtitleBackgroundDefaultsToTodaysLookAndIsClamped() {
         var preferences = MediaCommentPreferences()
-        #expect(preferences.bandBackgroundOpacity == 0)
         #expect(preferences.subtitleBackgroundOpacity == 0.45)
-        preferences.bandBackgroundOpacity = 5
         preferences.subtitleBackgroundOpacity = -1
-        #expect(preferences.bandBackgroundOpacity == MediaCommentPreferences.bandBackgroundRange.upperBound)
         #expect(preferences.subtitleBackgroundOpacity == 0)
     }
 

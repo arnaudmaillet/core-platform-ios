@@ -26,7 +26,7 @@ struct CommentBlurTests {
     }
 
     /// The pill's strength is the viewer's fill over its ceiling. (The band
-    /// no longer uses the blur flag: its capsules carry their own, #2172.)
+    /// no longer uses the blur flag: its letters wear an outline, #2339.)
     @Test func thePillsFillMapsOntoTheBlursStrength() {
         #expect(CommentBlur.pillStrength(fill: 0) == 0)
         #expect(abs(CommentBlur.pillStrength(fill: 0.45) - 0.5) < 0.001)
