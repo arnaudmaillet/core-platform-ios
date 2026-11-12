@@ -185,6 +185,7 @@ public final class VoicePlayer {
 
     public func pause() {
         guard state == .playing || state == .loading, let engine else { return }
+        cancelStart()
         engine.pause()
         stopLink()
         releaseFocus()
@@ -219,6 +220,7 @@ public final class VoicePlayer {
 
     /// Stops and forgets the message on show.
     public func stop() {
+        cancelStart()
         engine?.pause()
         engine = nil
         pendingFraction = nil
@@ -230,17 +232,43 @@ public final class VoicePlayer {
 
     // MARK: - Playing
 
+    /// Counts the starts: a session taken after a pause, a stop or another
+    /// start doesn't play (#2329).
+    private var startToken = 0
+    /// The start still waiting on the session, if any.
+    private var waitingStart: Int?
+
+    /// Plays once the session is taken (#2329). ⚠️ NEVER ON THE MAIN
+    /// THREAD'S TIME: the system's session is taken off it
+    /// (`activate(_:then:)`), the state staying `.loading` meanwhile — a
+    /// resume says `.loading` too while it waits — so the panel's morph and
+    /// glyph swap run their course instead of freezing for the half second
+    /// the activation took on main and then cutting to their end. A fake
+    /// session answers at once: the same turn, as before.
     private func start(_ engine: any VoicePlaybackEngine) {
         takeFocus()
-        do {
-            try VoiceSessionRole.listening.apply(to: session)
-        } catch {
-            failed()
-            return
+        startToken += 1
+        let token = startToken
+        waitingStart = token
+        session.activate(.listening) { [weak self] error in
+            guard let self, token == startToken, waitingStart == token, let engine = self.engine else { return }
+            waitingStart = nil
+            if error != nil {
+                failed()
+                return
+            }
+            engine.play(rate: Float(speed.rawValue))
+            set(.playing)
+            startLink()
         }
-        engine.play(rate: Float(speed.rawValue))
-        set(.playing)
-        startLink()
+        // Still waiting: a resume shows it is on its way.
+        if waitingStart == token, state == .paused { set(.loading) }
+    }
+
+    /// No start waiting on the session plays any more.
+    private func cancelStart() {
+        startToken += 1
+        waitingStart = nil
     }
 
     private func ended() {
@@ -250,6 +278,7 @@ public final class VoicePlayer {
     }
 
     private func failed() {
+        cancelStart()
         engine?.pause()
         stopLink()
         releaseFocus()

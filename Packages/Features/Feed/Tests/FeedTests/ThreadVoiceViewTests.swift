@@ -90,7 +90,10 @@ struct ThreadVoiceViewTests {
         view.update(state)
         #expect(view.debugShowsChip)
         #expect(view.debugChipTitle == "1.5×")
-        #expect(view.debugTimerText == "0:06")
+        // The hidden timer keeps the words it left with (#2329); VoiceOver
+        // still says the time reached.
+        #expect(view.debugTimerText == "0:12")
+        #expect(view.debugPlayElementValue == "0:06, speed 1.5×")
         #expect(view.debugGlyph == AppSymbol.pause.rawValue)
 
         state.unplayed = false

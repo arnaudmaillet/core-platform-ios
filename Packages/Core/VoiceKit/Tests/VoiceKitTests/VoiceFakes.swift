@@ -24,6 +24,33 @@ final class FakeSession: VoiceAudioSessionControlling {
     }
 }
 
+/// A session that answers a play's claim only when told (#2329), as the
+/// system's does off the main thread.
+@MainActor
+final class DeferredSession: VoiceAudioSessionControlling {
+    var isInputAvailable = true
+    private(set) var pending: [@MainActor @Sendable ((any Error)?) -> Void] = []
+
+    func setCategory(
+        _ category: AVAudioSession.Category, mode: AVAudioSession.Mode, options: AVAudioSession.CategoryOptions
+    ) throws {}
+
+    func setActive(_ active: Bool, options: AVAudioSession.SetActiveOptions) throws {}
+
+    func activate(
+        _ role: VoiceSessionRole, then completion: @escaping @MainActor @Sendable ((any Error)?) -> Void
+    ) {
+        pending.append(completion)
+    }
+
+    /// The session taken: every claim waiting answers.
+    func answer(_ error: (any Error)? = nil) {
+        let waiting = pending
+        pending = []
+        for completion in waiting { completion(error) }
+    }
+}
+
 @MainActor
 final class FakePermission: VoiceMicrophonePermission {
     var state: VoicePermissionState

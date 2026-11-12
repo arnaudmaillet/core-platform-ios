@@ -14,6 +14,14 @@ public protocol VoiceAudioSessionControlling: AnyObject {
     var isInputAvailable: Bool { get }
     /// Takes the session — after any release already under way.
     func activate() throws
+    /// Takes the session in `role` and says so on the main thread, with the
+    /// error if it could not (#2329). The system's session does it OFF the
+    /// main thread: taking it held the main thread about half a second, so a
+    /// voice's tap froze the panel's morph and its glyph's swap mid-motion
+    /// and then cut them to their end. A fake answers at once.
+    func activate(
+        _ role: VoiceSessionRole, then completion: @escaping @MainActor @Sendable (_ error: (any Error)?) -> Void
+    )
     /// Gives the session back, telling the others they may play again.
     func deactivate()
     /// Whether haptics still play while it records — iOS mutes them by
@@ -23,6 +31,16 @@ public protocol VoiceAudioSessionControlling: AnyObject {
 
 public extension VoiceAudioSessionControlling {
     func activate() throws { try setActive(true, options: []) }
+    func activate(
+        _ role: VoiceSessionRole, then completion: @escaping @MainActor @Sendable (_ error: (any Error)?) -> Void
+    ) {
+        do {
+            try role.apply(to: self)
+            completion(nil)
+        } catch {
+            completion(error)
+        }
+    }
     func deactivate() { try? setActive(false, options: .notifyOthersOnDeactivation) }
     func setAllowHapticsAndSystemSoundsDuringRecording(_ allow: Bool) throws {}
 }
@@ -43,6 +61,27 @@ extension AVAudioSession: VoiceAudioSessionControlling {
         VoiceSessionLine.shared.release {
             try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         }
+    }
+
+    /// ⚠️ THE CLAIM FOR A PLAY NEVER HOLDS THE MAIN THREAD EITHER (#2329):
+    /// the category and the activation, on the line, then `completion` on
+    /// the main thread. Held on main, they froze a voice's first frames for
+    /// about half a second — the panel's morph and its glyph's swap stood
+    /// still and then cut to their end (filmed, 60 fps, 2026-11-11).
+    public func activate(
+        _ role: VoiceSessionRole, then completion: @escaping @MainActor @Sendable (_ error: (any Error)?) -> Void
+    ) {
+        VoiceSessionLine.shared.claim(async: {
+            let session = AVAudioSession.sharedInstance()
+            do {
+                try session.setCategory(role.category, mode: role.mode, options: role.options)
+                if role == .recording { try? session.setAllowHapticsAndSystemSoundsDuringRecording(true) }
+                try session.setActive(true, options: [])
+                return nil
+            } catch {
+                return error
+            }
+        }, then: completion)
     }
 }
 
@@ -77,6 +116,21 @@ final class VoiceSessionLine: @unchecked Sendable {
     func claim<T>(_ work: () throws -> T) rethrows -> T {
         cancelPendingReleases()
         return try queue.sync(execute: work)
+    }
+
+    /// A claim that doesn't wait (#2329): it cancels the releases not begun,
+    /// runs on the line after one under way, and answers on the main thread.
+    func claim(
+        async work: @escaping @Sendable () -> (any Error)?,
+        then done: @escaping @MainActor @Sendable ((any Error)?) -> Void
+    ) {
+        cancelPendingReleases()
+        queue.async {
+            let error = work()
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { done(error) }
+            }
+        }
     }
 
     /// Every release queued and not begun will skip its work. One already

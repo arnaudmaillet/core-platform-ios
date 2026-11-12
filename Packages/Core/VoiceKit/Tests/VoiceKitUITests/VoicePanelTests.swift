@@ -529,6 +529,49 @@ struct VoicePanelTests {
         #expect(still.debugChipMaskFrame == nil && still.debugChipTransform == .identity)
     }
 
+    /// A tap goes rest → loading → playing (#2329, filmed: the morph and the
+    /// glyph's swap froze, then cut to their end). The morph and the swap
+    /// start at the tap — loading — and the playing state that follows
+    /// leaves them running: the slot's turn and the glyph's copies are
+    /// still there, and the leaving timer keeps its words, not the "0:00"
+    /// reached.
+    @Test func playingLeavesTheTapsMotionRunning() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 400, height: 200))
+        window.isHidden = false
+        defer { window.isHidden = true }
+        var state = VoiceView.State(levels: VoiceView.genericLevels, duration: 34)
+        let view = laidOut(.full, width: 340, duration: 34, role: .message)
+        view.reducesMotion = { false }
+        window.addSubview(view)
+        view.layoutIfNeeded()
+        #expect(view.debugTimerText == "0:34")
+
+        state.playback = .loading
+        view.update(state)
+        #expect(view.debugSlotMotion == .morph && view.debugSlotIsTurning, "the tap didn't start the morph")
+        #expect(PlayPauseGlyph.debugCopies(of: view.debugPlayButton) > 0, "the tap didn't start the glyph's swap")
+        let mask = view.debugChipMaskFrame
+
+        state.playback = .playing(progress: 0)
+        view.update(state)
+        #expect(view.debugSlotIsTurning, "playing cut the morph")
+        #expect(view.debugSlotOpacityDurations.count == 2, "playing cut the fades")
+        #expect(view.debugChipMaskFrame == mask, "playing moved the chip's ground")
+        #expect(PlayPauseGlyph.debugCopies(of: view.debugPlayButton) > 0, "playing cut the glyph's swap")
+        #expect(view.debugTimerText == "0:34", "the leaving timer's words changed mid-motion")
+        for progress in [0.01, 0.02] {
+            state.playback = .playing(progress: progress)
+            view.update(state)
+        }
+        #expect(view.debugSlotIsTurning && view.debugTimerText == "0:34", "a frame of playback cut the morph")
+
+        // Paused, the timer comes back with the time reached.
+        state.playback = .paused(progress: 0.5)
+        view.update(state)
+        #expect(view.debugTimerText == "0:17")
+        view.removeFromSuperview()
+    }
+
     /// The timer reads as the speed chip's words (#2329): the chip's title
     /// font — the subheadline on the app's scale, scaled with the text size
     /// — with monospaced digits, in the chip's ink; no longer caption1 grey.

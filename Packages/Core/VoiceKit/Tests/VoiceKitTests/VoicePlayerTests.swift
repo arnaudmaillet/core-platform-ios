@@ -52,6 +52,45 @@ struct VoicePlayerTests {
         #expect(engines.all.count == 1, "a resume reloaded the file")
     }
 
+    /// ⚠️ The session is taken off the main thread (#2329): a play stays
+    /// loading until it is, and only then plays; a pause or another message
+    /// meanwhile, and the late answer plays nothing; a resume waits loading
+    /// too.
+    @Test func aPlayWaitsForTheSessionWithoutHoldingTheMainThread() {
+        let deferred = DeferredSession()
+        let engines = Box()
+        let player = VoicePlayer(session: deferred, makeEngine: {
+            let engine = FakeEngine()
+            engines.all.append(engine)
+            return engine
+        }, defaults: defaults, notifications: center)
+        player.play("a", url: a)
+        #expect(player.state == .loading, "it played before the session was taken")
+        #expect(engines.all[0].rates.isEmpty)
+        deferred.answer()
+        #expect(player.state == .playing && engines.all[0].rates.count == 1)
+
+        // Paused while the session is being taken: the answer plays nothing.
+        player.pause()
+        player.play("a", url: a)
+        #expect(player.state == .loading, "a resume waiting on the session says so")
+        player.pause()
+        deferred.answer()
+        #expect(player.state == .paused && engines.all[0].rates.count == 1, "a late answer played a paused voice")
+
+        // Another message started meanwhile: only its own answer plays it.
+        player.play("a", url: a)
+        player.play("b", url: b)
+        deferred.answer()
+        #expect(player.messageID == "b" && player.state == .playing)
+        #expect(engines.all[0].rates.count == 1, "the first message played after the second started")
+
+        // A session that can't be taken fails the play.
+        player.play("a", url: a)
+        deferred.answer(CocoaError(.featureUnsupported))
+        #expect(player.state == .failed)
+    }
+
     /// The speed is applied to what plays, kept across launches, pitch kept.
     @Test func theSpeedIsAppliedAndKept() {
         let engines = Box()

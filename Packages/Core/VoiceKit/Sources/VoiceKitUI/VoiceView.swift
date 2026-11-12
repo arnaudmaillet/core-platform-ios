@@ -256,7 +256,7 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
             // A post's seconds or a message's clock (#2294): the slot is
             // measured again for the other format.
             refreshSlotSize()
-            showTimerText()
+            if shownSlot != .speed { showTimerText() }
             updateAccessibility()
         }
     }
@@ -1010,7 +1010,11 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
         // The slot holds the widest timer this voice can show: its total
         // length's format (#2274).
         if state.duration != previous.duration { refreshSlotSize() }
-        showTimerText()
+        // ⚠️ THE TIMER KEEPS ITS WORDS WHILE IT LEAVES (#2329, filmed): at a
+        // tap the playing state came with the time reached, "0:00", and the
+        // timer turning away from "0:34" changed its words mid-motion. It
+        // is written only while it is the slot's — before it comes back.
+        if Self.slotContent(for: state.playback) == .timer { showTimerText() }
         // Only on a change: written every frame of playback, it restyled the
         // chip under a finger trying to press it.
         if speedChip.content.title != state.speedLabel {
