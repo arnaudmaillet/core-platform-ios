@@ -16,6 +16,13 @@ final class MapFeaturedHalo {
     static let scale: CGFloat = 1.22
 
     private(set) var isFeatured = false
+    /// Whether its bubbles are the rounded ones (#2330, `-map-bubble-rounded`).
+    let bubbleIsRounded: Bool
+
+    init(bubbleIsRounded: Bool = MapTextBubbleView.roundsByDefault) {
+        self.bubbleIsRounded = bubbleIsRounded
+    }
+
     private var bubble: MapTextBubbleView?
     /// What the bubble says: the same again (the map moving) changes nothing.
     private var bubbleContent: MapTextBubbleView.Content?
@@ -53,7 +60,8 @@ final class MapFeaturedHalo {
     ///
     /// It starts as the marker's own circle, where it stands, and unfolds
     /// both ways; the marker slides to its LEFT end — always (the owner) —
-    /// and the author and the words appear on its right as it opens. Centred
+    /// rounded (#2330), to its top-left corner — and the author and the
+    /// words appear on its right as it opens. Centred
     /// on the marker's place, always — it may run off the screen, as the map
     /// does — and it moves with the map, as the marker does. Its glass
     /// materialises as it opens and dissolves as it folds: the system's own
@@ -73,7 +81,7 @@ final class MapFeaturedHalo {
         }
         if bubble != nil, content == bubbleContent { return }
         bubbleContent = content
-        let shown = bubble ?? MapTextBubbleView()
+        let shown = bubble ?? MapTextBubbleView(isRounded: bubbleIsRounded)
         let isNew = bubble == nil
         bubble = shown
         let grown = card.bounds.width * Self.scale
@@ -88,8 +96,13 @@ final class MapFeaturedHalo {
         }
         let size = shown.bounds.size
         let centre = card.center
-        let markerX = centre.x - size.width / 2 + MapTextBubbleView.markerPadding + grown / 2
-        let resting = CGAffineTransform(translationX: markerX - card.center.x, y: 0).scaledBy(x: Self.scale, y: Self.scale)
+        // Where the marker rides in the bubble: its left end's middle, or
+        // (rounded, #2330) its top-left corner — the bubble still centred on
+        // the marker's place.
+        let inBubble = shown.markerCentre(for: size)
+        let marker = CGPoint(x: centre.x - size.width / 2 + inBubble.x, y: centre.y - size.height / 2 + inBubble.y)
+        let resting = CGAffineTransform(translationX: marker.x - card.center.x, y: marker.y - card.center.y)
+            .scaledBy(x: Self.scale, y: Self.scale)
         guard isNew, moves else {
             UIView.performWithoutAnimation {
                 shown.bounds = CGRect(origin: .zero, size: size)
