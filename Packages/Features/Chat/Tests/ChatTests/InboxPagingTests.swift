@@ -1,5 +1,6 @@
 import CoreModels
 import Foundation
+import TestSupport
 import Testing
 @testable import Chat
 
@@ -59,17 +60,9 @@ struct InboxPagingTests {
     /// then read a stale catalog. It answers, so a timeout fails at the wait.
     private static let looks = 6_000
 
-    private func settle(until condition: () async -> Bool) async -> Bool {
-        for _ in 0..<Self.looks {
-            if await condition() { return true }
-            try? await Task.sleep(for: .milliseconds(10))
-        }
-        return await condition()
-    }
-
     /// A fixed grace, kept only where a test asserts that NOTHING more happens:
     /// there is no positive condition to wait for.
-    private func settle() async {
+    private func pause() async {
         try? await Task.sleep(for: .milliseconds(100))
     }
 
@@ -117,7 +110,7 @@ struct InboxPagingTests {
         #expect(catalog.snapshot.hasMore.isEmpty)
 
         catalog.loadMore(.inbox) // the end: nothing left to ask
-        await settle()
+        await pause()
         #expect(await provider.asks(for: .inbox) == [nil, "p2"])
     }
 
@@ -187,7 +180,7 @@ struct InboxPagingTests {
 
         catalog.loadMore(.inbox)
         #expect(await settle { await provider.asks(for: .inbox).count == 2 })
-        await settle()
+        await pause()
         #expect(ids(catalog.snapshot.active) == ["a"])
         #expect(catalog.snapshot.hasMore == [.inbox])
 

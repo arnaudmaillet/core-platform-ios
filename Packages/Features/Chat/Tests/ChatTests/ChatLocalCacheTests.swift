@@ -4,6 +4,7 @@ import CoreNetworking
 import Foundation
 import LocalStore
 import Synchronization
+import TestSupport
 import Testing
 @testable import Chat
 
@@ -124,18 +125,6 @@ struct ChatLocalCacheTests {
     private let folder = DeviceFolder()
     private let viewer = ViewerBox()
     private let conversation = ConversationID("conv-1")
-
-    /// Waits for STATE, in looks (6,000 × 10 ms), never wall-clock time: a
-    /// starved runner spends none of the budget (#1115). Returns whether
-    /// `condition` came to hold; every caller asserts it.
-    private func settle(until condition: () async -> Bool) async -> Bool {
-        for _ in 0..<6_000 {
-            await Task.yield()
-            if await condition() { return true }
-            try? await Task.sleep(for: .milliseconds(10))
-        }
-        return await condition()
-    }
 
     /// "Nothing more happens": a failed load leaves the screen as it was,
     /// so there is no landing to wait for — only time for one to be wrong.

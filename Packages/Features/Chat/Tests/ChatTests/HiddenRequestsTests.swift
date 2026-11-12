@@ -1,5 +1,6 @@
 import CoreModels
 import Foundation
+import TestSupport
 import Testing
 import UIKit
 @testable import Chat
@@ -45,18 +46,6 @@ private actor FolderedInbox: ChatProviding {
 
 @MainActor
 struct HiddenRequestsTests {
-    /// Whether `condition` came to hold within `looks` looks. A budget of
-    /// LOOKS, not of wall-clock time: a starved runner that deschedules the
-    /// process spends none of it (#528, #556, #599). Returns as soon as the
-    /// condition holds.
-    private func settle(looks: Int = 3_000, until condition: () async -> Bool) async -> Bool {
-        for _ in 0..<looks {
-            await Task.yield()
-            if await condition() { return true }
-            try? await Task.sleep(for: .milliseconds(10))
-        }
-        return await condition()
-    }
 
     private func loaded(_ provider: FolderedInbox) async throws -> InboxCatalog {
         let catalog = InboxCatalog(repository: provider)
