@@ -252,3 +252,6 @@ final class ForYouOwnFeed {
     var debugReadAhead: [PostID] { readAhead.map(\.id) }
     #endif
 }
+
+// The gallery's view of it (`OwnFeedPaging`, #2379).
+extension ForYouOwnFeed: OwnFeedPaging {}
