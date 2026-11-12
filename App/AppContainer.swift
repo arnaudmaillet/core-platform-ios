@@ -975,7 +975,13 @@ final class AppContainer {
             authSession: sessionManager,
             viewer: viewerSession,
             localStore: localStore,
-            people: entityStore
+            people: entityStore,
+            // A voice comment's take goes up the way a voice post's does
+            // (#2309, #2209).
+            mediaUploader: MediaAssetUploader(
+                mediaClient: Media_V1_MediaServiceClient(client: authenticatedRPCClient),
+                transport: mediaUploadTransport
+            )
         )
         // The shared viewer already carries the switch; this only drops the
         // composer's cached face the moment a switch is announced, without

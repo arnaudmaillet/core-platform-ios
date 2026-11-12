@@ -302,7 +302,8 @@ final class PostDetailViewController: UIViewController {
     private let statusView = EmptyStateView()
 
     /// The one composer (#2308), on the comments' contract
-    /// (`ComposerConfiguration.comments`, its default): no voice, no
+    /// (`ComposerConfiguration.comments`, its default): a voice comment
+    /// where the source carries one (#2309, `commentsVoice`), no
     /// attachments, the post's column. The sheet declares no column
     /// (`setComposerBare`); a text post's draft declares a voice post's
     /// voice (`TextPostComposerViewController`) until it is published.
@@ -451,6 +452,18 @@ final class PostDetailViewController: UIViewController {
     /// last tap (#676) — unless its stake toast is still up: the toast
     /// follows the screen on top, its Undo live, and sends the burst when
     /// it ends (#1375, the owner 2026-10-18).
+    /// Leaving the post's comments — popped, dismissed, or inside a page or
+    /// sheet that is — keeps a locked or paused voice comment for the
+    /// session (#2309, the conversation's rule, #2102): opened again, it
+    /// shows paused. A screen pushed over them leaves the take where it is.
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        let leaving = sequence(first: self as UIViewController, next: \.parent).contains {
+            $0.isMovingFromParent || $0.isBeingDismissed || $0.navigationController?.isBeingDismissed == true
+        }
+        if leaving { voiceComposer?.leave() }
+    }
+
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
         let toastIsUp = stakeToast.map { !$0.isDismissing } ?? false
@@ -556,6 +569,7 @@ final class PostDetailViewController: UIViewController {
         composeBar.usesLikeFace = true
         pushComposerLikeCount()
         if viewModel.isDraft { configureDraft() }
+        installCommentVoice()
 
         viewModel.onPhaseChange = { [weak self] phase in self?.render(phase) }
         viewModel.onEngagementChange = { [weak self] state in self?.renderEngagement(state) }
@@ -575,6 +589,12 @@ final class PostDetailViewController: UIViewController {
         viewModel.onPublishFailed = { [weak self] text in self?.restoreUnpublished(text) }
         viewModel.onCommentFailed = { [weak self] text, refused in self?.restoreUnsent(text, refused: refused) }
         viewModel.onCommentPosted = { [weak self] id in self?.stream.arrivingCommentID = id }
+        viewModel.onVoiceCommentFailed = { [weak self] refused in
+            // The row keeps it, with its retry; the author's refusal is said.
+            guard refused else { return }
+            let notice = Self.commentFailureNotice(refused: true)
+            self?.presentNotice(notice.title, notice.message)
+        }
         viewModel.onReviewFailed = { [weak self] approve in
             let notice = Self.reviewFailureNotice(approve: approve)
             self?.presentNotice(notice.title, notice.message)
@@ -800,6 +820,9 @@ final class PostDetailViewController: UIViewController {
     ///   moment the post is published.
     /// - It says what it does: it publishes.
     private func configureDraft() {
+        // Not a post's comments yet: no voice comment. A draft that publishes
+        // voices declares a voice post's (`TextPostComposerViewController`).
+        composeBar.configuration.voice = .none
         composerBackdrop.setVeilOpacity(SnapCommentsLayout.frostVeilOpacity(hasMedia: false))
         composeBar.defaultPlaceholder = "Write your post…"
         composeBar.sendAccessibilityLabel = "Publish post"
@@ -810,8 +833,9 @@ final class PostDetailViewController: UIViewController {
     /// visibility held (a published post's audience is settled), and the
     /// post's sound in the rail slot.
     private func becomePublished(_ entry: FeedEntry) {
-        // A post's comments don't record (#2308; voice comments are #2309):
-        // the draft's voice post goes with the draft.
+        // The draft's voice post goes with the draft. Its recorder stays the
+        // page's (`TextPostComposerViewController`): the page just published
+        // takes no voice comment — opened again, it does (#2309).
         composeBar.configuration.voice = .none
         composeBar.defaultPlaceholder = nil
         composeBar.sendAccessibilityLabel = nil
@@ -1624,7 +1648,11 @@ final class PostDetailViewController: UIViewController {
     /// the owner 2026-11-03). The row takes the column's width, as it does on
     /// a page with no slot (#1999). The sheet's contract (#2308).
     func setComposerBare() {
-        composeBar.configuration = .commentsSheet
+        var sheet = ComposerConfiguration.commentsSheet
+        // The sheet's voice is the page's: a voice comment where the source
+        // carries one (#2309).
+        sheet.voice = commentsVoice
+        composeBar.configuration = sheet
         composeBar.hostsActionColumn = true
         setPostActions(shown: false, saved: false, onSave: nil)
         railShareAction = nil
@@ -1923,6 +1951,88 @@ final class PostDetailViewController: UIViewController {
     private func clearReplyState() {
         replyTarget = nil
         composeBar.setReplyPlaceholder(name: nil)
+    }
+
+    // MARK: - Voice comments (#2309)
+
+    /// The voice the comments' field records: a comment's — a minute, in
+    /// seconds — on a post's comments whose source uploads voices; none on a
+    /// draft (its host declares a voice post's) or from a source that
+    /// carries no voice.
+    var commentsVoice: ComposerConfiguration.Voice {
+        viewModel.acceptsVoiceComments ? .comment : .none
+    }
+
+    /// Hold the empty field to record a voice comment (#2309) — the
+    /// conversation's mic, lock, pause, listen back and send (#2102), with a
+    /// comment's minute. A tap still types.
+    private(set) var voiceComposer: VoiceComposer?
+    /// The reply the take was started under: a reply's keyboard can go
+    /// while it records (`onIdleDismiss` clears the target), and the take
+    /// still answers the comment it was held for.
+    private var voiceReplyTarget: (parentID: String, name: String)?
+
+    private func installCommentVoice() {
+        // A draft's voice is its host's (`configureDraft`).
+        guard !viewModel.isDraft else { return }
+        composeBar.configuration.voice = commentsVoice
+        guard commentsVoice.records, voiceComposer == nil, let postID = viewModel.postID else { return }
+        let composer = VoiceComposer(for: .comment, draftKey: "comment-voice-\(postID.rawValue)")
+        composer.onSend = { [weak self] take in
+            self?.sendVoiceComment(CommentVoiceTake(fileURL: take.fileURL, duration: take.duration, waveform: take.waveform))
+        }
+        composer.onHint = { [weak self] hint in
+            guard let self else { return }
+            Feedback.info(hint, symbol: "mic", from: self)
+        }
+        composer.onPermissionDenied = { [weak self] in self?.offerMicrophoneSettings() }
+        composer.onPhaseChange = { [weak self] phase in self?.voicePhaseChanged(phase) }
+        composer.attach(to: composeBar, host: view)
+        voiceComposer = composer
+    }
+
+    private func voicePhaseChanged(_ phase: VoiceComposer.Phase) {
+        if phase == .idle {
+            voiceReplyTarget = nil
+        } else if voiceReplyTarget == nil {
+            voiceReplyTarget = replyTarget
+        }
+    }
+
+    /// A take from the comments' field, sent as a voice comment: behind the
+    /// member gate, as a typed comment is; under the reply it was held for;
+    /// with the words typed so far, if any, as its body.
+    func sendVoiceComment(_ take: CommentVoiceTake) {
+        let target = voiceReplyTarget ?? replyTarget
+        MemberGates.perform(.comment, from: self) { [weak self] in
+            guard let self else { return }
+            // A reply must be visible where it lands, as a typed one's.
+            if let target { expandedReplyParents.insert(target.parentID) }
+            let text = composeBar.draftText
+            viewModel.submitVoiceComment(take, text: text, parentID: target?.parentID)
+            if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { composeBar.draftText = "" }
+            clearReplyState()
+        }
+    }
+
+    /// A voice comment that didn't go, sent again from its row's tap.
+    func retryVoiceComment(_ commentID: String) {
+        MemberGates.perform(.comment, from: self) { [weak self] in
+            self?.viewModel.retryVoiceComment(commentID)
+        }
+    }
+
+    /// Once refused, a hold offers Settings — the conversation's (#2102).
+    private func offerMicrophoneSettings() {
+        let alert = UIAlertController(
+            title: "Microphone Access", message: "Allow microphone access to record voice comments.",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "Not Now", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Open Settings", style: .default) { _ in
+            if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+        })
+        present(alert, animated: true)
     }
 
     /// A comment's Copy says so (#803). Internal for tests.

@@ -2,6 +2,7 @@ import AuthInterface
 import CoreContracts
 import CoreModels
 import CoreNetworking
+import CryptoKit
 import Foundation
 import LocalStore
 
@@ -226,6 +227,16 @@ public protocol CommentsProviding: Sendable {
     func addComment(
         _ body: String, attachment: CommentAttachment?, to postID: PostID, parentID: String?, commentID: String
     ) async throws -> CommentEntry
+    /// Whether this source uploads a voice comment's take (#2309): the
+    /// comments' field records only where it does
+    /// (`PostDetailViewModel.acceptsVoiceComments`).
+    nonisolated var uploadsCommentVoices: Bool { get }
+    /// Uploads a voice comment's take as an audio asset — the voice posts'
+    /// way (#2209): `audio/mp4`, the take's hash, its length to a tenth of a
+    /// second — and returns the voice the comment carries
+    /// (`addComment(_:attachment:…)`). Under the comment's key: a retry of
+    /// the same take is the same asset (#795).
+    func uploadCommentVoice(_ take: CommentVoiceTake, commentID: String) async throws -> PostVoice
     /// The viewer's identity as last resolved, or nil — never a fetch.
     /// Synchronous for the one screen whose bars wear the viewer before
     /// anything has loaded: the Text Post page, whose author IS the viewer.
@@ -283,6 +294,32 @@ public extension CommentsProviding {
         }
         return try await addComment(body, to: postID, parentID: parentID, commentID: commentID)
     }
+    /// Default: no voice uploads — the comments' field records nothing.
+    nonisolated var uploadsCommentVoices: Bool { false }
+    /// Default: refused, never dropped.
+    func uploadCommentVoice(_ take: CommentVoiceTake, commentID: String) async throws -> PostVoice {
+        throw CommentsError.transport(message: "this source uploads no voice")
+    }
+}
+
+/// A voice comment's take (#2309): what the comments' composer recorded,
+/// on the device until it is uploaded — and after, the author's own voice
+/// plays from it.
+public struct CommentVoiceTake: Sendable, Equatable {
+    public let fileURL: URL
+    public let duration: TimeInterval
+    /// 100 levels, 0–31.
+    public let waveform: [UInt8]
+
+    public init(fileURL: URL, duration: TimeInterval, waveform: [UInt8]) {
+        self.fileURL = fileURL
+        self.duration = duration
+        self.waveform = waveform
+    }
+
+    /// Its length as the server keeps it: a tenth of a second, as a voice
+    /// post's (#2209).
+    public var servedDuration: TimeInterval { (duration * 10).rounded() / 10 }
 }
 
 /// Reads/writes top-level comments via comment.v1, hydrating author names via
@@ -316,6 +353,9 @@ public actor CommentsRepository: CommentsProviding {
     /// Bumped by every viewer change: a batch that left before it lands
     /// nothing.
     private var viewerGeneration = 0
+    /// media.v1's upload (#2309): a voice comment's take goes up the way a
+    /// voice post's does (#2209). Nil: comments carry no voice.
+    private let mediaUploader: MediaAssetUploader?
 
     /// `localStore` keeps the first pages on the device too (#893): a post
     /// opened in an earlier session opens on its last comments. Nil keeps
@@ -328,9 +368,11 @@ public actor CommentsRepository: CommentsProviding {
         pageSize: Int32 = 50,
         replyPageSize: Int32 = 20,
         localStore: LocalStore? = nil,
-        people: (any PeopleSightings)? = nil
+        people: (any PeopleSightings)? = nil,
+        mediaUploader: MediaAssetUploader? = nil
     ) {
         self.people = people
+        self.mediaUploader = mediaUploader
         self.topPages = TopCommentsCache(disk: localStore.map(CommentsDiskTier.init(store:)))
         self.commentClient = commentClient
         self.profileClient = profileClient
@@ -576,6 +618,38 @@ public actor CommentsRepository: CommentsProviding {
             }
             throw CommentsError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
+    }
+
+    public nonisolated var uploadsCommentVoices: Bool { mediaUploader != nil }
+
+    /// The voice posts' upload (#2209, `PostComposer.publishVoicePost`), for
+    /// a comment: the take as `audio/mp4` under the comment's key plus
+    /// `-voice`, its SHA-256, the account as its owner, delivered as the
+    /// server decides (a comment is public, as a post is). A guest is
+    /// refused before anything leaves (`resolveViewerProfileID`).
+    public func uploadCommentVoice(_ take: CommentVoiceTake, commentID: String) async throws -> PostVoice {
+        guard let mediaUploader else { throw CommentsError.transport(message: "this source uploads no voice") }
+        guard take.duration > 0 else { throw CommentsError.transport(message: "an empty recording") }
+        _ = try await resolveViewerProfileID(forWrite: "uploadCommentVoice")
+        guard case .authenticated(let account) = await authSession.currentState() else {
+            throw CommentsError.notAuthenticated
+        }
+        let data: Data
+        do { data = try Data(contentsOf: take.fileURL) } catch {
+            throw CommentsError.transport(message: "the recording couldn't be read")
+        }
+        let asset: MediaAssetUploader.Asset
+        do {
+            asset = try await mediaUploader.upload(
+                .file(take.fileURL), ownerID: account.rawValue, mimeType: "audio/mp4",
+                sizeBytes: UInt64(data.count),
+                sha256: SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined(),
+                idempotencyKey: commentID + "-voice"
+            )
+        } catch let error as MediaAssetUploader.UploadError {
+            throw CommentsError.transport(message: error.message, failure: error.networkFailure)
+        }
+        return PostVoice(assetID: asset.assetID, url: asset.url, duration: take.servedDuration, waveform: take.waveform)
     }
 
     /// The viewer's own profile, through the SAME hydration path and cache

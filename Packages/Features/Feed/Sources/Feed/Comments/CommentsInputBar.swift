@@ -118,8 +118,28 @@ final class CommentsInputBar: UIView {
         case accessibilityStart
     }
 
-    /// The recorder's ear (`VoiceComposer.attach`).
-    var onVoiceHold: ((VoiceHoldEvent) -> Void)?
+    /// The recorder's ear (`VoiceComposer.attach`). The field promises a
+    /// voice only once one listens (`promisesVoice`).
+    var onVoiceHold: ((VoiceHoldEvent) -> Void)? {
+        didSet {
+            guard (onVoiceHold == nil) != (oldValue == nil) else { return }
+            applyPlaceholder()
+            updateFieldAction()
+        }
+    }
+
+    /// Whether the field PROMISES a voice — "Hold for voice, tap to type",
+    /// VoiceOver's record action: where the host's voice records and a
+    /// recorder listens. A post's comments declare a voice comment (#2309),
+    /// but a source that carries none attaches no recorder, and its field
+    /// promises nothing.
+    private var promisesVoice: Bool { speaksFromField && onVoiceHold != nil }
+
+    /// A comment's reply is armed with the keyboard up — a row's tap focuses
+    /// the field — and goes with it (`onIdleDismiss`): so a voice reply
+    /// (#2309) is held from the focused, empty field while a reply is armed.
+    /// Elsewhere, focused, the field writes (2026-11-08).
+    private var recordsReplyWhileWriting: Bool { configuration.voice == .comment && replyName != nil }
 
     private var voiceHoldStart: CGPoint = .zero
 
@@ -147,8 +167,9 @@ final class CommentsInputBar: UIView {
     private let rowActionButton = UIButton(configuration: .glass())
 
     /// Whether the empty field's long press records: the host's voice
-    /// (`ComposerConfiguration.voice`). Off — a post's comments until #2309
-    /// — the field only writes, and nothing promises a voice.
+    /// (`ComposerConfiguration.voice`) — a post's comments record a voice
+    /// comment (#2309). Off, the field only writes, and nothing promises a
+    /// voice.
     var speaksFromField: Bool { configuration.voice.records }
     /// The field's emote button's width: 0 while it is gone
     /// (`updateEmoteToggle`), so the text and the placeholder run on.
@@ -1573,6 +1594,10 @@ final class CommentsInputBar: UIView {
         // applied to the frame before anyone has told us who you are.
         avatarView.setMonogram(Self.monogram(nil))
         applyRailFace()
+        // The contract the bar starts with is a post's comments, whose field
+        // records a voice comment (#2309): its hold is there from the start —
+        // `configuration`'s observer only runs on a change.
+        if speaksFromField { field.addGestureRecognizer(fieldVoiceHold) }
         updateFieldAction()
         updateFieldHeight()
 
@@ -1590,8 +1615,10 @@ final class CommentsInputBar: UIView {
         // The field's voice hold (#2183): over an empty field at rest, nothing
         // on its way. Focused, the field writes (2026-11-08).
         if gestureRecognizer === fieldVoiceHold {
+            // A guest records nothing (#2309): the member gate, as for a
+            // typed comment — their field is the sign-up button anyway.
             return speaksFromField && onVoiceHold != nil && !hasDraft && !isSending && voiceOverlay == nil
-                && !textView.isFirstResponder
+                && (!textView.isFirstResponder || recordsReplyWhileWriting) && !MemberGates.isGuest(self)
         }
         guard gestureRecognizer === swipeRecognizer,
               let pan = gestureRecognizer as? UIPanGestureRecognizer else {
@@ -2121,6 +2148,8 @@ final class CommentsInputBar: UIView {
     func setReplyPlaceholder(name: String?) {
         replyName = name
         applyPlaceholder()
+        // A comment's reply may be a voice (`recordsReplyWhileWriting`).
+        updateFieldAction()
     }
 
     /// The armed reply target's name, and the viewer's — the two inputs the
@@ -2156,7 +2185,7 @@ final class CommentsInputBar: UIView {
             placeholderLabel.text = "Sign up to comment"
         } else if let replyName {
             placeholderLabel.text = "Reply to \(replyName)…"
-        } else if speaksFromField, !textView.isFirstResponder {
+        } else if promisesVoice, !textView.isFirstResponder {
             placeholderLabel.text = Self.speakOrWritePlaceholder
         } else if let defaultPlaceholder {
             placeholderLabel.text = defaultPlaceholder
@@ -2802,7 +2831,8 @@ final class CommentsInputBar: UIView {
                 UIView.performWithoutAnimation { field.contentView.layoutIfNeeded() }
             }
         }
-        textView.accessibilityCustomActions = speaksFromField && !hasDraft && !textView.isFirstResponder
+        textView.accessibilityCustomActions = promisesVoice && !hasDraft
+            && (!textView.isFirstResponder || recordsReplyWhileWriting) && !MemberGates.isGuest(self)
             ? [UIAccessibilityCustomAction(name: configuration.voice.recordActionName) { [weak self] _ in
                 self?.onVoiceHold?(.accessibilityStart)
                 return true

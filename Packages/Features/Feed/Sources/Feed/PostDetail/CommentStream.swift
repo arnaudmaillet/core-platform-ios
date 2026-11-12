@@ -787,12 +787,14 @@ final class CommentStream: NSObject {
         let previous = streamModels
         streamModels = Dictionary(models.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         // A row keeps its identity (the comment id) when it is approved, its
-        // review starts or its likes move (#637), so the diff alone would
-        // leave it drawn as before.
+        // review starts or its likes move (#637) — or when the viewer's voice
+        // comment is sent, fails, or is sent again (#2309) — so the diff
+        // alone would leave it drawn as before.
         let reviewChanged = models.compactMap { model -> StreamItem? in
             guard let old = previous[model.id],
                   old.isHeld != model.isHeld || old.canReview != model.canReview
-                    || old.likeCount != model.likeCount || old.isLiked != model.isLiked else { return nil }
+                    || old.likeCount != model.likeCount || old.isLiked != model.isLiked
+                    || old.delivery != model.delivery || old.attachment != model.attachment else { return nil }
             return .comment(model.id)
         } + (interruptedLanding?.reconfiguring ?? [])
         // Bones were on screen and real rows are about to take their place.
@@ -2136,6 +2138,22 @@ final class CommentStream: NSObject {
             self.host.retireKeyboardOr { self.host.enterReplyState(for: model) }
         }
         row.onShare = { [weak self] in self?.host.presentCommentShare(model) }
+        // The viewer's voice comment on its way (#2309): a spinner where its
+        // time goes, nothing to answer or like yet; failed, the red mark, and
+        // a tap sends it again — a failed message's way (#719).
+        row.setDelivery(model.delivery)
+        row.accessibilityValue = switch model.delivery {
+        case .sending: "Sending"
+        case .failed: "Not sent. Tap to try again."
+        case nil: nil
+        }
+        if model.delivery == .failed {
+            row.onReplyTap = { [weak self] in self?.host.retryVoiceComment(model.id) }
+            row.onShare = nil
+        } else if model.delivery == .sending {
+            row.onReplyTap = nil
+            row.onShare = nil
+        }
         row.onReview = model.canReview
             ? { [weak self] approve in self?.viewModel.reviewHeldComment(model.id, approve: approve) }
             : nil
@@ -2156,6 +2174,8 @@ final class CommentStream: NSObject {
                 if self?.viewModel.likeComment(commentID: model.id) == true { Haptics.play(.toggleOn) }
             }
         }
+        // Nothing the server holds yet to like (#2309).
+        if model.delivery != nil { row.onLikeTap = nil }
     }
 
     private func makeSeamRow(kind: CommentThreadToggleRow.Kind, parentID: String) -> CommentThreadToggleRow {

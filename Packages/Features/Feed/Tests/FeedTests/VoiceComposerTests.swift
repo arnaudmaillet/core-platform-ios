@@ -433,12 +433,14 @@ struct VoiceComposerTests {
         #expect(await settle { composer.phase != .idle }, "VoiceOver's action recorded nothing")
     }
 
-    /// A post's comments (#2308): the same own bubble — the emote button at
-    /// rest — and no voice: the field's hold records nothing, and nothing
-    /// promises it (no instructions, no VoiceOver action).
-    @Test func aPostsFieldHasTheOwnBubbleAndNoVoice() {
+    /// A post's comments from a source that carries no voice (#2308, #2309):
+    /// the same own bubble — the emote button at rest — and no voice: the
+    /// field's hold records nothing, and nothing promises it (no
+    /// instructions, no VoiceOver action).
+    @Test func aPostsFieldWithoutVoiceHasTheOwnBubbleAndNoVoice() {
         let bar = CommentsInputBar()
         bar.frame = CGRect(x: 0, y: 0, width: 390, height: 120)
+        bar.configuration.voice = .none
         bar.onVoiceHold = { _ in }
         bar.layoutIfNeeded()
         #expect(bar.configuration.voice == .none)
@@ -729,9 +731,14 @@ struct VoiceComposerTests {
         #expect(await settle { toggle.isHidden && bar.debugEmoteSlotWidth == 0 }, "the way out never ended")
     }
 
-    /// A post's comments declare no voice (#2309 comes next): no hold.
-    @Test func aPostsComposerHasNoHold() {
+    /// A post's comments record a voice comment (#2309, 3), but a bar with
+    /// no recorder attached promises nothing: its hold never begins. A host
+    /// that turns the voice off has no hold either.
+    @Test func aPostsComposerHoldsOnlyWithARecorder() {
         let bar = CommentsInputBar()
+        #expect(bar.configuration.voice == .comment)
+        #expect(!bar.debugFieldHoldBegins, "no recorder attached")
+        bar.configuration.voice = .none
         #expect(!bar.speaksFromField)
         #expect(!bar.debugFieldHoldBegins)
     }
