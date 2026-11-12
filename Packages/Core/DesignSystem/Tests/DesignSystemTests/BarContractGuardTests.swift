@@ -74,7 +74,11 @@ struct BarContractGuardTests {
         for path in Self.keptBarHosts.sorted() {
             let url = Self.root.appendingPathComponent(path)
             let text = try String(contentsOf: url, encoding: .utf8)
-            #expect(text.contains("BarItemStore()"), "\(path) no longer keeps its bar in a BarItemStore")
+            // The store may be declared in the host's main file (an
+            // extension can't hold stored properties); what this file must
+            // do is hand its bar over through one.
+            #expect(text.range(of: #"Store\.apply\("#, options: .regularExpression) != nil,
+                    "\(path) no longer hands its bar over through a BarItemStore")
             let code = text.split(separator: "\n").filter {
                 !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//")
             }
