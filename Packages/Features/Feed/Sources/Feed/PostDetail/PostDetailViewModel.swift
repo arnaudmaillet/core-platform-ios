@@ -78,6 +78,25 @@ public final class PostDetailViewModel {
     /// popularity order, with the viewer's own leading. `.loading` until its
     /// first page answers.
     public var onPopularCommentsChange: ((CommentsState) -> Void)?
+    /// Recent's older page, as the panel's "Earlier comments" row shows it
+    /// (#2298): on its way, failed, or neither.
+    enum OlderCommentsLoad: Equatable {
+        case idle
+        case loading
+        case failed
+    }
+
+    /// Where Recent's older page stands (#2298). A failure stays until the
+    /// next ask, so the row can offer it again in place.
+    private(set) var olderCommentsLoad: OlderCommentsLoad = .idle {
+        didSet {
+            guard olderCommentsLoad != oldValue else { return }
+            onOlderCommentsLoadChange?(olderCommentsLoad)
+        }
+    }
+
+    /// Told when `olderCommentsLoad` changes.
+    var onOlderCommentsLoadChange: ((OlderCommentsLoad) -> Void)?
     /// True while a comment is being posted (disables the send control).
     public var onComposingChange: ((Bool) -> Void)?
     /// Who is composing — the bar's leading avatar. Fires once per load,
@@ -805,17 +824,18 @@ public final class PostDetailViewModel {
         }
     }
 
-    /// The viewer neared the end of the stream: the next page, if there is
-    /// one and none is already on its way (#589). Appended, never reordering
-    /// what is on screen; a failure is retried on the next approach.
-    /// Whether Popular has another ranked page to load (#2042: the next tier
-    /// is loaded ahead).
+    /// Whether Popular has another ranked page: what makes the panel's
+    /// Popular end on "See all" even when what it holds fits (#2298).
     var hasMorePopularComments: Bool { popular.hasMore }
 
     /// Whether Recent has older comments still to load (#2007): its caption,
     /// the post's first message, waits above them.
     var hasOlderComments: Bool { nextPageToken != nil }
 
+    /// The viewer neared the end of the stream (#589), or tapped the panel's
+    /// "Earlier comments" (#2298): the next page, if there is one and none is
+    /// already on its way. Appended, never reordering what is on screen; a
+    /// failure is said (`olderCommentsLoad`) and retried on the next ask.
     func loadMoreComments() {
         guard let commentsProvider, let postID, pageLoad == nil else { return }
         guard let token = nextPageToken else {
@@ -823,6 +843,7 @@ public final class PostDetailViewModel {
             return
         }
         let generation = pagingGeneration
+        olderCommentsLoad = .loading
         pageLoad = Task { [weak self] in
             await self?.appendPages(after: token, for: postID, from: commentsProvider, generation: generation)
         }
@@ -834,12 +855,19 @@ public final class PostDetailViewModel {
         var token = token
         var fresh: [CommentEntry] = []
         for _ in 0..<Self.maxEmptyPagesInARow {
-            guard let page = try? await provider.loadCommentsPage(for: postID, after: token),
-                  // A refresh replaced the stream while this was out.
-                  pagingGeneration == generation, self.postID == postID, nextPageToken == token
-            else {
+            let fetched = try? await provider.loadCommentsPage(for: postID, after: token)
+            // A refresh replaced the stream while this was out.
+            guard pagingGeneration == generation, self.postID == postID, nextPageToken == token else {
                 // A reset already emptied the slot, and may have refilled it.
-                if pagingGeneration == generation { pageLoad = nil }
+                if pagingGeneration == generation {
+                    pageLoad = nil
+                    olderCommentsLoad = .idle
+                }
+                return
+            }
+            guard let page = fetched else {
+                pageLoad = nil
+                olderCommentsLoad = .failed
                 return
             }
             nextPageToken = page.nextPageToken
@@ -858,6 +886,9 @@ public final class PostDetailViewModel {
         // slot taken and was dropped, and with every row already displayed the
         // stream stopped there (found on the inbox, #593).
         pageLoad = nil
+        // Once the rows it brought are rendered: the "Earlier comments" row
+        // stops loading over the page that has landed above it (#2298).
+        defer { olderCommentsLoad = .idle }
         guard let head = fresh.first(where: { $0.parentID == nil }) else { return }
         hasLaterPages = true
         comments += fresh
@@ -936,6 +967,7 @@ public final class PostDetailViewModel {
         pagingGeneration += 1
         pageLoad?.cancel()
         pageLoad = nil
+        olderCommentsLoad = .idle
         nextPageToken = nil
         hasLaterPages = false
         wantsNextPage = false
@@ -1018,7 +1050,9 @@ public final class PostDetailViewModel {
         loadPopularIfNeeded()
     }
 
-    /// The viewer neared the end of the Popular tab: its next page.
+    /// The viewer neared the end of the Popular tab: its next page. Not on
+    /// the text page nor in the comments sheet, whose Popular is its first
+    /// page cut to the room (#2298).
     public func loadMorePopularComments() {
         guard let commentsProvider, let postID else { return }
         popular.loadMore(postID: postID, from: commentsProvider)
