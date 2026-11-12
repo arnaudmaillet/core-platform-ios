@@ -11,9 +11,12 @@ typealias ThreadVoiceView = VoiceView
 
 extension VoiceView {
     /// The thread's voice: the neutral panel at full size (#2241), from the
-    /// text column to the row's end — every message one width whatever its
-    /// length, held to `conversationMaxWidth` so a landscape or iPad column
-    /// never stretches it.
+    /// text column, its width saying its length (#2329): the narrowest up to
+    /// 2 s, the full width at 30 s — the full width being the row's, held to
+    /// `conversationMaxWidth` so a landscape or iPad column never stretches
+    /// it. The conversation draws no bubble round a voice message: its panel
+    /// is the bubble, and wears the media message's corner
+    /// (`ThreadMediaView.cornerRadius`, the media tiles' token).
     static func thread() -> VoiceView {
         VoiceView(
             size: .full, leadingInset: CommentRowView.avatarSize + CommentRowView.avatarGap,

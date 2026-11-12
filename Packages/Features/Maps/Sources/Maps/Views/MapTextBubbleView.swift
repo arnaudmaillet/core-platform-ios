@@ -120,12 +120,12 @@ final class MapTextBubbleView: UIView {
     private let column = UIView()
 
     /// The glass's vibrancy, for the voice: the label's ink, the bars'
-    /// unplayed share of it, the timer's secondary grey — and the panel's
-    /// ground, derived from the label's ink (`Inks.panel`, #2241), the glass
-    /// showing through it.
+    /// unplayed share of it, the timer in the speed chip's ink, the label's
+    /// (#2329, no longer a grey) — and the panel's ground, derived from the
+    /// label's ink (`Inks.panel`, #2241), the glass showing through it.
     static let voiceInks = VoiceView.Inks(
         played: UIColor.label.withAlphaComponent(0.8), unplayed: UIColor.label.withAlphaComponent(0.28),
-        timer: .secondaryLabel
+        timer: .label
     )
 
     init(frame: CGRect = .zero, isRounded: Bool = MapTextBubbleView.roundsByDefault) {

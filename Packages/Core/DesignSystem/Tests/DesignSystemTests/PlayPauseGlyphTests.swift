@@ -50,14 +50,22 @@ struct PlayPauseGlyphTests {
 
     // MARK: - The one switch
 
-    /// Outside glass the system's Replace; in Liquid Glass the scale and
-    /// fade — decided in one place.
+    /// Outside glass the system's Replace; in Liquid Glass, and on the voice
+    /// panel (#2329), the scale and fade — decided in one place.
     @Test func eachSiteHasOneMotion() {
         #expect(PlayPauseGlyph.swap(for: .soundSheet) == .scaleAndFade, "the sheet's glyph is in glass")
         #expect(PlayPauseGlyph.swap(for: .mediaFlash) == .scaleAndFade, "the flash is a glass capsule")
-        for site in [PlayPauseGlyph.Site.voicePanel, .voiceComposerChip, .voiceComposerTake, .mediaTimeline] {
+        for site in [PlayPauseGlyph.Site.voiceComposerChip, .voiceComposerTake, .mediaTimeline] {
             #expect(PlayPauseGlyph.swap(for: site) == .replace, "\(site)")
         }
+    }
+
+    /// ⚠️ The voice panel's glyph is never missing (#2329): its Replace sent
+    /// the old glyph off before the new one came; the scale and fade
+    /// overlaps them — the old one on a copy while the new one grows in.
+    @Test func theVoicePanelSwapOverlaps() {
+        #expect(PlayPauseGlyph.swap(for: .voicePanel) == .scaleAndFade)
+        #expect(PlayPauseGlyph.motion(for: .voicePanel, animated: true, reducesMotion: false) == .scaleAndFade)
     }
 
     /// Reduce Motion cross-fades at every site; unanimated, a cut.

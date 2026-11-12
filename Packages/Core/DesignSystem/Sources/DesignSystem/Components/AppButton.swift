@@ -1288,6 +1288,24 @@ open class AppButton: AppControl {
         return config
     }
 
+    /// The button's words' font at `size` — public so a text that stands in
+    /// a button's place reads at its size (#2329: the voice panel's timer,
+    /// which trades places with its speed chip). `monospacedDigits` for a
+    /// number that changes in place.
+    public static func titleFont(for size: Size, monospacedDigits: Bool = false) -> UIFont {
+        guard monospacedDigits else { return font(for: size) }
+        switch size {
+        case .row:
+            return UIFont.appMonospacedDigitFont(forTextStyle: .subheadline)
+        case .header:
+            return UIFont.scaledMonospacedDigitSystemFont(
+                ofSize: 15, weight: .semibold, relativeTo: .subheadline, maximumPointSize: 19
+            )
+        case .form:
+            return UIFont.appMonospacedDigitFont(forTextStyle: .headline)
+        }
+    }
+
     /// `traits`: a text size to measure at (tests); nil is the app's.
     static func font(for size: Size, compatibleWith traits: UITraitCollection? = nil) -> UIFont {
         switch size {

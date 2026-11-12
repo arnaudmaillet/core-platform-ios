@@ -54,13 +54,18 @@ public enum PlayPauseGlyph {
     }
 
     /// ⚠️ THE ONE SWITCH: each site's motion. Outside glass the system's
-    /// Replace; inside Liquid Glass (and wherever Replace stutters) the scale
-    /// and fade.
+    /// Replace; inside Liquid Glass, and wherever Replace leaves the glyph's
+    /// place empty, the scale and fade.
+    ///
+    /// ⚠️ THE VOICE PANEL OVERLAPS (#2329, the owner's recording): its
+    /// Replace sent the old glyph off before the new one came, and frames at
+    /// 8 fps showed no glyph at all. The scale and fade keeps the old one on
+    /// a copy while the new one grows in: a glyph on every frame.
     public static func swap(for site: Site) -> Swap {
         switch site {
-        case .soundSheet, .mediaFlash:
+        case .voicePanel, .soundSheet, .mediaFlash:
             .scaleAndFade
-        case .voicePanel, .voiceComposerChip, .voiceComposerTake, .mediaTimeline:
+        case .voiceComposerChip, .voiceComposerTake, .mediaTimeline:
             .replace
         }
     }

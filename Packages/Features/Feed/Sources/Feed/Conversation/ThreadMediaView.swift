@@ -16,7 +16,9 @@ import UIKit
 @MainActor
 final class ThreadMediaView: UIView {
     static let maxWidth: CGFloat = 240
-    static let cornerRadius: CGFloat = 14
+    /// The media tiles' corner (`Surface.mediaCornerRadius`) — a voice
+    /// message's panel wears it too (#2329).
+    static let cornerRadius: CGFloat = Surface.mediaCornerRadius
     /// The narrowest and widest shapes drawn.
     static let ratioRange: ClosedRange<CGFloat> = 0.75...(4.0 / 3.0)
 

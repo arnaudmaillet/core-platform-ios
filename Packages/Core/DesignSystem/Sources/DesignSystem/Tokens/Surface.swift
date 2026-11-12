@@ -138,6 +138,11 @@ public enum Surface {
     /// thumbnail or a media tile, whose corners are their own.
     public static let cardCornerRadius: CGFloat = 26
 
+    /// A media tile's corner in the post lists (#2290): a list row's
+    /// preview, a shelf's media card — and a voice post's panel (#2329),
+    /// content like a photo, not a control's capsule.
+    public static let mediaCornerRadius: CGFloat = 14
+
     /// Dresses `view` as a card: the card's tone, its corner and its edge —
     /// the one contract every card follows (#1494).
     @MainActor
