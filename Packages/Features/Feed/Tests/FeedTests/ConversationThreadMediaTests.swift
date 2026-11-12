@@ -96,22 +96,22 @@ struct ConversationThreadMediaTests {
 
     // MARK: - The composer's row (#2305)
 
-    /// `[avatar][field][📷][🖼][☺]`: the camera and the library are the
-    /// composer's, labelled, in the row's order, and each hands its source
-    /// to the driver. The footer is `[peer pill] … [pin] [⋯]` — no camera
-    /// or library left on it.
+    /// `[avatar][field][📷 🖼][☺]`: the camera and the library are the
+    /// composer's, one capsule (#2344), labelled, in the row's order, and
+    /// each hands its source to the driver. The footer is `[peer pill] …
+    /// [pin] [⋯]` — no camera or library left on it.
     @Test func theRowOffersTheCameraAndTheLibrary() throws {
         let (screen, driver, window) = screen()
         defer { window.isHidden = true }
         let bar = screen.debugComposeBar
-        let buttons = bar.debugAttachmentButtons
-        #expect(buttons.map(\.accessibilityLabel) == ["Camera", "Photo Library"])
-        #expect(buttons.map(\.accessibilityIdentifier) == [
+        let sources = bar.debugAttachmentItems
+        #expect(sources.map(\.accessibilityLabel) == ["Camera", "Photo Library"])
+        #expect(sources.map(\.accessibilityIdentifier) == [
             ConversationThreadViewController.cameraID, ConversationThreadViewController.libraryID,
         ])
         #expect(bar.debugShowsAttachments, "an empty field at rest hides its attachments")
 
-        for button in buttons { button.sendActions(for: .primaryActionTriggered) }
+        for item in sources { item.primaryAction?.performWithSender(nil, target: nil) }
         #expect(driver.picked == [.camera, .library])
 
         let items = try #require(screen.toolbarItems)
@@ -124,7 +124,7 @@ struct ConversationThreadMediaTests {
     @Test func aTextOnlyThreadHasNoMediaButtons() {
         let (screen, _, window) = screen(sendsMedia: false)
         defer { window.isHidden = true }
-        #expect(screen.debugComposeBar.debugAttachmentButtons.isEmpty)
+        #expect(screen.debugComposeBar.debugAttachmentItems.isEmpty)
         #expect(!screen.debugComposeBar.debugShowsAttachments)
         #expect(toolbarActions(screen).compactMap(\.accessibilityLabel) == ["Pin conversation", "More actions"])
     }

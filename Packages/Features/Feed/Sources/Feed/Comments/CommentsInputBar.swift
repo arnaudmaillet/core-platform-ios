@@ -78,7 +78,7 @@ final class CommentsInputBar: UIView {
 
     private func applyConfiguration(from old: ComposerConfiguration) {
         if !ComposerConfiguration.sameEntries(configuration.attachments, old.attachments) {
-            rebuildAttachmentButtons()
+            rebuildAttachmentBar()
         }
         if configuration.column != old.column { applyColumn() }
         guard configuration.voice != old.voice else { return }
@@ -460,28 +460,31 @@ final class CommentsInputBar: UIView {
     private let ownBubbleSlot = UILayoutGuide()
     private var ownBubbleSlotTrailing: NSLayoutConstraint!
 
-    // MARK: The attachments (#2305, #2308)
+    // MARK: The attachments (#2305, #2308, #2344)
 
     // What the reader can attach from the input row is the host's LIST
-    // (`ComposerConfiguration.attachments`), in the row's order: one glass
-    // bubble per entry, the own bubble's size and spacing, BETWEEN THE FIELD
-    // AND THE OWN BUBBLE —
+    // (`ComposerConfiguration.attachments`), in the row's order: ONE glass
+    // capsule holding every entry's glyph (#2344, the owner 2026-11-12),
+    // BETWEEN THE FIELD AND THE OWN BUBBLE —
     //
-    //     [avatar][field][📷][🖼][☺]
+    //     [avatar][field][📷 🖼][☺]
     //
-    // — never right of it: hiding them would make the own bubble jump.
-    // Between, the field widens into their place and the own bubble never
-    // moves. A host that declares none (a post's comments) keeps its row
-    // exactly. The same entries with new actions keep their bubbles: a tap
-    // reads its action off the list (`attachmentTapped`).
-    private var attachmentButtons: [UIButton] = []
-    /// What the bubbles were last told — not `isHidden`, which stays false
-    /// through their way out.
+    // — never right of it: hiding it would make the own bubble jump. The
+    // capsule is a standalone native toolbar's (`ComposerAttachmentToolbar`):
+    // while the reader writes it FOLDS INTO THE OWN BUBBLE, its neighbour,
+    // the toolbar's own fold, and the field widens into the room in step;
+    // done writing, it comes back out of it. A host that declares none (a
+    // post's comments) has no toolbar and keeps its row exactly. The same
+    // entries with new actions keep their items: a tap reads its action off
+    // the list (`attachmentTapped`).
+    private var attachmentBar: ComposerAttachmentToolbar?
+    /// The toolbar's place: its anchor under the own bubble's resting place
+    /// (`alignAttachmentBar` corrects for the toolbar's own margins).
+    private var attachmentBarTrailing: NSLayoutConstraint?
+    private var attachmentBarCentreY: NSLayoutConstraint?
+    /// What the capsule was last told — the toolbar's items change at once,
+    /// their fold runs after.
     private var attachmentsShown = false
-
-    /// The attachments' glyph: the row's quiet ink, one size at every text
-    /// size, as the own bubble's.
-    static let attachmentConfiguration = UIImage.SymbolConfiguration(pointSize: 17, weight: .medium)
 
     /// Whether the attachments show (#2305, Messenger's rule; the contract's
     /// one rule for every host's list, #2308): only while the reader is NOT
@@ -501,91 +504,107 @@ final class CommentsInputBar: UIView {
         return contents
     }
 
+    private var attachmentCount: Int { attachmentBar?.sourceItems.count ?? 0 }
+
     private var attachmentsWanted: Bool {
         Self.showsAttachments(
-            hasSources: !attachmentButtons.isEmpty && !field.isHidden,
+            hasSources: attachmentCount > 0 && !field.isHidden,
             isEditing: textView.isFirstResponder,
             draft: draftContents
         )
     }
 
-    /// The attachments' room at the field's end, while they show.
+    /// The capsule's room at the field's end, while it shows: the capsule
+    /// and the gap before it.
     private var attachmentsInset: CGFloat {
-        attachmentsShown ? CGFloat(attachmentButtons.count) * (Metrics.controlSize + Spacing.sm) : 0
+        attachmentsShown ? ComposerAttachmentToolbar.capsuleWidth(count: attachmentCount) + Spacing.sm : 0
     }
 
-    /// One bubble per entry, each on the row's line and riding the keyboard
-    /// with the field, counted from the own bubble's RESTING place
+    /// One toolbar for the list, on the row's line and riding the keyboard
+    /// with the field, laid from the own bubble's RESTING place
     /// (`ownBubbleSlot`), so the bubble's hold (which grows and slides it)
-    /// never moves them.
-    private func rebuildAttachmentButtons() {
-        for button in attachmentButtons { button.removeFromSuperview() }
+    /// never moves the capsule. Under the own bubble: the toolbar's anchor
+    /// stands beneath it.
+    private func rebuildAttachmentBar() {
+        attachmentBar?.removeFromSuperview()
+        attachmentBar = nil
+        attachmentBarTrailing = nil
+        attachmentBarCentreY = nil
         let sources = configuration.attachments
-        attachmentButtons = sources.map { makeAttachmentButton(for: $0) }
-        let step = Metrics.controlSize + Spacing.sm
-        for (index, button) in attachmentButtons.enumerated() {
-            insertSubview(button, belowSubview: rowActionButton)
-            NSLayoutConstraint.activate([
-                button.trailingAnchor.constraint(
-                    equalTo: ownBubbleSlot.leadingAnchor,
-                    constant: -Spacing.sm - step * CGFloat(sources.count - 1 - index)
-                ),
-                button.bottomAnchor.constraint(equalTo: field.bottomAnchor),
-                button.widthAnchor.constraint(equalToConstant: Metrics.controlSize),
-                button.heightAnchor.constraint(equalToConstant: Metrics.controlSize),
-            ])
+        guard !sources.isEmpty else {
+            attachmentsShown = false
+            return setNeedsLayout()
         }
+        let bar = ComposerAttachmentToolbar(sources: sources, tint: Self.restingTint) { [weak self] id in
+            self?.attachmentTapped(id)
+        }
+        bar.translatesAutoresizingMaskIntoConstraints = false
+        bar.maximumContentSizeCategory = .large
+        insertSubview(bar, belowSubview: rowActionButton)
+        let trailing = bar.trailingAnchor.constraint(equalTo: ownBubbleSlot.trailingAnchor)
+        let centreY = bar.centerYAnchor.constraint(equalTo: ownBubbleSlot.centerYAnchor)
+        NSLayoutConstraint.activate([
+            trailing,
+            centreY,
+            bar.widthAnchor.constraint(equalToConstant: ComposerAttachmentToolbar.width(count: sources.count)),
+        ])
+        attachmentBar = bar
+        attachmentBarTrailing = trailing
+        attachmentBarCentreY = centreY
         // A new list lands in place: nothing to animate from.
         attachmentsShown = attachmentsWanted
-        for button in attachmentButtons {
-            button.isHidden = !attachmentsShown
-            button.isAccessibilityElement = attachmentsShown
-        }
+        bar.setShowsSources(attachmentsShown, animated: false)
         setNeedsLayout()
     }
 
-    private func makeAttachmentButton(for source: ComposerAttachmentSource) -> UIButton {
-        var face = UIButton.Configuration.glass()
-        face.cornerStyle = .capsule
-        face.image = UIImage(systemName: source.symbol)
-        face.preferredSymbolConfigurationForImage = Self.attachmentConfiguration
-        face.baseForegroundColor = Self.restingTint
-        let button = UIButton(configuration: face)
-        button.translatesAutoresizingMaskIntoConstraints = false
-        button.accessibilityLabel = source.accessibilityLabel
-        button.accessibilityIdentifier = source.id
-        button.maximumContentSizeCategory = .large
-        button.showsLargeContentViewer = true
-        button.scalesLargeContentImage = true
-        let id = source.id
-        button.addAction(UIAction { [weak self] _ in self?.attachmentTapped(id) }, for: .primaryActionTriggered)
-        return button
-    }
-
-    /// A bubble's tap: the action its entry carries now.
+    /// A source's tap: the action its entry carries now.
     private func attachmentTapped(_ id: String) {
         configuration.attachments.first { $0.id == id }?.action()
     }
 
-    /// The attachments in or out, as the reader starts or stops writing:
-    /// they fade and shrink where they stand while the field's end springs
-    /// to its new width — one motion. Reduce Motion: the field at once, the
-    /// bubbles cross-fading. Off screen, at once.
+    /// Lays the toolbar so its anchor stands exactly on the own bubble's
+    /// resting place: the toolbar keeps margins of its own, read off its
+    /// layout rather than assumed. Settled passes only — never inside an
+    /// animation, which would slide the capsule. Returns whether it moved.
+    private func alignAttachmentBar() -> Bool {
+        guard let bar = attachmentBar, let trailing = attachmentBarTrailing, let centreY = attachmentBarCentreY,
+              UIView.inheritedAnimationDuration == 0, bar.bounds.width > 0 else { return false }
+        UIView.performWithoutAnimation { bar.layoutIfNeeded() }
+        let anchor = bar.anchorView
+        guard anchor.superview != nil, anchor.bounds.width > 0 else { return false }
+        let centre = anchor.convert(CGPoint(x: anchor.bounds.midX, y: anchor.bounds.midY), to: self)
+        let slot = ownBubbleSlot.layoutFrame
+        let dx = slot.midX - centre.x
+        let dy = slot.midY - centre.y
+        // A toolbar not laid out yet reads nonsense: no chase across the row.
+        guard abs(dx) > 0.5 || abs(dy) > 0.5, abs(dx) < bar.bounds.width, abs(dy) < bar.bounds.height else {
+            return false
+        }
+        // Leading/trailing constants run against the layout direction.
+        trailing.constant += dx * layoutDirectionSign
+        centreY.constant += dy
+        return true
+    }
+
+    /// The fold's spring: the toolbar's own, as the lab measured it at
+    /// 60 Hz (`SnapGlassColumn`: k 260, ζ 0.75, after a 0.03 s wait) — the
+    /// field's end rides it while the capsule folds.
+    static var attachmentFoldSpring: (duration: TimeInterval, bounce: CGFloat, delay: TimeInterval) {
+        (2 * .pi / SnapGlassColumn.springK.squareRoot(), 1 - CGFloat(SnapGlassColumn.springZeta), SnapGlassColumn.startDelay)
+    }
+
+    /// The capsule in or out, as the reader starts or stops writing: it
+    /// folds into the own bubble — or comes back out of it — by the
+    /// toolbar's own animation, while the field's end springs to its new
+    /// width on the toolbar's spring, in the same turn. Reduce Motion: the
+    /// field at once, the capsule cross-fading. Off screen, at once.
     private func updateAttachments() {
-        guard !attachmentButtons.isEmpty else { return }
+        guard let bar = attachmentBar else { return }
         let shows = attachmentsWanted
         guard shows != attachmentsShown else { return }
-        let buttons = attachmentButtons
-        // Gone for VoiceOver at once, not at the end of their way out.
-        for button in buttons { button.isAccessibilityElement = shows }
         guard window != nil, hasLaidOutOnce else {
             attachmentsShown = shows
-            for button in buttons {
-                button.layer.removeAllAnimations()
-                button.isHidden = !shows
-                button.alpha = 1
-                button.transform = .identity
-            }
+            bar.setShowsSources(shows, animated: false)
             return setNeedsLayout()
         }
         // What is pending lands first, unanimated — a placeholder moving to
@@ -595,39 +614,22 @@ final class CommentsInputBar: UIView {
         #if DEBUG
         debugAttachmentMotions += 1
         #endif
-        let reduces = MotionPreference.reducesMotion
-        let away: CGAffineTransform = reduces ? .identity : CGAffineTransform(scaleX: 0.5, y: 0.5)
-        if shows {
-            for button in buttons where button.isHidden {
-                button.isHidden = false
-                button.alpha = 0
-                button.transform = away
-            }
-        }
         setNeedsLayout()
-        let finish: (Bool) -> Void = { [weak self] _ in
-            guard let self, !self.attachmentsShown else { return }
-            for button in buttons {
-                button.isHidden = true
-                button.alpha = 1
-                button.transform = .identity
-            }
-        }
-        let options: UIView.AnimationOptions = [.allowUserInteraction, .beginFromCurrentState]
-        if reduces {
+        if MotionPreference.reducesMotion {
             UIView.performWithoutAnimation { layoutIfNeeded() }
-            UIView.animate(withDuration: 0.2, delay: 0, options: options, animations: {
-                for button in buttons { button.alpha = shows ? 1 : 0 }
-            }, completion: finish)
+            bar.setShowsSources(shows, animated: true, crossFades: true)
             return
         }
-        UIView.animate(springDuration: 0.4, bounce: shows ? 0.2 : 0, options: options, animations: {
-            for button in buttons {
-                button.alpha = shows ? 1 : 0
-                button.transform = shows ? .identity : away
-            }
+        // The fold first, outside the field's block: the toolbar runs its
+        // own animation, and its items are never laid out inside ours.
+        bar.setShowsSources(shows, animated: true)
+        let spring = Self.attachmentFoldSpring
+        UIView.animate(
+            springDuration: spring.duration, bounce: spring.bounce, initialSpringVelocity: 0, delay: spring.delay,
+            options: [.allowUserInteraction, .beginFromCurrentState]
+        ) {
             self.layoutIfNeeded()
-        }, completion: finish)
+        }
     }
 
     #if DEBUG
@@ -656,8 +658,11 @@ final class CommentsInputBar: UIView {
     var debugFieldHoldBegins: Bool { gestureRecognizerShouldBegin(fieldVoiceHold) }
     /// The field's text view, for its VoiceOver actions.
     var debugTextView: UITextView { textView }
-    /// The attachments' bubbles, in the row's order (#2305).
-    var debugAttachmentButtons: [UIButton] { attachmentButtons }
+    /// The attachments' items, in the row's order (#2305) — the capsule's
+    /// glyphs (#2344).
+    var debugAttachmentItems: [UIBarButtonItem] { attachmentBar?.sourceItems ?? [] }
+    /// The capsule's toolbar, nil without attachments (#2344).
+    var debugAttachmentBar: ComposerAttachmentToolbar? { attachmentBar }
     /// Whether the attachments show — or are on their way in.
     var debugShowsAttachments: Bool { attachmentsShown }
     /// How many times the attachments came or went in sight.
@@ -1996,6 +2001,8 @@ final class CommentsInputBar: UIView {
         // The keyboard has placed the field by now; its width follows, in
         // this same pass (see `applyRise`).
         if applyRise() { super.layoutSubviews() }
+        // The capsule's toolbar is placed: its anchor onto the own bubble.
+        if alignAttachmentBar() { super.layoutSubviews() }
         // The field is placed: its height for the draft lands in this same
         // pass too (see `updateFieldHeight`).
         if updateFieldHeight() { super.layoutSubviews() }

@@ -83,9 +83,10 @@ struct SnapBarPillWidthsTests {
             // A footer that wears ⋯ alone.
             let textOnly = width - SnapBarPillWidths.toolbarReserve(icon: icon, platter: false)
             #expect(27.5 + (textOnly + 10) + 12.5 + 48 + 27.5 <= width)
-            // The conversation's (#2305): [pin] [bell] [⋯], each a bubble of
-            // its own — a lone glyph's bubble is the glyph and 10 (☆ alone
-            // measured 59 at XXXL) — or [pin] [⋯] on a draft.
+            // A draft conversation's [pin] [⋯] (#2305) — a lone glyph's
+            // bubble is the glyph and 10 (☆ alone measured 59 at XXXL) — and
+            // two lone bubbles, the most such a footer held; with its bell,
+            // [pin · bell] is the platter above (#2344).
             for lone in 1...2 {
                 let peer = width - SnapBarPillWidths.toolbarReserve(icon: icon, lone: lone)
                 let bubbles = CGFloat(lone) * (12.5 + icon + 10)
