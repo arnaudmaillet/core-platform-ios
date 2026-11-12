@@ -4345,6 +4345,15 @@ final class SnapFeedViewController: UIViewController {
         detail?.setEngagedPageSwipeHandler({ [weak self] phase, translation, velocity in
             self?.drivePageSwipe(phase, translation: translation, velocity: velocity)
         }, pagesBack: { [weak self] in self?.downwardDragOwner == .pager })
+        // The pull past the stream's ends (#2298 § 2), and the page's
+        // VoiceOver actions: the feed's own page change, from this page.
+        detail?.setPostPull(PostDetailViewController.PostPull(
+            target: { [weak self] direction in self?.postPullTarget(direction, from: id) },
+            commit: { [weak self] direction, velocity, completion in
+                guard let self else { return completion() }
+                commitPostPull(direction, from: id, velocity: velocity, completion: completion)
+            }
+        ))
         observeCommentCount(of: detail)
         observeCommentsDay(of: detail)
         // INSTANT: composer already onstage, cell engaged synchronously —
@@ -4696,13 +4705,22 @@ final class SnapFeedViewController: UIViewController {
         collectionView.contentOffset.y = rubberBandedOffset(start - dy, floor: floor)
     }
 
-    private func endPageDrive(translation dy: CGFloat, velocity vy: CGFloat) {
-        guard let start = pageDriveStartOffset else { return }
+    /// - Parameters:
+    ///   - step: the step to settle, decided by the caller (a committed pull,
+    ///     #2298); nil for the drag's own (`SnapPageDrive.step`).
+    ///   - reducesMotion: the settle without its spring (a pull's commit
+    ///     under Reduce Motion).
+    ///   - completion: once the settle has ended, whatever it did.
+    private func endPageDrive(
+        translation dy: CGFloat, velocity vy: CGFloat, step decided: Int? = nil, reducesMotion: Bool = false,
+        completion: (() -> Void)? = nil
+    ) {
+        guard let start = pageDriveStartOffset else { completion?(); return }
         pageDriveStartOffset = nil
         let page = collectionView.bounds.height
-        guard page > 0 else { return }
+        guard page > 0 else { completion?(); return }
         let startIndex = Int((start / page).rounded())
-        let step = SnapPageDrive.step(translation: dy, velocity: vy, page: page)
+        let step = decided ?? SnapPageDrive.step(translation: dy, velocity: vy, page: page)
         let target = SnapPageDrive.target(origin: startIndex, step: step, ceiling: orderedIDs.count - 1)
         let targetOffset = CGFloat(target) * page
         // FOOTER MORPH, timed with the settle: if this drive commits to a
@@ -4736,13 +4754,8 @@ final class SnapFeedViewController: UIViewController {
         settleFromOffset = collectionView.contentOffset.y
         let distance = abs(collectionView.contentOffset.y - targetOffset)
         let springVelocity = distance > 0 ? min(3, abs(vy) / distance) : 0
-        UIView.animate(
-            withDuration: 0.4, delay: 0,
-            usingSpringWithDamping: 0.9, initialSpringVelocity: springVelocity,
-            options: [.curveEaseOut, .allowUserInteraction]
-        ) {
-            self.collectionView.contentOffset.y = targetOffset
-        } completion: { [weak self] finished in
+        let settle = { self.collectionView.contentOffset.y = targetOffset }
+        let settled: (Bool) -> Void = { [weak self] finished in
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-grab-log"), let self {
                 print("[drive] settled finished=\(finished)"
@@ -4750,6 +4763,7 @@ final class SnapFeedViewController: UIViewController {
             }
             #endif
             self?.settleFromOffset = nil
+            defer { completion?() }
             guard finished else { return }
             // Now the target page is settled: recompute the active item,
             // which fires the resign→teardown / activate legs (the landed
@@ -4757,6 +4771,69 @@ final class SnapFeedViewController: UIViewController {
             // torn down as it resigns).
             self?.updateActiveItem()
         }
+        if reducesMotion {
+            UIView.animate(
+                withDuration: 0.25, delay: 0, options: [.curveEaseInOut, .allowUserInteraction],
+                animations: settle, completion: settled
+            )
+        } else {
+            UIView.animate(
+                withDuration: 0.4, delay: 0,
+                usingSpringWithDamping: 0.9, initialSpringVelocity: springVelocity,
+                options: [.curveEaseOut, .allowUserInteraction],
+                animations: settle, completion: settled
+            )
+        }
+    }
+
+    // MARK: - The pull to the next / previous post (#2298 § 2)
+
+    /// Where a text page's pull goes (#2298 § 2): the post that way, as its
+    /// pill shows it — nil when there is nowhere to go, so no pill. The page
+    /// must be the settled one, at rest, with no close under way:
+    /// - `.next`: the page after it, made ready as the pull begins (the
+    ///   ceiling prepares it); none on the feed's last post (its upward close,
+    ///   #628, stays as it is);
+    /// - `.previous`: the router's answer (`downwardDragOwner`), so the first
+    ///   post keeps its close (#2058) and shows no pill.
+    private func postPullTarget(_ direction: PostPullDirection, from id: PostID) -> PostPullTarget? {
+        guard commentsEngagedID == id, !pageDriveYieldsToClose, !isKeyboardOnScreen,
+              let index = orderedIDs.firstIndex(of: id), index == settledPageIndex else { return nil }
+        let target: Int
+        switch direction {
+        case .next:
+            guard reachableCeiling() > index else { return nil }
+            target = index + 1
+        case .previous:
+            guard index > 0, downwardDragOwner == .pager else { return nil }
+            target = index - 1
+        }
+        guard let model = modelsByID[orderedIDs[target]] else { return nil }
+        return PostPullTarget(
+            authorName: model.authorName, monogram: CommentsInputBar.monogram(model.authorName),
+            avatarURL: model.avatarURL
+        )
+    }
+
+    /// A committed pull (or the page's VoiceOver action): the feed's own page
+    /// change — the drive's settle, the composer's swipe's — from where the
+    /// page stands, one step that way at the finger's velocity. Under Reduce
+    /// Motion, the settle without its spring.
+    private func commitPostPull(
+        _ direction: PostPullDirection, from id: PostID, velocity vy: CGFloat, completion: @escaping () -> Void
+    ) {
+        guard postPullTarget(direction, from: id) != nil else { return completion() }
+        beginPageDrive()
+        guard pageDriveStartOffset != nil else { return completion() }
+        let step = direction == .next ? 1 : -1
+        // The finger's velocity, only where it heads the page's way: a
+        // release drifting back starts the settle from rest.
+        let heading = direction == .next ? min(0, vy) : max(0, vy)
+        let travel = CGFloat(-step) * collectionView.bounds.height
+        endPageDrive(
+            translation: travel, velocity: heading, step: step,
+            reducesMotion: MotionPreference.reducesMotion, completion: completion
+        )
     }
 
     /// UIScrollView-style rubber-band past `floor`/last page: the drive

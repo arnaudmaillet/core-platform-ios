@@ -1015,23 +1015,69 @@ final class PostDetailViewController: UIViewController {
     /// velocity, and the host drives the feed pager's `contentOffset` in
     /// real time (finger-linked paging), settling on release.
     ///
-    /// `pagesBack` answers, as a drag begins at the stream's top edge, whether
-    /// it goes to the previous post (#2058) — the feed's router, so the first
-    /// post keeps its close there.
+    /// `pagesBack` answers, as a downward drag begins on a stream its room
+    /// holds whole (#2298 § 1), whether it goes to the previous post — the
+    /// feed's router, so the first post keeps its close there.
     func setEngagedPageSwipeHandler(
         _ handler: @escaping (CommentsInputBar.PageSwipePhase, CGFloat, CGFloat) -> Void,
         pagesBack: @escaping () -> Bool
     ) {
         composeBar.onPageSwipe = handler
         pagesBackFromStreamTop = pagesBack
-        // A page in a vertical feed: its streams read in its room (#2298),
-        // and a drag beginning at an edge of what is shown goes to the next
-        // post or the previous one (`CommentStream.edgeHandOff`).
+        // A page in a vertical feed: its streams read in its room (#2298).
+        // One that fits pages with the feed's swipe; one that scrolls goes on
+        // with the pull past its ends (`setPostPull`).
         cutStreamsToRoom()
     }
-    /// Whether a drag beginning at the stream's top edge goes to the previous
+    /// Whether a downward drag on a stream that fits goes to the previous
     /// post. Nil outside a vertical feed.
     private(set) var pagesBackFromStreamTop: (() -> Bool)?
+
+    // MARK: - The pull to the next / previous post (#2298 § 2)
+
+    /// What the feed gives the page's pull (#2298 § 2): where a pull that way
+    /// goes — the post's author, nil for nowhere (the feed's last post, the
+    /// first post's top, which keeps its close) — and the page change itself.
+    struct PostPull {
+        /// The post a pull that way would go to; nil for no pill.
+        var target: (PostPullDirection) -> PostPullTarget?
+        /// The feed's own page change to that post, from where the page
+        /// stands now, at `velocity` (pt/s, the finger's), then `completion`
+        /// once it has settled (or did not go).
+        var commit: (_ direction: PostPullDirection, _ velocity: CGFloat, _ completion: @escaping () -> Void) -> Void
+    }
+
+    /// The feed's side of the pull; nil outside a vertical feed (the comments
+    /// sheet has no pull, #2298 § 5).
+    private(set) var postPull: PostPull?
+
+    /// Wires the pull past the streams' ends to the feed, and the page's
+    /// VoiceOver actions with it: "Next post", "Previous post" — no pull
+    /// needed.
+    func setPostPull(_ pull: PostPull) {
+        postPull = pull
+        loadViewIfNeeded()
+        view.accessibilityCustomActions = [
+            UIAccessibilityCustomAction(name: "Next post") { [weak self] _ in self?.goToPost(.next) ?? false },
+            UIAccessibilityCustomAction(name: "Previous post") { [weak self] _ in self?.goToPost(.previous) ?? false },
+        ]
+    }
+
+    /// Where a pull that way would go now: nil with the keyboard up, or with
+    /// nowhere to go.
+    func postPullTarget(_ direction: PostPullDirection) -> PostPullTarget? {
+        guard let postPull, !composeBar.isKeyboardOpen else { return nil }
+        return postPull.target(direction)
+    }
+
+    /// The page's VoiceOver action: the post that way, as a committed pull
+    /// would go to it. False (VoiceOver says so) when there is none.
+    @discardableResult
+    func goToPost(_ direction: PostPullDirection) -> Bool {
+        guard let postPull, postPull.target(direction) != nil else { return false }
+        postPull.commit(direction, 0) {}
+        return true
+    }
 
     /// The STREAM's shrink for the engagement, 0 (engaged) → 1 (dismissed).
     ///

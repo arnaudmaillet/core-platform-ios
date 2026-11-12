@@ -6,8 +6,9 @@ import Foundation
 ///
 /// The pager is the native one on a media page, and the hand-moved drive
 /// (`SnapPageDrive`) where the comments hold the page: a text page, an open
-/// panel. There the composer, the header band and the stream's top edge
-/// (#2058) start the drive, the last by asking this too.
+/// panel. There the composer and the header band start the drive (#2058),
+/// and on a text page a stream its room holds whole and the pull past a
+/// scrolling stream's top (#2298) ask this too.
 ///
 /// ⚠️ ONE ANSWER, ASKED BY BOTH SIDES. The pager's per-touch gate
 /// (`SnapFeedCollectionView`) and the dismissal drivers' vertical gate

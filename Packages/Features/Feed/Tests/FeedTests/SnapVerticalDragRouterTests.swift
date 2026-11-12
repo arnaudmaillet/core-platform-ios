@@ -42,7 +42,7 @@ struct SnapVerticalDragRouterTests {
 
     /// A page the pager does not page (a text page, comments holding the
     /// scroll) pages back through the drive on a later post (#2058) — the
-    /// composer, the header band, the stream's top edge — and keeps its close
+    /// composer, the header band, the pull past the stream's top (#2298) — and keeps its close
     /// on the first.
     @Test func aPageTheDrivePagesGoesBackOnALaterPostOnly() {
         #expect(owner(index: 4, pager: false, drive: true) == .pager)
