@@ -628,13 +628,21 @@ final class TextPostComposerViewController: UIViewController {
         keyboardObservers.tokens = [
             NotificationCenter.default.addObserver(
                 forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main
-            ) { [weak self] _ in
-                MainActor.assumeIsolated { self?.keyboardWillShow() }
+            ) { [weak self] note in
+                let scope = KeyboardNotificationScope.window(of: note)
+                MainActor.assumeIsolated {
+                    guard let self, self.view.hearsKeyboard(aimedAt: scope) else { return }
+                    self.keyboardWillShow()
+                }
             },
             NotificationCenter.default.addObserver(
                 forName: UIResponder.keyboardWillHideNotification, object: nil, queue: .main
-            ) { [weak self] _ in
-                MainActor.assumeIsolated { self?.keyboardWillHide() }
+            ) { [weak self] note in
+                let scope = KeyboardNotificationScope.window(of: note)
+                MainActor.assumeIsolated {
+                    guard let self, self.view.hearsKeyboard(aimedAt: scope) else { return }
+                    self.keyboardWillHide()
+                }
             },
         ]
     }

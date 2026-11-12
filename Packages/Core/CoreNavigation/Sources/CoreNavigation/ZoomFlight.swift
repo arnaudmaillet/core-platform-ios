@@ -284,9 +284,24 @@ struct ZoomFlight {
 
     /// How far the presenting screen recedes behind a flight (depth cue).
     static let presenterDepthScale: CGFloat = 0.95
-    /// Grab feedback: the card's scale the instant a dismissal starts — it
-    /// visibly detaches from the screen canvas before flying home.
-    static let detachScale: CGFloat = 0.95
+
+    // ⚠️ NO DETACH SCALE ANY MORE (#2362, the owner 2026-11-12). A grab used
+    // to spring the card to 0.95 the instant it began, before the finger had
+    // travelled — "it visibly detaches from the screen canvas". Filmed next to
+    // Instagram's Explore post, whose media barely zooms out at the grab, it
+    // was the zoom out the owner felt, and the jump at every grab / let go /
+    // grab again. A held card now starts at the page's own size and corners.
+
+    /// How the held card's shrink grows with the drag: the shrink is
+    /// `progress ^ grabShrinkExponent` of the way to `minimumGrabScale`
+    /// (`ZoomDismissInteractionController.grabEase`).
+    ///
+    /// 2 (quadratic) is the issue's numbers: flat at the start — 0.991 at 60pt
+    /// across a 402pt width, the card first just follows the finger —, 0.9 at
+    /// half the span, the floor only at the full span. A linear curve (the
+    /// old one) took 0.35 of scale per span from the first point, so 100pt
+    /// already read 0.86.
+    nonisolated static let grabShrinkExponent: CGFloat = 2
 
     /// The smallest the card may shrink to while the finger still holds it.
     ///
@@ -296,7 +311,7 @@ struct ZoomFlight {
     /// recognisably the thing being dismissed; the remaining distance to the
     /// tile is covered by the release spring, which is the moment the outcome
     /// is actually decided.
-    static let minimumGrabScale: CGFloat = 0.6
+    nonisolated static let minimumGrabScale: CGFloat = 0.6
 
     /// The single spring every FLIGHT lands on — the non-interactive present
     /// and tap-back (`ZoomAnimator`) and the released grab
@@ -677,10 +692,10 @@ struct ZoomFlight {
             // viewer sees is the PRESENTATION, and a layer carrying an
             // animation presents an interpolated value while its model has
             // already arrived. `card.center` is set directly on every pan
-            // (`ZoomDismissInteractionController`) while `card.bounds` may be
-            // riding `springDetach`'s spring, so the two channels can be on
-            // different clocks — which is what "the video follows the drag with
-            // a delay" would be.
+            // (`ZoomDismissInteractionController`); `card.bounds` rode the
+            // detach dip's spring until #2362 removed it, and two channels on
+            // different clocks is what "the video follows the drag with a
+            // delay" was.
             let cardPres = card.layer.presentation()?.bounds
             let cardKeys = card.layer.animationKeys()?.joined(separator: ",") ?? "-"
             print(String(format: "[grab] %.3f scale=%.4f card=%@ pres=%@ anim=[%@] | %@",

@@ -226,14 +226,25 @@ struct InteractionLatencyHarnessTests {
         return (window, nav)
     }
 
-    /// Waits for the response to be COMMITTED (up to 30 s: a CI simulator
-    /// under parallel suites can starve the main actor for seconds), then
-    /// ends the input itself. Nothing hangs on the harness's own window,
-    /// which the suite lengthens so it never drops a late response.
-    private func nextRecord(after count: Int) async throws -> InteractionLatencyTracker.Record {
-        for _ in 0..<3000 where !InteractionLatency.hasCommittedResponse && InteractionLatency.records.count <= count {
-            try await Task.sleep(for: .milliseconds(10))
+    /// Waits for the response to be COMMITTED, then ends the input itself.
+    /// Nothing hangs on the harness's own window, which the suite lengthens
+    /// so it never drops a late response.
+    ///
+    /// A budget of LOOKS, not a clock: a look is spent only when the loop
+    /// runs, so the wait stretches with a starved main actor (a CI simulator
+    /// under parallel suites can starve it for minutes) where a wall-clock
+    /// deadline would expire during the starvation. 24,000 looks of 10 ms
+    /// are at least 240 s.
+    private func responseCommitted(after count: Int) async -> Bool {
+        for _ in 0..<24_000 where !InteractionLatency.hasCommittedResponse && InteractionLatency.records.count <= count {
+            try? await Task.sleep(for: .milliseconds(10))
         }
+        return InteractionLatency.hasCommittedResponse || InteractionLatency.records.count > count
+    }
+
+    private func nextRecord(after count: Int) async throws -> InteractionLatencyTracker.Record {
+        let committed = await responseCommitted(after: count)
+        #expect(committed, "no response committed within the budget: \(InteractionLatency.debugState)")
         // One more turn for the frame's phase to be read, then the end.
         try await Task.sleep(for: .milliseconds(50))
         if InteractionLatency.records.count <= count { InteractionLatency.finishInput() }
@@ -247,7 +258,11 @@ struct InteractionLatencyHarnessTests {
     private func install() {
         InteractionLatency.install(log: false, hud: false)
         InteractionLatency.countsOnly = { $0 is Destination || $0 is UIButton }
-        InteractionLatency.responseWindow = 60
+        // Longer than any starvation: a CI runner under parallel suites once
+        // held the main actor past a 60 s window, and the input was dropped
+        // with "no response" before the deferred push could land. The test
+        // ends the input itself (`nextRecord`), so the window never decides.
+        InteractionLatency.responseWindow = 600
     }
 
     /// Nothing is hooked without the argument.

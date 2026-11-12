@@ -76,4 +76,33 @@ struct SnapLiveGrabTests {
         #expect(chrome.convert(chrome.bounds, to: cell.contentView) == cell.contentView.bounds)
     }
 
+    /// A grab during a cancel's spring (#2362) is told the caught pose as a
+    /// held state mid-spring: the page drops what the release left in flight,
+    /// or its additive animations keep adding their remainder onto the caught
+    /// pose and the page parts from the card until the spring ends.
+    @Test func aHeldStateAfterAReleaseDropsTheReleasesAnimations() {
+        let window = UIWindow(frame: Self.container)
+        defer {
+            window.subviews.forEach { $0.removeFromSuperview() }
+            window.isHidden = true
+        }
+        let cell = makeCell()
+        window.addSubview(cell)
+        window.isHidden = false
+        cell.beginLiveGrab()
+        cell.setEngagedDismissal(ZoomDismissState(progress: 0.2, card: Self.card, cornerRadius: 30, isSettling: false))
+        UIView.animate(withDuration: 0.42, delay: 0, usingSpringWithDamping: 0.82, initialSpringVelocity: 0) {
+            cell.setEngagedDismissal(ZoomDismissState(
+                progress: 0, card: Self.container, cornerRadius: 50, isSettling: true
+            ))
+        }
+        #expect(cell.debugGrabAnimates, "the release spring animated nothing; the test proves nothing")
+
+        let caught = CGRect(x: 30, y: 100, width: 330, height: 714)
+        cell.setEngagedDismissal(ZoomDismissState(progress: 0.1, card: caught, cornerRadius: 40, isSettling: false))
+        #expect(!cell.debugGrabAnimates, "the release's animations still run under the caught pose")
+        let chrome = cell.debugChrome
+        let posed = chrome.convert(chrome.bounds, to: cell.contentView)
+        #expect(abs(posed.midX - caught.midX) < 1 && abs(posed.midY - caught.midY) < 1)
+    }
 }
