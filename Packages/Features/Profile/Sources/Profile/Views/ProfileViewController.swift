@@ -2065,17 +2065,25 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
                 $0, opacity: opacity, ink: barTitleInk, reduceMotion: MotionPreference.reducesMotion
             )
         }
+        // ⚠️ WHAT WAS DRAWN IS OUR OWN RECORD, NOT `attributedTitle`'S
+        // GETTER: set to nil with `title` still set, it answered "@lena"
+        // as an attributed string (iOS 26, the Profile lane, #2334) — UIKit
+        // derives it from the title — so it cannot tell a scrubbed title
+        // from a plain one.
+        let wasScrubbed = drawnBarTitleOpacity > 0 && drawnBarTitleOpacity < 1
+        let titleChanged = navigationItem.title != title
         if let attributed {
             // The plain title first: the attributed one drawn over it.
-            if navigationItem.title != title { navigationItem.title = title }
-            if opacity != drawnBarTitleOpacity || navigationItem.attributedTitle == nil {
+            if titleChanged { navigationItem.title = title }
+            if titleChanged || !wasScrubbed || opacity != drawnBarTitleOpacity {
                 navigationItem.attributedTitle = attributed
             }
         } else {
-            // Cleared first, then the plain title — whatever clearing it does
-            // to `title`, the bar ends on the right one.
-            if navigationItem.attributedTitle != nil { navigationItem.attributedTitle = nil }
-            if navigationItem.title != title { navigationItem.title = title }
+            // Leaving the scrub: the attributed title cleared, then the plain
+            // title written again, so the bar draws it in its own dress
+            // whatever the attributed one left behind.
+            if wasScrubbed { navigationItem.attributedTitle = nil }
+            if wasScrubbed || titleChanged { navigationItem.title = title }
         }
         drawnBarTitleOpacity = opacity
         // The tab root keeps the stock style: it has no title to lead with.

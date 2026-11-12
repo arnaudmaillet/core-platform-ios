@@ -786,26 +786,43 @@ extension ProfileBellAndMapMenuTests {
         // Whole: the plain native title, in the bar's own dress.
         screen.debugSetHandlePassage(1)
         #expect(screen.navigationItem.title == "@lena")
-        #expect(screen.navigationItem.attributedTitle == nil, "a whole title kept its own ink")
+        #expect(wearsThePlainTitle(screen), "a whole title kept its scrub: \(String(describing: screen.navigationItem.attributedTitle))")
         #expect(screen.debugBarTitleOpacity == 1)
         #expect(screen.debugBarRelationshipItem == nil && !screen.galleryPager.hasSoftTopEdge, "Follow or the blur left the tray's trigger")
 
         // The tray under the bar: Follow and the blur, the handle unchanged.
         screen.debugSetTrayScrolledAway(true)
         #expect(screen.debugBarRelationshipItem != nil && screen.galleryPager.hasSoftTopEdge)
-        #expect(screen.navigationItem.title == "@lena" && screen.navigationItem.attributedTitle == nil)
+        #expect(screen.navigationItem.title == "@lena" && wearsThePlainTitle(screen))
 
         // The way down: the tray back, the line half way, then none.
         screen.debugSetTrayScrolledAway(false)
         #expect(screen.debugBarRelationshipItem == nil && !screen.galleryPager.hasSoftTopEdge)
         screen.debugSetHandlePassage(0.5)
         #expect(screen.navigationItem.title == "@lena")
-        #expect(screen.navigationItem.attributedTitle != nil, "the way down is not scrubbed")
+        #expect(!wearsThePlainTitle(screen), "the way down is not scrubbed")
         #expect(screen.debugBarTitleOpacity == 0.5)
         screen.debugSetHandlePassage(0)
         #expect(screen.navigationItem.title == nil, "the title stayed with the line back")
         #expect(screen.navigationItem.attributedTitle == nil)
         #expect(screen.debugBarTitleOpacity == 0)
+    }
+
+    /// Whether the bar wears its title plain — no scrub's faded ink, no
+    /// climb. ⚠️ Not `attributedTitle == nil`: set to nil with `title`
+    /// still set, its getter answered the title as an attributed string
+    /// (iOS 26), so it is not nil while the bar is titled.
+    private func wearsThePlainTitle(_ screen: ProfileViewController) -> Bool {
+        guard let attributed = screen.navigationItem.attributedTitle else { return true }
+        for run in attributed.runs {
+            if let offset = run.uiKit.baselineOffset, abs(offset) > 0.001 { return false }
+            if let ink = run.uiKit.foregroundColor {
+                var alpha: CGFloat = 0
+                ink.resolvedColor(with: screen.traitCollection).getRed(nil, green: nil, blue: nil, alpha: &alpha)
+                if alpha < 0.999 { return false }
+            }
+        }
+        return true
     }
 
     /// The tab root (the viewer's own) wears no handle however far its line
