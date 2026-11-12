@@ -1256,30 +1256,50 @@ final class CommentStream: NSObject {
     private func rowMenu(at indexPath: IndexPath) -> UIMenu? {
         guard case .comment(let id) = streamDataSource.itemIdentifier(for: indexPath),
               let model = streamModels[id] else { return nil }
-        let copy = UIAction(title: "Copy", image: UIImage(systemName: "doc.on.doc")) { [weak self] _ in
-            UIPasteboard.general.string = model.body
-            // Said (#803): nothing on screen shows a copy.
-            self?.host.confirmCopied()
+        return Self.commentMenu(
+            for: model,
+            copy: { [weak self] text in
+                UIPasteboard.general.string = text
+                // Said (#803): nothing on screen shows a copy.
+                self?.host.confirmCopied()
+            },
+            selectText: { [weak self] in
+                guard let self, let current = self.streamDataSource.indexPath(for: .comment(id)) else { return }
+                self.rowContextMenu.beginTextSelection(at: current)
+            },
+            share: { [weak self] in self?.host.presentCommentShare(model) },
+            review: { [weak self] approve in self?.viewModel.reviewHeldComment(id, approve: approve) }
+        )
+    }
+
+    /// A comment's long-press menu, whatever it carries (#2309, D): review
+    /// (a held comment, the post's owner), Copy and Select Text — ONLY with
+    /// words: a voice alone has nothing to copy or select — Share, and the
+    /// moderation rows that do something. Nothing here reads the kind of
+    /// attachment. Internal for tests.
+    static func commentMenu(
+        for model: CommentDisplayModel,
+        copy: @escaping (String) -> Void,
+        selectText: @escaping () -> Void,
+        share: @escaping () -> Void,
+        review: @escaping (_ approve: Bool) -> Void
+    ) -> UIMenu {
+        var children: [UIMenuElement] = []
+        if model.canReview { children.append(CommentRowView.reviewActions(review)) }
+        if let text = model.copyableText {
+            children.append(UIAction(title: "Copy", image: UIImage(systemName: "doc.on.doc")) { _ in copy(text) })
+            children.append(UIAction(title: "Select Text", image: UIImage(systemName: "text.magnifyingglass")) { _ in
+                selectText()
+            })
         }
-        let select = UIAction(title: "Select Text", image: UIImage(systemName: "text.magnifyingglass")) {
-            [weak self] _ in
-            guard let self, let current = self.streamDataSource.indexPath(for: .comment(id)) else { return }
-            self.rowContextMenu.beginTextSelection(at: current)
-        }
-        let share = UIAction(title: "Share Comment", image: AppSymbol.share.image()) {
-            [weak self] _ in self?.host.presentCommentShare(model)
-        }
+        children.append(UIAction(title: "Share Comment", image: AppSymbol.share.image()) { _ in share() })
         // ⚠️ NO MODERATION ROWS UNTIL THEY DO SOMETHING (#801). Block and
         // Report used to sit here as `{ _ in }` no-ops: for a safety action
         // the user believes something was filed. There is no comment report
         // flow (`ReportSubject` has no comment case), so the same builder
         // as the row's own menu draws nothing for the unset seams.
-        let moderation = CommentRowView.moderationMenu(onBlock: nil, onReport: nil).map { [$0] } ?? []
-        guard model.canReview else { return UIMenu(children: [copy, select, share] + moderation) }
-        let review = CommentRowView.reviewActions { [weak self] approve in
-            self?.viewModel.reviewHeldComment(id, approve: approve)
-        }
-        return UIMenu(children: [review, copy, select, share] + moderation)
+        if let moderation = CommentRowView.moderationMenu(onBlock: nil, onReport: nil) { children.append(moderation) }
+        return UIMenu(children: children)
     }
 
     private func streamItems() -> [StreamItem] {
@@ -1604,8 +1624,14 @@ final class CommentStream: NSObject {
         return height
     }
 
-    /// The comment row's cell, offscreen, for `rowHeight`.
-    private lazy var sizingCommentCell: UICollectionViewCell = threadChrome ? ThreadRowCell() : CommentCell()
+    /// The comment row's cell, offscreen, for `rowHeight`. It draws a voice
+    /// comment's voice (#2309) — the row's height counts it — but never
+    /// binds it to the voice hub: it is measured, not shown.
+    private lazy var sizingCommentCell: UICollectionViewCell = {
+        let cell: UICollectionViewCell = threadChrome ? ThreadRowCell() : CommentCell()
+        PostDetailViewController.commentRow(in: cell)?.bindsVoicePlayback = false
+        return cell
+    }()
 
     private func measure(_ cell: UICollectionViewCell, width: CGFloat, configure: (UICollectionViewCell) -> Void) -> CGFloat {
         configure(cell)
@@ -2160,6 +2186,12 @@ extension CommentStream: UICollectionViewDelegate {
         case .recent: viewModel.loadMoreComments()
         case .popular: viewModel.loadMorePopularComments()
         }
+    }
+
+    /// A row scrolled away (#2309): a voice comment it was playing stops
+    /// where it is, unless the same voice shows elsewhere on screen.
+    func collectionView(_ collectionView: UICollectionView, didEndDisplaying cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
+        PostDetailViewController.commentRow(in: cell)?.attachmentLeftScreen()
     }
 
     /// A drag begins: a row's text selection ends, and on a stream its room

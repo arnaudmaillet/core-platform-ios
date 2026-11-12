@@ -26,6 +26,9 @@ import VoiceKitUI
 /// - avatar tap → the author's profile (the outbound push lifecycle).
 /// - row tap → the composer's reply state, bound to this thread.
 /// - long press → the native context menu (share / block / report).
+///
+/// A comment's ATTACHMENT (#2309) is drawn by kind in a slot between the
+/// header and the body — see `showAttachment`.
 final class CommentRowView: UIView {
     private enum Metrics {
         static let avatarGap: CGFloat = Spacing.sm
@@ -338,9 +341,10 @@ final class CommentRowView: UIView {
             : "\(model.authorName) · \(model.metaText)"
         bodyLabel.text = model.body
         // A conversation's caption-less photo (#681): no empty line between
-        // the header and the picture.
+        // the header and the picture. A voice alone (#2309) likewise.
         bodyLabel.isHidden = model.body.isEmpty
         bodyLabel.textColor = model.isHeld ? .secondaryLabel : .label
+        showAttachment(model.attachment, body: model.body, authorName: model.authorName, commentID: model.id)
         avatarView.setMonogram(model.monogram)
         isReplyRow = model.isReply
         refreshTypeDrivenGeometry()
@@ -442,6 +446,8 @@ final class CommentRowView: UIView {
         onAvatarHold = nil
         setBodyAccessory(nil)
         setBodyFooter(nil)
+        // A voice it played stops, unless shown elsewhere on screen (#2309).
+        showAttachment(nil, body: "", authorName: "", commentID: "")
         // ⚠️ BACK TO A COMMENT. A row that stood in for a caption has its reply
         // tap, its menu and its like control switched off, and a recycled cell
         // that inherited that would be a comment nobody could interact with —
@@ -466,6 +472,153 @@ final class CommentRowView: UIView {
     }
 
     static let heldMarker = "Held for review"
+
+    // MARK: - The attachment slot (#2309)
+
+    /// Between the header and the body: the comment's attachment, drawn by
+    /// kind — a voice is the shared `VoiceView`; an image or a short video
+    /// (#2310) will be another view in the same place. Hidden, it takes no
+    /// room and no spacing.
+    private let attachmentSlot = UIView()
+    /// What the slot holds now, nil when it is empty.
+    private weak var attachmentContent: UIView?
+    /// The attachment drawn, nil for none.
+    private(set) var shownAttachment: CommentAttachment?
+    /// A voice comment's voice: the shared component, full size, its panel's
+    /// width saying its length (#2329) — leading-aligned, from the narrowest
+    /// up to the text column's width (the slot's) at 30 s — as a voice
+    /// post's caption. Built when first shown.
+    private lazy var attachmentVoiceView = VoiceView(size: .full, widthFollowsLength: true)
+    /// The neutral line of a kind this build can't draw, on a comment with
+    /// no words of its own. Built when first shown.
+    private lazy var unsupportedAttachmentLabel: UILabel = {
+        let label = UILabel()
+        label.font = .appFont(forTextStyle: .footnote)
+        label.adjustsFontForContentSizeCategory = true
+        label.textColor = .secondaryLabel
+        label.numberOfLines = 1
+        label.text = Self.unsupportedAttachmentText
+        return label
+    }()
+    /// The id the shown voice plays under, nil while none is bound.
+    private(set) var attachmentVoiceID: String?
+
+    /// The app's one voice hub (`VoicePlaybackHub`): one voice at a time,
+    /// app-wide, the feed's video and sound paused while it speaks
+    /// (`VoiceAudioFocus`). Tests put their own in.
+    static var voiceHub: VoicePlaybackHub = .shared
+
+    /// Whether the row binds its voice to the hub. Off for a row that is
+    /// only measured (`CommentStream`'s sizing cell): it draws the voice at
+    /// rest and never takes part in playback.
+    var bindsVoicePlayback = true
+
+    /// The neutral line for an attachment this build can't draw (#2309).
+    static let unsupportedAttachmentText = "Unsupported attachment"
+
+    /// The id a comment's voice plays under in the hub — one per comment,
+    /// wherever it is drawn (the text page, the sheet, a preview).
+    static func voicePlaybackID(commentID: String) -> String { "comment-\(commentID)" }
+
+    /// Draws `attachment` in the slot, by kind:
+    /// - **a voice:** the shared voice view, its width by its length, with
+    ///   the seconds timer (a comment is public, as a post: "12″", #2294),
+    ///   bound to the hub; the
+    ///   body's words, if any, under it — as on a voice post's caption;
+    /// - **a kind this build doesn't know:** nothing when the comment has
+    ///   words (they speak for it), the neutral line otherwise — never a
+    ///   crash, never an empty row;
+    /// - **none:** an empty slot.
+    private func showAttachment(_ attachment: CommentAttachment?, body: String, authorName: String, commentID: String) {
+        shownAttachment = attachment
+        switch attachment {
+        case .voice(let voice)?:
+            let id = Self.voicePlaybackID(commentID: commentID)
+            if attachmentVoiceID != nil, attachmentVoiceID != id || !bindsVoicePlayback { releaseAttachmentVoice() }
+            let view = attachmentVoiceView
+            // A comment's role: a post's seconds ("12″"), read "Voice
+            // comment by Ava, 13 seconds".
+            view.role = .comment(author: authorName.isEmpty ? nil : authorName)
+            let levels = voice.waveform.isEmpty ? nil : voice.waveform
+            if bindsVoicePlayback {
+                Self.voiceHub.bind(view, id: id, url: voice.url, duration: voice.duration, levels: levels)
+                attachmentVoiceID = id
+            } else {
+                view.configure(VoiceView.State(levels: levels ?? VoiceView.genericLevels, duration: voice.duration))
+            }
+            setAttachmentContent(view)
+        case .unsupported?:
+            releaseAttachmentVoice()
+            setAttachmentContent(CommentAttachment.hasWords(body) ? nil : unsupportedAttachmentLabel)
+        case nil:
+            releaseAttachmentVoice()
+            setAttachmentContent(nil)
+        }
+    }
+
+    /// Puts `view` in the slot, edge to edge — nil empties and hides it.
+    private func setAttachmentContent(_ view: UIView?) {
+        guard view !== attachmentContent else {
+            attachmentSlot.isHidden = view == nil
+            return
+        }
+        attachmentContent?.removeFromSuperview()
+        attachmentContent = view
+        attachmentSlot.isHidden = view == nil
+        guard let view else { return }
+        view.translatesAutoresizingMaskIntoConstraints = false
+        attachmentSlot.addSubview(view)
+        NSLayoutConstraint.activate([
+            view.leadingAnchor.constraint(equalTo: attachmentSlot.leadingAnchor),
+            view.trailingAnchor.constraint(equalTo: attachmentSlot.trailingAnchor),
+            view.topAnchor.constraint(equalTo: attachmentSlot.topAnchor),
+            view.bottomAnchor.constraint(equalTo: attachmentSlot.bottomAnchor),
+        ])
+    }
+
+    /// Lets the bound voice go: it stops where it is, unless another view on
+    /// screen shows the same comment's voice.
+    private func releaseAttachmentVoice() {
+        guard attachmentVoiceID != nil else { return }
+        Self.voiceHub.viewLeftScreen(attachmentVoiceView)
+        Self.voiceHub.unbind(attachmentVoiceView)
+        attachmentVoiceID = nil
+    }
+
+    /// The row left the screen — a list's `didEndDisplaying`, its sheet or
+    /// page closed: its voice stops where it is, keeping its place, unless
+    /// shown elsewhere on screen.
+    func attachmentLeftScreen() {
+        guard attachmentVoiceID != nil else { return }
+        Self.voiceHub.viewLeftScreen(attachmentVoiceView)
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window == nil { attachmentLeftScreen() }
+    }
+
+    /// Whether a press at `point` (the row's coordinates) is the voice's own
+    /// — its play button, its waveform, its speed chip: the row's tap and
+    /// long press leave it alone.
+    func attachmentKeepsPress(at point: CGPoint) -> Bool {
+        guard attachmentContent === attachmentVoiceView, !attachmentSlot.isHidden else { return false }
+        return attachmentVoiceView.keepsPress(at: convert(point, to: attachmentVoiceView))
+    }
+
+    #if DEBUG
+    /// The attachment's voice on show, nil otherwise. Tests.
+    var debugAttachmentVoiceView: VoiceView? {
+        attachmentContent === attachmentVoiceView && !attachmentSlot.isHidden ? attachmentVoiceView : nil
+    }
+    /// The neutral line on show, nil otherwise. Tests.
+    var debugUnsupportedAttachmentLine: String? {
+        attachmentContent === unsupportedAttachmentLabel && !attachmentSlot.isHidden
+            ? unsupportedAttachmentLabel.text : nil
+    }
+    /// Whether the body's label shows. Tests.
+    var debugShowsBody: Bool { !bodyLabel.isHidden }
+    #endif
 
     /// Approve and Decline, as one inline group leading a held comment's
     /// menu — shared by the row's own menu and the stream's.
@@ -965,7 +1118,9 @@ final class CommentRowView: UIView {
         headerRow.alignment = .center
         headerRow.spacing = Spacing.sm
 
-        let textStack = UIStackView(arrangedSubviews: [headerRow, bodyLabel])
+        // The attachment's slot (#2309), hidden until a comment carries one.
+        attachmentSlot.isHidden = true
+        let textStack = UIStackView(arrangedSubviews: [headerRow, attachmentSlot, bodyLabel])
         self.textStack = textStack
         textStack.axis = .vertical
         textStack.spacing = Metrics.lineSpacing
@@ -1281,6 +1436,8 @@ extension CommentRowView: UIGestureRecognizerDelegate {
     /// instead of firing alongside the reply.
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
         guard gestureRecognizer.view === self else { return true }
+        // The voice's own press (#2309): play, seek, speed — not a reply.
+        if attachmentKeepsPress(at: touch.location(in: self)) { return false }
         var view = touch.view
         while let current = view, current !== self {
             if current is UIControl || current === avatarView || current === markedFace
@@ -1296,7 +1453,9 @@ extension CommentRowView: UIContextMenuInteractionDelegate {
         _ interaction: UIContextMenuInteraction,
         configurationForMenuAtLocation location: CGPoint
     ) -> UIContextMenuConfiguration? {
-        UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
+        // A press on the voice's controls is theirs (#2309): no lift.
+        if attachmentKeepsPress(at: location) { return nil }
+        return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
             UIMenu(children: self?.menuElements() ?? [])
         }
     }

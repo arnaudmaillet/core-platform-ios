@@ -80,7 +80,7 @@ public struct SubtitleCommentBuilder: Sendable {
         tickerIsRendering: Bool = true
     ) -> [SubtitleCue] {
         let candidates = tickerIsRendering
-            ? entries.filter { !Self.isClaimedByTicker(Self.flattened($0.body)) }
+            ? entries.filter { !Self.isClaimedByTicker(Self.line(of: $0)) }
             : entries
         let semantic = cues(from: candidates, requiringSemanticShape: true)
         // The no-blank floor: a post with comments the band isn't showing
@@ -109,7 +109,7 @@ public struct SubtitleCommentBuilder: Sendable {
     public static func previewDecidesFirstCue(_ preview: [CommentEntry], isWholeTopLevel: Bool) -> Bool {
         func decides(tickerIsRendering: Bool) -> Bool {
             for entry in preview {
-                let body = flattened(entry.body)
+                let body = line(of: entry)
                 let candidate = !tickerIsRendering || !isClaimedByTicker(body)
                 if candidate, !body.isEmpty, isSemanticShaped(body) { return true }
                 if (entry.replyCount ?? 0) > 0 { return false }
@@ -123,18 +123,23 @@ public struct SubtitleCommentBuilder: Sendable {
         var seenBodies = Set<String>()
         var cues: [SubtitleCue] = []
         for entry in entries {
-            // TODO(#2309, piece 2): a voice with no words speaks as
-            // "🎙 12″"; until then its empty body keeps it out of the zone.
-            let body = Self.flattened(entry.body)
+            // One line of words (#2309): a voice alone speaks as "🎙 12″".
+            let body = Self.line(of: entry)
             guard !body.isEmpty,
                   !requiringSemanticShape || Self.isSemanticShaped(body),
-                  seenBodies.insert(body.lowercased()).inserted else { continue }
+                  seenBodies.insert(CommentTickerBuilder.dedupKey(body, of: entry)).inserted else { continue }
             cues.append(SubtitleCue(
                 id: entry.id, text: body, avatarURL: entry.authorAvatarURL,
                 monogram: MonogramAvatarView.monogram(name: entry.authorName, handle: entry.authorHandle)
             ))
         }
         return cues
+    }
+
+    /// A comment's line in the zone: its one line of words (#2309 — "🎙
+    /// 12″" for a voice alone), flattened.
+    static func line(of entry: CommentEntry) -> String {
+        flattened(entry.oneLineText)
     }
 
     /// Subtitles render one visual block, so embedded newlines collapse
