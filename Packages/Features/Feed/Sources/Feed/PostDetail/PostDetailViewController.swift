@@ -1110,8 +1110,10 @@ final class PostDetailViewController: UIViewController {
     }
 
     /// Whether a stream shorter than its room starts from the bottom (#1799,
-    /// the default since #1923). Settable for tests, before
-    /// the stream is engaged.
+    /// the default since #1923) — Recent's, as the panel's resting contract
+    /// says (`CommentStreamResting`, #2287). ⚠️ A TEST SEAM, NEVER A HOST'S:
+    /// no host sets it — each gives the room, never the rest. Settable for
+    /// tests, before the stream is engaged.
     var anchorsShortStream = true
 
     /// How far the keyboard lifts the composer's input row above where it

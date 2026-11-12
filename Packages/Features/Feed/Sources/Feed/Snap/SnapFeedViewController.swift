@@ -3748,33 +3748,24 @@ final class SnapFeedViewController: UIViewController {
     /// `SnapCommentsSheetSession`. Today's panel, built as the page's is; the
     /// pager and the sector hold still while it is up.
     private func presentCommentsSheet(for id: PostID, animated: Bool) {
-        guard commentsSheet == nil, commentsEngagedID == nil, presentedViewController == nil,
+        // ⚠️ A REOPENING DURING THE CLOSE TURNS AROUND (#2287 § 4): the sheet
+        // gone, the media still on its way back, the session that closed it
+        // hands the media over where it stands rather than snapping it home.
+        let landingSheet = commentsSheet.flatMap { $0.postID == id && $0.isLandingAfterSheet ? $0 : nil }
+        guard commentsSheet == nil || landingSheet != nil, commentsEngagedID == nil, presentedViewController == nil,
               view.window != nil, modelsByID[id]?.mediaURL != nil,
               let indexPath = dataSource.indexPath(for: id),
               let cell = collectionView.cellForItem(at: indexPath) as? SnapFeedCell,
               let content = takeCommentsSheetWarm(for: id) ?? makeCommentsPanelContent?(id)
         else { return }
+        let handover = landingSheet?.handOverLanding()
         let detail = content as? PostDetailViewController
         // The panel learns here that its post turned out unavailable (#1409),
         // as `applyRailSlot` tells the page's.
         detail?.onPostUnavailable = { [weak self] id in self?.markPostUnavailable(id) }
-        // The avatar and the field alone: no like, no slot, no post actions.
-        detail?.setComposerBare()
-        // A SHORT THREAD IN A FIXED SHEET (#2195): the sheet keeps its
-        // shape's height, so one or two comments leave room in it. Each tab
-        // keeps its own reading — Popular from the top, as a ranking (#2007);
-        // Recent from the bottom, its last comment over the composer, the
-        // conversation the owner decided on (#1799) — the panel's own rule
-        // (`anchorsShortStream`, Recent only), left on. Until #2195 the sheet
-        // was fitted to its stream and the anchor was turned off.
-        // A stream held whole leaves a drag on it to the sheet.
-        detail?.letSheetTakeShortStreams()
-        // The sheet rises over the keyboard itself: Recent does not ride it.
-        detail?.streamsRideKeyboard = false
-        // The count the feed knows: no comment bones for a post with none (#1773).
-        detail?.seedCommentCount(modelsByID[id]?.cardMetrics?.comments)
-        detail?.setStreamTransitionProgress(0)
-        detail?.setComposerEntranceState(offstage: false)
+        if let detail {
+            SnapCommentsSheetViewController.prepare(detail, commentCount: modelsByID[id]?.cardMetrics?.comments)
+        }
         collectionView.isScrollEnabled = false
         (parent as? ForYouSectorViewController)?.setPagingEnabled(false)
         // The balance moves to the sheet's bar (the page's leaves with its
@@ -3801,7 +3792,7 @@ final class SnapFeedViewController: UIViewController {
         }
         commentsSheet = session
         refreshWalletBadge()
-        session.present(animated: animated)
+        session.present(animated: animated, handover: handover)
     }
 
     /// Builds the sheet's panel for `id` before the tap: loading its view asks

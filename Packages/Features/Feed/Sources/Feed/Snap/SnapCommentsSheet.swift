@@ -39,6 +39,11 @@ import UIKit
 /// one height and never shrinks; the comments scroll inside the sheet. The
 /// sheet is undimmed, so the media above it stays lit; a tap there closes
 /// it, as a swipe down does.
+///
+/// THE CLOSE LANDS IN ONE MOVEMENT (#2287, the owner 2026-11-11): once the
+/// sheet leaves with no finger on it, the media goes back to full screen on
+/// its own clock, never behind the sheet, and the page is put back only
+/// from rest (`beginLanding`, `CommentsSheetLanding`).
 @MainActor
 final class SnapCommentsSheetSession: NSObject, UISheetPresentationControllerDelegate {
     /// The sheet's numbers, next to its catalogue (#2195 § 5).
@@ -166,8 +171,11 @@ final class SnapCommentsSheetSession: NSObject, UISheetPresentationControllerDel
         super.init()
     }
 
-    func present(animated: Bool) {
-        guard let feed, let window = feed.view.window, let cell else { return end() }
+    /// - Parameter handover: what a session whose media was still on its
+    ///   way back left (`handOverLanding`): this opening turns around from
+    ///   where the media stands (#2287 § 4).
+    func present(animated: Bool, handover: Handover? = nil) {
+        guard let feed, let window = feed.view.window, let cell else { return sheetDidGo() }
         let resting = Self.restingHeight(
             screen: window.bounds.size, safeArea: window.safeAreaInsets, picture: cell.commentsSheetPictureSize
         )
@@ -243,11 +251,17 @@ final class SnapCommentsSheetSession: NSObject, UISheetPresentationControllerDel
             }
             return route.detached
         }
-        content.onDismissed = { [weak self] in self?.end() }
+        content.onDismissed = { [weak self] in self?.sheetDidGo() }
         content.onClose = { [weak self] in self?.close() }
 
-        // The page's top bar items leave with its interface.
+        // The page's top bar items leave with its interface — or are still
+        // gone, hidden by the session this one takes the media from.
         setTopBarItemsHidden(true, animated: animated)
+        if let handover {
+            turnaround = handover.pose
+            hiddenNavigationItems += handover.hiddenNavigationItems
+            hidBackButton = hidBackButton || handover.hidBackButton
+        }
         catcher.frame = feed.view.bounds
         catcher.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         catcher.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(mediaTapped)))
@@ -374,13 +388,16 @@ final class SnapCommentsSheetSession: NSObject, UISheetPresentationControllerDel
         }
     }
 
-    /// Closes the sheet; the session ends when it has gone.
+    /// Closes the sheet — its ✕, a tap above it, the QA hooks: the media
+    /// starts its way back at once (`beginLanding`); the session ends once
+    /// the sheet has gone and the media has landed.
     @objc func close() {
-        guard !hasEnded, sheet.presentingViewController != nil else { return }
+        guard !hasEnded, phase == .open, sheet.presentingViewController != nil else { return }
         endEditing()
         beginLeaving()
         content.freeze()
         feed?.dismiss(presented: sheet)
+        beginLanding(duration: remainingDismissal(sheet.transitionCoordinator))
     }
 
     /// The page's TOP BAR items: gone while the sheet is up, back once it
@@ -421,7 +438,8 @@ final class SnapCommentsSheetSession: NSObject, UISheetPresentationControllerDel
     /// or the keyboard is on the move (the display link's pace).
     fileprivate var lastFollowedTop: CGFloat? { lastDrawnTop }
     fileprivate var isAnimating: Bool {
-        isKeyboardHiding || (sheet.presentationController?.presentedView?.layer.animationKeys()?.isEmpty == false)
+        phase == .landing || isKeyboardHiding
+            || (sheet.presentationController?.presentedView?.layer.animationKeys()?.isEmpty == false)
             || preview?.layer.animationKeys()?.isEmpty == false
             || (!isPreviewUnavailable && mediaOutShare != (previewOwnsMedia ? 1 : 0))
     }
@@ -481,7 +499,7 @@ final class SnapCommentsSheetSession: NSObject, UISheetPresentationControllerDel
     }
 
     private func followIfMovedByHand() {
-        guard let container = sheet.presentationController?.containerView,
+        guard phase == .open, let container = sheet.presentationController?.containerView,
               let presented = sheet.presentationController?.presentedView,
               presented.layer.animationKeys()?.isEmpty ?? true else { return }
         let modelTop = container.convert(presented.frame, to: nil).minY
@@ -492,8 +510,14 @@ final class SnapCommentsSheetSession: NSObject, UISheetPresentationControllerDel
         frameTiming = timing
     }
 
-    /// The page as the sheet stands this frame.
+    /// The page as the sheet stands this frame — or, once it leaves with no
+    /// finger on it, as the media's way back stands (`followLanding`).
     fileprivate func follow() {
+        switch phase {
+        case .open: break
+        case .landing: return followLanding(now: frameTiming?.shown ?? CACurrentMediaTime())
+        case .landed: return
+        }
         followKeyboardDrag()
         guard let cell, let window = cell.window,
               let container = sheet.presentationController?.containerView,
@@ -598,7 +622,17 @@ final class SnapCommentsSheetSession: NSObject, UISheetPresentationControllerDel
             height: max(room, smallest)
         )
         let wasPreviewOwned = previewOwnsMedia
-        if isSheetAtRest(top: top) {
+        // ⚠️ FROM EXPANDED, THE PREVIEW KEEPS THE PICTURE UNDER THE FINGER
+        // (#2287 § 4, the owner 2026-11-10): a swipe down from expanded
+        // handed the picture back to the media past the threshold — the
+        // preview vanishing, a dimmed media regrowing elsewhere. Leaving
+        // from expanded, the preview stays the picture until the sheet is let
+        // go; it then grows from its corner to full screen (`beginLanding`).
+        // Let go back up, the sheet is no longer leaving.
+        let holdsPreview = isLeaving && leaveRestTop != nil && previewOwnsMedia
+        if holdsPreview {
+            // The picture stays the preview's.
+        } else if isSheetAtRest(top: top) {
             previewOwnsMedia = room < smallest - Self.previewTakesAt
         } else if !previewOwnsMedia, room < smallest - Self.previewTakesAt {
             previewOwnsMedia = true
@@ -630,10 +664,20 @@ final class SnapCommentsSheetSession: NSObject, UISheetPresentationControllerDel
             ? min(1, max(0, progress))
             : min(1, max(0, (restingRoom - room) / max(1, restingRoom - smallest)))
         let sheetRadius = sheetCornerRadius(below: container)
-        cell.setCommentsSheetLayout(
-            progress: progress, mediaRegion: region, sheetCornerRadius: sheetRadius, out: out,
-            towardsPreview: towardsPreview, previewCornerRadius: SnapCommentsPreview.cornerRadius
+        // While the preview keeps the picture, the page's interface waits
+        // for the media too.
+        var pose = CommentsSheetPose(
+            progress: min(1, max(0, progress)), region: region, out: out,
+            towardsPreview: towardsPreview, interface: holdsPreview ? 1 : min(1, max(0, progress))
         )
+        if let handed = turnaround {
+            let turned = handed.turningAround(towards: pose)
+            pose = turned.pose
+            if turned.caughtUp { turnaround = nil }
+        }
+        cell.setCommentsSheetLayout(pose, sheetCornerRadius: sheetRadius, previewCornerRadius: SnapCommentsPreview.cornerRadius)
+        lastPose = pose
+        lastSheetRadius = sheetRadius
         followPreview(wantsPreview: previewOwnsMedia && mediaOutShare >= 1, in: window, sheetTop: top)
         offerExpandedDetentIfNeeded()
     }
@@ -1140,7 +1184,281 @@ final class SnapCommentsSheetSession: NSObject, UISheetPresentationControllerDel
         return detent
     }
 
-    private func end() {
+    // MARK: The way back to the page (#2287 § 4)
+
+    /// Where the session stands: the sheet up (or leaving under a finger),
+    /// the media on its way back, the page at rest again.
+    enum ClosePhase {
+        case open, landing, landed
+    }
+
+    private(set) var phase: ClosePhase = .open
+    /// The media's way back to full screen, once the sheet leaves with no
+    /// finger on it.
+    private var landing: CommentsSheetLanding?
+    /// The sheet's top where the way back began: its share still to go down
+    /// is measured from there (`sheetRemainingShare`).
+    private var landingSheetTop: CGFloat?
+    /// The sheet's share still to go, as last accepted.
+    private var lastSheetShare: CGFloat?
+    /// UIKit's dismissal has completed: the sheet has gone.
+    private(set) var sheetHasGone = false
+    /// The preview draws the media over the sheet while it lands: the same
+    /// pixels, where the media under the sheet cannot be seen.
+    private var standsIn = false
+    /// The stand-in's opacity as the way back began (a pop still running).
+    private var standInAlphaFrom: CGFloat = 1
+    /// Reduce Motion's way back: a cross-fade in place.
+    private var landsByFade = false
+    /// The page as last drawn, and the sheet's corners then.
+    private(set) var lastPose: CommentsSheetPose?
+    private var lastSheetRadius: CGFloat = 0
+    /// What a session whose media was still landing handed this opening:
+    /// it turns around from there (`CommentsSheetPose.turningAround`).
+    private var turnaround: CommentsSheetPose?
+    /// Reduce Motion's cross-fade, as long as a dismissal takes.
+    private static let fadeDuration: CFTimeInterval = 0.3
+
+    /// What a reopening takes from a session whose media is still on its
+    /// way back (`handOverLanding`).
+    struct Handover {
+        let pose: CommentsSheetPose?
+        let hiddenNavigationItems: [UIBarButtonItem]
+        let hidBackButton: Bool
+    }
+
+    /// The sheet has gone and the media is still on its way back: a
+    /// reopening may take it from here (`handOverLanding`).
+    var isLandingAfterSheet: Bool { sheetHasGone && phase == .landing && !hasEnded }
+
+    /// What is left of UIKit's dismissal, for the media to land with it.
+    private func remainingDismissal(_ context: UIViewControllerTransitionCoordinatorContext?) -> CFTimeInterval? {
+        guard let context, context.transitionDuration > 0 else { return nil }
+        let left = context.transitionDuration * (1 - min(1, max(0, Double(context.percentComplete))))
+        return min(0.6, max(0.25, left))
+    }
+
+    /// THE MEDIA'S WAY BACK BEGINS (#2287 § 4): from the pose it stands in,
+    /// one movement to the page at rest (`CommentsSheetLanding`), never cut
+    /// short by the sheet's end.
+    ///
+    /// - **The media (collapsed):** it grows from its place above the sheet
+    ///   to its full-screen frame, the room it shrank into held where it
+    ///   was, its corners and its cut opening to the page's on the way.
+    /// - **The preview (expanded, the owner 2026-11-10):** the preview ITSELF
+    ///   grows from its corner to full screen. The movement is the media's —
+    ///   the card's pose, from the preview's frame — and the preview draws
+    ///   it over the sheet, the same pixels, until the sheet has gone; the
+    ///   media then shows from under it, where it stands. No second, dimmed
+    ///   media appearing elsewhere.
+    /// - **Reduce Motion:** a cross-fade in place — the shrunk picture (the
+    ///   preview, or a stand-in drawn over the media) fades out where it
+    ///   stands as the page at rest fades in under it.
+    ///
+    /// - Parameter duration: what is left of UIKit's dismissal, nil for the
+    ///   standard length.
+    private func beginLanding(duration: CFTimeInterval?, now: CFTimeInterval = CACurrentMediaTime()) {
+        guard phase == .open, !hasEnded else { return }
+        phase = .landing
+        turnaround = nil
+        guard let cell, cell.window != nil, var from = lastPose else {
+            landing = CommentsSheetLanding(from: CommentsSheetPose.restingPose, start: now, duration: 0)
+            return mediaDidLand()
+        }
+        let reduceMotion = UIAccessibility.isReduceMotionEnabled
+        if let preview, !preview.isHidden, isPreviewPopped {
+            // From the preview as it stands — its pop included.
+            let frame = preview.layer.presentation()?.frame ?? preview.frame
+            standInAlphaFrom = CGFloat(preview.layer.presentation()?.opacity ?? Float(preview.alpha))
+            from = CommentsSheetPose(progress: 1, region: frame, out: 0, towardsPreview: 1, interface: 1)
+            beginStandIn(preview, on: cell)
+        }
+        landsByFade = reduceMotion
+        landing = CommentsSheetLanding(
+            from: from, start: now,
+            duration: reduceMotion ? Self.fadeDuration : (duration ?? CommentsSheetLanding.standardDuration)
+        )
+        landingSheetTop = lastDrawnTop
+        lastSheetShare = nil
+        // ⚠️ AT THE SCREEN'S RATE FROM THE TAP: a sheet at rest is followed
+        // at a slow pace (`DisplayLinkTarget`), and the movement's first
+        // frame would come up to 100 ms late, the media far ahead.
+        link?.preferredFrameRateRange = DisplayLinkTarget.movingRate
+        if reduceMotion, !standsIn, let window = cell.window {
+            // A stand-in where the shrunk media stands, to fade out over the
+            // page fading in: drawn from the media as it was last laid out.
+            let size = cell.commentsSheetPictureFrame?.size ?? from.region.size
+            if preview == nil, size.width > 0, size.height > 0 { _ = makePreview(size: size, in: window) }
+            if let preview {
+                standInAlphaFrom = 1
+                beginStandIn(preview, on: cell)
+                placeStandIn(furniture: 0, cell: cell)
+            }
+        }
+        followLanding(now: now)
+    }
+
+    /// The preview made the media's stand-in: shown, still, no finger on it.
+    private func beginStandIn(_ preview: SnapCommentsPreview, on cell: SnapFeedCell) {
+        if preview.isHidden {
+            isMediaPaused = cell.showsPausedMark
+            preview.isHidden = false
+        }
+        preview.beginStandingIn()
+        isPreviewHeld = true
+        standsIn = true
+        // The media under the sheet is the stand-in's to show until the sheet
+        // has gone — but for a cross-fade, which shows both.
+        if !UIAccessibility.isReduceMotionEnabled { cell.setCommentsSheetMediaHidden(true) }
+    }
+
+    /// The stand-in drawn as the media stands this frame.
+    private func placeStandIn(furniture: CGFloat, cell: SnapFeedCell) {
+        guard let preview, let window = cell.commentsSheetPictureFrame,
+              let picture = cell.commentsSheetWholePictureFrame else { return }
+        preview.standIn(
+            window: window, cornerRadius: cell.commentsSheetPictureRadius, picture: picture, furniture: furniture
+        )
+    }
+
+    /// The media's way back, this frame.
+    private func followLanding(now: CFTimeInterval) {
+        guard phase == .landing, var landing else { return }
+        guard let cell, cell.window != nil else {
+            // The page went with the cell: nothing left to land.
+            self.landing = nil
+            return mediaDidLand()
+        }
+        let pose = landing.advance(to: now, sheetRemaining: landsByFade ? nil : sheetRemainingShare())
+        self.landing = landing
+        let left = landing.remaining
+        let previewRadius = SnapCommentsPreview.cornerRadius
+        if landsByFade {
+            followFade(from: landing.from, remaining: left, cell: cell)
+        } else {
+            cell.setCommentsSheetLayout(pose, sheetCornerRadius: lastSheetRadius, previewCornerRadius: previewRadius)
+            if standsIn {
+                if sheetHasGone {
+                    handStandInBack()
+                } else {
+                    placeStandIn(furniture: pose.progress, cell: cell)
+                    let ramp = CommentsSheetLanding.smoothstep((left - 0.7) / 0.3)
+                    preview?.alpha = 1 - (1 - standInAlphaFrom) * ramp
+                }
+            }
+        }
+        lastPose = pose
+        if landing.hasLanded { mediaDidLand() }
+    }
+
+    /// Reduce Motion: the shrunk picture fades out where it stands as the
+    /// page at rest fades in — with a stand-in, under it; without one, once
+    /// it has gone.
+    private func followFade(from: CommentsSheetPose, remaining left: CGFloat, cell: SnapFeedCell) {
+        let previewRadius = SnapCommentsPreview.cornerRadius
+        var rest = CommentsSheetPose.restingPose
+        rest.region = from.region
+        rest.interface = from.interface * left
+        if standsIn, let preview {
+            cell.setCommentsSheetMediaHidden(false)
+            cell.setCommentsSheetLayout(rest, sheetCornerRadius: lastSheetRadius, previewCornerRadius: previewRadius)
+            cell.commentsSheetMediaFade = 1 - left
+            preview.alpha = left
+            return
+        }
+        if left > 0.5 {
+            cell.setCommentsSheetLayout(from, sheetCornerRadius: lastSheetRadius, previewCornerRadius: previewRadius)
+            cell.commentsSheetMediaFade = (left - 0.5) / 0.5
+        } else {
+            rest.interface = from.interface * left / 0.5
+            cell.setCommentsSheetLayout(rest, sheetCornerRadius: lastSheetRadius, previewCornerRadius: previewRadius)
+            cell.commentsSheetMediaFade = 1 - left / 0.5
+        }
+    }
+
+    /// The sheet's share of its way down still to go, from where the media's
+    /// way back began: 1 there, 0 off the screen. Nil once it has gone, or
+    /// when it was never read: the media then carries on on its own.
+    ///
+    /// ⚠️ A FRAME THAT CANNOT BE READ HOLDS THE LAST ONE (the trap `follow`
+    /// names: a presentation read on the model's end for one frame,
+    /// 2026-11-04; a jump in one frame is not the sheet's). Read so, the
+    /// media would have landed in a frame; it holds for that frame instead,
+    /// and goes on with the sheet.
+    private func sheetRemainingShare() -> CGFloat? {
+        guard !sheetHasGone, let from = landingSheetTop, let window = cell?.window else { return nil }
+        guard let container = sheet.presentationController?.containerView,
+              let presented = sheet.presentationController?.presentedView,
+              let layer = presented.layer.presentation() else { return lastSheetShare }
+        let height = window.bounds.height
+        guard height - from > 1 else { return nil }
+        let drawn = layer.convert(layer.bounds, to: nil).minY
+        guard drawn >= window.safeAreaInsets.top - 1 else { return lastSheetShare }
+        // Where the sheet is when this frame is SHOWN, as `follow` reads it:
+        // read at the link's call, the media would trail the sheet by a frame.
+        let top = predictedTop(drawn: drawn, model: container.convert(presented.frame, to: nil).minY)
+        let share = min(1, max(0, (height - top) / (height - from)))
+        if abs(share - (lastSheetShare ?? 1)) > Self.sheetShareJump { return lastSheetShare }
+        lastSheetShare = share
+        return share
+    }
+
+    private static let sheetShareJump: CGFloat = 0.3
+
+    /// The sheet has gone in the middle of the way back: the media, where it
+    /// stands — the stand-in's very pixels — shows from under it, and the
+    /// stand-in goes.
+    private func handStandInBack() {
+        guard standsIn else { return }
+        standsIn = false
+        isPreviewHeld = false
+        removePreview()
+    }
+
+    /// The media has landed: the page at rest. Held while a stand-in still
+    /// covers a sheet that has not gone — taken away first, the sheet's last
+    /// frames would show over the media again.
+    private func mediaDidLand() {
+        guard phase == .landing else { return }
+        if standsIn, !landsByFade, !sheetHasGone { return }
+        phase = .landed
+        landing = nil
+        settlePage()
+        if sheetHasGone { finish() }
+    }
+
+    /// The page at rest, where the media has landed: clearing its layout
+    /// now changes nothing on the screen (`CommentsSheetLanding`).
+    private func settlePage() {
+        standsIn = false
+        isPreviewHeld = false
+        removePreview()
+        cell?.clearCommentsSheetLayout()
+        setTopBarItemsHidden(false, animated: true)
+    }
+
+    /// UIKit's dismissal has completed — or the sheet never came. The media
+    /// carries on to rest if it is still on its way (a sheet that left
+    /// without our close — a programmatic dismissal — lands from where it
+    /// stands); the session ends once it has landed.
+    private func sheetDidGo() {
+        guard !sheetHasGone, !hasEnded else { return }
+        sheetHasGone = true
+        catcher.removeFromSuperview()
+        sheet.presentationController?.containerView?.transform = .identity
+        switch phase {
+        case .open:
+            beginLanding(duration: nil)
+        case .landing:
+            if standsIn, !landsByFade { handStandInBack() }
+            if landing?.hasLanded ?? true { mediaDidLand() }
+        case .landed:
+            finish()
+        }
+    }
+
+    /// The session's last step: the link, the observers, the feed told.
+    private func finish() {
         guard !hasEnded else { return }
         hasEnded = true
         link?.invalidate()
@@ -1151,11 +1469,56 @@ final class SnapCommentsSheetSession: NSObject, UISheetPresentationControllerDel
         followCommitObserver = nil
         removePreview()
         catcher.removeFromSuperview()
-        sheet.presentationController?.containerView?.transform = .identity
-        cell?.clearCommentsSheetLayout()
-        setTopBarItemsHidden(false, animated: true)
         onEnd()
     }
+
+    /// A reopening while the media is still on its way back, the sheet gone
+    /// (#2287 § 4): this session ends WITHOUT putting the page back, and
+    /// hands the media's pose — and the top bar items it hid — to the new
+    /// one, which turns around from there. A cross-fade (Reduce Motion) is
+    /// ended at rest instead: nothing moves in it to turn around.
+    func handOverLanding() -> Handover {
+        var pose: CommentsSheetPose?
+        if isLandingAfterSheet, !landsByFade {
+            pose = lastPose
+            phase = .landed
+            landing = nil
+            standsIn = false
+            isPreviewHeld = false
+            removePreview()
+        } else if phase != .landed {
+            phase = .landed
+            landing = nil
+            settlePage()
+        }
+        let handover = Handover(
+            pose: pose, hiddenNavigationItems: hiddenNavigationItems, hidBackButton: hidBackButton
+        )
+        hiddenNavigationItems = []
+        hidBackButton = false
+        finish()
+        return handover
+    }
+
+    #if DEBUG
+    /// The way back as a close begins it, for tests: from `pose`, without a
+    /// sheet to read.
+    func debugBeginLanding(from pose: CommentsSheetPose, now: CFTimeInterval, duration: CFTimeInterval) {
+        lastPose = pose
+        cell?.setCommentsSheetLayout(pose, sheetCornerRadius: 0, previewCornerRadius: SnapCommentsPreview.cornerRadius)
+        beginLanding(duration: duration, now: now)
+    }
+
+    /// A display link's frame of the way back at `now`, for tests.
+    func debugFollowLanding(now: CFTimeInterval) {
+        followLanding(now: now)
+    }
+
+    /// UIKit's dismissal completing, for tests.
+    func debugSheetDidGo() {
+        sheetDidGo()
+    }
+    #endif
 
     // MARK: UIAdaptivePresentationControllerDelegate
 
@@ -1176,10 +1539,16 @@ final class SnapCommentsSheetSession: NSObject, UISheetPresentationControllerDel
     func presentationControllerWillDismiss(_ presentationController: UIPresentationController) {
         beginLeaving()
         content.freeze()
+        // The finger let go: back up, the sheet stays; on down, the media
+        // starts its way back from where the finger left it (#2287).
         sheet.transitionCoordinator?.notifyWhenInteractionChanges { [weak self] context in
-            guard context.isCancelled else { return }
-            self?.isLeaving = false
-            self?.leaveRestTop = nil
+            guard let self else { return }
+            guard context.isCancelled else {
+                beginLanding(duration: remainingDismissal(context))
+                return
+            }
+            isLeaving = false
+            leaveRestTop = nil
         }
     }
 
@@ -1191,7 +1560,7 @@ final class SnapCommentsSheetSession: NSObject, UISheetPresentationControllerDel
     }
 
     func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
-        end()
+        sheetDidGo()
     }
 
     // MARK: UISheetPresentationControllerDelegate
@@ -1356,6 +1725,30 @@ final class SnapCommentsSheetViewController: UIViewController, UINavigationBarDe
 
     /// The sheet's own bar.
     private let ownBar = UINavigationBar()
+
+    /// The panel made the sheet's (#2087): what the sheet changes in it,
+    /// all in one place — and nothing of where its streams rest, which is
+    /// the panel's own contract (`CommentStreamResting`, #2287 § 3): the
+    /// sheet gives the room (`applyPanelInsets`), never the rest.
+    ///
+    /// - Parameter commentCount: the count the feed knows, nil for none.
+    static func prepare(_ detail: PostDetailViewController, commentCount: Int64?) {
+        // The avatar and the field alone: no like, no slot, no post actions.
+        detail.setComposerBare()
+        // A SHORT THREAD IN A FIXED SHEET (#2195): the sheet keeps its
+        // shape's height, so one or two comments leave room in it — Popular
+        // from the top, Recent from the bottom, as everywhere the panel is
+        // (`CommentStreamResting`). Until #2195 the sheet was fitted to its
+        // stream and Recent's anchor was turned off.
+        // A stream held whole leaves a drag on it to the sheet.
+        detail.letSheetTakeShortStreams()
+        // The sheet rises over the keyboard itself: Recent does not ride it.
+        detail.streamsRideKeyboard = false
+        // The count the feed knows: no comment bones for a post with none (#1773).
+        detail.seedCommentCount(commentCount)
+        detail.setStreamTransitionProgress(0)
+        detail.setComposerEntranceState(offstage: false)
+    }
 
     init(panel: UIViewController, walletBadge: WalletBadgeButton?, onWalletTap: (() -> Void)?) {
         self.panel = panel

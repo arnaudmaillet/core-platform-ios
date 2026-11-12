@@ -1,4 +1,5 @@
 import DesignSystem
+import MediaPlayback
 import UIKit
 
 /// The post's media floating over the comments sheet once the sheet has
@@ -75,7 +76,7 @@ final class SnapCommentsPreview: UIView {
         super.init(frame: .zero)
         // Over the sheet's rows: a shadow lifts it off them.
         layer.shadowColor = UIColor.black.cgColor
-        layer.shadowOpacity = 0.45
+        layer.shadowOpacity = Self.shadowOpacity
         layer.shadowRadius = Spacing.md
         layer.shadowOffset = CGSize(width: 0, height: Spacing.xs)
         clip.clipsToBounds = true
@@ -203,7 +204,64 @@ final class SnapCommentsPreview: UIView {
     /// 2026-11-03).
     override func layoutSubviews() {
         super.layoutSubviews()
-        layer.shadowPath = UIBezierPath(roundedRect: bounds, cornerRadius: Self.cornerRadius).cgPath
+        layer.shadowPath = UIBezierPath(roundedRect: bounds, cornerRadius: landingRadius ?? Self.cornerRadius).cgPath
+    }
+
+    private static let shadowOpacity: Float = 0.45
+
+    // MARK: The way back to the page (#2287 § 4)
+
+    /// Its corners while it stands in for the media on its way back; nil
+    /// otherwise.
+    private var landingRadius: CGFloat?
+
+    /// The preview from here on stands in for the media on its way back to
+    /// full screen (#2287, the owner 2026-11-10: "the preview goes to
+    /// full-screen media in one move"): no finger takes it any more, and its
+    /// picture is placed by `standIn` rather than filling it.
+    func beginStandingIn() {
+        layer.removeAllAnimations()
+        isUserInteractionEnabled = false
+        content.autoresizingMask = []
+        showStash(leading: nil)
+    }
+
+    /// The preview drawn exactly as the media under the sheet stands: its
+    /// frame the media's shown window (`window`, the window's coordinates),
+    /// its corners the media's, its picture the media's whole picture
+    /// (`picture`, in the window too) — clipped by it as the media's mask
+    /// clips the card. The same pixels as the media, over the sheet, which
+    /// hides the media until it has gone. Its own furniture — shadow, edge,
+    /// stopped mark, expand button — at `furniture` (1 as a preview, 0 at
+    /// rest), the edge as the media's own.
+    ///
+    /// ⚠️ ITS SURFACE LAID OUT AT ONCE: a sample-buffer layer given a new
+    /// size animates its own content there (`VideoRenderView.settleGeometry`).
+    func standIn(window: CGRect, cornerRadius: CGFloat, picture: CGRect, furniture: CGFloat) {
+        let place = {
+            self.transform = .identity
+            self.bounds = CGRect(origin: .zero, size: window.size)
+            self.center = CGPoint(x: window.midX, y: window.midY)
+            self.layoutIfNeeded()
+            self.content.frame = picture.offsetBy(dx: -window.minX, dy: -window.minY)
+        }
+        if let surface = content as? VideoRenderView {
+            surface.settleGeometry(place)
+        } else {
+            place()
+        }
+        landingRadius = cornerRadius
+        clip.layer.cornerRadius = cornerRadius
+        edge.layer.cornerRadius = cornerRadius
+        let share = min(max(0, furniture), 1)
+        edge.alpha = share
+        layer.shadowOpacity = Self.shadowOpacity * Float(share)
+        layer.shadowPath = UIBezierPath(roundedRect: bounds, cornerRadius: cornerRadius).cgPath
+        // The marks go first: they are the preview's, not the media's.
+        let marks = min(max(0, (share - 0.6) / 0.4), 1)
+        expandButton.alpha = marks
+        pausedMark.layer.removeAllAnimations()
+        pausedMark.alpha = min(pausedMark.alpha, marks)
     }
 
     override func didMoveToWindow() {
