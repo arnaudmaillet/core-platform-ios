@@ -24,10 +24,15 @@ struct BarSelectorItemTests {
     /// A trailing group shares one pill: 44, then +27 per item, and 24pt
     /// between the two groups.
     @Test func aTrailingGroupIsChargedAsOnePill() {
+        // ⚠️ The expected rooms are stated as typed constants, compared with a
+        // tolerance: an arithmetic chain of literals inside `#expect`
+        // compared unequal on CI ("246.0" against "246").
         let one = BarSelectorBudget(barWidth: 402, leadingWidths: [44], trailingWidths: [44])
-        #expect(one.room == 314 - 44 - 24)
+        let oneRoom: CGFloat = 246 // 314 − 44 − 24
+        #expect(abs(one.room - oneRoom) < 0.01, "\(one.room)")
         let two = BarSelectorBudget(barWidth: 402, leadingWidths: [44], trailingWidths: [44, 44])
-        #expect(two.room == 314 - 44 - 27 - 44 - 24)
+        let twoRoom: CGFloat = 175 // 314 − 44 − 27 − 44 − 24
+        #expect(abs(two.room - twoRoom) < 0.01, "\(two.room)")
         // A glyph narrower than a platter still takes one.
         #expect(BarSelectorBudget(barWidth: 402, leadingWidths: [20]).room == 314)
     }
@@ -95,25 +100,23 @@ struct BarSelectorItemTests {
         #expect(bar.intrinsicContentSize.width >= bar.intrinsicContentSize.height)
     }
 
-    /// The item is re-minted when the width moves — under the same
-    /// identifier, around the same strip, with its frame already set (UIKit
-    /// reads the frame at hand-over) — and not otherwise.
-    @Test func aWidthChangeReMintsTheItemUnderOneIdentifier() throws {
+    /// ONE item for the strip's life, as For You's: a width change is told
+    /// in place (`fit` answers that it moved), never by minting a new item
+    /// around the same strip — a strip handed from one item to the next lost
+    /// its window (`-pill-drag-probe` read `bar=0`).
+    @Test func aWidthChangeKeepsTheOneItem() throws {
         let bar = strip()
         let selector = BarSelectorItem(strip: bar, id: "test.selector")
-        let budget = BarSelectorBudget(barWidth: 402, leadingWidths: [44])
-        #expect(selector.fit(budget), "the first fit mints the item at its width")
         let first = selector.item
-        #expect(abs(bar.frame.width - bar.intrinsicContentSize.width) < 0.5)
-        #expect(!selector.fit(budget), "the same room re-minted the item")
-        #expect(selector.item === first)
+        let budget = BarSelectorBudget(barWidth: 402, leadingWidths: [44])
+        #expect(selector.fit(budget), "the first fit states a width")
+        #expect(!selector.fit(budget), "the same room moved the width")
 
         bar.setBadge(43, at: 0)
-        #expect(selector.fit(budget))
-        #expect(selector.item !== first)
+        #expect(selector.fit(budget), "a count did not move the width")
+        #expect(selector.item === first, "the item was re-minted")
         #expect(selector.item.identifier == "test.selector")
         #expect(selector.item.customView === bar)
-        #expect(abs(bar.frame.width - bar.intrinsicContentSize.width) < 0.5)
     }
 
     /// `[lead][separator][selector]`, or the selector alone; the same

@@ -71,11 +71,10 @@ struct InboxSelectorInBarTests {
         #expect(screen.navigationItem.titleView == nil, "the selector is not in the title slot")
     }
 
-    /// ⚠️ THE IDENTIFIER OUTLIVES EVERY RE-MINT. A count widens its segment
-    /// and the bar freezes an item's width when the item is made, so the
-    /// selector's item is minted afresh around the same strip — under the
-    /// same identifier, the same slot to UIKit. The count stays on the
-    /// segment.
+    /// ⚠️ ONE ITEM, ONE IDENTIFIER, WHATEVER THE COUNTS. A count widens its
+    /// segment; the selector re-fits in place — the same item, around the
+    /// same strip, under the same identifier (a re-minted item lost its strip
+    /// on the simulator, `BarSelectorItem`).
     @Test func theSelectorsIdentifierIsStableAcrossACount() throws {
         let (screen, surfaces) = inbox()
         screen.setLeadingAccessoryItem(bell())
@@ -87,6 +86,7 @@ struct InboxSelectorInBarTests {
         surfaces[1].publish(6)
 
         let after = try #require(screen.navigationItem.leftBarButtonItems?.last)
+        #expect(after === before, "the selector's item was re-minted")
         #expect(after.identifier == before.identifier)
         #expect(after.customView === strip, "a new strip where the same one belongs")
         #expect(strip.intrinsicContentSize.width > width, "the count did not widen the selector")

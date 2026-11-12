@@ -52,8 +52,8 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     /// identifier — with the room it may take, 15pt or 13pt, and a scroll
     /// past that. Never a `•••`.
     private let selector: BarSelectorItem
-    /// The selector item's identifier, the same across every re-mint and
-    /// every launch (#2337).
+    /// The selector item's identifier, the same on every launch (#2337). One
+    /// item for the screen's life, as For You's.
     static let selectorItemID = "messages.inbox.selector"
 
     /// Built in `viewDidLoad`, once the surfaces are children — reading a
@@ -494,11 +494,12 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     }
 
     /// Re-fits the selector to the room it has — a new bar width, a count
-    /// that widened a segment — and writes the group again only when the item
-    /// had to be re-minted (the bar freezes an item's width when it is made).
+    /// that widened a segment — and, when the width it states moved, asks the
+    /// bar to lay out again. The item stays the same: no group is rewritten
+    /// (`BarSelectorItem`'s note on why it is never re-minted).
     private func refitSelector() {
         guard isViewLoaded, selector.fit(selectorBudget) else { return }
-        applyLeadingGroup()
+        navigationController?.navigationBar.setNeedsLayout()
     }
 
     /// The room the bar leaves the selector: the bell before it, whatever
@@ -596,12 +597,9 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
 
     /// Stamps a count on a segment and re-settles the navigation bar around it.
     ///
-    /// ⚠️ A badge changes the capsule's WIDTH, and the bar freezes an item's
-    /// width when the item is made — the capsule's own
-    /// `invalidateIntrinsicContentSize` is not enough, and frame and content
-    /// drift apart the moment a count appears or clears. So the selector is
-    /// re-fitted, and its item re-minted under the same identifier when the
-    /// width moved (`BarSelectorItem`).
+    /// ⚠️ A badge changes the capsule's WIDTH, and with it what fits: the
+    /// selector is re-fitted (15pt or 13pt, its ceiling) and the bar told to
+    /// lay out again when the stated width moved (`BarSelectorItem`).
     private func setBadge(_ count: Int, at index: Int) {
         categoryBar.setBadge(count, at: index)
         refitSelector()

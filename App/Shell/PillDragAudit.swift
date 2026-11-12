@@ -130,9 +130,16 @@ final class PillDragAudit {
         }
         var candidate = tabBarController.selectedViewController
         if let nav = candidate as? UINavigationController {
+            // ⚠️ BY THE SCREEN'S OWN BAR ITEMS, NOT BY WALKING THE BAR. A walk
+            // down `nav.navigationBar` found nothing for the inbox's strip
+            // (`bar=0` for 21s, #2337) — the same lesson `HeaderSelectorAudit`
+            // records for the toolbar: UIKit hosts a bar item's custom view in
+            // containers of its own. The item names its view exactly.
             if nav.presentedViewController == nil, !nav.isNavigationBarHidden,
-               let bar = firstBar(in: nav.navigationBar) {
-                return bar
+               let item = nav.topViewController?.navigationItem {
+                let hosts = ((item.leftBarButtonItems ?? []) + (item.rightBarButtonItems ?? []))
+                    .compactMap(\.customView)
+                if let bar = hosts.lazy.compactMap({ self.firstBar(in: $0) }).first { return bar }
             }
             candidate = nav.presentedViewController ?? nav.topViewController
         }

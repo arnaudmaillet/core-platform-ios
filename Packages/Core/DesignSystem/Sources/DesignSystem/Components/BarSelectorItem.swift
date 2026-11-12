@@ -19,33 +19,36 @@ import UIKit
 /// - **15pt if it fits, otherwise 13pt** (`PagedTabBar.TitleSize`), the size
 ///   the inbox's titles wore in the bar in August.
 ///
-/// ⚠️ **RE-MINTED ON EVERY WIDTH CHANGE, under the same identifier.** The bar
-/// freezes a custom view's width when its ITEM is made (`SectionBarItem`, the
-/// wallet badge): a count arriving on a segment would leave the platter at the
-/// old width. A fresh item around the same strip is the same slot to UIKit.
-/// So `fit(_:)` answers whether the item changed, and the host writes its
-/// leading group again when it did.
+/// ⚠️ **ONE ITEM FOR THE STRIP'S LIFE, AS FOR YOU'S — NEVER RE-MINTED.** The
+/// first cut minted a fresh item around the same strip on every width change
+/// (the wallet badge's cure for a frozen width), several times during the
+/// screen's load and its layout passes. On the simulator the inbox's strip
+/// was then found in no window (`-pill-drag-probe` read `bar=0`) and the bell
+/// was gone from the header — and handing one strip from item to item is the
+/// one thing For You's working recipe never does. A width change is told IN PLACE: the strip re-states its intrinsic size and
+/// `fit(_:)` answers that it moved, so the host asks its bar to lay out again.
+/// Nor is the strip's frame written: the bar sizes it from its intrinsic size,
+/// as For You's.
 ///
-/// ⚠️ **AND THE FRAME IS SET BEFORE THE ITEM IS HANDED OVER.** A bar item's
-/// custom view keeps its autoresizing mask, so the size UIKit reads at
-/// hand-over is the FRAME, and a ceiling applied only once the view is hosted
-/// was applied to nothing: measured on 2026-08-19, the whole toolbar went into
-/// a `•••` on an iPhone SE while the cap waited for a layout pass that never
-/// came (`navbar-leading-selector-collapse`).
+/// ⚠️ **AND THE CEILING IS APPLIED BEFORE THE BAR FIRST MEASURES IT.** The
+/// host fits the strip as it composes its bar, before the screen is ever on
+/// show: measured on 2026-08-19, a cap applied only once the view was hosted
+/// was applied to nothing, and the whole toolbar went into a `•••` on an
+/// iPhone SE (`navbar-leading-selector-collapse`).
 @MainActor
 public final class BarSelectorItem {
     /// The strip, as the host built it (titles, badges, its actions).
     public let strip: PagedTabBar
-    /// The item's identifier, the same across every re-mint.
+    /// The item's identifier, stable across launches.
     public let id: String
-    /// The item the host puts after the bell — replaced when the strip's
-    /// width changes (see the type's note).
-    public private(set) var item: UIBarButtonItem
+    /// The item the host puts after the bell — the same one for the strip's
+    /// life (see the type's note).
+    public let item: UIBarButtonItem
     /// What keeps the bell and the strip two platters rather than one shared
     /// pill — one instance, so an identical group compares identical.
     private let separator = BarItems.separator()
-    /// The width the current item was minted at; nil before the first fit.
-    private var mintedWidth: CGFloat?
+    /// The width the strip last stated; nil before the first fit.
+    private var statedWidth: CGFloat?
 
     public init(strip: PagedTabBar, id: String) {
         strip.hosting = .platter
@@ -62,20 +65,18 @@ public final class BarSelectorItem {
         return [lead, separator, item]
     }
 
-    /// Fits the strip to the room `budget` leaves: the title size, the
-    /// ceiling, the frame. Returns true when the item was re-minted, so the
-    /// host writes its leading group again (`leadingGroup(after:)`).
+    /// Fits the strip to the room `budget` leaves: the title size and the
+    /// ceiling. Returns true when the width the strip states moved, so the
+    /// host lays its bar out again — the item stays the same.
     @discardableResult
     public func fit(_ budget: BarSelectorBudget) -> Bool {
         let ceiling = budget.selectorCeiling(bubble: strip.intrinsicContentSize.height,
                                              ring: strip.hosting.overhang)
         strip.titleSize = strip.preferredWidth(at: .regular) <= ceiling + 0.5 ? .regular : .compact
         strip.widthCeiling = ceiling
-        let size = strip.intrinsicContentSize
-        if let mintedWidth, abs(mintedWidth - size.width) <= 0.5 { return false }
-        mintedWidth = size.width
-        strip.frame.size = size
-        item = BarItems.container(id: id, view: strip)
+        let width = strip.intrinsicContentSize.width
+        if let statedWidth, abs(statedWidth - width) <= 0.5 { return false }
+        statedWidth = width
         return true
     }
 }
