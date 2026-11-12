@@ -226,16 +226,25 @@ struct InteractionLatencyHarnessTests {
         return (window, nav)
     }
 
-    /// Waits for the response to be COMMITTED (up to 240 s: a CI simulator
-    /// under parallel suites can starve the main actor for seconds), then
-    /// ends the input itself. Nothing hangs on the harness's own window,
-    /// which the suite lengthens so it never drops a late response.
-    private func nextRecord(after count: Int) async throws -> InteractionLatencyTracker.Record {
-        let deadline = ContinuousClock.now + .seconds(240)
-        while !InteractionLatency.hasCommittedResponse, InteractionLatency.records.count <= count,
-              ContinuousClock.now < deadline {
-            try await Task.sleep(for: .milliseconds(10))
+    /// Waits for the response to be COMMITTED, then ends the input itself.
+    /// Nothing hangs on the harness's own window, which the suite lengthens
+    /// so it never drops a late response.
+    ///
+    /// A budget of LOOKS, not a clock: a look is spent only when the loop
+    /// runs, so the wait stretches with a starved main actor (a CI simulator
+    /// under parallel suites can starve it for minutes) where a wall-clock
+    /// deadline would expire during the starvation. 24,000 looks of 10 ms
+    /// are at least 240 s.
+    private func responseCommitted(after count: Int) async -> Bool {
+        for _ in 0..<24_000 where !InteractionLatency.hasCommittedResponse && InteractionLatency.records.count <= count {
+            try? await Task.sleep(for: .milliseconds(10))
         }
+        return InteractionLatency.hasCommittedResponse || InteractionLatency.records.count > count
+    }
+
+    private func nextRecord(after count: Int) async throws -> InteractionLatencyTracker.Record {
+        let committed = await responseCommitted(after: count)
+        #expect(committed, "no response committed within the budget: \(InteractionLatency.debugState)")
         // One more turn for the frame's phase to be read, then the end.
         try await Task.sleep(for: .milliseconds(50))
         if InteractionLatency.records.count <= count { InteractionLatency.finishInput() }
