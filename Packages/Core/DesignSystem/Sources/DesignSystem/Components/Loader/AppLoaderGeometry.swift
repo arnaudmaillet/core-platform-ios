@@ -9,8 +9,8 @@ import CoreGraphics
 /// At `.large` (37 pt) that is ≈ 10.3 pt × 25.7 pt at the peak; at `.medium`
 /// (20 pt), ≈ 5.6 pt × 13.9 pt.
 public enum AppLoaderGeometry {
-    /// Three pills, masking one gradient across them: violet, sky blue,
-    /// mint (`Palette.loaderGradient`, #2147; the signature since #2282).
+    /// Three pills, one colour each: the primary, then two lighter steps of
+    /// its hue (`Palette.loaderPillColors`, #2340).
     public static let pillCount = 3
     /// The gap between two pills, as a share of a pill's width.
     public static let gapRatio: CGFloat = 0.3
