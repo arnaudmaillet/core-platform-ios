@@ -77,7 +77,7 @@ struct StackScreenGuardTests {
 
     /// A view controller class declaration: its name, then its superclass.
     static let declaration = try! NSRegularExpression(
-        pattern: #"^\s*(?:@\w+\s+)*(?:(?:public|open|final|internal|fileprivate|private)\s+)*class\s+(\w+)\s*(?:<[^>]*>)?\s*:\s*([\w.]+)"#,
+        pattern: #"^\s*(?:@\w+\s+)*(?:(?:public|package|open|final|internal|fileprivate|private)\s+)*class\s+(\w+)\s*(?:<[^>]*>)?\s*:\s*([\w.]+)"#,
         options: .anchorsMatchLines
     )
 
@@ -138,10 +138,15 @@ struct StackScreenGuardTests {
         let text = """
         final class AScreen: UIViewController {}
         public final class AStep<Tab: Equatable>: AuthStepTableViewController {}
+        package final class APackageScreen: UIViewController {}
         final class AStack: UINavigationController {}
         extension AScreen: StackScreen {
         """
-        #expect(Self.screens(in: text) == ["AScreen": "UIViewController", "AStep": "AuthStepTableViewController"])
+        // `package` too (#2382): the settings screens are package-visible.
+        #expect(Self.screens(in: text) == [
+            "AScreen": "UIViewController", "AStep": "AuthStepTableViewController",
+            "APackageScreen": "UIViewController",
+        ])
         #expect(Self.declaresContract("AScreen", in: text))
         #expect(!Self.declaresContract("AStep", in: text))
         #expect(Self.declaresContract("B", in: "final class B: UIViewController, StackScreen {"))
