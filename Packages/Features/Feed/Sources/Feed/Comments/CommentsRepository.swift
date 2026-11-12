@@ -37,7 +37,18 @@ public struct CommentEntry: Equatable, Sendable, Identifiable {
     /// The author's avatar frame (#943), hydrated with the avatar; nil for
     /// none.
     public let authorAvatarFrameID: String?
+    /// The comment's words. Empty when an attachment speaks for it: a voice
+    /// alone is a valid comment (#2309).
     public let body: String
+    /// What the comment carries besides its words (#2309): a voice for now,
+    /// a kind this build doesn't know as `.unsupported`. Nil for a plain
+    /// text comment.
+    ///
+    /// TODO(#2309, piece 2): nothing draws it yet. A row, the band, the
+    /// ticker, the danmaku and the copy / share actions still read `body`
+    /// alone, so a voice with no words shows as a row with no text and
+    /// rides no one-line surface.
+    public let attachment: CommentAttachment?
     public let createdAt: Date
     /// The parent comment's id when this entry is a level-2 reply
     /// (comment.v1 carries exactly two levels: top-level and replies).
@@ -62,6 +73,7 @@ public struct CommentEntry: Equatable, Sendable, Identifiable {
         authorAvatarURL: URL? = nil,
         authorAvatarFrameID: String? = nil,
         body: String,
+        attachment: CommentAttachment? = nil,
         createdAt: Date,
         parentID: String? = nil,
         isHeld: Bool = false,
@@ -74,6 +86,7 @@ public struct CommentEntry: Equatable, Sendable, Identifiable {
         self.authorAvatarURL = authorAvatarURL
         self.authorAvatarFrameID = authorAvatarFrameID
         self.body = body
+        self.attachment = attachment
         self.createdAt = createdAt
         self.parentID = parentID
         self.isHeld = isHeld
@@ -85,7 +98,7 @@ public struct CommentEntry: Equatable, Sendable, Identifiable {
         CommentEntry(
             id: id, authorID: authorID, authorName: authorName, authorHandle: authorHandle,
             authorAvatarURL: authorAvatarURL, authorAvatarFrameID: authorAvatarFrameID, body: body,
-            createdAt: createdAt, parentID: parentID, replyCount: replyCount
+            attachment: attachment, createdAt: createdAt, parentID: parentID, replyCount: replyCount
         )
     }
 }
@@ -205,6 +218,13 @@ public protocol CommentsProviding: Sendable {
     func addComment(
         _ body: String, to postID: PostID, parentID: String?, commentID: String
     ) async throws -> CommentEntry
+    /// Posts a comment that carries `attachment` (#2309) — a voice, with or
+    /// without words — and returns the created entry. `body` may be empty
+    /// when an attachment is there. Same idempotency rule as the text-only
+    /// call: `commentID` belongs to the draft (#795).
+    func addComment(
+        _ body: String, attachment: CommentAttachment?, to postID: PostID, parentID: String?, commentID: String
+    ) async throws -> CommentEntry
     /// The viewer's identity as last resolved, or nil — never a fetch.
     /// Synchronous for the one screen whose bars wear the viewer before
     /// anything has loaded: the Text Post page, whose author IS the viewer.
@@ -250,6 +270,17 @@ public extension CommentsProviding {
     /// screen that offers a retry mints the key itself and keeps it (#795).
     func addComment(_ body: String, to postID: PostID, parentID: String?) async throws -> CommentEntry {
         try await addComment(body, to: postID, parentID: parentID, commentID: UUID().uuidString)
+    }
+    /// Default: a provider that carries no attachment (every test fake, any
+    /// read-only source) posts words alone, and refuses an attachment rather
+    /// than dropping it silently.
+    func addComment(
+        _ body: String, attachment: CommentAttachment?, to postID: PostID, parentID: String?, commentID: String
+    ) async throws -> CommentEntry {
+        guard attachment == nil else {
+            throw CommentsError.transport(message: "this source takes no comment attachment")
+        }
+        return try await addComment(body, to: postID, parentID: parentID, commentID: commentID)
     }
 }
 
@@ -502,6 +533,12 @@ public actor CommentsRepository: CommentsProviding {
     public func addComment(
         _ body: String, to postID: PostID, parentID: String?, commentID: String
     ) async throws -> CommentEntry {
+        try await addComment(body, attachment: nil, to: postID, parentID: parentID, commentID: commentID)
+    }
+
+    public func addComment(
+        _ body: String, attachment: CommentAttachment?, to postID: PostID, parentID: String?, commentID: String
+    ) async throws -> CommentEntry {
         let viewer = try await resolveViewerProfileID(forWrite: "addComment")
 
         var request = Comment_V1_CreateCommentRequest()
@@ -512,6 +549,9 @@ public actor CommentsRepository: CommentsProviding {
         request.authorID = viewer.rawValue
         request.parentID = parentID ?? ""
         request.body = body
+        // backend#996's `attachment`, on an undeclared field until the
+        // contracts carry it (`CommentAttachmentWire`).
+        if let attachment { CommentAttachmentWire.write(attachment, to: &request) }
         let response = await commentClient.createComment(request: request, headers: [:])
         switch response.result {
         case .success(let created):
@@ -525,6 +565,7 @@ public actor CommentsRepository: CommentsProviding {
                 authorAvatarURL: author.avatarURL,
                 authorAvatarFrameID: author.frameID,
                 body: body,
+                attachment: attachment,
                 createdAt: Date(),
                 parentID: parentID
             )
@@ -637,6 +678,9 @@ public actor CommentsRepository: CommentsProviding {
             authorAvatarURL: author.avatarURL,
             authorAvatarFrameID: author.frameID,
             body: view.body,
+            // backend#996's `attachment` (#2309); an unknown kind reads as
+            // `.unsupported`, and the comment keeps its text.
+            attachment: CommentAttachmentWire.attachment(in: view),
             createdAt: Date(timeIntervalSince1970: TimeInterval(view.createdAtMs) / 1000),
             parentID: view.parentID.isEmpty ? nil : view.parentID,
             isHeld: view.held,

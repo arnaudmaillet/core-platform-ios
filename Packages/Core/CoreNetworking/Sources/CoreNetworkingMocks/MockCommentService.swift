@@ -1,12 +1,16 @@
 import Connect
 import CoreContracts
+import CoreModels
+import CoreNetworking
 import Foundation
 
 /// Fake of comment.v1.CommentService over the shared dataset. Seeds a couple of
 /// top-level comments per post (authored by dataset authors, so profile
 /// hydration resolves; a few posts are deliberately dense or empty — see the
-/// seed sets below), level-2 replies on the dense posts (ListReplies), and
-/// accepts CreateComment (parentID included, persisted at the right level).
+/// seed sets below), level-2 replies on the dense posts (ListReplies), voice
+/// comments on a few posts (#2309, `MockVoiceComments.swift`), and accepts
+/// CreateComment (parentID and attachment included, persisted at the right
+/// level).
 public final class MockCommentService: @unchecked Sendable {
     private let dataset: MockSocialDataset
     /// Posts created this session. None of them existed when the seed was
@@ -372,7 +376,8 @@ public final class MockCommentService: @unchecked Sendable {
     /// carry none — post-0001's two-comment seed is pinned by repository
     /// tests and stays byte-identical.
     private func seedReplies(for postID: String) -> [String: [Comment_V1_CommentView]] {
-        guard Self.denselySeededPostIDs.contains(postID) else { return [:] }
+        // The voice comments' reply (#2309); none of those posts is dense.
+        guard Self.denselySeededPostIDs.contains(postID) else { return voiceReplySeed(for: postID, authors: dataset.authors) }
         let authors = dataset.authors
         guard authors.count >= 5 else { return [:] }
         let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
@@ -476,7 +481,7 @@ public final class MockCommentService: @unchecked Sendable {
             raw = [
                 makeComment(id: "\(postID)-c0", postID: postID, author: authors[1].profileID, body: pair.0, ageMs: 20 * 60_000),
                 makeComment(id: "\(postID)-c1", postID: postID, author: authors[2].profileID, body: pair.1, ageMs: 5 * 60_000)
-            ] + heldSeed(for: postID, authors: authors)
+            ] + heldSeed(for: postID, authors: authors) + voiceSeed(for: postID, authors: authors)
         }
         return raw.map {
             var view = $0
@@ -511,7 +516,7 @@ public final class MockCommentService: @unchecked Sendable {
         Int(String(postID.suffix(4).reversed().prefix { $0.isNumber }.reversed())) ?? 0
     }
 
-    private func makeComment(id: String, postID: String, author: String, body: String, ageMs: Int64) -> Comment_V1_CommentView {
+    func makeComment(id: String, postID: String, author: String, body: String, ageMs: Int64) -> Comment_V1_CommentView {
         var view = Comment_V1_CommentView()
         view.commentID = id
         view.postID = postID
@@ -571,6 +576,10 @@ public final class MockCommentService: @unchecked Sendable {
                 view.parentID = request.parentID
                 view.body = request.body
                 view.createdAtMs = Int64(Date().timeIntervalSince1970 * 1000)
+                // The comment's attachment (#2309) is served with it, as sent.
+                if let carried = CommentAttachmentWire.attachment(in: request) {
+                    CommentAttachmentWire.write(carried, to: &view)
+                }
                 created[request.postID, default: []].insert(view, at: 0)
                 return (request.commentID, request.postID)
             }

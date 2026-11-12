@@ -302,25 +302,105 @@ struct ChannelsTests {
         #expect(requests.newCount == plain.newCount)
     }
 
-    /// One list on Requests (#2292), but the join requests keep their own
-    /// section with its header, above the requests: another kind of request.
-    @Test func theJoinRequestsKeepTheirHeadedSectionAboveTheRequests() async throws {
+    /// A screen laid out at a phone's size.
+    private func laidOut<Screen: UIViewController>(_ screen: Screen) -> Screen {
+        screen.loadViewIfNeeded()
+        screen.view.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+        screen.view.layoutIfNeeded()
+        return screen
+    }
+
+    /// Requests with the mock's one channel waiting (ch-studio-requests),
+    /// loaded.
+    private func requestsWithJoinRequests() async -> (MessageRequestsViewModel, InboxCatalog) {
         let repository = make()
         let catalog = InboxCatalog(repository: repository)
         let digest = ChannelJoinRequestsDigest(catalog: catalog, service: repository)
         let requests = MessageRequestsViewModel(catalog: catalog, joinRequests: digest)
         catalog.reload()
         await settle { requests.joinRequests.count == 1 && catalog.snapshot.phase == .loaded }
+        return (requests, catalog)
+    }
+
+    /// The Requests snapshot (#2328): the join requests rows come first,
+    /// with NO HEADER — no title, no count — then the conversation requests;
+    /// the gap under the last channel row stays.
+    @Test func theJoinRequestsRowsLeadTheRequestsWithNoHeader() async throws {
+        let (requests, _) = await requestsWithJoinRequests()
         guard case .content(let rows) = requests.phase else { Issue.record("\(requests.phase)"); return }
 
-        let list = MessageRequestsViewController(viewModel: requests)
-        list.loadViewIfNeeded()
-        list.view.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
-        list.view.layoutIfNeeded()
+        let list = laidOut(MessageRequestsViewController(viewModel: requests))
         #expect(list.debugSections == (rows.isEmpty ? [.joinRequests] : [.joinRequests, .conversations]))
-        #expect(list.debugHeadedSections == [.joinRequests], "only the join requests wear a header")
+        #expect(list.debugHeadedSections.isEmpty, "a header over the join requests: \(list.debugHeadedSections)")
         #expect(list.debugRowIDs(in: .joinRequests) == [studio])
         #expect(list.debugRowIDs(in: .conversations) == rows.map(\.id))
+
+        // The very first row is the channel's, at the top of the list.
+        let table = list.debugTableView
+        let first = try #require(table.cellForRow(at: IndexPath(row: 0, section: 0)) as? JoinRequestsCell)
+        #expect(first.debugTitle == "Studio drops · 3 requests")
+        #expect(table.rectForRow(at: IndexPath(row: 0, section: 0)).minY < 1, "something sits above the first row")
+        if !rows.isEmpty {
+            #expect(list.debugGap(underSectionAt: 0) >= 1, "the gap under the channel rows went")
+        }
+    }
+
+    /// No section is headed on either tab (#2292, #2328): Chats, and
+    /// Requests with join requests waiting.
+    @Test func noSectionIsHeadedOnEitherTab() async throws {
+        let (requests, catalog) = await requestsWithJoinRequests()
+        let chatsModel = ConversationListViewModel(catalog: catalog)
+        chatsModel.refresh()
+        await settle { chatsModel.phase != .loading }
+
+        let chats = laidOut(ConversationListViewController(viewModel: chatsModel))
+        let chatsTable = chats.debugTableView
+        for index in 0..<chatsTable.numberOfSections {
+            let height = chatsTable.delegate?.tableView?(chatsTable, heightForHeaderInSection: index) ?? 0
+            #expect(height < 1, "Chats headed section \(index): \(height)")
+            #expect(chatsTable.headerView(forSection: index) == nil)
+        }
+
+        let list = laidOut(MessageRequestsViewController(viewModel: requests))
+        #expect(list.debugSections.first == .joinRequests)
+        #expect(list.debugHeadedSections.isEmpty, "Requests headed \(list.debugHeadedSections)")
+    }
+
+    /// The bar names no section when the list scrolls (#2328): after the
+    /// bell, nothing, on Requests with join requests waiting as on Chats.
+    @Test func theBarNamesNoSectionWhenScrolled() async throws {
+        let (requests, catalog) = await requestsWithJoinRequests()
+        let chats = ConversationListViewController(viewModel: ConversationListViewModel(catalog: catalog))
+        let list = MessageRequestsViewController(viewModel: requests)
+        let screen = MessagesInboxViewController(surfaces: [chats, list])
+        let bell = UIBarButtonItem(customView: UIView())
+        screen.setLeadingAccessoryItem(bell)
+        _ = laidOut(screen)
+
+        func onlyTheBell(_ moment: String) {
+            let leading = screen.navigationItem.leftBarButtonItems ?? []
+            #expect(leading.count == 1 && leading.first === bell, "\(moment): \(leading)")
+        }
+
+        screen.setCategory(.requests, animated: false)
+        list.view.layoutIfNeeded()
+        onlyTheBell("Requests at its top")
+
+        // Down past where the Join requests header used to stick.
+        let table = list.debugTableView
+        table.contentOffset.y = 200
+        table.layoutIfNeeded()
+        await Task.yield()
+        onlyTheBell("Requests scrolled")
+
+        screen.setCategory(.all, animated: false)
+        chats.debugTableView.contentOffset.y = 200
+        await Task.yield()
+        onlyTheBell("Chats scrolled")
+
+        screen.setCategory(.requests, animated: false)
+        await Task.yield()
+        onlyTheBell("back on Requests")
     }
 
     @Test func theHiddenRequestsListNeverShowsJoinRequests() async {

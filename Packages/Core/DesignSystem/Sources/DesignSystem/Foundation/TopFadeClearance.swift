@@ -88,6 +88,21 @@ public enum SoftTopEdge {
     /// `-top-fade-clearance-off`: the screens as they were before #2240, for
     /// a before/after comparison without another build.
     nonisolated static let isClearanceOff: Bool = DebugFlags.isOn("-top-fade-clearance-off")
+
+    /// `-top-edge-automatic` (#2327): the titled screens wear UIKit's
+    /// `.automatic` top edge instead of `.soft`, for the owner to compare on
+    /// a device. Only the style changes: the same screens, the same
+    /// triggers (the profile's title-driven edge included), and the same
+    /// clearance — measured on the soft effect and not retuned for this.
+    nonisolated static let isAutomaticStyle: Bool = DebugFlags.isOn("-top-edge-automatic")
+
+    /// What a test states in place of the launch flag; nil reads the flag.
+    @MainActor static var automaticStyleOverride: Bool?
+
+    /// The style `prefersSoftTopEdge` gives a titled screen's top edge.
+    @MainActor static var titledStyle: UIScrollEdgeEffect.Style {
+        (automaticStyleOverride ?? isAutomaticStyle) ? .automatic : .soft
+    }
 }
 
 public extension UIScrollView {

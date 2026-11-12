@@ -12,7 +12,15 @@ public struct CommentDisplayModel: Equatable, Sendable, Identifiable {
     /// comfort; the handle still travels on `CommentEntry` for routing
     /// stubs).
     public let metaText: String
+    /// Empty for a voice alone (#2309): the row hides its body label then.
     public let body: String
+    /// The comment's attachment (#2309), carried for the row's slot.
+    ///
+    /// TODO(#2309, piece 2): `CommentRowView` draws no slot yet — a voice
+    /// alone shows as a row with a name, a time and no text; an
+    /// `.unsupported` kind with no words likewise. Piece 2 draws the voice
+    /// (the shared `VoiceView`) and a neutral line for an unknown kind.
+    public let attachment: CommentAttachment?
     /// The two-letter initials — the row's RENDERED identity, drawn
     /// immediately and permanently. The picture (if any) is layered over
     /// it; it is never swapped for it, so there is no empty disc at any
@@ -57,6 +65,7 @@ public struct CommentDisplayModel: Equatable, Sendable, Identifiable {
         authorID = entry.authorID
         authorName = entry.authorName
         body = entry.body
+        attachment = entry.attachment
         parentID = entry.parentID
         monogram = MonogramAvatarView.monogram(name: entry.authorName, handle: "")
         avatarURL = entry.authorAvatarURL
@@ -89,6 +98,7 @@ public struct CommentDisplayModel: Equatable, Sendable, Identifiable {
         self.authorName = authorName
         self.metaText = metaText
         self.body = body
+        attachment = nil
         self.avatarURL = avatarURL
         self.parentID = parentID
         self.createdAt = createdAt

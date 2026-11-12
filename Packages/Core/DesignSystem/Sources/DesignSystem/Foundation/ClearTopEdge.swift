@@ -105,7 +105,9 @@ public extension UIScrollView {
     ///   `TitledHeaderTopEdgeGuardTests.fadeClearanceOptOuts`.
     func prefersSoftTopEdge(keepsContentBelowFade: Bool = true) {
         topEdgeEffect.isHidden = false
-        topEdgeEffect.style = .soft
+        // `.soft`, or UIKit's `.automatic` under `-top-edge-automatic`
+        // (#2327): the flag is read here and nowhere else.
+        topEdgeEffect.style = SoftTopEdge.titledStyle
         guard keepsContentBelowFade else { return }
         if let pager = self as? HorizontalPagerScrollView {
             pager.forwardsTopFadeClearance = true
