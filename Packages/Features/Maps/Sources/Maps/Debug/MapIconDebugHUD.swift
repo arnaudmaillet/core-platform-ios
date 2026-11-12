@@ -246,23 +246,23 @@ final class MapIconDebugHUD: UIView {
         let pins = views.compactMap { $0 as? MapAnnotationView }
         let clusters = views.compactMap { $0 as? MapClusterAnnotationView }
         let recent = recent()
-        let line = [
+        // Every piece computed on its own, typed: one array literal mixing
+        // counts, dictionaries and closures cost the Maps target about 2.5 s
+        // of type-checking (#2369).
+        let icons: Int = pins.count { $0.wearsAnimatedIcon } + clusters.count { $0.wearsAnimatedIcon }
+        let sheetsBound: Int = pins.count { $0.wearsPreviewSheet } + clusters.count { $0.wearsPreviewSheet }
+        let kinds: String = Self.tally(pins.map(\.debugKindName))
+        let faces: String = Self.tally(pins.map(\.debugFaceName) + clusters.map(\.debugFaceName))
+        let line: String = [
             "MAPICONHUD",
             "pins=\(pins.count)",
             "clusters=\(clusters.count)",
-            "icons=\(pins.count { $0.wearsAnimatedIcon } + clusters.count { $0.wearsAnimatedIcon })",
+            "icons=\(icons)",
             // What each marker is actually DRAWING. `icons=` counts art worn, so
             // it reads 0 both when no marker wants an icon and when every icon
             // failed to resolve — the two cases this feature has to tell apart.
-            "kinds=" + Dictionary(grouping: pins.map(\.debugKindName), by: { $0 })
-                .sorted { $0.key < $1.key }
-                .map { "\($0.key):\($0.value.count)" }
-                .joined(separator: ","),
-            "faces=" + Dictionary(grouping: pins.map(\.debugFaceName) + clusters.map(\.debugFaceName),
-                                  by: { $0 })
-                .sorted { $0.key < $1.key }
-                .map { "\($0.key):\($0.value.count)" }
-                .joined(separator: ","),
+            "kinds=\(kinds)",
+            "faces=\(faces)",
             "resident=\(catalog?.residentCount ?? 0)",
             "policy=\(AnimatedIconView.policy.rawValue)",
             String(format: "presented=%.1f", presentedFPS),
@@ -283,7 +283,7 @@ final class MapIconDebugHUD: UIView {
             // was read as "no marker has a sheet" through several rounds of
             // fixture archaeology. `sheets_bound=` answers the question that
             // was actually being asked.
-            "sheets_bound=\(pins.count { $0.wearsPreviewSheet } + clusters.count { $0.wearsPreviewSheet })",
+            "sheets_bound=\(sheetsBound)",
             "sheets=\(playingSheets)",
             "sheets_advancing=\(advancingSheets)",
             churnLine(),
@@ -291,6 +291,14 @@ final class MapIconDebugHUD: UIView {
             String(format: "sheets_mb=%.2f", Double(previews?.residentBytes ?? 0) / 1024 / 1024)
         ].joined(separator: " ")
         print(line)
+    }
+
+    /// `name:count` for each distinct name, sorted by name, comma-joined.
+    private static func tally(_ names: [String]) -> String {
+        var counts: [String: Int] = [:]
+        for name in names { counts[name, default: 0] += 1 }
+        return counts.keys.sorted().map { (name: String) -> String in "\(name):\(counts[name] ?? 0)" }
+            .joined(separator: ",")
     }
 
     /// Surfaces the pool reports as genuinely moving — not merely bound.

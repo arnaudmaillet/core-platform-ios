@@ -32,8 +32,20 @@ concurrency:
 #   36793858807). Every runner and every Mac this project targets is Apple
 #   silicon; the test lanes already build arm64 only, through their concrete
 #   destination.
+#
+# - Compilation caching on the app's Debug build (#2369). Every compile is
+#   keyed on its inputs and its whole command line in a content-addressed
+#   store; a key includes the module's search paths, so unlike a shared
+#   DerivedData it hides no missing dependency. Keys also include absolute
+#   paths, which are the same on every runner, so the store develop saved
+#   answers the next run's unchanged modules. (Prefix mapping would make keys
+#   path-free, for worktrees too, but Swift crashes replaying cached warnings
+#   with it on: Xcode 27.2, `replayCachedDiagnostics`.) Only a push to develop
+#   saves the store, so pull requests never fill the repository's 10 GB cache
+#   with copies of their own.
 env:
   NO_INDEX: COMPILER_INDEX_STORE_ENABLE=NO
+  CAS_DIR: /Users/runner/compilation-cas
 
 jobs:
   # ── Which packages have tests ────────────────────────────────────────────
@@ -126,6 +138,17 @@ jobs:
           key: spm-mirrors-${{ hashFiles('**/Package.resolved') }}
           restore-keys: spm-mirrors-
 
+      # The store develop saved last (see the header): this commit's, else the
+      # newest for these package pins, else any.
+      - name: Restore compilation cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.CAS_DIR }}
+          key: cas-v1-${{ hashFiles('**/Package.resolved') }}-${{ github.sha }}
+          restore-keys: |
+            cas-v1-${{ hashFiles('**/Package.resolved') }}-
+            cas-v1-
+
       - name: Resolve Swift packages
         run: |
           set -o pipefail
@@ -137,14 +160,35 @@ jobs:
       - name: Build app
         run: |
           set -o pipefail
-          xcodebuild build \
-            -project core-platform-ios.xcodeproj \
-            -scheme core-platform-ios \
-            -destination "generic/platform=iOS Simulator" \
-            -configuration Debug \
-            -clonedSourcePackagesDirPath .spm \
-            -skipMacroValidation \
-            CODE_SIGNING_ALLOWED=NO ARCHS=arm64 "$NO_INDEX"
+          build() {
+            xcodebuild build \
+              -project core-platform-ios.xcodeproj \
+              -scheme core-platform-ios \
+              -destination "generic/platform=iOS Simulator" \
+              -configuration Debug \
+              -clonedSourcePackagesDirPath .spm \
+              -skipMacroValidation \
+              CODE_SIGNING_ALLOWED=NO ARCHS=arm64 "$NO_INDEX" "$@" 2>&1 | tee build-debug.log
+          }
+          if ! build COMPILATION_CACHE_ENABLE_CACHING=YES COMPILATION_CACHE_CAS_PATH="$CAS_DIR" \
+                     COMPILATION_CACHE_ENABLE_DIAGNOSTIC_REMARKS=YES; then
+            # A crash of the build service is the cache's fault, not the
+            # change's: build again without it rather than fail the run.
+            grep -q "build system has crashed" build-debug.log || exit 1
+            echo "::warning::The build service crashed with compilation caching on; building without it"
+            build COMPILATION_CACHE_ENABLE_CACHING=NO
+          fi
+          HITS=$(grep -c '^Cache hit' build-debug.log || true)
+          MISSES=$(grep -c '^Cache miss' build-debug.log || true)
+          echo "Compilation cache (Debug): $HITS hits, $MISSES misses" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # Saved by develop only (see the header), under this commit's key.
+      - name: Save compilation cache
+        if: ${{ github.event_name == 'push' }}
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.CAS_DIR }}
+          key: cas-v1-${{ hashFiles('**/Package.resolved') }}-${{ github.sha }}
 
       # ⚠️ RELEASE TOO, AND THIS STEP EXISTS BECAUSE ITS ABSENCE SHIPPED.
       #
