@@ -1481,6 +1481,23 @@ struct CaptureFlowTests {
         #expect(screen.camera.take.clips == clips)
     }
 
+    /// Next leaving keeps the close button's item (#2331): an unchanged ✕
+    /// re-minted beside it was blurred out and back by the bar.
+    @Test func theCloseButtonStaysAsNextLeaves() async throws {
+        let screen = try await open()
+        try await record(screen, seconds: 0.6)
+        try #require(screen.camera.debugNextIsShowing)
+        let close = try #require(
+            screen.camera.navigationItem.rightBarButtonItems?.first { $0.identifier == CaptureViewController.closeItemID }
+        )
+        screen.camera.debugTapUndo()
+        screen.camera.debugTapUndo()
+        try await settle { screen.camera.take.clips.isEmpty && !screen.camera.debugNextIsShowing }
+        let trailing = screen.camera.navigationItem.rightBarButtonItems ?? []
+        #expect(trailing.map(\.identifier) == [CaptureViewController.closeItemID])
+        #expect(trailing.first === close, "the close button was minted anew as Next left")
+    }
+
     /// ⚠️ Next is disabled while the take is joined, and gone — with undo and
     /// the library — while a clip records or a countdown runs. Each time it
     /// comes back it is a FRESH item under the same identifier; while it

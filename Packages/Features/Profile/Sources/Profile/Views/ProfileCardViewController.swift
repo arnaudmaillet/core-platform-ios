@@ -475,19 +475,40 @@ final class ProfileCardViewController: UIViewController {
     /// The ••• menu's identity, top left, across rebuilds.
     nonisolated static let moreIdentifier = "profileCard.more"
 
-    /// What the bars last showed: they are rebuilt only when it changes, so
-    /// a phase or a refresh that leaves them alone does not redraw them.
+    /// What the bars last showed: they are applied only when it changes, so
+    /// a phase or a refresh that leaves them alone does not touch them.
     private struct BarState: Equatable {
-        var muted: Bool
+        var muteScopes: MuteScopes
         var more: Bool
         var toolbar: [ToolbarItem]
     }
 
     private var shownBars: BarState?
 
+    /// The toolbar's items and the ••• menu's, kept by identifier (#2331):
+    /// an item that stays is the same instance.
+    private let toolbarStore = BarItemStore()
+    private let leadingStore = BarItemStore()
+
+    /// ⚠️ ONLY THE ITEM THAT CHANGED MOVES (#2331, the owner 2026-11-11).
+    /// Every item used to be a new instance on every change — under its old
+    /// identifier (#1678), so UIKit matched it — and UIKit runs its content
+    /// transition on a matched NEW item: Requested turning back into Follow
+    /// blurred Message and the QR out and back with it (the owner's
+    /// recording). Now:
+    ///
+    /// - every item is kept by identifier (`BarItemStore`), and a state
+    ///   change dresses it in place: Follow ↔ Requested is one item whose
+    ///   word and prominence change, the bell takes its new glyph, Message
+    ///   stretches or not;
+    /// - the bar is handed the items only when the list changes (Follow →
+    ///   the bell once followed, #2302; the QR once the share card loads), and
+    ///   the staying items are the same instances then too.
+    ///
+    /// No animation of ours (#1672): the bar draws every bubble.
     private func applyBars() {
         let state = BarState(
-            muted: !viewModel.muteScopes.isEmpty,
+            muteScopes: viewModel.muteScopes,
             more: Self.showsMoreMenu(for: followButtonState),
             toolbar: Self.toolbarItems(
                 for: followButtonState, showsBell: showsMuteBell,
@@ -495,119 +516,107 @@ final class ProfileCardViewController: UIViewController {
             )
         )
         guard state != shownBars else { return }
-        // ⚠️ REBUILT FOR EVERY CHANGE, AND ANIMATED BY THE BAR (#1678). #1672
-        // restyled a custom-view `UIButton` in place inside a spring of its
-        // own: "Follow" and "Requested" cross-faded over each other while the
-        // tint turned (the owner's recording, 2026-10-24). No button now and
-        // no animation of ours: the bar draws every bubble, and
-        // `setToolbarItems` carries one set into the next, told which items
-        // are the same (`barIdentifier`).
         shownBars = state
-        // The ••• menu, top left (#1562).
-        var leading: [UIBarButtonItem] = []
-        if state.more {
-            let more = UIBarButtonItem(image: UIImage(systemName: "ellipsis"), menu: makeMoreMenu())
-            more.accessibilityLabel = "More"
-            more.identifier = Self.moreIdentifier
-            leading.append(more)
-        }
-        navigationItem.setLeftBarButtonItems(leading, animated: view.window != nil)
+        let animated = view.window != nil
+        // The ••• menu, top left (#1562): its rows are read as it opens.
+        let leading: [UIBarButtonItem] = state.more ? [leadingStore.item(Self.moreIdentifier) {
+            BarItems.icon(
+                id: Self.moreIdentifier, image: UIImage(systemName: "ellipsis"), label: "More", menu: makeMoreMenu()
+            )
+        }] : []
+        leadingStore.apply(leading: leading, to: navigationItem, animated: animated)
 
         var items: [UIBarButtonItem] = []
         let wide = Self.wideItem(in: state.toolbar)
         for kind in state.toolbar {
             // Each in its own bubble: the zero-width fixed space keeps UIKit
             // from joining two items in one shared platter (the sound
-            // sheet's toolbar).
-            if !items.isEmpty { items.append(.fixedSpace()) }
-            let item = kind == wide ? wideItem(for: kind) : barItem(for: kind)
-            item.identifier = Self.barIdentifier(for: kind)
-            items.append(item)
+            // sheet's toolbar) — kept with the item it stands before.
+            let id = Self.barIdentifier(for: kind)
+            if !items.isEmpty { items.append(toolbarStore.separator(before: id)) }
+            items.append(toolbarItem(for: kind, wide: kind == wide))
         }
-        setToolbarItems(items, animated: view.window != nil)
+        toolbarStore.apply(toolbar: items, to: self, animated: animated)
     }
 
-    /// A toolbar item that does not stretch: a stock bar item.
-    private func barItem(for kind: ToolbarItem) -> UIBarButtonItem {
-        switch kind {
-        case .follow:
-            return followItem(title: "Follow", prominent: true)
-        case .bell:
-            return makeMuteBellItem()
-        case .qr:
-            let qr = UIBarButtonItem(
-                image: UIImage(systemName: "qrcode"),
-                primaryAction: UIAction { [weak self] _ in self?.presentShareSheet() }
-            )
-            qr.accessibilityLabel = "QR Code"
-            return qr
-        case .requested:
-            // Never reached while Follow's slot is the stretched one; kept
-            // for a bar that has no stretched slot.
-            return followItem(title: "Requested", prominent: false)
-        case .openProfile:
-            let open = UIBarButtonItem(title: "View Profile", primaryAction: UIAction { [weak self] _ in
-                self?.infoTapped()
-            })
-            open.style = .prominent
-            return open
-        case .message:
-            return UIBarButtonItem(title: "Message", primaryAction: UIAction { [weak self] _ in
-                self?.messageTapped()
-            })
-        }
-    }
-
-    /// The stretched item: a plain view holding its word, in an item whose
-    /// bubble the BAR draws — its glass, its press, and its prominence for
-    /// Follow — as the post screen's author pill is (#1678). A custom view,
-    /// since there is no flexible-width bar item (a title item's `width` is
-    /// ignored on iOS 27, measured again 2026-10-24); never a `UIButton`
-    /// drawing a glass of its own. It hugs nothing and asks, at the lowest
-    /// priority, for more room than any bar has, so the bar gives it exactly
-    /// what the other items leave (#304).
-    private func wideItem(for kind: ToolbarItem) -> UIBarButtonItem {
-        let made: (item: UIBarButtonItem, label: StretchedBarLabel)
+    /// The kept item for `kind`, dressed for now.
+    private func toolbarItem(for kind: ToolbarItem, wide: Bool) -> UIBarButtonItem {
         let id = Self.barIdentifier(for: kind)
         switch kind {
-        case .follow:
-            made = BarItems.stretched(id: id, title: "Follow", prominent: true) { [weak self] in self?.followTapped() }
-        case .requested:
-            made = BarItems.stretched(id: id, title: "Requested") { [weak self] in self?.followTapped() }
-        default:
-            made = BarItems.stretched(id: id, title: "Message") { [weak self] in self?.messageTapped() }
+        case .follow, .requested:
+            // One item in two states (#1668): its word and its prominence
+            // change in place. It always takes the free width (`wideItem`).
+            return toolbarStore.item(id) {
+                let made = BarItems.stretched(id: id, title: "Follow", prominent: true) { [weak self] in
+                    self?.followTapped()
+                }
+                made.label.accessibilityIdentifier = "profileCard.follow"
+                return made.item
+            } update: { item in
+                BarItems.update(stretched: item, title: kind == .follow ? "Follow" : "Requested", prominent: kind == .follow)
+                (item.customView as? StretchedBarLabel)?.stretches = wide
+            }
+        case .message:
+            // The same item whether it takes the free width (followed, or not
+            // followable) or stands beside Follow: only its stretch changes,
+            // so Following does not redraw it (#2331). A plain view in the
+            // bar's bubble either way (`StretchedBarLabel`), never a stock
+            // title item turned into one.
+            return toolbarStore.item(id) {
+                let made = BarItems.stretched(id: id, title: "Message") { [weak self] in self?.messageTapped() }
+                made.label.accessibilityIdentifier = "profileCard.message"
+                return made.item
+            } update: { item in
+                (item.customView as? StretchedBarLabel)?.stretches = wide
+            }
+        case .bell:
+            return toolbarStore.item(id) {
+                BarItems.icon(id: id, image: nil, label: "Notifications", menu: UIMenu(children: [
+                    UIDeferredMenuElement.uncached { [weak self] completion in
+                        guard let self else { return completion([]) }
+                        completion(ProfileMenuBuilder.muteMenuElements(viewModel.muteScopes) { [weak self] scope in
+                            self?.viewModel.toggleMute(scope)
+                        })
+                    },
+                ]))
+            } update: { item in
+                // Its glyph in place (R7), written only when the scope moves
+                // it; the menu reads the scopes as it opens.
+                let scopes = viewModel.muteScopes
+                let symbol = ProfileRelationControl.bellSymbol(for: scopes)
+                if item.image == nil || shownBellSymbol != symbol {
+                    item.image = UIImage(systemName: symbol)
+                    shownBellSymbol = symbol
+                }
+                item.accessibilityValue = ProfileRelationControl.bellAccessibilityValue(for: scopes)
+            }
+        case .qr:
+            return toolbarStore.item(id) {
+                BarItems.icon(id: id, image: UIImage(systemName: "qrcode"), label: "QR Code") { [weak self] in
+                    self?.presentShareSheet()
+                }
+            }
+        case .openProfile:
+            return toolbarStore.item(id) {
+                BarItems.title(id: id, title: "View Profile", prominent: true) { [weak self] in self?.infoTapped() }
+            }
         }
-        made.label.accessibilityIdentifier = "profileCard.wide"
-        wideLabel = made.label
-        return made.item
     }
 
-    /// The stretched item's view — what a test reads.
-    private(set) weak var wideLabel: StretchedBarLabel?
+    /// The glyph the bell wears now.
+    private var shownBellSymbol: String?
 
-    private func followItem(title: String, prominent: Bool) -> UIBarButtonItem {
-        let item = UIBarButtonItem(title: title, primaryAction: UIAction { [weak self] _ in
-            self?.followTapped()
-        })
-        if prominent { item.style = .prominent }
-        return item
+    /// The item taking the toolbar's free width, its view — what a test reads.
+    var wideLabel: StretchedBarLabel? {
+        (toolbarItems ?? []).lazy.compactMap { $0.customView as? StretchedBarLabel }.first { $0.stretches }
     }
 
-    private func makeMuteBellItem() -> UIBarButtonItem {
-        let scopes = viewModel.muteScopes
-        let item = UIBarButtonItem(
-            image: UIImage(systemName: ProfileRelationControl.bellSymbol(for: scopes)),
-            menu: UIMenu(children: [UIDeferredMenuElement.uncached { [weak self] completion in
-                guard let self else { return completion([]) }
-                completion(ProfileMenuBuilder.muteMenuElements(viewModel.muteScopes) { [weak self] scope in
-                    self?.viewModel.toggleMute(scope)
-                })
-            }])
-        )
-        item.accessibilityLabel = "Notifications"
-        item.accessibilityValue = ProfileRelationControl.bellAccessibilityValue(for: scopes)
-        return item
-    }
+    #if DEBUG
+    /// How many times the toolbar and the top bar's leading run were handed
+    /// their items. Tests.
+    var debugToolbarWrites: Int { toolbarStore.debugWrites }
+    var debugLeadingWrites: Int { leadingStore.debugWrites }
+    #endif
 
     private func makeMoreMenu() -> UIMenu {
         UIMenu(children: [UIDeferredMenuElement.uncached { [weak self] completion in

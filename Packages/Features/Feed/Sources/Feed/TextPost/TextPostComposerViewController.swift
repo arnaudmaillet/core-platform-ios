@@ -105,6 +105,13 @@ final class TextPostComposerViewController: UIViewController {
     /// The saved pile: the app's one (`shared`) outside tests.
     private let bookmarks: PostBookmarkStore
     private lazy var bookmarkItem = SnapFooterToolbar.makeSaveItem { [weak self] in self?.toggleBookmark() }
+    /// The footer's repost and ⋯, and the leading run's space, kept from the
+    /// draft's bars into the published post's (#2331): a new instance under
+    /// the same identifier is redrawn by the bar — blurred out and back —
+    /// though it says the same. The ⋯ takes its menu in place.
+    private lazy var repostItem = SnapFooterToolbar.makeRepostItem()
+    private lazy var moreItem = SnapFooterToolbar.makeMoreItem(menu: UIMenu(children: []))
+    private let leadingSortSpacer = UIBarButtonItem.fixedSpace(Spacing.sm)
     /// Keeps the published post's save glyph on its saved fact (#1067): a
     /// save or unsave made on another surface while the page shows the post
     /// draws at once — the feed page's and the cards' mechanism. Lives as
@@ -427,16 +434,15 @@ final class TextPostComposerViewController: UIViewController {
         // Drawn as they will be once the post exists, and quiet until then:
         // there is nothing to save, pass on or report yet.
         bookmarkItem.isEnabled = false
-        let more = SnapFooterToolbar.makeMoreItem(menu: UIMenu(children: []))
-        more.isEnabled = false
+        moreItem.isEnabled = false
         // ⚠️ NO SOUND PILL (#1999): a text post has no sound, so the footer
         // has nothing to lead with — its trailing run alone, [🔖 ⇄] [⋯]. It
         // used to lead with an inert pill that rode into the top bar while
         // the keyboard was up. The published post's footer leads with its
         // attribution, as before.
         toolbarItems = SnapFooterToolbar.trailingItems(
-            actions: [bookmarkItem, SnapFooterToolbar.makeRepostItem()],
-            more: more
+            actions: [bookmarkItem, repostItem],
+            more: moreItem
         )
     }
 
@@ -783,16 +789,17 @@ final class TextPostComposerViewController: UIViewController {
         attribution.setPost(model, pipeline: imagePipeline)
         bookmarkItem.isEnabled = true
         refreshBookmarkGlyph()
-        let more = SnapFooterToolbar.makeMoreItem(menu: UIMenu(children: [
+        moreItem.menu = UIMenu(children: [
             UIAction(title: "Share", image: AppSymbol.share.image()) { [weak self] _ in
                 self?.sharePost()
             },
-        ]))
+        ])
+        moreItem.isEnabled = true
         setToolbarItems(SnapFooterToolbar.items(
             leading: attribution,
             leadingID: ItemID.attribution,
-            actions: [bookmarkItem, SnapFooterToolbar.makeRepostItem()],
-            more: more
+            actions: [bookmarkItem, repostItem],
+            more: moreItem
         ), animated: true)
         fitTrailingRun()
     }
@@ -802,7 +809,7 @@ final class TextPostComposerViewController: UIViewController {
     private func applyLeadingItems(animated: Bool) {
         guard let closeItem else { return }
         var items = [closeItem]
-        if isSortAvailable, let sortItem { items += [.fixedSpace(Spacing.sm), sortItem] }
+        if isSortAvailable, let sortItem { items += [leadingSortSpacer, sortItem] }
         guard navigationItem.leftBarButtonItems ?? [] != items else { return }
         navigationItem.setLeftBarButtonItems(items, animated: animated)
     }

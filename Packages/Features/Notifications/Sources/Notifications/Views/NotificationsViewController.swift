@@ -66,6 +66,8 @@ final class NotificationsViewController: UIViewController {
     var isWritingMute = false
     weak var muteButton: StretchedBarLabel?
     var muteTimerItem: UIBarButtonItem?
+    /// The mute toolbar's items, kept by identifier (#2331).
+    let muteBarStore = BarItemStore()
     var muteTick: Timer?
 
     /// The shell's opener for a post notification (#1577); nil routes it.

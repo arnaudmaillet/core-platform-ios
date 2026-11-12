@@ -1467,9 +1467,11 @@ final class CaptureViewController: UIViewController {
     /// Everything goes while a clip records or a countdown runs, with the rest
     /// of the chrome.
     ///
-    /// ⚠️ A FRESH wrapper for the close button each time the run is rebuilt,
-    /// under a stable identifier (`bar-item-wrapper-drift`); "Next" keeps its
-    /// own item while it stays, as before.
+    /// ⚠️ THE CLOSE BUTTON KEEPS ITS ITEM WHILE IT STAYS (#2331), as "Next"
+    /// does: it was re-minted each time the run was rebuilt, and "Next"
+    /// arriving blurred the unchanged ✕ out and back. A stock item, so the
+    /// custom-view wrapper's drift (`bar-item-wrapper-drift`) does not apply;
+    /// it comes back new after leaving with the chrome.
     private func applyTrailingHeader(animated: Bool) {
         var items: [UIBarButtonItem] = []
         if !isChromeHidden {
@@ -1477,21 +1479,24 @@ final class CaptureViewController: UIViewController {
             // hosted view's glyph monochrome whatever its tint, and the close
             // button is the one RED control on this screen (it throws a take
             // away) — a system item takes the tint.
-            let close = UIBarButtonItem(
-                image: UIImage(systemName: "xmark"),
-                primaryAction: UIAction { [weak self] _ in self?.closeTapped() }
-            )
-            close.identifier = Self.closeItemID
-            close.accessibilityLabel = "Close camera"
-            close.tintColor = .systemRed
-            close.sharesBackground = false
+            let close = trailingStore.item(Self.closeItemID) {
+                let item = UIBarButtonItem(
+                    image: UIImage(systemName: "xmark"),
+                    primaryAction: UIAction { [weak self] _ in self?.closeTapped() }
+                )
+                item.accessibilityLabel = "Close camera"
+                item.tintColor = .systemRed
+                item.sharesBackground = false
+                return item
+            }
             items.append(close)
             if let nextItem { items.append(nextItem) }
         }
-        let current = ownTrailingBarItems
-        guard current.map(\.identifier) != items.map(\.identifier) else { return }
-        setOwnTrailingBarItems(items.isEmpty ? nil : items, animated: animated)
+        trailingStore.apply(trailing: items, to: self, animated: animated)
     }
+
+    /// The header's trailing run, kept by identifier (#2331).
+    private let trailingStore = BarItemStore()
 
     /// Dims the shape's icon while the take has a clip — see `optionChosen`.
     /// It rests rather than disabling: a tap on it explains how to free it.
