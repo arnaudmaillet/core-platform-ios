@@ -193,6 +193,14 @@ final class LoginFlowCoordinator {
                 guard let self, self.isInForm(step) else { return }
                 showCode(challenge, display: display)
             } catch {
+                // ⚠️ THE GUARD GOES BEFORE THE BUSY STATE ENDS. The screen
+                // opens again in `endWorking`'s completion, a main turn before
+                // this task resumes, and the `defer` only ran after that: a
+                // Continue tapped in between met a guard still up and was
+                // dropped without a word (develop's backstop, 2026-11-12,
+                // `aRefusedSMSClearsTheBusyStateAndLetsTheNextTapSend`).
+                // On success the guard stays until the code step is pushed.
+                self?.callsInFlight.remove(.sendCode)
                 await step?.endWorking()
                 self?.presentFlowError(error, on: step as? SignUpStepViewController)
             }
@@ -302,6 +310,10 @@ final class LoginFlowCoordinator {
             } catch is FederatedSignInCancelled {
                 return
             } catch {
+                // The guard goes before the row ends, as in `sendCode`:
+                // `endWorking` clears the row at once and waits for its
+                // animation, and the next tap must find the guard down.
+                self?.callsInFlight.remove(.federatedSignIn)
                 await methods?.endWorking()
                 self?.presentFlowError(error, on: nil)
             }
@@ -345,6 +357,8 @@ final class LoginFlowCoordinator {
             } catch is PasskeyCancelled {
                 return
             } catch {
+                // The guard goes before the row ends (see `sendCode`).
+                self?.callsInFlight.remove(.passkeySignIn)
                 await methods?.endWorking()
                 self?.presentFlowError(error, on: nil)
             }
