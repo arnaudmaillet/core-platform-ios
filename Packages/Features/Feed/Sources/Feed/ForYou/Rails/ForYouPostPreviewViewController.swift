@@ -401,6 +401,9 @@ final class TextCardPreview {
             var rowY = ruleY + 1 + Self.gap / 2
             for model in topLevel {
                 let row = CommentRowView(installsContextMenu: false)
+                // A voice comment's voice (#2309) drawn at rest: a preview
+                // plays nothing.
+                row.bindsVoicePlayback = false
                 row.configure(with: model, imagePipeline: imagePipeline)
                 row.isUserInteractionEnabled = false
                 let height = ceil(row.systemLayoutSizeFitting(

@@ -102,6 +102,8 @@ extension ThreadRowContextMenu: UIContextMenuInteractionDelegate {
               // chip is theirs: the row neither lifts nor greys under it
               // (the owner's device check, 2026-11-06).
               !cell.voiceView.keepsPress(at: collectionView.convert(location, to: cell.voiceView)),
+              // …and so is one on a voice comment's (#2309).
+              !cell.row.attachmentKeepsPress(at: collectionView.convert(location, to: cell.row)),
               let menu = menuProvider?(indexPath)
         else { return nil }
         liftedCell = cell

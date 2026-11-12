@@ -121,6 +121,9 @@ final class RestingCommentsPlaceholderView: UIView {
         heldRows = held.prefix(fits).map { model in
             let row = CommentRowView(installsContextMenu: false)
             row.variant = .comment
+            // A voice comment (#2309) at rest: the stand-in plays nothing,
+            // the panel that replaces it does.
+            row.bindsVoicePlayback = false
             row.configure(with: model, imagePipeline: imagePipeline)
             return row
         }

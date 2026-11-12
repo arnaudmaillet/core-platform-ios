@@ -42,12 +42,8 @@ public struct CommentEntry: Equatable, Sendable, Identifiable {
     public let body: String
     /// What the comment carries besides its words (#2309): a voice for now,
     /// a kind this build doesn't know as `.unsupported`. Nil for a plain
-    /// text comment.
-    ///
-    /// TODO(#2309, piece 2): nothing draws it yet. A row, the band, the
-    /// ticker, the danmaku and the copy / share actions still read `body`
-    /// alone, so a voice with no words shows as a row with no text and
-    /// rides no one-line surface.
+    /// text comment. The row draws it in its slot (`CommentRowView`); a
+    /// one-line surface reads `oneLineText`.
     public let attachment: CommentAttachment?
     public let createdAt: Date
     /// The parent comment's id when this entry is a level-2 reply
@@ -92,6 +88,11 @@ public struct CommentEntry: Equatable, Sendable, Identifiable {
         self.isHeld = isHeld
         self.replyCount = replyCount
     }
+
+    /// The comment as one line of words (#2309): its text, or "🎙 12″" for
+    /// a voice alone, or a neutral line for a kind this build can't draw —
+    /// what the band, the danmaku and the subtitle zone show.
+    public var oneLineText: String { CommentAttachment.oneLineText(body: body, attachment: attachment) }
 
     /// This comment once its post's owner approved it: shown to everyone.
     func released() -> CommentEntry {

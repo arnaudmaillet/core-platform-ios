@@ -14,13 +14,15 @@ public struct CommentDisplayModel: Equatable, Sendable, Identifiable {
     public let metaText: String
     /// Empty for a voice alone (#2309): the row hides its body label then.
     public let body: String
-    /// The comment's attachment (#2309), carried for the row's slot.
-    ///
-    /// TODO(#2309, piece 2): `CommentRowView` draws no slot yet — a voice
-    /// alone shows as a row with a name, a time and no text; an
-    /// `.unsupported` kind with no words likewise. Piece 2 draws the voice
-    /// (the shared `VoiceView`) and a neutral line for an unknown kind.
+    /// The comment's attachment (#2309), drawn by kind in the row's slot:
+    /// a voice as the shared `VoiceView`, a kind this build doesn't know as
+    /// a neutral line when the comment has no words.
     public let attachment: CommentAttachment?
+    /// The comment as one line of words (#2309): what a share says.
+    public var oneLineText: String { CommentAttachment.oneLineText(body: body, attachment: attachment) }
+    /// What Copy copies (#2309, D): the words, nil when there are none — a
+    /// voice alone has no Copy row.
+    public var copyableText: String? { CommentAttachment.hasWords(body) ? body : nil }
     /// The two-letter initials — the row's RENDERED identity, drawn
     /// immediately and permanently. The picture (if any) is layered over
     /// it; it is never swapped for it, so there is no empty disc at any

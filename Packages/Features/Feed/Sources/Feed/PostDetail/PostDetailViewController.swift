@@ -1932,7 +1932,8 @@ final class PostDetailViewController: UIViewController {
 
     func presentCommentShare(_ model: CommentDisplayModel) {
         let sheet = UIActivityViewController(
-            activityItems: ["\(model.authorName): \(model.body)"],
+            // A voice alone shares as "🎙 12″" (#2309), never "Ava: ".
+            activityItems: ["\(model.authorName): \(model.oneLineText)"],
             applicationActivities: nil
         )
         present(sheet, animated: true)

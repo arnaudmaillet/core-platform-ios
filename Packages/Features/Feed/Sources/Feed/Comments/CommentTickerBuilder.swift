@@ -58,14 +58,14 @@ public struct CommentTickerBuilder: Sendable {
         var seenBodies = Set<String>()
         var qualifying: [TickerCommentModel] = []
         for entry in entries {
-            // TODO(#2309, piece 2): a voice with no words rides as
-            // "🎙 12″"; until then its empty body keeps it off the band.
-            let body = entry.body.trimmingCharacters(in: .whitespacesAndNewlines)
+            // One line of words (#2309): a voice with words rides as its
+            // words, a voice alone as "🎙 12″" — reaction-shaped, so it rides.
+            let body = entry.oneLineText
             guard !body.isEmpty,
                   body.count <= Self.maxCharacterCount,
                   !body.contains(where: \.isNewline),
                   Self.isReactionShaped(body),
-                  seenBodies.insert(body.lowercased()).inserted else { continue }
+                  seenBodies.insert(Self.dedupKey(body, of: entry)).inserted else { continue }
             qualifying.append(TickerCommentModel(
                 id: entry.id, text: body, avatarURL: entry.authorAvatarURL,
                 monogram: MonogramAvatarView.monogram(name: entry.authorName, handle: entry.authorHandle)
@@ -77,6 +77,14 @@ public struct CommentTickerBuilder: Sendable {
         // recency order would cluster similar comments — is the tape's, a
         // new shuffle per cycle.
         return Array(qualifying.prefix(Self.maxPoolItems))
+    }
+
+    /// What two comments must not share to both ride: their words,
+    /// case-blind. A line that stands for an attachment ("🎙 12″") is no
+    /// one's words — two voices of one length are two comments — so it is
+    /// keyed by its comment.
+    static func dedupKey(_ line: String, of entry: CommentEntry) -> String {
+        CommentAttachment.hasWords(entry.body) || entry.attachment == nil ? line.lowercased() : "\u{1}\(entry.id)"
     }
 
     /// Reaction shape: any emoji-bearing body qualifies outright (dense emoji
