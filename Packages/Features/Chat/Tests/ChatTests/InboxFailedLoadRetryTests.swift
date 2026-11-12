@@ -1,6 +1,7 @@
 import CoreModels
 import DesignSystem
 import Foundation
+import TestSupport
 import Testing
 import UIKit
 @testable import Chat
@@ -64,15 +65,6 @@ private actor FlakySuggestions: SuggestionsProviding {
 
 @MainActor
 struct InboxFailedLoadRetryTests {
-    /// Whether `condition` came to hold within `looks` short looks — a budget
-    /// of looks, not of wall-clock time, so a starved runner spends none of it.
-    private func settle(looks: Int = 1_000, until condition: () async -> Bool) async -> Bool {
-        for _ in 0..<looks {
-            if await condition() { return true }
-            try? await Task.sleep(for: .milliseconds(5))
-        }
-        return await condition()
-    }
 
     /// The screen's status view, while it shows.
     private func statusView(of screen: UIViewController) -> InboxStatusView? {

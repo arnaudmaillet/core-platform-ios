@@ -3,6 +3,7 @@ import DesignSystem
 import EntityStore
 import Foundation
 import MediaCore
+import TestSupport
 import Testing
 import UIKit
 @testable import Chat
@@ -86,14 +87,6 @@ struct MessageRequestRowTests {
 
     private func frame(of view: UIView, in cell: UITableViewCell) -> CGRect {
         view.convert(view.bounds, to: cell.contentView)
-    }
-
-    private func settle(_ condition: () async -> Bool) async -> Bool {
-        for _ in 0..<1_000 {
-            if await condition() { return true }
-            try? await Task.sleep(for: .milliseconds(5))
-        }
-        return await condition()
     }
 
     // MARK: - The face

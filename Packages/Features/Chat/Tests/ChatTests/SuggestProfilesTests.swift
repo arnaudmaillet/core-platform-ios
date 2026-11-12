@@ -3,6 +3,7 @@ import CoreModels
 import CoreNetworking
 import CoreNetworkingMocks
 import Foundation
+import TestSupport
 import Testing
 import UIKit
 @testable import Chat
@@ -239,16 +240,6 @@ private func page(_ indexes: some Sequence<Int>, next: String?) -> SuggestionsPa
 
 @MainActor
 struct SuggestionsPagingTests {
-    /// Whether `condition` came to hold within `looks` looks — a budget of
-    /// looks, not wall-clock time, so a starved runner spends none of it.
-    private func settle(looks: Int = 2_000, until condition: () async -> Bool) async -> Bool {
-        for _ in 0..<looks {
-            await Task.yield()
-            if await condition() { return true }
-            try? await Task.sleep(for: .milliseconds(5))
-        }
-        return await condition()
-    }
 
     private func rows(_ viewModel: SuggestionsViewModel) -> [String] {
         guard case .content(let models) = viewModel.phase else { return [] }
@@ -582,14 +573,6 @@ struct SuggestionsPagingTests {
 
 @MainActor
 struct SuggestionsScreenPagingTests {
-    private func settle(looks: Int = 2_000, until condition: () async -> Bool) async -> Bool {
-        for _ in 0..<looks {
-            await Task.yield()
-            if await condition() { return true }
-            try? await Task.sleep(for: .milliseconds(5))
-        }
-        return await condition()
-    }
 
     /// ⚠️ ROWS ALREADY ON SCREEN NEVER ASK AGAIN from `willDisplay`: every
     /// row fits, the first ask walked only empty pages, and the list must

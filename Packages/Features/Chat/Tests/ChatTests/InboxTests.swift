@@ -3,6 +3,7 @@ import CoreNavigation
 import CoreNetworking
 import DesignSystem
 import Foundation
+import TestSupport
 import Testing
 import UIKit
 @testable import Chat
@@ -290,23 +291,10 @@ struct InboxCatalogTests {
     ///
     /// Prefer `settle(until:)` for anything new: it waits for the condition the
     /// test is actually about, and returns as soon as it holds.
-    private func settle() async {
+    private func pause() async {
         for _ in 0..<8 {
             await Task.yield()
             try? await Task.sleep(for: .milliseconds(25))
-        }
-    }
-
-    /// Waits for a condition instead of for the clock.
-    ///
-    /// `settle()` sleeps a fixed 50ms, which is enough right up until the
-    /// machine is busy. Polling also means the work has LANDED when the test
-    /// ends, rather than being left in flight to slow whatever runs next.
-    private func settle(until condition: @escaping () async -> Bool) async {
-        for _ in 0..<200 {
-            if await condition() { return }
-            await Task.yield()
-            try? await Task.sleep(for: .milliseconds(5))
         }
     }
 
@@ -322,7 +310,7 @@ struct InboxCatalogTests {
         var latest: InboxCatalog.Snapshot?
         let token = catalog.observe { latest = $0 }
         catalog.reload()
-        await settle()
+        await pause()
 
         #expect(latest?.phase == .loaded)
         #expect(latest?.active.map(\.id) == [ConversationID("active")])
@@ -390,7 +378,7 @@ struct InboxCatalogTests {
         var latest: InboxCatalog.Snapshot?
         let token = catalog.observe { latest = $0 }
         catalog.reload()
-        await settle()
+        await pause()
 
         catalog.recordSentMessage(
             ChatMessage(id: "m", senderID: ProfileID("me"), body: "hey", createdAt: Date(timeIntervalSince1970: 20), isMine: true),
@@ -413,7 +401,7 @@ struct InboxCatalogTests {
         var snapshots: [InboxCatalog.Snapshot] = []
         let token = catalog.observe { snapshots.append($0) }
         catalog.reload()
-        await settle()
+        await pause()
 
         #expect(snapshots.last?.active.map(\.id) == [ConversationID("active")])
         #expect(snapshots.last?.requests.map(\.id) == [ConversationID("request")])
@@ -429,7 +417,7 @@ struct InboxCatalogTests {
         var latest: InboxCatalog.Snapshot?
         let token = catalog.observe { latest = $0 }
         catalog.reload()
-        await settle()
+        await pause()
 
         catalog.accept(ConversationID("request"))
         #expect(latest?.active.map(\.id) == [ConversationID("request")])
@@ -446,7 +434,7 @@ struct InboxCatalogTests {
         var latest: InboxCatalog.Snapshot?
         let token = catalog.observe { latest = $0 }
         catalog.reload()
-        await settle()
+        await pause()
 
         catalog.decline(ConversationID("request"))
         #expect(latest?.active.isEmpty == true)
@@ -488,7 +476,7 @@ struct InboxCatalogTests {
         catalog.reload()   // load A — claims the truncated payload
         catalog.reload()   // supersedes A; load B claims the full one
         await provider.setLoadGate(open: true)
-        await settle()
+        await pause()
 
         #expect(!loadedCounts.isEmpty)
         // The one-row inbox never reached anybody.
@@ -506,7 +494,7 @@ struct InboxCatalogTests {
         var latest: InboxCatalog.Snapshot?
         let token = catalog.observe { latest = $0 }
         catalog.reload()
-        await settle()
+        await pause()
         catalog.togglePin(ConversationID("a"))
         #expect(latest?.active.map(\.id) == [ConversationID("a")])
 
@@ -530,7 +518,7 @@ struct InboxCatalogTests {
 
         catalog.reset()
         await provider.setLoadGate(open: true)
-        await settle()
+        await pause()
 
         #expect(!loaded)
         #expect(catalog.snapshot.active.isEmpty)
@@ -551,7 +539,7 @@ struct InboxCatalogTests {
             repository: provider
         )
         catalog.reload()
-        await settle()
+        await pause()
 
         var observed: [(active: Int, unread: Int, requests: Int)] = []
         let token = catalog.observe { snapshot in
@@ -559,11 +547,11 @@ struct InboxCatalogTests {
         }
         await provider.setLoadGate(open: false)
         catalog.reload()
-        await settle() // mid-flight: the fetch has not returned
+        await pause() // mid-flight: the fetch has not returned
 
         #expect(observed.allSatisfy { $0 == (2, 1, 1) })
         await provider.setLoadGate(open: true)
-        await settle()
+        await pause()
         #expect(observed.last! == (2, 1, 1))
         _ = token
     }
@@ -584,7 +572,7 @@ struct InboxCatalogTests {
         var latest: InboxCatalog.Snapshot?
         let token = catalog.observe { latest = $0 }
         catalog.reload()
-        await settle()
+        await pause()
 
         #expect(latest?.active.map(\.id) == [ConversationID("read"), ConversationID("unread")])
         #expect(latest?.requests.map(\.id) == [ConversationID("unread-request")])
@@ -614,7 +602,7 @@ struct InboxCatalogTests {
         var latest: InboxCatalog.Snapshot?
         let token = catalog.observe { latest = $0 }
         catalog.reload()
-        await settle()
+        await pause()
         #expect(latest?.unreadIDs.count == 2)
 
         // The thread screen reports that it moved the cursor.
@@ -627,7 +615,7 @@ struct InboxCatalogTests {
 
         // The confirming reload lands; the row must not reappear just because
         // this stub never advances its cursors.
-        await settle()
+        await pause()
         #expect(latest?.unreadIDs == [ConversationID("u2")])
         _ = token
     }
@@ -653,7 +641,7 @@ struct InboxCatalogTests {
         var latest: InboxCatalog.Snapshot?
         let token = catalog.observe { latest = $0 }
         catalog.reload()
-        await settle()
+        await pause()
 
         // Pin: reorders the active list, immediately.
         catalog.togglePin(ConversationID("b"))
@@ -701,7 +689,7 @@ struct InboxCatalogTests {
         var latest: InboxCatalog.Snapshot?
         let token = catalog.observe { latest = $0 }
         catalog.reload()
-        await settle()
+        await pause()
         #expect(latest?.active.map(\.id) == [ConversationID("top"), ConversationID("bottom")])
 
         catalog.recordSentMessage(
@@ -732,7 +720,7 @@ struct InboxCatalogTests {
         var latest: InboxCatalog.Snapshot?
         let token = catalog.observe { latest = $0 }
         catalog.reload()
-        await settle()
+        await pause()
 
         catalog.recordSentMessage(
             ChatMessage(id: "x", senderID: ProfileID("me"), body: "hi", createdAt: Date(), isMine: true),
@@ -759,13 +747,13 @@ struct InboxCatalogTests {
         var latest: InboxCatalog.Snapshot?
         let token = catalog.observe { latest = $0 }
         catalog.reload()
-        await settle()
+        await pause()
 
         let viewModel = ConversationViewModel(conversationID: ConversationID("u1"), repository: provider)
         viewModel.onDidMarkRead = { catalog.markRead($0) }
         viewModel.onMarkReadDidFail = { catalog.markReadDidFail($0) }
         viewModel.viewDidLoad()
-        await settle()
+        await pause()
 
         // The write is still blocked, yet the row is already gone.
         #expect(await provider.markReadIsPending)
@@ -785,13 +773,13 @@ struct InboxCatalogTests {
         var latest: InboxCatalog.Snapshot?
         let token = catalog.observe { latest = $0 }
         catalog.reload()
-        await settle()
+        await pause()
 
         let viewModel = ConversationViewModel(conversationID: ConversationID("u1"), repository: provider)
         viewModel.onDidMarkRead = { catalog.markRead($0) }
         viewModel.onMarkReadDidFail = { catalog.markReadDidFail($0) }
         viewModel.viewDidLoad()
-        await settle()
+        await pause()
 
         #expect(latest?.unreadIDs == [ConversationID("u1")])
         _ = token
@@ -808,10 +796,10 @@ struct InboxCatalogTests {
         var latest: InboxCatalog.Snapshot?
         let token = catalog.observe { latest = $0 }
         catalog.reload()
-        await settle()
+        await pause()
 
         catalog.markRead(ConversationID("u1"))
-        await settle()
+        await pause()
 
         #expect(latest?.unreadIDs.isEmpty == true)
         _ = token
@@ -828,12 +816,12 @@ struct InboxCatalogTests {
         var emissions = 0
         let token = catalog.observe { _ in emissions += 1 }
         catalog.reload()
-        await settle()
+        await pause()
         let before = emissions
 
         catalog.markRead(ConversationID("u1"))
         catalog.markRead(ConversationID("u1"))
-        await settle()
+        await pause()
 
         // One projection for the change, plus the confirming reload's own.
         #expect(emissions - before <= 2)
@@ -856,7 +844,7 @@ struct InboxCatalogTests {
         let token = catalog.observe { latest = $0 }
 
         catalog.reload()
-        await settle()
+        await pause()
         let firstOrder = latest?.requests.map(\.id)
         #expect(firstOrder == [ConversationID("r-a"), ConversationID("r-b"), ConversationID("r-c")])
 
@@ -868,7 +856,7 @@ struct InboxCatalogTests {
                 conversation($0, peer: "stranger-\($0.suffix(1))", activityAt: shared)
             })
             catalog.reload()
-            await settle()
+            await pause()
             #expect(latest?.requests.map(\.id) == firstOrder)
         }
         _ = token
@@ -883,7 +871,7 @@ struct InboxCatalogTests {
         var latest: InboxCatalog.Snapshot?
         let token = catalog.observe { latest = $0 }
         catalog.reload()
-        await settle()
+        await pause()
 
         catalog.togglePin(ConversationID("c2"))
         #expect(latest?.active.map(\.id) == [ConversationID("c2"), ConversationID("c1")])
@@ -905,7 +893,7 @@ struct InboxSurfaceViewModelTests {
     ///
     /// Prefer `settle(until:)` for anything new: it waits for the condition the
     /// test is actually about, and returns as soon as it holds.
-    private func settle() async {
+    private func pause() async {
         for _ in 0..<8 {
             await Task.yield()
             try? await Task.sleep(for: .milliseconds(25))
@@ -928,7 +916,7 @@ struct InboxSurfaceViewModelTests {
         requests.onPhaseChange = { requestsPhase = $0 }
 
         list.viewWillAppear()
-        await settle()
+        await pause()
         #expect(listPhase == .empty)
         guard case .content(let pending) = requestsPhase else {
             Issue.record("expected a pending request, got \(String(describing: requestsPhase))")
@@ -962,7 +950,7 @@ struct InboxSurfaceViewModelTests {
         list.onPhaseChange = { phase = $0 }
 
         list.viewWillAppear()
-        await settle()
+        await pause()
 
         guard case .content(let rows) = phase else {
             Issue.record("expected content, got \(String(describing: phase))")
@@ -987,7 +975,7 @@ struct InboxSurfaceViewModelTests {
         var phase: ConversationListViewModel.Phase?
         list.onPhaseChange = { phase = $0 }
         list.viewWillAppear()
-        await settle()
+        await pause()
 
         catalog.markRead(ConversationID("a"))
 
@@ -1015,7 +1003,7 @@ struct InboxSurfaceViewModelTests {
         var counts: [Int] = []
         requests.onNewCountChange = { counts.append($0) }
         requests.refresh()
-        await settle()
+        await pause()
         #expect(counts == [2], "the badge counted messages, not requests")
         #expect(requests.newCount == 2)
 
@@ -1023,7 +1011,7 @@ struct InboxSurfaceViewModelTests {
         #expect(requests.newCount == 1, "opening r1 left it on the badge")
 
         requests.refresh()
-        await settle()
+        await pause()
         #expect(requests.newCount == 1)
     }
 
@@ -1041,7 +1029,7 @@ struct InboxSurfaceViewModelTests {
         )
         let chats = ConversationListViewModel(catalog: catalog, now: { Date(timeIntervalSince1970: -1) })
         chats.refresh()
-        await settle()
+        await pause()
         #expect(chats.newCount == 4)
 
         catalog.markRead(ConversationID("c1"))
@@ -1069,7 +1057,7 @@ struct InboxSurfaceViewModelTests {
         var phase: MessageRequestsViewModel.Phase?
         requests.onPhaseChange = { phase = $0 }
         requests.refresh()
-        await settle()
+        await pause()
 
         guard case .content(let rows) = phase else {
             Issue.record("expected content, got \(String(describing: phase))")
@@ -1083,7 +1071,7 @@ struct InboxSurfaceViewModelTests {
         // Time passes, the tab reloads: still new for the session.
         clock.now = Date(timeIntervalSince1970: 10_000)
         requests.refresh()
-        await settle()
+        await pause()
         guard case .content(let later) = phase else {
             Issue.record("expected content, got \(String(describing: phase))")
             return
@@ -1105,7 +1093,7 @@ struct InboxSurfaceViewModelTests {
         var phase: MessageRequestsViewModel.Phase?
         requests.onPhaseChange = { phase = $0 }
         requests.refresh()
-        await settle()
+        await pause()
 
         guard case .content(let before) = phase else {
             Issue.record("expected content, got \(String(describing: phase))")
@@ -1157,7 +1145,7 @@ struct InboxSurfaceViewModelTests {
         )
         let requests = MessageRequestsViewModel(catalog: catalog, router: router)
         requests.refresh()
-        await settle()
+        await pause()
 
         requests.didSelect(ConversationID("r1"))
         #expect(router.routes == [.conversation(ConversationID("r1"))])
@@ -1177,7 +1165,7 @@ struct SuggestionsViewModelTests {
     ///
     /// Prefer `settle(until:)` for anything new: it waits for the condition the
     /// test is actually about, and returns as soon as it holds.
-    private func settle() async {
+    private func pause() async {
         for _ in 0..<8 {
             await Task.yield()
             try? await Task.sleep(for: .milliseconds(25))
@@ -1191,9 +1179,9 @@ struct SuggestionsViewModelTests {
         viewModel.onPhaseChange = { phases.append($0) }
 
         viewModel.loadIfNeeded()
-        await settle()
+        await pause()
         viewModel.loadIfNeeded()
-        await settle()
+        await pause()
 
         #expect(phases.count == 1)
         guard case .content(let rows) = phases.last else {
@@ -1210,7 +1198,7 @@ struct SuggestionsViewModelTests {
         var phases: [SuggestionsViewModel.Phase] = []
         viewModel.onPhaseChange = { phases.append($0) }
         viewModel.loadIfNeeded()
-        await settle()
+        await pause()
 
         viewModel.toggleFollow(ProfileID("p1"))
         // Asserted before any await: an optimistic button doesn't wait.
@@ -1220,7 +1208,7 @@ struct SuggestionsViewModelTests {
         }
         #expect(rows[0].isFollowing)
 
-        await settle()
+        await pause()
         #expect(await repository.followed == [ProfileID("p1")])
     }
 
@@ -1230,10 +1218,10 @@ struct SuggestionsViewModelTests {
         var phases: [SuggestionsViewModel.Phase] = []
         viewModel.onPhaseChange = { phases.append($0) }
         viewModel.loadIfNeeded()
-        await settle()
+        await pause()
 
         viewModel.toggleFollow(ProfileID("p1"))
-        await settle()
+        await pause()
 
         guard case .content(let rows) = phases.last else {
             Issue.record("expected content")
@@ -1250,14 +1238,14 @@ struct SuggestionsViewModelTests {
         let repository = StubSuggestions(accounts: [account("p1")])
         let viewModel = SuggestionsViewModel(repository: repository)
         viewModel.loadIfNeeded()
-        await settle()
+        await pause()
 
         #expect(viewModel.toggleFollow(ProfileID("p1")), "a follow is on (#1886)")
         #expect(!viewModel.toggleFollow(ProfileID("p1")), "an ignored tap plays nothing")
         // Asserted before any await: the second tap changed nothing.
         #expect(viewModel.isFollowing(ProfileID("p1")), "the second tap undid the follow")
 
-        await settle()
+        await pause()
         #expect(await repository.followed == [ProfileID("p1")])
         #expect(await repository.unfollowed.isEmpty, "the second tap reached the server")
     }
@@ -1270,7 +1258,7 @@ struct SuggestionsViewModelTests {
         var phases: [SuggestionsViewModel.Phase] = []
         viewModel.onPhaseChange = { phases.append($0) }
         viewModel.loadIfNeeded()
-        await settle()
+        await pause()
 
         viewModel.toggleFollow(ProfileID("p1"))
         guard case .content(let rows) = phases.last else {
@@ -1279,7 +1267,7 @@ struct SuggestionsViewModelTests {
         }
         #expect(rows[0].isRequested && !rows[0].isFollowing, "the tap read Following on a private profile")
 
-        await settle()
+        await pause()
         #expect(await repository.followed == [ProfileID("p1")])
         #expect(viewModel.isRequested(ProfileID("p1")) && !viewModel.isFollowing(ProfileID("p1")))
     }
@@ -1291,10 +1279,10 @@ struct SuggestionsViewModelTests {
         let repository = StubSuggestions(accounts: [account("p1")], asks: true)
         let viewModel = SuggestionsViewModel(repository: repository)
         viewModel.loadIfNeeded()
-        await settle()
+        await pause()
 
         viewModel.toggleFollow(ProfileID("p1"))
-        await settle()
+        await pause()
         #expect(viewModel.isRequested(ProfileID("p1")), "an ask read as a follow")
         #expect(!viewModel.isFollowing(ProfileID("p1")))
     }
@@ -1304,15 +1292,15 @@ struct SuggestionsViewModelTests {
         let repository = StubSuggestions(accounts: [account("p1", isPrivate: true)], asks: true)
         let viewModel = SuggestionsViewModel(repository: repository)
         viewModel.loadIfNeeded()
-        await settle()
+        await pause()
         // A request turns the follow on (`toggleOn`, #1886); its withdrawal
         // is silent.
         #expect(viewModel.toggleFollow(ProfileID("p1")))
-        await settle()
+        await pause()
 
         #expect(!viewModel.toggleFollow(ProfileID("p1")))
         #expect(!viewModel.isRequested(ProfileID("p1")), "the withdrawal waited on the network")
-        await settle()
+        await pause()
         #expect(await repository.withdrawn == [ProfileID("p1")])
         #expect(!viewModel.isRequested(ProfileID("p1")) && !viewModel.isFollowing(ProfileID("p1")))
     }
@@ -1324,11 +1312,11 @@ struct SuggestionsViewModelTests {
         var failures: [String] = []
         viewModel.onFollowFailure = { failures.append($0) }
         viewModel.loadIfNeeded()
-        await settle()
+        await pause()
 
         viewModel.toggleFollow(ProfileID("p1"))
         #expect(failures.isEmpty, "the failure was said before the server answered")
-        await settle()
+        await pause()
 
         #expect(failures == ["Couldn't follow @p1"])
         #expect(!viewModel.isFollowing(ProfileID("p1")))
@@ -1342,7 +1330,7 @@ struct SuggestionsViewModelTests {
         var phases: [SuggestionsViewModel.Phase] = []
         viewModel.onPhaseChange = { phases.append($0) }
         viewModel.loadIfNeeded()
-        await settle()
+        await pause()
 
         viewModel.dismiss(ProfileID("p1"))
         #expect(phases.last == .empty)
@@ -1354,7 +1342,7 @@ struct SuggestionsViewModelTests {
             repository: StubSuggestions(accounts: [account("p1")]), router: router
         )
         viewModel.loadIfNeeded()
-        await settle()
+        await pause()
 
         viewModel.message(ProfileID("p1"))
         viewModel.didSelect(ProfileID("p1"))
@@ -1425,7 +1413,7 @@ struct MessageRequestCellTests {
 /// tab badges keep their own counts.
 @MainActor
 struct InboxOneListTests {
-    private func settle() async {
+    private func pause() async {
         for _ in 0..<8 {
             await Task.yield()
             try? await Task.sleep(for: .milliseconds(25))
@@ -1479,7 +1467,7 @@ struct InboxOneListTests {
         var phase: ConversationListViewModel.Phase?
         chats.onPhaseChange = { phase = $0 }
         chats.refresh()
-        await settle()
+        await pause()
 
         guard case .content(let shown) = phase else {
             Issue.record("expected content, got \(String(describing: phase))")
@@ -1503,7 +1491,7 @@ struct InboxOneListTests {
         var phase: MessageRequestsViewModel.Phase?
         requests.onPhaseChange = { phase = $0 }
         requests.refresh()
-        await settle()
+        await pause()
 
         guard case .content(let shown) = phase else {
             Issue.record("expected content, got \(String(describing: phase))")
@@ -1521,7 +1509,7 @@ struct InboxOneListTests {
         let requests = MessageRequestsViewModel(catalog: requestsCatalog(), now: { Self.opened })
         chats.refresh()
         requests.refresh()
-        await settle()
+        await pause()
         #expect(chats.newCount == 5, "2 on a new row and 3 on an older one")
         #expect(requests.newCount == 2, "r1 and r3, one each")
     }
@@ -1546,7 +1534,7 @@ struct InboxOneListTests {
         var phase: ConversationListViewModel.Phase?
         chats.onPhaseChange = { phase = $0 }
         chats.refresh()
-        await settle()
+        await pause()
         guard case .content(let shown) = phase else {
             Issue.record("expected content, got \(String(describing: phase))")
             return
@@ -1665,7 +1653,7 @@ struct InboxOneListTests {
         let catalog = chatsCatalog()
         let chats = ConversationListViewModel(catalog: catalog, now: { Self.opened })
         chats.refresh()
-        await settle()
+        await pause()
         let list = ConversationListViewController(viewModel: chats)
         screen(list)
 
@@ -1680,7 +1668,7 @@ struct InboxOneListTests {
     @Test func theRequestsListIsOneSectionWithNoHeader() async {
         let requests = MessageRequestsViewModel(catalog: requestsCatalog(), now: { Self.opened })
         requests.refresh()
-        await settle()
+        await pause()
         let list = MessageRequestsViewController(viewModel: requests)
         screen(list)
 

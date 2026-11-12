@@ -38,7 +38,9 @@ let package = Package(
         // counters, the page under it — a Core package, no feature.
         .package(path: "../../Core/HeroPage"),
         // The Posts page's types (`GalleryPost`, `PostCardStaking`).
-        .package(path: "../../Core/PostGrid")
+        .package(path: "../../Core/PostGrid"),
+        // The tests' shared waits (#2389).
+        .package(path: "../../Tools/TestSupport")
     ],
     targets: [
         .target(
@@ -67,6 +69,7 @@ let package = Package(
             name: "ChatTests",
             dependencies: [
                 "Chat",
+                "TestSupport",
                 "CoreNavigation",
                 "CoreNetworking",
                 "FeedInterface",
