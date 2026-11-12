@@ -19,16 +19,13 @@ import UIKit
 /// - **15pt if it fits, otherwise 13pt** (`PagedTabBar.TitleSize`), the size
 ///   the inbox's titles wore in the bar in August.
 ///
-/// ⚠️ **ONE ITEM FOR THE STRIP'S LIFE, AS FOR YOU'S — NEVER RE-MINTED.** The
-/// first cut minted a fresh item around the same strip on every width change
-/// (the wallet badge's cure for a frozen width), several times during the
-/// screen's load and its layout passes. On the simulator the inbox's strip
-/// was then found in no window (`-pill-drag-probe` read `bar=0`) and the bell
-/// was gone from the header — and handing one strip from item to item is the
-/// one thing For You's working recipe never does. A width change is told IN PLACE: the strip re-states its intrinsic size and
-/// `fit(_:)` answers that it moved, so the host asks its bar to lay out again.
-/// Nor is the strip's frame written: the bar sizes it from its intrinsic size,
-/// as For You's.
+/// ⚠️ **ONE ITEM FOR THE STRIP'S LIFE, AS FOR YOU'S.** A width change (a
+/// count, the title size) is told IN PLACE: the strip re-states its
+/// intrinsic size and `fit(_:)` answers that it moved, so the host asks its
+/// bar to lay out again. The strip's frame is never written: the bar sizes it
+/// from its intrinsic size. The one re-mint is after a sweep into a `•••`
+/// (`narrowAfterOverflow`): a swept group is measured again only for a new
+/// item.
 ///
 /// ⚠️ **AND THE CEILING IS APPLIED BEFORE THE BAR FIRST MEASURES IT.** The
 /// host fits the strip as it composes its bar, before the screen is ever on
@@ -42,8 +39,14 @@ public final class BarSelectorItem {
     /// The item's identifier, stable across launches.
     public let id: String
     /// The item the host puts after the bell — the same one for the strip's
-    /// life (see the type's note).
-    public let item: UIBarButtonItem
+    /// life (see the type's note), except after a sweep into a `•••`
+    /// (`narrowAfterOverflow`), when only a fresh item makes the bar measure
+    /// again.
+    public private(set) var item: UIBarButtonItem
+    /// Points taken off the budget's ceiling after the bar swept the group.
+    public private(set) var trim: CGFloat = 0
+    /// How much each sweep takes off.
+    public static let trimStep: CGFloat = 24
     /// What keeps the bell and the strip two platters rather than one shared
     /// pill — one instance, so an identical group compares identical.
     private let separator = BarItems.separator()
@@ -70,8 +73,7 @@ public final class BarSelectorItem {
     /// host lays its bar out again — the item stays the same.
     @discardableResult
     public func fit(_ budget: BarSelectorBudget) -> Bool {
-        let ceiling = budget.selectorCeiling(bubble: strip.intrinsicContentSize.height,
-                                             ring: strip.hosting.overhang)
+        let ceiling = ceiling(for: budget)
         strip.titleSize = strip.preferredWidth(at: .regular) <= ceiling + 0.5 ? .regular : .compact
         strip.widthCeiling = ceiling
         let width = strip.intrinsicContentSize.width
@@ -79,22 +81,60 @@ public final class BarSelectorItem {
         statedWidth = width
         return true
     }
+
+    /// The strip view's ceiling under `budget`, less any trim — never below
+    /// one bubble.
+    public func ceiling(for budget: BarSelectorBudget) -> CGFloat {
+        let bubble = strip.intrinsicContentSize.height
+        let ceiling = budget.selectorCeiling(bubble: bubble, ring: strip.hosting.overhang)
+        return max(bubble, ceiling - trim)
+    }
+
+    /// Whether the strip is on screen in its bar. A bar that swept the
+    /// group into a `•••` hosts it nowhere: it has no window.
+    public var isHosted: Bool { strip.window != nil }
+
+    /// The bar swept the group into a `•••` all the same (its allowance is
+    /// UIKit's, and not public): takes `trimStep` off the ceiling, re-fits,
+    /// and mints a fresh item under the same identifier so the bar measures
+    /// it again — the host writes its leading group with the new `item`.
+    /// False, and nothing changed, once the strip is down to one bubble.
+    @discardableResult
+    public func narrowAfterOverflow(_ budget: BarSelectorBudget) -> Bool {
+        guard ceiling(for: budget) > strip.intrinsicContentSize.height + 0.5 else { return false }
+        trim += Self.trimStep
+        fit(budget)
+        item = BarItems.container(id: id, view: strip)
+        return true
+    }
 }
 
 /// The room a navigation bar leaves its leading selector (#2337) — the
 /// August arithmetic (`navbar-leading-selector-collapse`, measured on iOS 26
-/// at 375pt): 16pt margins, a 44pt platter per item, 12pt between leading
-/// platters, a trailing group's items sharing one pill (+27pt each after the
-/// first), and at least 24pt between the two groups.
+/// at 375pt: 16pt margins, 12pt between leading platters, a trailing group's
+/// items sharing one pill at +27pt each after the first, at least 24pt
+/// between the two groups), with iOS 27's numbers where they grew.
 ///
-/// On a 402pt bar with the bell alone, 314pt for the selector's platter; on
-/// an iPhone SE (375pt), 287.
+/// ⚠️ **THE AUGUST NUMBERS ALONE SWEPT THE WHOLE GROUP INTO A `•••`.** On the
+/// iPhone 18 Pro simulator (402pt, iOS 27.0) they promised the selector a
+/// 314pt platter after the bell; the inbox's three counted titles asked for
+/// about 300 of it and UIKit showed a lone `•••` platter instead of the bell
+/// and the selector. Two things changed since August: an iOS 27 bubble is
+/// 48pt, not 44 (`BarItems.bubbleHeight`), and the bar keeps room at its
+/// trailing end even with no trailing item — so one inter-group gap is
+/// reserved always (`trailingReserve`). On a 402pt bar with the bell alone
+/// that leaves 286pt for the selector's platter; on an iPhone SE (375pt),
+/// 259. Should a bar still sweep the group, the host narrows the selector
+/// further (`BarSelectorItem.narrowAfterOverflow`).
 public struct BarSelectorBudget: Equatable, Sendable {
     public static let barMargin: CGFloat = 16
-    public static let platter: CGFloat = 44
+    /// iOS 27's glass bubble (`BarItems.bubbleHeight`); iOS 26 drew 44.
+    public static let platter: CGFloat = 48
     public static let leadingGap: CGFloat = 12
     public static let sharedItemSpacing: CGFloat = 27
     public static let interGroupGap: CGFloat = 24
+    /// What the bar keeps at its trailing end with nothing there.
+    public static let trailingReserve: CGFloat = interGroupGap
 
     /// The navigation bar's width.
     public var barWidth: CGFloat
@@ -115,8 +155,11 @@ public struct BarSelectorBudget: Equatable, Sendable {
         let leading = leadingWidths.reduce(CGFloat.zero) { $0 + max(Self.platter, $1) + Self.leadingGap }
         var trailing = trailingWidths.reduce(CGFloat.zero) { $0 + max(Self.platter, $1) }
         if !trailingWidths.isEmpty {
-            trailing += Self.sharedItemSpacing * CGFloat(trailingWidths.count - 1) + Self.interGroupGap
+            trailing += Self.sharedItemSpacing * CGFloat(trailingWidths.count - 1)
         }
+        // The gap before a trailing group, or the bar's own reserve without
+        // one: the same 24pt either way.
+        trailing += Self.interGroupGap
         return barWidth - Self.barMargin * 2 - leading - trailing
     }
 

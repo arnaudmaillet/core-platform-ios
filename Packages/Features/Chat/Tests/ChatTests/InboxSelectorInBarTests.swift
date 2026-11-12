@@ -151,4 +151,68 @@ struct InboxSelectorInBarTests {
         let fitsAtRegular = strip.preferredWidth(at: .regular) <= room - strip.hosting.overhang * 2 + 0.5
         #expect(strip.titleSize == (fitsAtRegular ? .regular : .compact))
     }
+
+    // MARK: - In a real navigation bar
+
+    /// ⚠️ **THE BELL AND THE SELECTOR ARE IN THE BAR — NOT SWEPT INTO A
+    /// `•••`.** The first cut's budget promised more room than iOS 27 gives a
+    /// leading group, and the iPhone 18 Pro simulator showed a lone `•••`
+    /// platter where `[bell][selector]` belonged. Hosted here as the shell
+    /// hosts it — in a navigation controller, in a window, the shell's bell
+    /// (an image item), counts on two segments — at an iPhone 17/18 Pro's
+    /// width and an SE's: both views are in the navigation bar, inside its
+    /// bounds, the bell before the selector, and no overflow control.
+    @Test(arguments: [CGSize(width: 402, height: 874), CGSize(width: 375, height: 667)])
+    func theBellAndTheSelectorAreInTheBar(size: CGSize) async throws {
+        let (screen, surfaces) = inbox()
+        screen.setLeadingAccessoryItem(BarItems.icon(
+            id: BarItems.SharedID.notificationsBell, image: UIImage(systemName: "bell"),
+            label: "Notifications", action: {}
+        ))
+        let navigation = UINavigationController(rootViewController: screen)
+        let window = UIWindow(frame: CGRect(origin: .zero, size: size))
+        window.rootViewController = navigation
+        window.isHidden = false
+        defer { window.isHidden = true }
+        surfaces[0].publish(7)
+        surfaces[1].publish(3)
+        window.layoutIfNeeded()
+
+        // The bar hosts its items over a few turns; a swept group is
+        // narrowed from `viewDidAppear` on (`recoverSelectorFromOverflow`).
+        let bar = navigation.navigationBar
+        let strip = screen.debugSelector
+        for _ in 0..<100 where strip.window == nil || bell(in: bar) == nil {
+            try await Task.sleep(for: .milliseconds(50))
+            window.layoutIfNeeded()
+            bar.layoutIfNeeded()
+        }
+
+        let label = "\(Int(size.width))pt"
+        #expect(strip.window != nil, "\(label): the selector is in no window — swept into a •••")
+        #expect(strip.isDescendant(of: bar), "\(label): the selector is not in the navigation bar")
+        let stripFrame = strip.convert(strip.bounds, to: bar)
+        #expect(stripFrame.width >= 1 && stripFrame.minX >= -0.5 && stripFrame.maxX <= bar.bounds.width + 0.5,
+                "\(label): the selector at \(stripFrame) in a \(bar.bounds.width)pt bar")
+        let bellView = try #require(bell(in: bar), "\(label): the bell is not in the navigation bar")
+        let bellFrame = bellView.convert(bellView.bounds, to: bar)
+        #expect(bellFrame.minX >= -0.5 && bellFrame.maxX <= stripFrame.minX + 0.5,
+                "\(label): the bell at \(bellFrame), the selector at \(stripFrame)")
+        #expect(descendant(of: bar, where: { $0.accessibilityLabel == "More" }) == nil,
+                "\(label): an overflow control in the bar")
+    }
+
+    /// The bell's view in the bar: whatever UIKit draws the image item with,
+    /// labelled as the item is, in a window.
+    private func bell(in bar: UIView) -> UIView? {
+        descendant(of: bar) { $0.accessibilityLabel == "Notifications" && $0.window != nil && $0.bounds.width > 1 }
+    }
+
+    private func descendant(of root: UIView, where matches: (UIView) -> Bool) -> UIView? {
+        if matches(root) { return root }
+        for subview in root.subviews {
+            if let found = descendant(of: subview, where: matches) { return found }
+        }
+        return nil
+    }
 }

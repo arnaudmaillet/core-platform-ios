@@ -264,6 +264,9 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        // Once the bar has laid the group out: a sweep into a `•••` is
+        // answered by a narrower selector (#2337).
+        DispatchQueue.main.async { [weak self] in self?.recoverSelectorFromOverflow() }
         // A tab root always shows the bar (#769) — search mode hides it on
         // purpose.
         if !isSearching {
@@ -500,6 +503,52 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     private func refitSelector() {
         guard isViewLoaded, selector.fit(selectorBudget) else { return }
         navigationController?.navigationBar.setNeedsLayout()
+        traceSelector("fit")
+        // A wider strip (a count arriving) on a bar on show can tip it over.
+        if view.window != nil {
+            DispatchQueue.main.async { [weak self] in self?.recoverSelectorFromOverflow() }
+        }
+    }
+
+    /// ⚠️ **THE BAR'S ALLOWANCE IS UIKIT'S, NOT PUBLIC, AND A GROUP IT CANNOT
+    /// FIT IS SWEPT WHOLE INTO A `•••`** — the bell with the selector, as the
+    /// first cut of #2337 did on an iPhone 18 Pro (iOS 27.0) with the August
+    /// budget. The budget is conservative now; this is the net under it. A
+    /// swept strip is in no window while the bar shows, so it is narrowed by
+    /// a step and handed back as a fresh item (a swept group is measured again
+    /// only for a new one), until it is hosted or down to one bubble. Bounded.
+    private func recoverSelectorFromOverflow(attempt: Int = 0) {
+        guard attempt < 12, isViewLoaded, view.window != nil, !isSearching,
+              let navigation = navigationController, navigation.topViewController === self,
+              !navigation.isNavigationBarHidden
+        else { return }
+        navigation.navigationBar.layoutIfNeeded()
+        traceSelector("check \(attempt)")
+        guard !selector.isHosted, selector.narrowAfterOverflow(selectorBudget) else { return }
+        applyLeadingGroup()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+            self?.recoverSelectorFromOverflow(attempt: attempt + 1)
+        }
+    }
+
+    /// `-inbox-selector-trace`: the numbers behind the selector's width —
+    /// what the bar measured, what the strip wants at 14/15pt and at 13pt,
+    /// what it states, and whether it is hosted.
+    private func traceSelector(_ moment: String) {
+        #if DEBUG
+        guard ProcessInfo.processInfo.arguments.contains("-inbox-selector-trace") else { return }
+        let budget = selectorBudget
+        let strip = categoryBar
+        let line = String(
+            format: "[inbox-selector] %@ barW=%.0f room=%.0f ceiling=%.0f regular=%.0f compact=%.0f "
+                + "stated=%.0f size=%@ trim=%.0f hosted=%@ leading=%d",
+            moment, budget.barWidth, budget.room, selector.ceiling(for: budget),
+            strip.preferredWidth(at: .regular), strip.preferredWidth(at: .compact),
+            strip.intrinsicContentSize.width, strip.titleSize == .regular ? "regular" : "compact",
+            selector.trim, selector.isHosted ? "yes" : "NO", navigationItem.leftBarButtonItems?.count ?? 0
+        )
+        print(line)
+        #endif
     }
 
     /// The room the bar leaves the selector: the bell before it, whatever

@@ -13,12 +13,14 @@ struct BarSelectorItemTests {
 
     // MARK: - The budget (the August arithmetic)
 
-    /// The issue's numbers: the bell alone leaves about 310pt on a 402pt bar
-    /// and about 285 on an iPhone SE.
-    @Test func theBellAloneLeavesTheIssuesRoom() {
-        #expect(BarSelectorBudget(barWidth: 402, leadingWidths: [44]).room == 314)
-        #expect(BarSelectorBudget(barWidth: 375, leadingWidths: [44]).room == 287)
-        #expect(BarSelectorBudget(barWidth: 402).room == 370, "nothing to lead: the margins alone")
+    /// The bell alone leaves 286pt on a 402pt bar and 259 on an iPhone SE:
+    /// 16pt margins, a 48pt bubble and 12pt for the bell, 24pt kept at the
+    /// trailing end. (The August 314 / 287 swept the group into a `•••` on
+    /// iOS 27.)
+    @Test func theBellAloneLeavesRoomWithTheTrailingReserve() {
+        #expect(BarSelectorBudget(barWidth: 402, leadingWidths: [44]).room == 286)
+        #expect(BarSelectorBudget(barWidth: 375, leadingWidths: [44]).room == 259)
+        #expect(BarSelectorBudget(barWidth: 402).room == 346, "nothing to lead: the margins and the reserve")
     }
 
     /// A trailing group shares one pill: 44, then +27 per item, and 24pt
@@ -28,20 +30,20 @@ struct BarSelectorItemTests {
         // tolerance: an arithmetic chain of literals inside `#expect`
         // compared unequal on CI ("246.0" against "246").
         let one = BarSelectorBudget(barWidth: 402, leadingWidths: [44], trailingWidths: [44])
-        let oneRoom: CGFloat = 246 // 314 − 44 − 24
+        let oneRoom: CGFloat = 238 // 402 − 32 − 60 − 48 − 24
         #expect(abs(one.room - oneRoom) < 0.01, "\(one.room)")
         let two = BarSelectorBudget(barWidth: 402, leadingWidths: [44], trailingWidths: [44, 44])
-        let twoRoom: CGFloat = 175 // 314 − 44 − 27 − 44 − 24
+        let twoRoom: CGFloat = 163 // 402 − 32 − 60 − (48 + 27 + 48) − 24
         #expect(abs(two.room - twoRoom) < 0.01, "\(two.room)")
         // A glyph narrower than a platter still takes one.
-        #expect(BarSelectorBudget(barWidth: 402, leadingWidths: [20]).room == 314)
+        #expect(BarSelectorBudget(barWidth: 402, leadingWidths: [20]).room == 286)
     }
 
     /// The ceiling leaves the platter's ring out, and never falls below one
     /// bubble — demanding more than the bar has is how a group becomes `•••`.
     @Test func theCeilingNeverFallsBelowABubble() {
         let roomy = BarSelectorBudget(barWidth: 402, leadingWidths: [44])
-        #expect(roomy.selectorCeiling(bubble: 44, ring: 4) == 306)
+        #expect(roomy.selectorCeiling(bubble: 44, ring: 4) == 278)
         let cramped = BarSelectorBudget(barWidth: 160, leadingWidths: [44], trailingWidths: [44, 44])
         #expect(cramped.selectorCeiling(bubble: 44, ring: 4) == 44)
     }
@@ -84,12 +86,13 @@ struct BarSelectorItemTests {
         let compact = bar.preferredWidth(at: .compact)
 
         // Room for 15pt.
-        selector.fit(BarSelectorBudget(barWidth: regular + ring * 2 + 32 + 10))
+        let fixed = BarSelectorBudget.barMargin * 2 + BarSelectorBudget.trailingReserve
+        selector.fit(BarSelectorBudget(barWidth: regular + ring * 2 + fixed + 10))
         #expect(bar.titleSize == .regular)
         #expect(abs(bar.intrinsicContentSize.width - regular) < 0.5)
 
         // Room for 13pt only.
-        selector.fit(BarSelectorBudget(barWidth: compact + ring * 2 + 32 + 1))
+        selector.fit(BarSelectorBudget(barWidth: compact + ring * 2 + fixed + 1))
         #expect(bar.titleSize == .compact)
         #expect(abs(bar.intrinsicContentSize.width - compact) < 0.5)
 
@@ -117,6 +120,28 @@ struct BarSelectorItemTests {
         #expect(selector.item === first, "the item was re-minted")
         #expect(selector.item.identifier == "test.selector")
         #expect(selector.item.customView === bar)
+    }
+
+    /// A bar that swept the group anyway: each narrowing takes a step off
+    /// the ceiling and mints a fresh item under the same identifier around
+    /// the same strip, down to one bubble and no further.
+    @Test func aSweptSelectorNarrowsDownToABubble() {
+        let bar = strip()
+        let selector = BarSelectorItem(strip: bar, id: "test.selector")
+        let budget = BarSelectorBudget(barWidth: 402, leadingWidths: [44])
+        selector.fit(budget)
+        #expect(!selector.isHosted, "no window, no bar")
+        let first = selector.item
+        let before = selector.ceiling(for: budget)
+        #expect(selector.narrowAfterOverflow(budget))
+        #expect(selector.ceiling(for: budget) == before - BarSelectorItem.trimStep)
+        #expect(selector.item !== first)
+        #expect(selector.item.identifier == "test.selector" && selector.item.customView === bar)
+        var steps = 1
+        while selector.narrowAfterOverflow(budget), steps < 50 { steps += 1 }
+        #expect(steps < 50, "it never stopped narrowing")
+        #expect(abs(selector.ceiling(for: budget) - bar.intrinsicContentSize.height) < 0.5)
+        #expect(bar.intrinsicContentSize.width >= bar.intrinsicContentSize.height - 0.5)
     }
 
     /// `[lead][separator][selector]`, or the selector alone; the same
