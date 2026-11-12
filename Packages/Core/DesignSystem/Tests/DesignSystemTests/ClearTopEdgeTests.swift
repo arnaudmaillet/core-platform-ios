@@ -31,6 +31,22 @@ struct ClearTopEdgeTests {
         #expect(scrollView.topEdgeEffect.style == .soft)
     }
 
+    /// #2346 (#2327's verdict): a titled header wears `.soft`, never
+    /// `.automatic`, with its fade clearance installed; a pager carrying the
+    /// edge hands the clearance to its pages.
+    @Test func aTitledHeaderIsSoftWithItsClearance() {
+        let table = UITableView(frame: .zero, style: .plain)
+        table.applyTopEdge(for: .titled)
+        #expect(!table.topEdgeEffect.isHidden)
+        #expect(table.topEdgeEffect.style == .soft)
+        #expect(TopFadeClearanceKeeper.attached(to: table) != nil, "the clearance is installed")
+
+        let pager = HorizontalPagerView(pages: [UIView(), UIView()])
+        pager.pagingScrollView.prefersSoftTopEdge()
+        #expect(pager.pagingScrollView.topEdgeEffect.style == .soft)
+        #expect((pager.pagingScrollView as? HorizontalPagerScrollView)?.forwardsTopFadeClearance == true)
+    }
+
     /// Only the top. The bottom edge — above a tab bar, a toolbar, a composer —
     /// is not what the call is about, and keeps the system's effect.
     @Test func theBottomEdgeKeepsTheSystemsEffect() {
