@@ -108,7 +108,7 @@ final class SnapSubtitleView: UIView {
     /// label, never inside it: the cue fade animates the label's opacity, and
     /// an effect view under a faded ancestor stops rendering. The blur follows
     /// the fade on its own strength instead.
-    private var pillBlur: CommentBlurView?
+    private var pillBlur: ProgressBlurView?
     /// The author avatar leading the cue — a compact round image at the
     /// zone's leading edge, pinned (via its wrapper) to the ZONE'S fixed
     /// center so it never moves as the cue grows from one line to two; the
@@ -452,9 +452,9 @@ final class SnapSubtitleView: UIView {
         CATransaction.commit()
     }
 
-    private func blurBehindPill() -> CommentBlurView {
+    private func blurBehindPill() -> ProgressBlurView {
         if let pillBlur { return pillBlur }
-        let blur = CommentBlurView(style: .systemMaterialDark)
+        let blur = ProgressBlurView(style: .systemMaterialDark)
         blur.accessibilityIdentifier = "subtitle-pill-blur"
         blur.clipsToBounds = true
         blur.layer.cornerCurve = .continuous
