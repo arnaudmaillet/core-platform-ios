@@ -78,7 +78,7 @@ final class CommentsInputBar: UIView {
 
     private func applyConfiguration(from old: ComposerConfiguration) {
         if !ComposerConfiguration.sameEntries(configuration.attachments, old.attachments) {
-            rebuildAttachmentButtons()
+            rebuildAttachmentColumn()
         }
         if configuration.column != old.column { applyColumn() }
         guard configuration.voice != old.voice else { return }
@@ -460,28 +460,60 @@ final class CommentsInputBar: UIView {
     private let ownBubbleSlot = UILayoutGuide()
     private var ownBubbleSlotTrailing: NSLayoutConstraint!
 
-    // MARK: The attachments (#2305, #2308)
+    // MARK: The attachments (#2305, #2308, #2344)
 
     // What the reader can attach from the input row is the host's LIST
-    // (`ComposerConfiguration.attachments`), in the row's order: one glass
-    // bubble per entry, the own bubble's size and spacing, BETWEEN THE FIELD
-    // AND THE OWN BUBBLE —
+    // (`ComposerConfiguration.attachments`), in the row's order: ONE glass
+    // capsule holding every entry's glyph (#2344, the owner 2026-11-12),
+    // BETWEEN THE FIELD AND THE OWN BUBBLE —
     //
-    //     [avatar][field][📷][🖼][☺]
+    //     [avatar][field][📷 🖼][☺]
     //
-    // — never right of it: hiding them would make the own bubble jump.
-    // Between, the field widens into their place and the own bubble never
-    // moves. A host that declares none (a post's comments) keeps its row
-    // exactly. The same entries with new actions keep their bubbles: a tap
-    // reads its action off the list (`attachmentTapped`).
+    // — never right of it: hiding it would make the own bubble jump. A host
+    // that declares none (a post's comments) has no capsule and keeps its
+    // row exactly. The same entries with new actions keep their buttons: a
+    // tap reads its action off the list (`attachmentTapped`).
+    //
+    // THE FOLD IS ROUTE B (#2344): the capsule is a bubble of a horizontal
+    // `SnapGlassColumn` — one `UIGlassContainerEffect`, the springs the lab
+    // measured on a native toolbar at 60 Hz, stepped frame by frame — whose
+    // anchor stands on the own bubble's resting place. While the reader
+    // writes the capsule FOLDS INTO IT, narrowing toward the own bubble and
+    // vanishing under it; done writing, it is born from it again. The frames
+    // are the composer's, so the capsule ends exactly `sm` short of the own
+    // bubble and the field exactly `sm` short of the capsule, every glyph a
+    // 45 pt square, the row's height.
+    //
+    // ⚠️ ROUTE A (a standalone `UIToolbar`) WAS TRIED AND LEFT (filmed on
+    // the iPhone 18 Pro simulator, 2026-11-12): its platter stood 48 pt tall
+    // and about 120 wide, unlike the row's 45 pt bubbles, over the field's
+    // end and a bubble's width short of the own bubble; and the toolbar
+    // never let its anchor be read (its custom view stayed uninstalled), so
+    // no correction could place it.
+    private var attachmentColumn: SnapGlassColumn?
+    /// The entries' buttons, in the row's order: the column hosts each in
+    /// the capsule's glass.
     private var attachmentButtons: [UIButton] = []
-    /// What the bubbles were last told — not `isHidden`, which stays false
-    /// through their way out.
+    /// What the capsule was last told — its fold runs after.
     private var attachmentsShown = false
+
+    /// The capsule's anchor: the own bubble's resting place in the column.
+    static let ownBubbleAnchorID = "composer.own-bubble"
 
     /// The attachments' glyph: the row's quiet ink, one size at every text
     /// size, as the own bubble's.
     static let attachmentConfiguration = UIImage.SymbolConfiguration(pointSize: 17, weight: .medium)
+
+    /// How the capsule last went or came: for tests.
+    enum AttachmentChange: Equatable {
+        case none
+        /// Off screen or before the first layout: in place.
+        case snapped
+        /// The glass column's fold into the own bubble, or its way back out.
+        case folded
+        /// Reduce Motion: a cross-fade.
+        case crossFaded
+    }
 
     /// Whether the attachments show (#2305, Messenger's rule; the contract's
     /// one rule for every host's list, #2308): only while the reader is NOT
@@ -509,49 +541,98 @@ final class CommentsInputBar: UIView {
         )
     }
 
-    /// The attachments' room at the field's end, while they show.
-    private var attachmentsInset: CGFloat {
-        attachmentsShown ? CGFloat(attachmentButtons.count) * (Metrics.controlSize + Spacing.sm) : 0
+    /// The capsule's width for `count` glyphs: one row-high square each, so
+    /// each glyph keeps a 45 pt target.
+    static func attachmentCapsuleWidth(count: Int) -> CGFloat {
+        CGFloat(count) * Metrics.controlSize
     }
 
-    /// One bubble per entry, each on the row's line and riding the keyboard
-    /// with the field, counted from the own bubble's RESTING place
-    /// (`ownBubbleSlot`), so the bubble's hold (which grows and slides it)
-    /// never moves them.
-    private func rebuildAttachmentButtons() {
-        for button in attachmentButtons { button.removeFromSuperview() }
-        let sources = configuration.attachments
-        attachmentButtons = sources.map { makeAttachmentButton(for: $0) }
-        let step = Metrics.controlSize + Spacing.sm
-        for (index, button) in attachmentButtons.enumerated() {
-            insertSubview(button, belowSubview: rowActionButton)
-            NSLayoutConstraint.activate([
-                button.trailingAnchor.constraint(
-                    equalTo: ownBubbleSlot.leadingAnchor,
-                    constant: -Spacing.sm - step * CGFloat(sources.count - 1 - index)
-                ),
-                button.bottomAnchor.constraint(equalTo: field.bottomAnchor),
-                button.widthAnchor.constraint(equalToConstant: Metrics.controlSize),
-                button.heightAnchor.constraint(equalToConstant: Metrics.controlSize),
-            ])
+    /// The column's width: the capsule, the gap, the own bubble's place.
+    static func attachmentColumnWidth(count: Int) -> CGFloat {
+        attachmentCapsuleWidth(count: count) + Spacing.sm + Metrics.controlSize
+    }
+
+    /// The capsule's room at the field's end, while it shows: the capsule
+    /// and the gap before it.
+    private var attachmentsInset: CGFloat {
+        attachmentsShown ? Self.attachmentCapsuleWidth(count: attachmentButtons.count) + Spacing.sm : 0
+    }
+
+    /// The column's shapes for a state, in its bounds (`width` wide, `side`
+    /// tall): the anchor on the own bubble's place at the trailing end and,
+    /// while the capsule shows, the capsule `gap` before it, the entries in
+    /// the row's order. Pure, for tests.
+    static func attachmentShapes(
+        ids: [String], shows: Bool, width: CGFloat, side: CGFloat, gap: CGFloat, rightToLeft: Bool
+    ) -> [[SnapGlassColumn.Slot]] {
+        let anchor = SnapGlassColumn.Slot(
+            id: ownBubbleAnchorID, frame: CGRect(x: rightToLeft ? 0 : width - side, y: 0, width: side, height: side)
+        )
+        guard shows, !ids.isEmpty else { return [[anchor]] }
+        let count = CGFloat(ids.count)
+        let capsule = ids.enumerated().map { index, id in
+            let i = CGFloat(index)
+            let x = rightToLeft ? side + gap + (count - 1 - i) * side : width - side - gap - (count - i) * side
+            return SnapGlassColumn.Slot(id: id, frame: CGRect(x: x, y: 0, width: side, height: side))
         }
+        return [capsule, [anchor]]
+    }
+
+    /// One glass column for the list, on the row's line and riding the
+    /// keyboard with the field, its trailing end on the own bubble's
+    /// RESTING place (`ownBubbleSlot`), so the bubble's hold (which grows
+    /// and slides it) never moves the capsule. Under the own bubble.
+    private func rebuildAttachmentColumn() {
+        attachmentColumn?.removeFromSuperview()
+        attachmentColumn = nil
+        attachmentButtons = []
+        let sources = configuration.attachments
+        guard !sources.isEmpty else {
+            attachmentsShown = false
+            return setNeedsLayout()
+        }
+        let column = SnapGlassColumn(frame: .zero)
+        column.axis = .horizontal
+        column.anchorID = Self.ownBubbleAnchorID
+        // Born from the own bubble straight away: the toolbar's two-step
+        // reveal would first lay one capsule over the own bubble.
+        column.revealsInOneCapsule = false
+        column.translatesAutoresizingMaskIntoConstraints = false
+        attachmentButtons = sources.map { makeAttachmentButton(for: $0) }
+        for (source, button) in zip(sources, attachmentButtons) { column.register(button, for: source.id) }
+        insertSubview(column, belowSubview: rowActionButton)
+        let width = Self.attachmentColumnWidth(count: sources.count)
+        NSLayoutConstraint.activate([
+            column.trailingAnchor.constraint(equalTo: ownBubbleSlot.trailingAnchor),
+            column.centerYAnchor.constraint(equalTo: ownBubbleSlot.centerYAnchor),
+            column.widthAnchor.constraint(equalToConstant: width),
+            column.heightAnchor.constraint(equalToConstant: Metrics.controlSize),
+        ])
+        let ids = sources.map(\.id)
+        column.layout = { [weak self] in
+            guard let self else { return [] }
+            return Self.attachmentShapes(
+                ids: ids, shows: attachmentsShown, width: width, side: Metrics.controlSize, gap: Spacing.sm,
+                rightToLeft: effectiveUserInterfaceLayoutDirection == .rightToLeft
+            )
+        }
+        attachmentColumn = column
         // A new list lands in place: nothing to animate from.
         attachmentsShown = attachmentsWanted
-        for button in attachmentButtons {
-            button.isHidden = !attachmentsShown
-            button.isAccessibilityElement = attachmentsShown
-        }
+        column.refresh(animated: false)
+        // The anchor's own bubble stays a point under the composer's own
+        // bubble, which draws its glass: the capsule folds into that point.
+        column.setCover(Self.ownBubbleAnchorID, amount: 1)
+        for button in attachmentButtons { button.isAccessibilityElement = attachmentsShown }
         setNeedsLayout()
     }
 
     private func makeAttachmentButton(for source: ComposerAttachmentSource) -> UIButton {
-        var face = UIButton.Configuration.glass()
-        face.cornerStyle = .capsule
+        var face = UIButton.Configuration.plain()
         face.image = UIImage(systemName: source.symbol)
         face.preferredSymbolConfigurationForImage = Self.attachmentConfiguration
         face.baseForegroundColor = Self.restingTint
         let button = UIButton(configuration: face)
-        button.translatesAutoresizingMaskIntoConstraints = false
         button.accessibilityLabel = source.accessibilityLabel
         button.accessibilityIdentifier = source.id
         button.maximumContentSizeCategory = .large
@@ -562,30 +643,35 @@ final class CommentsInputBar: UIView {
         return button
     }
 
-    /// A bubble's tap: the action its entry carries now.
+    /// A glyph's tap: the action its entry carries now.
     private func attachmentTapped(_ id: String) {
         configuration.attachments.first { $0.id == id }?.action()
     }
 
-    /// The attachments in or out, as the reader starts or stops writing:
-    /// they fade and shrink where they stand while the field's end springs
-    /// to its new width — one motion. Reduce Motion: the field at once, the
-    /// bubbles cross-fading. Off screen, at once.
+    /// The fold's spring: the column's own (`SnapGlassColumn`: k 260,
+    /// ζ 0.75, after its 0.03 s wait) — the same physics for the field's
+    /// end, so the field widens into the room as the capsule frees it.
+    static var attachmentFoldSpring: (duration: TimeInterval, bounce: CGFloat, delay: TimeInterval) {
+        (2 * .pi / SnapGlassColumn.springK.squareRoot(), 1 - CGFloat(SnapGlassColumn.springZeta), SnapGlassColumn.startDelay)
+    }
+
+    /// The capsule in or out, as the reader starts or stops writing: it
+    /// folds into the own bubble — or comes back out of it — on the glass
+    /// column's springs, while the field's end springs to its new width on
+    /// the same physics, in the same turn. Reduce Motion: the field at
+    /// once, the capsule cross-fading. Off screen, at once.
     private func updateAttachments() {
-        guard !attachmentButtons.isEmpty else { return }
+        guard let column = attachmentColumn else { return }
         let shows = attachmentsWanted
         guard shows != attachmentsShown else { return }
-        let buttons = attachmentButtons
         // Gone for VoiceOver at once, not at the end of their way out.
-        for button in buttons { button.isAccessibilityElement = shows }
+        for button in attachmentButtons { button.isAccessibilityElement = shows }
         guard window != nil, hasLaidOutOnce else {
             attachmentsShown = shows
-            for button in buttons {
-                button.layer.removeAllAnimations()
-                button.isHidden = !shows
-                button.alpha = 1
-                button.transform = .identity
-            }
+            column.refresh(animated: false)
+            #if DEBUG
+            debugAttachmentChange = .snapped
+            #endif
             return setNeedsLayout()
         }
         // What is pending lands first, unanimated — a placeholder moving to
@@ -595,39 +681,30 @@ final class CommentsInputBar: UIView {
         #if DEBUG
         debugAttachmentMotions += 1
         #endif
-        let reduces = MotionPreference.reducesMotion
-        let away: CGAffineTransform = reduces ? .identity : CGAffineTransform(scaleX: 0.5, y: 0.5)
-        if shows {
-            for button in buttons where button.isHidden {
-                button.isHidden = false
-                button.alpha = 0
-                button.transform = away
-            }
-        }
         setNeedsLayout()
-        let finish: (Bool) -> Void = { [weak self] _ in
-            guard let self, !self.attachmentsShown else { return }
-            for button in buttons {
-                button.isHidden = true
-                button.alpha = 1
-                button.transform = .identity
-            }
-        }
-        let options: UIView.AnimationOptions = [.allowUserInteraction, .beginFromCurrentState]
-        if reduces {
+        if MotionPreference.reducesMotion {
+            #if DEBUG
+            debugAttachmentChange = .crossFaded
+            #endif
             UIView.performWithoutAnimation { layoutIfNeeded() }
-            UIView.animate(withDuration: 0.2, delay: 0, options: options, animations: {
-                for button in buttons { button.alpha = shows ? 1 : 0 }
-            }, completion: finish)
+            UIView.transition(
+                with: column, duration: 0.2, options: [.transitionCrossDissolve, .allowUserInteraction]
+            ) {
+                column.refresh(animated: false)
+            }
             return
         }
-        UIView.animate(springDuration: 0.4, bounce: shows ? 0.2 : 0, options: options, animations: {
-            for button in buttons {
-                button.alpha = shows ? 1 : 0
-                button.transform = shows ? .identity : away
-            }
+        #if DEBUG
+        debugAttachmentChange = .folded
+        #endif
+        column.refresh(animated: true)
+        let spring = Self.attachmentFoldSpring
+        UIView.animate(
+            springDuration: spring.duration, bounce: spring.bounce, initialSpringVelocity: 0, delay: spring.delay,
+            options: [.allowUserInteraction, .beginFromCurrentState]
+        ) {
             self.layoutIfNeeded()
-        }, completion: finish)
+        }
     }
 
     #if DEBUG
@@ -656,8 +733,12 @@ final class CommentsInputBar: UIView {
     var debugFieldHoldBegins: Bool { gestureRecognizerShouldBegin(fieldVoiceHold) }
     /// The field's text view, for its VoiceOver actions.
     var debugTextView: UITextView { textView }
-    /// The attachments' bubbles, in the row's order (#2305).
+    /// The capsule's glyphs, in the row's order (#2305, #2344).
     var debugAttachmentButtons: [UIButton] { attachmentButtons }
+    /// The capsule's glass column, nil without attachments (#2344).
+    var debugAttachmentColumn: SnapGlassColumn? { attachmentColumn }
+    /// How the capsule last went or came (#2344).
+    private(set) var debugAttachmentChange: AttachmentChange = .none
     /// Whether the attachments show — or are on their way in.
     var debugShowsAttachments: Bool { attachmentsShown }
     /// How many times the attachments came or went in sight.

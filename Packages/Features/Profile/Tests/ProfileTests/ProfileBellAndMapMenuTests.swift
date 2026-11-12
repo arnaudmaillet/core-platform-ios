@@ -710,8 +710,8 @@ extension ProfileBellAndMapMenuTests {
     }
 
     /// The @handle, native and leading (#2248): `navigationItem.title` with
-    /// the `.browser` style — no title view, no leading item. ⚠️ ONLY ONCE
-    /// THE TRAY HAS SCROLLED AWAY (#2268): at rest the header shows it.
+    /// the `.browser` style — no title view, no leading item. ⚠️ NOT AT REST
+    /// (#2268): the header shows it; whole once the tray has scrolled away.
     @Test func aPushedProfileIsTitledWithItsHandleLeading() async throws {
         let (screen, _, _) = makeScreen(relationship: .other(isFollowing: false, isBlocked: false))
         try #require(await settle { screen.followButtonState == .follow })
@@ -730,9 +730,10 @@ extension ProfileBellAndMapMenuTests {
         #expect(screen.navigationItem.title == nil, "the title stayed with the tray back")
     }
 
-    /// ⚠️ FOLLOW, THE @HANDLE AND THE BLUR COME AND GO TOGETHER (#2268, the
-    /// owner 2026-11-10): one trigger, the tray going under the bar. The blur
-    /// is UIKit's soft top edge on the pager, which spans the bar.
+    /// ⚠️ FOLLOW AND THE BLUR COME AND GO TOGETHER (#2268, the owner
+    /// 2026-11-10): one trigger, the tray going under the bar — with the
+    /// @handle whole by then (#2334). The blur is UIKit's soft top edge on
+    /// the pager, which spans the bar.
     @Test func followTheHandleAndTheBlurAreInSync() async throws {
         let (screen, _, _) = makeScreen(relationship: .other(isFollowing: false, isBlocked: false))
         try #require(await settle { screen.followButtonState == .follow && screen.navigationItem.title == nil })
@@ -750,6 +751,89 @@ extension ProfileBellAndMapMenuTests {
         #expect(screen.debugBarRelationshipItem == nil)
         #expect(screen.navigationItem.title == nil)
         #expect(!screen.galleryPager.hasSoftTopEdge && paging.topEdgeEffect.isHidden, "the blur stayed")
+    }
+
+    /// ⚠️ THE @HANDLE FOLLOWS THE SCROLL (#2334), as a large title does:
+    /// while the header's @handle line passes under the bar, the bar's own
+    /// native title comes in by steps — its ink at the passage's alpha, a
+    /// few points low and climbing — and goes the same way down. Never from
+    /// nothing to whole in one step; whole, it is the plain title in the
+    /// bar's dress. Only the title moves: Follow and the blur wait for the
+    /// tray (#2268).
+    @Test func theHandleFollowsTheScrollThroughItsLine() async throws {
+        let (screen, _, _) = makeScreen(relationship: .other(isFollowing: false, isBlocked: false))
+        try #require(await settle { screen.followButtonState == .follow && screen.navigationItem.title == nil })
+        #expect(screen.navigationItem.attributedTitle == nil)
+
+        // The way up, a step at a time.
+        var opacities: [CGFloat] = []
+        for step in 1...19 {
+            screen.debugSetHandlePassage(CGFloat(step) / 20)
+            opacities.append(screen.debugBarTitleOpacity)
+            #expect(screen.navigationItem.title == "@lena", "step \(step): no handle")
+            let attributed = try #require(screen.navigationItem.attributedTitle, "step \(step): not scrubbed")
+            #expect(String(attributed.characters) == "@lena")
+            let ink = try #require(attributed.uiKit.foregroundColor, "step \(step): no ink")
+            var alpha: CGFloat = 0
+            ink.resolvedColor(with: screen.traitCollection).getRed(nil, green: nil, blue: nil, alpha: &alpha)
+            #expect(abs(alpha - CGFloat(step) / 20) < 0.02, "step \(step): alpha \(alpha)")
+            #expect(screen.navigationItem.titleView == nil, "a custom title view")
+            #expect(screen.debugBarRelationshipItem == nil, "Follow came with the handle")
+            #expect(!screen.galleryPager.hasSoftTopEdge, "the blur came with the handle")
+        }
+        #expect(opacities == opacities.sorted() && opacities.first! < 0.1, "not a gradual arrival: \(opacities)")
+
+        // Whole: the plain native title, in the bar's own dress.
+        screen.debugSetHandlePassage(1)
+        #expect(screen.navigationItem.title == "@lena")
+        #expect(wearsThePlainTitle(screen), "a whole title kept its scrub: \(String(describing: screen.navigationItem.attributedTitle))")
+        #expect(screen.debugBarTitleOpacity == 1)
+        #expect(screen.debugBarRelationshipItem == nil && !screen.galleryPager.hasSoftTopEdge, "Follow or the blur left the tray's trigger")
+
+        // The tray under the bar: Follow and the blur, the handle unchanged.
+        screen.debugSetTrayScrolledAway(true)
+        #expect(screen.debugBarRelationshipItem != nil && screen.galleryPager.hasSoftTopEdge)
+        #expect(screen.navigationItem.title == "@lena" && wearsThePlainTitle(screen))
+
+        // The way down: the tray back, the line half way, then none.
+        screen.debugSetTrayScrolledAway(false)
+        #expect(screen.debugBarRelationshipItem == nil && !screen.galleryPager.hasSoftTopEdge)
+        screen.debugSetHandlePassage(0.5)
+        #expect(screen.navigationItem.title == "@lena")
+        #expect(!wearsThePlainTitle(screen), "the way down is not scrubbed")
+        #expect(screen.debugBarTitleOpacity == 0.5)
+        screen.debugSetHandlePassage(0)
+        #expect(screen.navigationItem.title == nil, "the title stayed with the line back")
+        #expect(screen.navigationItem.attributedTitle == nil)
+        #expect(screen.debugBarTitleOpacity == 0)
+    }
+
+    /// Whether the bar wears its title plain — no scrub's faded ink, no
+    /// climb. ⚠️ Not `attributedTitle == nil`: set to nil with `title`
+    /// still set, its getter answered the title as an attributed string
+    /// (iOS 26), so it is not nil while the bar is titled.
+    private func wearsThePlainTitle(_ screen: ProfileViewController) -> Bool {
+        guard let attributed = screen.navigationItem.attributedTitle else { return true }
+        for run in attributed.runs {
+            if let offset = run.uiKit.baselineOffset, abs(offset) > 0.001 { return false }
+            if let ink = run.uiKit.foregroundColor {
+                var alpha: CGFloat = 0
+                ink.resolvedColor(with: screen.traitCollection).getRed(nil, green: nil, blue: nil, alpha: &alpha)
+                if alpha < 0.999 { return false }
+            }
+        }
+        return true
+    }
+
+    /// The tab root (the viewer's own) wears no handle however far its line
+    /// has gone (#1642, #2334).
+    @Test func theOwnProfilesHandleLineTitlesNothing() async throws {
+        let (screen, viewModel, _) = makeScreen(relationship: .me, own: true)
+        try #require(await settle { viewModel.isOwnProfile && viewModel.profile != nil })
+        screen.debugSetHandlePassage(0.5)
+        #expect(screen.navigationItem.title == nil && screen.navigationItem.attributedTitle == nil)
+        screen.debugSetHandlePassage(1)
+        #expect(screen.navigationItem.title == nil && screen.navigationItem.attributedTitle == nil)
     }
 
     /// Follow wears the primary colour (the bar's `.prominent`); Requested

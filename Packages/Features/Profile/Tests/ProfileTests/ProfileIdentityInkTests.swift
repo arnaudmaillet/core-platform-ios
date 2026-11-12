@@ -128,8 +128,8 @@ struct ProfileIdentityInkTests {
             #expect(header.debugBannerHasPicture)
             let contrast = try #require(header.debugIdentityContrast())
             let shape = band ? "band" : "poster"
-            // ⚠️ A BAND CARD'S NAME IS HELD TO AA FOR LARGE TEXT (3:1 — title3
-            // semibold, 20pt): its ramp runs to a lower foot (even air over
+            // ⚠️ A BAND CARD'S NAME IS HELD TO AA FOR LARGE TEXT (3:1 — title2
+            // bold, 22pt, #2334): its ramp runs to a lower foot (even air over
             // the counters, the owner 2026-10-15) and in the picture's dark
             // tone, and over the synthetic worst cases (2px stripes, pure
             // white) the name measures 4.2 (a photograph ≥ 7). The 15pt

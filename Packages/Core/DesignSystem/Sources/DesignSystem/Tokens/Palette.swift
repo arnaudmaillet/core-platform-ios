@@ -46,7 +46,8 @@ import UIKit
 ///   never a gradient, under a white count.
 /// - **A filled button wears white** (`onPrimary`) in both appearances.
 /// - **The mint is the brand's second colour, not a UI colour** (#2282
-///   § 3): the icon, the launch logo and the signature's end. The theme
+///   § 3): the icon (and the launch picture, its render) and the
+///   signature's end. The theme
 ///   holds it (`accent`, with a deep mint for light grounds) but no role
 ///   reads it. The violet appears only inside the signature gradient
 ///   (#2071: the gems wear the crown's yellow — `gem`, `gemText`,
@@ -56,7 +57,8 @@ import UIKit
 ///   Contrast value where its contrast is close to the line.
 /// - **The signature gradient is kept to a few places** (`brandGradient`,
 ///   violet `7235FF` → mint `16FFCB`, #2282): the unseen-story ring
-///   (`storyRingGradient`, #2089) and the loader (`loaderGradient`, #2147).
+///   (`storyRingGradient`, #2089). The loader left it (#2340): its pills
+///   wear the primary in three steps (`loaderPillColors`).
 ///   White text never sits over its mint half (1.30:1), so no button wears
 ///   it.
 public enum Palette {
@@ -171,28 +173,19 @@ public enum Palette {
 
     // MARK: - The loader (#1329)
 
-    /// The loader's gradient (#2147, the owner 2026-11-05): the signature —
-    /// violet → mint since #2282, at the loader's own opacities — one layer
-    /// across the mark that the pills mask, so the left pill is violet, the
-    /// middle sky blue, the right mint. Real alpha: pastel on the light
-    /// page, deeper on the dark one. With Increased Contrast, the stops are
-    /// opaque and the mint deepened (`signatureContrastStops`). The same in
-    /// both appearances otherwise: the mark is a logo, not text.
-    public static func loaderGradient(highContrast: Bool) -> [UIColor] {
-        guard !highContrast else { return theme.signatureContrastStops.map(rgb) }
-        return zip(theme.signatureGradient, theme.loaderOpacities).map { rgb($0).withAlphaComponent($1) }
+    /// The loader's pills, left to right (#2340, the owner 2026-11-12): one
+    /// colour each, the primary and then two lighter steps of its hue
+    /// (`BrandTheme.loaderSteps`), so a pill growing in the wave keeps its
+    /// colour. Opaque, the same in both appearances; with Increased Contrast
+    /// all three are the primary's IC value (`C6003A` in the light, `FF5C8C`
+    /// in the dark). It replaced the signature masked by the pills (#2147,
+    /// #2282): the signature stays for the story ring only.
+    public static let loaderPillColors: [UIColor] = theme.loaderSteps.map {
+        dynamic(light: $0, dark: $0, lightIC: theme.primary.lightIC, darkIC: theme.primary.darkIC)
     }
 
-    /// Where the loader's stops sit: the signature's.
-    public static var loaderGradientLocations: [NSNumber] { brandGradientLocations }
-
-    /// The loader's direction, in a layer's unit coordinates: `(0, 0.2) →
-    /// (1, 1.03)`, the old icon blob's (#2147), kept as the loader's own.
-    public static let loaderGradientStart = CGPoint(x: 0, y: 0.2)
-    public static let loaderGradientEnd = CGPoint(x: 1, y: 1.03)
-
-    /// Each pill's lead — its pale wake (#1795): the same gradient, at this
-    /// share of the pills' opacity (#2147).
+    /// Each pill's lead — its pale wake (#1795): its pill's colour, at this
+    /// opacity.
     public static let loaderLeadOpacity: Float = 0.45
 
     // MARK: - Economy
@@ -241,8 +234,8 @@ public enum Palette {
 
     /// THE SIGNATURE GRADIENT (#2282, the owner 2026-11-11): violet
     /// `7235FF` → mint `16FFCB`, through a sky blue, bottom-left to
-    /// top-right, interpolated in sRGB. The story ring and the loader wear
-    /// it. ⚠️ White text never sits over its mint half (1.30:1); it holds on
+    /// top-right, interpolated in sRGB. The story ring wears it (the loader
+    /// left it, #2340). ⚠️ White text never sits over its mint half (1.30:1); it holds on
     /// the violet end (5.72:1). The violet is never a UI colour on its own.
     public static let brandGradient: [UIColor] = theme.signatureGradient.map(rgb)
     /// Where each of `brandGradient`'s stops sits. Computed: `NSNumber` is
@@ -252,8 +245,8 @@ public enum Palette {
     /// The unseen-story ring's gradient (#2089): the signature itself since
     /// #2282, along its diagonal (`brandGradientStart` → `brandGradientEnd`),
     /// the same in both appearances. With Increased Contrast, its mint end
-    /// deepens to 3:1 on the light page (`signatureContrastStops`), as the
-    /// loader's: each stop resolves per contrast setting.
+    /// deepens to 3:1 on the light page (`signatureContrastStops`): each
+    /// stop resolves per contrast setting.
     public static let storyRingGradient: [UIColor] = zip(theme.signatureGradient, theme.signatureContrastStops)
         .map { stop, contrastStop in dynamic(light: stop, dark: stop, lightIC: contrastStop, darkIC: contrastStop) }
     /// Where each of `storyRingGradient`'s stops sits: the signature's.

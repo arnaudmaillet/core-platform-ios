@@ -1498,7 +1498,8 @@ final class CommentStream: NSObject {
             case .failed: state = .failed
             }
             return CommentStreamLinkCell.Content(
-                title: earlierTitle, symbol: "chevron.up", state: state, identifier: "comments.earlier"
+                title: earlierTitle, symbol: "chevron.up", state: state, identifier: "comments.earlier",
+                placement: .top
             )
         default:
             return nil
@@ -2355,8 +2356,8 @@ extension CommentStream {
             pill.configure(direction: reading.direction, target: beginning, pipeline: imagePipeline)
             pill.prepare()
         }
-        pill.apply(reading)
-        placePullPill(pill, direction: reading.direction, pulled: reading.pulled)
+        placePullPill(pill, direction: reading.direction)
+        pill.apply(reading, room: pullPillRoom(direction: reading.direction, pulled: reading.pulled))
     }
 
     private func makePullPill() -> PostPullPill {
@@ -2366,40 +2367,37 @@ extension CommentStream {
         return pill
     }
 
-    /// In the gap the pull opens, out of the edge it was pulled past: over
-    /// the composer for the next post, under the bar for the previous one —
-    /// never on the rows' side of a small gap.
-    private func placePullPill(_ pill: PostPullPill, direction: PostPullDirection, pulled: CGFloat) {
+    /// ⚠️ THE PILL STANDS `PostPullRule.footGap` (16 pt) OFF THE EDGE IT WAS
+    /// PULLED PAST, AND STAYS THERE (#2349): its foot above the composer for
+    /// the next post (the stream's bottom edge, where the composer starts),
+    /// its head under the bar for the previous one. It never moves toward
+    /// the composer: it grows away from the edge with the pull and shrinks
+    /// back toward its foot (`PostPullPill`). Its box is as wide as the page
+    /// allows; the capsule is drawn inside, centred.
+    private func placePullPill(_ pill: PostPullPill, direction: PostPullDirection) {
         let bounds = pageView.bounds
         let insets = collectionView.adjustedContentInset
         let height = PostPullPill.height
-        let centreY: CGFloat
+        let y: CGFloat
         switch direction {
-        case .next:
-            let edge = bounds.maxY - insets.bottom
-            centreY = min(edge - height / 2 - Spacing.sm, edge - pulled / 2)
-        case .previous:
-            let edge = bounds.minY + insets.top
-            centreY = max(edge + height / 2 + Spacing.sm, edge + pulled / 2)
+        case .next: y = bounds.maxY - insets.bottom - PostPullRule.footGap - height
+        case .previous: y = bounds.minY + insets.top + PostPullRule.footGap
         }
-        let width = pill.width(limit: bounds.width - 2 * Spacing.lg)
-        let place = {
-            pill.bounds = CGRect(x: 0, y: 0, width: width, height: height)
-            pill.center = CGPoint(x: bounds.midX, y: centreY)
-        }
-        // The words grow at the threshold: the capsule widens with a spring.
-        let widens = pill.bounds.width > 0 && abs(pill.bounds.width - width) > 0.5
-        guard widens, pill.window != nil, !MotionPreference.reducesMotion else {
-            UIView.performWithoutAnimation(place)
-            pill.layoutIfNeeded()
-            return
-        }
-        pill.center = CGPoint(x: bounds.midX, y: centreY)
-        UIView.animate(withDuration: 0.3, delay: 0, usingSpringWithDamping: 0.8, initialSpringVelocity: 0,
-                       options: [.beginFromCurrentState, .allowUserInteraction]) {
-            place()
+        let frame = CGRect(x: bounds.minX + Spacing.lg, y: y, width: max(0, bounds.width - 2 * Spacing.lg), height: height)
+        guard pill.frame != frame else { return }
+        UIView.performWithoutAnimation {
+            pill.frame = frame
             pill.layoutIfNeeded()
         }
+    }
+
+    /// The height the gap the pull opens leaves the pill, between its foot's
+    /// place and the rows: the overscroll, plus the section's own air at that
+    /// end (the last row ends `streamSectionVerticalInsets` above the
+    /// content's end; the first starts at its top), less the foot's gap.
+    private func pullPillRoom(direction: PostPullDirection, pulled: CGFloat) -> CGFloat {
+        let air = direction == .next ? streamSectionVerticalInsets : 0
+        return pulled + air - PostPullRule.footGap
     }
 
     /// The finger lets go. Armed: the feed's own page change to that post,
@@ -2461,6 +2459,18 @@ extension CommentStream {
 
     /// The pull's pill, once built. Tests.
     var debugPullPill: PostPullPill? { pullPill }
+    /// The pill's capsule, in the stream's page. Tests.
+    var debugPullPillCapsule: CGRect? {
+        guard let pill = pullPill else { return nil }
+        pill.layoutIfNeeded()
+        return pageView.convert(pill.debugGlassFrame, from: pill)
+    }
+    /// The stream's edges in its page: under the bar, and where the composer
+    /// starts. Tests.
+    var debugStreamEdges: (top: CGFloat, bottom: CGFloat) {
+        let insets = collectionView.adjustedContentInset
+        return (pageView.bounds.minY + insets.top, pageView.bounds.maxY - insets.bottom)
+    }
     /// Whether a committed pull holds the stream. Tests.
     var debugHoldsPull: Bool { pullHold != nil }
     /// The offset that shows the last row. Tests.

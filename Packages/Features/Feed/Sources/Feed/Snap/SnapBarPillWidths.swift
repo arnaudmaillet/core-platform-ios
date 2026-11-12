@@ -87,12 +87,12 @@ struct SnapBarPillWidths: Equatable {
         28 + 10 + 13 + (platter ? (2 * icon + 31) + 13 : 0) + 48 + 28 + slack
     }
 
-    /// A conversation's footer (#2305): `[peer pill] —— [pin] [bell] [⋯]`,
-    /// each glyph in a bubble of its own (`lone` of them: the pin, and the
-    /// bell unless the thread is a draft). The margins, the pill's glass and
-    /// ⋯ as above; each lone bubble its glyph and the bar's 10 (☆ alone
-    /// measured 59 at XXXL: 49 + 10) and the 13pt gap before it. Two of them
-    /// cost two points more than the `[📷 🖼]` platter they replace.
+    /// A footer of lone glyph bubbles before ⋯ (`lone` of them): a draft
+    /// conversation's `[peer pill] —— [pin] [⋯]` (#2305) — with its bell, the
+    /// pin and the bell share one platter (#2344), `toolbarReserve(icon:)`.
+    /// The margins, the pill's glass and ⋯ as above; each lone bubble its
+    /// glyph and the bar's 10 (☆ alone measured 59 at XXXL: 49 + 10) and the
+    /// 13pt gap before it.
     static func toolbarReserve(icon: CGFloat, lone: Int) -> CGFloat {
         28 + 10 + 13 + CGFloat(max(0, lone)) * (icon + 10 + 13) + 48 + 28 + slack
     }

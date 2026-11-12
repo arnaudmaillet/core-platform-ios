@@ -6,9 +6,9 @@ import UIKit
 /// composer knows.
 ///
 /// A conversation declares `[camera, library]`; a post's comments declare
-/// none (#2310 is on hold). The composer draws one glass bubble per entry,
-/// in the list's order, between the field and its own bubble, and hides
-/// them all while the reader writes. What a tap does — open the camera, the
+/// none (#2310 is on hold). The composer draws every entry's glyph in ONE
+/// glass capsule (#2344), in the list's order, between the field and its
+/// own bubble, and folds it into the own bubble while the reader writes. What a tap does — open the camera, the
 /// library, later a GIF picker — is the host's: the composer only calls
 /// `action`, and never uploads anything itself. A new source is one more
 /// entry, with no change to the composer.

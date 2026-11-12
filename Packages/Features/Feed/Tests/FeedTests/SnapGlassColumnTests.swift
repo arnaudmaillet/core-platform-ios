@@ -56,6 +56,44 @@ struct SnapGlassColumnTests {
         #expect(column.hitTest(CGPoint(x: 10, y: 80), with: nil) == nil)
     }
 
+    /// Horizontally (#2344, the composer's capsule): two items side by side
+    /// in one bubble, the anchor in its own; each item hosted in its
+    /// bubble's glass at its frame; the anchor alone once the capsule folds;
+    /// a covered anchor drawn as a point inside its frame.
+    @Test func aHorizontalColumnStandsACapsuleBesideItsAnchor() throws {
+        let column = SnapGlassColumn(frame: CGRect(x: 0, y: 0, width: 143, height: 45))
+        column.axis = .horizontal
+        column.anchorID = "anchor"
+        column.revealsInOneCapsule = false
+        let camera = UIButton()
+        let library = UIButton()
+        column.register(camera, for: "camera")
+        column.register(library, for: "library")
+        let cameraFrame = CGRect(x: 0, y: 0, width: 45, height: 45)
+        let libraryFrame = CGRect(x: 45, y: 0, width: 45, height: 45)
+        let anchorFrame = CGRect(x: 98, y: 0, width: 45, height: 45)
+        var folded = false
+        column.layout = {
+            let anchor = [SnapGlassColumn.Slot(id: "anchor", frame: anchorFrame)]
+            guard !folded else { return [anchor] }
+            return [[.init(id: "camera", frame: cameraFrame), .init(id: "library", frame: libraryFrame)], anchor]
+        }
+        column.refresh(animated: false)
+        #expect(column.debugShapes == [CGRect(x: 0, y: 0, width: 90, height: 45), anchorFrame])
+        #expect(camera.convert(camera.bounds, to: column) == cameraFrame)
+        #expect(library.convert(library.bounds, to: column) == libraryFrame)
+        #expect(camera.superview === library.superview, "the two items are not one bubble's")
+
+        column.setCover("anchor", amount: 1)
+        let drawn = try #require(column.debugDrawnShapes.last)
+        #expect(drawn.width <= 2 && anchorFrame.contains(CGPoint(x: drawn.midX, y: drawn.midY)), "\(drawn)")
+
+        folded = true
+        column.refresh(animated: false)
+        #expect(column.debugShapes == [anchorFrame])
+        #expect(camera.superview == nil && library.superview == nil, "a folded item still stands")
+    }
+
     /// The anchor is the sound: everything is born from it and folds into it.
     @Test func theSoundIsTheAnchor() {
         #expect(mediaChrome(postActions: true).debugGlassColumn.anchorID == "sound")

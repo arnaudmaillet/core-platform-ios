@@ -8,9 +8,11 @@ import VoiceKit
 @testable import Feed
 
 /// #2305: on a conversation's screen the camera and the library stand in the
-/// composer's row, between the field and the own bubble, hidden while the
-/// reader writes; the pin and the bell left the top bar for the footer,
-/// `[peer pill] … [pin] [bell] [⋯]`, each a bubble of its own.
+/// composer's row, between the field and the own bubble; the pin and the
+/// bell left the top bar for the footer. #2344: the camera and the library
+/// are ONE glass capsule (a horizontal `SnapGlassColumn`) that folds into the own
+/// bubble while the reader writes, and the pin and the bell share one
+/// platter, `[peer pill] … [pin · bell] [⋯]`.
 @MainActor
 struct ConversationRowAttachmentsTests {
     private final class Driver: ConversationThreadDriving {
@@ -91,56 +93,151 @@ struct ConversationRowAttachmentsTests {
 
     // MARK: - The composer's row
 
-    /// `[avatar][field][📷][🖼][☺]`: the two bubbles the own bubble's size, on
-    /// the field's line, one `sm` apart — after the field, before the own
-    /// bubble.
-    @Test func theCameraAndTheLibraryStandBetweenTheFieldAndTheOwnBubble() throws {
-        let (screen, window) = makeScreen()
-        defer { window.isHidden = true }
-        let bar = screen.debugComposeBar
-        window.layoutIfNeeded()
-        bar.layoutIfNeeded()
-        let buttons = bar.debugAttachmentButtons
-        try #require(buttons.count == 2)
-        #expect(bar.debugShowsAttachments)
-        #expect(buttons.allSatisfy { !$0.isHidden && $0.isAccessibilityElement })
-        let field = bar.inputRowView.frame
-        let camera = buttons[0].frame
-        let library = buttons[1].frame
-        let bubble = bar.debugRowActionButton.frame
-        let side = CommentsInputBar.Metrics.controlSize
-        #expect(abs(camera.width - side) < 0.5 && abs(camera.height - side) < 0.5)
-        #expect(abs(camera.minX - (field.maxX + Spacing.sm)) < 0.5, "camera \(camera), field \(field)")
-        #expect(abs(library.minX - (camera.maxX + Spacing.sm)) < 0.5, "library \(library), camera \(camera)")
-        #expect(abs(bubble.minX - (library.maxX + Spacing.sm)) < 0.5, "own bubble \(bubble), library \(library)")
-        #expect(abs(camera.maxY - field.maxY) < 0.5 && abs(library.maxY - field.maxY) < 0.5, "off the field's line")
-        #expect(abs(bar.debugFieldTrailingInset - 3 * Self.step) < 0.5)
+    /// The capsule's glass and its glyphs, in the bar's space.
+    private static func capsule(of bar: CommentsInputBar) throws -> (glass: CGRect, glyphs: [CGRect]) {
+        let column = try #require(bar.debugAttachmentColumn)
+        let glyphs = bar.debugAttachmentButtons.map { $0.convert($0.bounds, to: bar) }
+        let shapes = column.debugShapes.map { column.convert($0, to: bar) }
+        // The capsule is the shape holding the glyphs; the other is the
+        // anchor, on the own bubble's place.
+        let glass = try #require(shapes.first { shape in glyphs.allSatisfy { shape.insetBy(dx: -0.5, dy: -0.5).contains($0) } })
+        return (glass, glyphs)
     }
 
-    /// A draft hides them, keyboard down or not, and the field takes their
-    /// room; the own bubble never moves. Emptied, they come back.
-    @Test func aDraftHidesThemAndTheFieldTakesTheirRoom() throws {
+    /// `[avatar][field][📷 🖼][☺]`, hosted as the screen hosts it: ONE glass
+    /// capsule holding both glyphs — each a row-high square, a 45 pt target —
+    /// that stays clear of the field and of its text, and ends `sm` short of
+    /// the own bubble; the column's anchor stands on the own bubble, drawn as
+    /// a point under it.
+    @Test func theCameraAndTheLibraryShareOneCapsuleBeforeTheOwnBubble() throws {
+        let (screen, window) = makeScreen()
+        defer { window.isHidden = true }
+        let bar = screen.debugComposeBar
+        window.layoutIfNeeded()
+        bar.layoutIfNeeded()
+        #expect(bar.debugShowsAttachments)
+        let buttons = bar.debugAttachmentButtons
+        try #require(buttons.count == 2)
+        #expect(buttons.map(\.accessibilityLabel) == ["Camera", "Photo Library"])
+        #expect(buttons.allSatisfy { $0.isAccessibilityElement && $0.window != nil })
+        let column = try #require(bar.debugAttachmentColumn)
+        #expect(column.debugShapes.count == 2, "not one capsule and the anchor: \(column.debugShapes)")
+
+        let (glass, glyphs) = try Self.capsule(of: bar)
+        let side = CommentsInputBar.Metrics.controlSize
+        let field = bar.inputRowView.frame
+        let own = bar.debugRowActionButton.frame
+        for glyph in glyphs {
+            #expect(abs(glyph.width - side) < 0.5 && abs(glyph.height - side) < 0.5 && glyph.width >= 44, "\(glyph)")
+        }
+        #expect(abs(glyphs[1].minX - glyphs[0].maxX) < 0.5, "the glyphs are not one capsule's: \(glyphs)")
+        #expect(abs(glass.width - 2 * side) < 0.5 && abs(glass.height - side) < 0.5, "the capsule \(glass)")
+        // 1. Clear of the field.
+        #expect(!glass.intersects(field.insetBy(dx: 0.5, dy: 0.5)), "the capsule \(glass) covers the field \(field)")
+        #expect(abs(glass.minX - (field.maxX + Spacing.sm)) < 1, "the capsule \(glass), the field \(field)")
+        // 2. `sm` short of the own bubble, on its line.
+        #expect(abs(glass.maxX - (own.minX - Spacing.sm)) < 1, "the capsule \(glass), the own bubble \(own)")
+        #expect(abs(glass.midY - own.midY) < 1, "the capsule \(glass) off the own bubble's line \(own)")
+        // 3. The field's text untouched.
+        let text = bar.debugTextView.convert(bar.debugTextView.bounds, to: bar)
+        #expect(!glass.intersects(text.insetBy(dx: 0.5, dy: 0.5)), "the capsule \(glass) covers the text \(text)")
+        // The anchor on the own bubble, drawn as a point inside it.
+        let anchor = try #require(column.debugShapes.map { column.convert($0, to: bar) }.first { $0 != glass })
+        #expect(abs(anchor.midX - own.midX) < 1 && abs(anchor.midY - own.midY) < 1, "the anchor \(anchor), the own bubble \(own)")
+        let drawn = column.debugDrawnShapes.map { column.convert($0, to: bar) }
+        #expect(drawn.contains { $0.width <= 2 && own.contains(CGPoint(x: $0.midX, y: $0.midY)) },
+                "the anchor's glass is not a point under the own bubble: \(drawn)")
+        #expect(abs(bar.debugFieldTrailingInset - (Self.step + 2 * side + Spacing.sm)) < 0.5)
+    }
+
+    /// A draft folds the capsule into the own bubble — the anchor alone —
+    /// keyboard down or not, and the field takes its room; the own bubble
+    /// never moves. Emptied, the capsule comes back out of it.
+    @Test func aDraftFoldsTheCapsuleIntoTheOwnBubble() throws {
         let (screen, window) = makeScreen()
         defer { window.isHidden = true }
         let bar = screen.debugComposeBar
         window.layoutIfNeeded()
         bar.layoutIfNeeded()
         let bubble = bar.debugRowActionButton.frame
+        let column = try #require(bar.debugAttachmentColumn)
         try #require(bar.debugShowsAttachments)
+        let (rest, _) = try Self.capsule(of: bar)
 
         bar.draftText = "On my way"
         bar.layoutIfNeeded()
         #expect(!bar.debugShowsAttachments, "a draft narrowed the field")
+        #expect(column.debugShapes.count == 1, "writing left more than the own bubble's anchor: \(column.debugShapes)")
         #expect(bar.debugAttachmentButtons.allSatisfy { !$0.isAccessibilityElement }, "hidden, still VoiceOver elements")
         #expect(abs(bar.debugFieldTrailingInset - Self.step) < 0.5, "the field did not take their room")
         #expect(abs(bar.debugRowActionButton.frame.minX - bubble.minX) < 0.5, "the own bubble moved")
+        let tapPoint = CGPoint(x: rest.midX, y: rest.midY)
+        #expect(column.hitTest(bar.convert(tapPoint, to: column), with: nil) == nil, "the folded capsule took the field's touch")
 
         bar.draftText = ""
         bar.layoutIfNeeded()
         #expect(bar.debugShowsAttachments, "an emptied field at rest did not give them back")
-        #expect(bar.debugAttachmentButtons.allSatisfy { !$0.isHidden && $0.isAccessibilityElement })
-        #expect(abs(bar.debugFieldTrailingInset - 3 * Self.step) < 0.5)
+        #expect(column.debugShapes.count == 2)
+        #expect(bar.debugAttachmentButtons.allSatisfy { $0.isAccessibilityElement })
+        #expect(abs(bar.debugFieldTrailingInset - (Self.step + 2 * CommentsInputBar.Metrics.controlSize + Spacing.sm)) < 0.5)
         #expect(abs(bar.debugRowActionButton.frame.minX - bubble.minX) < 0.5, "the own bubble moved")
+    }
+
+    /// On screen, the capsule goes and comes by the glass column's fold;
+    /// under Reduce Motion it cross-fades, the field at once.
+    @Test func theFoldIsTheGlassColumnsAndReduceMotionCrossFades() throws {
+        let previous = MotionPreference.appReducesMotion
+        defer { MotionPreference.appReducesMotion = previous }
+        for reduces in [false, true] {
+            MotionPreference.appReducesMotion = reduces
+            let (screen, window) = makeScreen()
+            defer { window.isHidden = true }
+            let bar = screen.debugComposeBar
+            window.layoutIfNeeded()
+            bar.layoutIfNeeded()
+            let motions = bar.debugAttachmentMotions
+            bar.draftText = "Hi"
+            #expect(bar.debugAttachmentMotions == motions + 1)
+            let expected: CommentsInputBar.AttachmentChange = MotionPreference.reducesMotion ? .crossFaded : .folded
+            #expect(bar.debugAttachmentChange == expected, "reduces \(reduces): \(bar.debugAttachmentChange)")
+            if MotionPreference.reducesMotion {
+                // The field at once: no spring left on its frame.
+                #expect(abs(bar.debugFieldTrailingInset - Self.step) < 0.5)
+            }
+            bar.draftText = ""
+            #expect(bar.debugAttachmentChange == expected)
+            #expect(bar.debugShowsAttachments)
+        }
+    }
+
+    /// The column's shapes per state: the capsule `sm` before the anchor and
+    /// the anchor on the own bubble's place at rest; the anchor alone while
+    /// writing or without sources; mirrored right to left.
+    @Test func theCapsulesShapesPerState() {
+        let side: CGFloat = 45
+        let width = CommentsInputBar.attachmentColumnWidth(count: 2)
+        #expect(width == 2 * side + Spacing.sm + side)
+        let rest = CommentsInputBar.attachmentShapes(
+            ids: ["a", "b"], shows: true, width: width, side: side, gap: Spacing.sm, rightToLeft: false
+        )
+        #expect(rest.map { $0.map(\.id) } == [["a", "b"], [CommentsInputBar.ownBubbleAnchorID]])
+        #expect(rest[0].map(\.frame) == [
+            CGRect(x: 0, y: 0, width: side, height: side), CGRect(x: side, y: 0, width: side, height: side),
+        ])
+        #expect(rest[1][0].frame == CGRect(x: width - side, y: 0, width: side, height: side))
+        let writing = CommentsInputBar.attachmentShapes(
+            ids: ["a", "b"], shows: false, width: width, side: side, gap: Spacing.sm, rightToLeft: false
+        )
+        #expect(writing.map { $0.map(\.id) } == [[CommentsInputBar.ownBubbleAnchorID]])
+        let none = CommentsInputBar.attachmentShapes(
+            ids: [], shows: true, width: width, side: side, gap: Spacing.sm, rightToLeft: false
+        )
+        #expect(none.count == 1)
+        let mirrored = CommentsInputBar.attachmentShapes(
+            ids: ["a", "b"], shows: true, width: width, side: side, gap: Spacing.sm, rightToLeft: true
+        )
+        #expect(mirrored[1][0].frame.minX == 0)
+        #expect(mirrored[0].map(\.frame.minX) == [side + Spacing.sm + side, side + Spacing.sm], "b is the own bubble's neighbour")
     }
 
     /// A voice take is the row's: they go while it shows, and come back
@@ -240,7 +337,7 @@ struct ConversationRowAttachmentsTests {
         bar.configuration = .conversation(voice: .none, attachments: [
             ComposerAttachmentSource(id: "test.camera", symbol: "camera", accessibilityLabel: "Camera") { taps.names.append("new") },
         ])
-        #expect(bar.debugAttachmentButtons.first === button, "the bubble was rebuilt for a new action")
+        #expect(bar.debugAttachmentButtons.first === button, "the glyph was rebuilt for a new action")
         button?.sendActions(for: .primaryActionTriggered)
         #expect(taps.names == ["new"])
     }
@@ -276,10 +373,11 @@ struct ConversationRowAttachmentsTests {
 
     // MARK: - The footer
 
-    /// `[peer pill] … [pin] [bell] [⋯]`, each its own bubble — a separator
-    /// between every two — and the top bar holds neither the pin nor the
-    /// bell.
-    @Test func thePinAndTheBellStandOnTheFooterEachItsOwnBubble() throws {
+    /// `[peer pill] … [pin · bell] [⋯]` (#2344): the pin and the bell are
+    /// neighbours — no separator, so the bar makes one platter of them — and
+    /// ⋯ keeps its own bubble behind a separator; the top bar holds neither
+    /// the pin nor the bell.
+    @Test func thePinAndTheBellShareOnePlatterOnTheFooter() throws {
         let (screen, window) = makeScreen()
         defer { window.isHidden = true }
         let items = try #require(screen.toolbarItems)
@@ -289,12 +387,11 @@ struct ConversationRowAttachmentsTests {
         let pin = try #require(items.firstIndex { $0.identifier == "conversation.pin" })
         let bell = try #require(items.firstIndex { $0.identifier == ConversationThreadViewController.bellID })
         let more = try #require(items.firstIndex { $0.identifier == SnapFooterToolbar.ID.more })
-        // A separator — no identifier, no view — between neighbours, so the
-        // bar does not join them in one platter.
-        #expect(bell == pin + 2 && more == bell + 2, "\(items.map { $0.identifier ?? "·" })")
-        for gap in [items[pin + 1], items[bell + 1]] {
-            #expect(gap.identifier == nil && gap.customView == nil && gap.primaryAction == nil)
-        }
+        // No separator between the pin and the bell; one — no identifier, no
+        // view — before ⋯.
+        #expect(bell == pin + 1 && more == bell + 2, "\(items.map { $0.identifier ?? "·" })")
+        let gap = items[bell + 1]
+        #expect(gap.identifier == nil && gap.customView == nil && gap.primaryAction == nil)
         #expect(items[pin].image == UIImage(systemName: "pin"))
         #expect(items[bell].image == UIImage(systemName: "bell"))
         #expect(items[pin].accessibilityLabel == "Pin conversation")
