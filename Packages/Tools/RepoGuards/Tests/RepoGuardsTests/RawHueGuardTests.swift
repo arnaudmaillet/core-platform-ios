@@ -15,8 +15,7 @@ import Testing
 ///
 /// The second scan keeps every hex colour in `BrandTheme.swift` (#2062).
 ///
-/// CI only runs this in DesignSystem's lane, which a change elsewhere does
-/// not select: touching colours anywhere, run DesignSystem's tests too.
+/// A repository guard (`RepoGuards`, #2371): every pull request runs it.
 struct RawHueGuardTests {
     /// File name → why its raw hue stays.
     static let allowed: [String: String] = [

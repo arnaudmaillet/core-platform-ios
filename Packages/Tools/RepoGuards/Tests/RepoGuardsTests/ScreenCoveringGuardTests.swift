@@ -13,8 +13,7 @@ import Testing
 /// names on the list below where the declaration lives, or why none is
 /// needed.
 ///
-/// CI only runs this in CoreNavigation's lane, which a change elsewhere does
-/// not select: adding a sheet anywhere, run CoreNavigation's tests too.
+/// A repository guard (`RepoGuards`, #2371): every pull request runs it.
 struct ScreenCoveringGuardTests {
     /// File name → where its sheet declares itself, or why it need not.
     static let allowed: [String: String] = [

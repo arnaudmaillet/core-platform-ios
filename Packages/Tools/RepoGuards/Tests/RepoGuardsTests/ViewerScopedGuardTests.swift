@@ -10,8 +10,7 @@ import Testing
 /// (`CommentsRepository` → `commentsRepository`), or is named below with the
 /// reason it is not.
 ///
-/// CI only runs this in Feed's lane, which a change elsewhere does not
-/// select: adding a `ViewerScoped` cache anywhere, run Feed's tests too.
+/// A repository guard (`RepoGuards`, #2371): every pull request runs it.
 struct ViewerScopedGuardTests {
     /// Type name → why it is not in `AppContainer`'s list.
     static let calledElsewhere: [String: String] = [:]

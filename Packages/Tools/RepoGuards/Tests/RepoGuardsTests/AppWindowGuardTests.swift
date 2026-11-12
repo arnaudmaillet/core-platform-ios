@@ -10,8 +10,7 @@ import Testing
 /// (`class Name: UIWindow`). Build or subclass `AppWindow` instead. A file
 /// may keep one only with a reason on the list below.
 ///
-/// CI only runs this in DesignSystem's lane, which a change elsewhere does
-/// not select: adding a window anywhere, run DesignSystem's tests too.
+/// A repository guard (`RepoGuards`, #2371): every pull request runs it.
 struct AppWindowGuardTests {
     /// File name → why it makes a plain `UIWindow`.
     static let allowed: [String: String] = [

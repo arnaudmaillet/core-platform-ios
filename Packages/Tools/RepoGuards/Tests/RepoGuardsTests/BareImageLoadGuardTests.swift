@@ -14,9 +14,7 @@ import Testing
 /// onto the slot, one step at a time; it is down to the slot itself. A new
 /// one uses the slot, or argues its case here.
 ///
-/// ⚠️ A REPO-WIDE GUARD IN MEDIACORE'S LANE. A pull request's CI runs only the
-/// lanes its diff selects: touching a picture load anywhere, run MediaCore's
-/// tests.
+/// A repository guard (`RepoGuards`, #2371): every pull request runs it.
 struct BareImageLoadGuardTests {
     /// File name → why it may load a picture bare.
     static let allowed: [String: String] = [

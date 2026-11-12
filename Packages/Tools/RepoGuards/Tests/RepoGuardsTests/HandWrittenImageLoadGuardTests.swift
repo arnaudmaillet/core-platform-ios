@@ -16,10 +16,7 @@ import Testing
 /// #943 (the avatar view). A new one goes through the ladder, or argues its
 /// case here.
 ///
-/// ⚠️ A REPO-WIDE GUARD IN MEDIACORE'S LANE. A pull request's CI runs only the
-/// lanes its diff selects, so a Feed or Profile change that writes the shape
-/// again merges green and turns the `develop` backstop red. Touching image
-/// loads anywhere, run MediaCore's tests too (as for `UnsizedImageDecodesGuardTests`).
+/// A repository guard (`RepoGuards`, #2371): every pull request runs it.
 struct HandWrittenImageLoadGuardTests {
     /// File name → why it may stay.
     static let allowed: [String: String] = [

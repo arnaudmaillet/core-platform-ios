@@ -12,8 +12,7 @@ import Testing
 /// LensLab's `play.square` are not play controls: they stay SF, and this
 /// does not match them.
 ///
-/// CI only runs this in DesignSystem's lane: touching a play or a pause
-/// anywhere, run DesignSystem's tests too.
+/// A repository guard (`RepoGuards`, #2371): every pull request runs it.
 struct PlayPauseSymbolGuardTests {
     static let names = ["\"play.fill\"", "\"pause.fill\"", "\"play.circle.fill\""]
 

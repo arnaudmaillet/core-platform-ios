@@ -13,8 +13,7 @@ import Testing
 /// shape with a reason on the list below — a tile, a thumbnail, a badge, a
 /// control, debug art.
 ///
-/// CI only runs this in DesignSystem's lane, which a change elsewhere does
-/// not select: drawing a card anywhere, run DesignSystem's tests too.
+/// A repository guard (`RepoGuards`, #2371): every pull request runs it.
 struct CardContractGuardTests {
     /// File name → why its rounded fill is not a card.
     static let allowed: [String: String] = [

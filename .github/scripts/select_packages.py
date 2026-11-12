@@ -52,6 +52,12 @@ LANE_MINUTES = {
 }
 DEFAULT_LANE_MINUTES = 5.0
 
+# The repository's guards read every source and every manifest, so a change
+# anywhere can break one: every run that builds anything runs their lane
+# (#2371). It depends on nothing and takes about a minute, so it sorts last.
+ALWAYS = ("Packages/Tools/RepoGuards",)
+LANE_MINUTES["RepoGuards"] = 1.0
+
 DEP_RE = re.compile(r'\.package\(\s*path:\s*"([^"]+)"')
 NAME_RE = re.compile(r'name:\s*"([^"]+)"')
 
@@ -194,6 +200,9 @@ def main():
                 chosen = affected & testable
                 names = ", ".join(sorted(pkgs[d]["name"] for d in touched))
                 why = f"touched: {names}"
+
+    if build_app:
+        chosen = set(chosen) | {d for d in ALWAYS if d in testable}
 
     matrix = entries(pkgs, chosen)
     print(f"Reason: {why}")

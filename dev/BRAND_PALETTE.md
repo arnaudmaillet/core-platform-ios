@@ -125,9 +125,9 @@ If paid themes come back one day, a theme is a second `BrandTheme` value plus a 
 - White-labelled swipe actions, which keep their system grounds.
 
 ## Guards
-- **`RawHueGuardTests`** (DesignSystem) has two scans over `App/` and `Packages/` (sources, not tests):
+- **`RawHueGuardTests`** (`Packages/Tools/RepoGuards`, #2371) has two scans over `App/` and `Packages/` (sources, not tests):
   - raw colours (`UIColor(red:`, `UIColor(hue:`) and the system hues the palette replaces. A file may keep one only with a reason on its list;
   - hex colour literals (`0xF37AB4`), which are allowed only in `BrandTheme.swift`.
 - **`BrandAssetsGuardTests`** (DesignSystem) checks the three assets above.
 
-CI only runs them in DesignSystem's lane, so when you touch colours anywhere, run DesignSystem's tests too.
+Every pull request runs `RawHueGuardTests` (the RepoGuards lane). `BrandAssetsGuardTests` reads DesignSystem's own assets and runs in DesignSystem's lane.

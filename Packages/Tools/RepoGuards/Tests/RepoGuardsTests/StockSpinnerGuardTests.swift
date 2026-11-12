@@ -11,8 +11,7 @@ import Testing
 /// stock spinner through `UIButton.Configuration.showsActivityIndicator`
 /// (decided 2026-10-17), which this scan does not match.
 ///
-/// CI only runs this in DesignSystem's lane, which a change elsewhere does
-/// not select: adding a spinner anywhere, run DesignSystem's tests too.
+/// A repository guard (`RepoGuards`, #2371): every pull request runs it.
 struct StockSpinnerGuardTests {
     /// File name → why its stock spinner stays.
     static let allowed: [String: String] = [

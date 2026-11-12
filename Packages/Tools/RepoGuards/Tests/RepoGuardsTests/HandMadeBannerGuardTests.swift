@@ -10,8 +10,7 @@ import Testing
 /// own, decides again what a loading banner looks like — a flat card, a
 /// spinner, nothing — which is what the audit of 2026-10-26 set out to end.
 ///
-/// ⚠️ A REPO-WIDE GUARD IN HEROPAGE'S LANE. A pull request's CI runs only the
-/// lanes its diff selects: touching a banner anywhere, run HeroPage's tests.
+/// A repository guard (`RepoGuards`, #2371): every pull request runs it.
 struct HandMadeBannerGuardTests {
     /// File name → why it may build a banner's parts.
     static let allowed: [String: String] = [

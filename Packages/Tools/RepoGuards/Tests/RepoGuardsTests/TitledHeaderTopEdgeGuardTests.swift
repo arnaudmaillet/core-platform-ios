@@ -20,8 +20,7 @@ import Testing
 /// .soft` by hand, and every opt-out of the clearance argued. What the
 /// contract adds is pinned by `TopFadeClearanceTests`.
 ///
-/// CI only runs this in DesignSystem's lane: changing a screen's header
-/// anywhere, run DesignSystem's tests too.
+/// A repository guard (`RepoGuards`, #2371): every pull request runs it.
 struct TitledHeaderTopEdgeGuardTests {
     /// File name → why its titled header stays clear.
     /// (The snap feed's embedded comment stream, where a blur would band the

@@ -8,8 +8,7 @@ import Testing
 /// `.profileCard` is named below with the reason; a new one fails here
 /// until it is the contract's or says why it is not.
 ///
-/// CI only runs this in Feed's lane: adding a `.profileCard` route
-/// elsewhere, run Feed's tests too.
+/// A repository guard (`RepoGuards`, #2371): every pull request runs it.
 struct PersonOpeningGuardTests {
     /// File name → why it routes `.profileCard`.
     static let allowed: [String: String] = [
