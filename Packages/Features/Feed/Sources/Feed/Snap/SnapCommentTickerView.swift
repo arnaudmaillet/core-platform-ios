@@ -5,20 +5,17 @@ import MediaCore
 import UIKit
 
 /// The danmaku band: `laneCount` lanes of micro-reactions conveying
-/// right-to-left over the page's media, directly above the caption, each on
-/// its own blurred capsule (the owner, 2026-11-07, #2172; the text was naked
-/// from #1991, after #1988's capsule): since #1983 the page's scrim stops at
-/// the caption, and naked white text read poorly over a white picture.
+/// right-to-left over the page's media, directly above the caption.
 ///
-/// # The capsules
-/// ONE blur for the whole band (`capsuleSurface`), masked by one capsule
-/// layer per bubble (`TickerBubbleView.capsule`) — one backdrop pass whatever
-/// the number of bubbles, where a blur per bubble was one per bubble per
-/// frame over the video. Each capsule is moved exactly as its bubble is: the
-/// same flight added in the same transaction, the same freeze on a grab, the
-/// same displacement during a drag and a coast (`moveBubble`, `animateToExit`).
-/// The capsule is the lane's height, so the band, its lanes and the corner
-/// sized from it do not move by a point (#1990 was declined for growing it).
+/// # Readable over any picture (#2339)
+/// No capsule, no blur: each reaction's white letters wear a thin dark
+/// outline OUTSIDE their shapes and a light shadow, drawn once into the
+/// text's own picture (`OutlinedTickerLabel`) and then only moved — what
+/// video captions and Bilibili's danmaku do. Since #1983 the page's scrim
+/// stops at the caption, and naked white text read poorly over a white
+/// picture; #2172's blurred capsules fixed that but looked coarse (the
+/// owner, 2026-11-12), and a shadow alone vanishes over white. The band,
+/// its lanes and the corner sized from them do not move by a point.
 ///
 /// # The conveyor
 /// Steady state is pure Core Animation. Each bubble's flight is one linear
@@ -43,8 +40,8 @@ import UIKit
 /// drift (`v(t) = -vₖ + (V₀+vₖ)·e^(-t/τ)`), integrated by a `CADisplayLink`
 /// that lives only for the interaction transient; when the residual is
 /// imperceptible the bubbles are handed back to CA at exactly matched
-/// velocity. No wash rises behind the band any more (#2172): the capsules
-/// carry the readability, at rest and under the finger alike.
+/// velocity. No wash rises behind the band: the letters' outline carries the
+/// readability, at rest and under the finger alike (#2339).
 ///
 /// # Lifecycle
 /// Hard stop/start, not a freeze: deactivation retires everything in flight,
@@ -64,9 +61,6 @@ final class SnapCommentTickerView: UIView {
     private(set) static var speedScale: CGFloat = 1
     /// The viewer's bubble opacity, read with the speed.
     private(set) static var bubbleOpacity: CGFloat = 1
-    /// The viewer's Background setting (0 = the blur alone, the default),
-    /// read with the speed: the capsules' dark tint over their blur (#2172).
-    private(set) static var capsuleTint: CGFloat = 0
     /// "Don't Cover People" (#484), read with the speed.
     private(set) static var avoidsPeople = false
     static var laneSpeeds: [CGFloat] { baseLaneSpeeds.map { $0 * speedScale } }
@@ -76,7 +70,6 @@ final class SnapCommentTickerView: UIView {
         let preferences = store.preferences
         speedScale = CGFloat(preferences.bandSpeed.scale)
         bubbleOpacity = CGFloat(preferences.bandOpacity)
-        capsuleTint = CGFloat(preferences.bandBackgroundOpacity)
         avoidsPeople = preferences.avoidsPeople
     }
     /// When each lane's first bubble enters, from the start (#2000): lane 0
@@ -97,27 +90,6 @@ final class SnapCommentTickerView: UIView {
     /// below perception, so the handover cannot be seen.
     static let restVelocityTolerance: CGFloat = 2
 
-    // MARK: Capsule tuning (#2172)
-
-    /// The capsules' material: a dark blur, always — the band is always over
-    /// the media. Ultra-thin keeps the picture's colour through the capsule;
-    /// `-ticker-thin-material` shows the thin one (DEBUG, for the PR).
-    static var capsuleMaterial: UIBlurEffect.Style {
-        #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-ticker-thin-material") { return .systemThinMaterialDark }
-        #endif
-        return .systemUltraThinMaterialDark
-    }
-    /// Increased Contrast adds this much dark tint to the capsules.
-    static let increasedContrastTint: CGFloat = 0.25
-    /// Reduce Transparency's capsule: opaque, dark, no blur.
-    static let opaqueCapsuleColor = UIColor(white: 0.12, alpha: 1)
-
-    /// The tint the capsules wear over their blur: the setting's, darker
-    /// with Increased Contrast, capped short of black.
-    static func tint(setting: CGFloat, increasedContrast: Bool) -> CGFloat {
-        min(0.9, max(0, setting) + (increasedContrast ? increasedContrastTint : 0))
-    }
     /// How far past either edge a scrubbed bubble may sit before retiring.
     private static let scrubMargin: CGFloat = 48
 
@@ -232,21 +204,11 @@ final class SnapCommentTickerView: UIView {
     private var coastStart: CFTimeInterval = 0
     private var coastLastTimestamp: CFTimeInterval = 0
     private var lastPanTranslation: CGFloat = 0
-    /// The capsules' one surface, behind every bubble: a blur (or, with
-    /// Reduce Transparency, an opaque dark fill) under the setting's tint,
-    /// masked by `capsuleMask` (#2172). Made on the first start in a window
-    /// (never at init: a blur built eagerly stalls headless CI), hidden while
-    /// the band is parked (#580: no blur drawn for a parked band).
-    private var capsuleSurface: UIView?
-    /// The tint over the surface's blur.
-    private let capsuleTintView = UIView()
-    /// The mask holding one capsule layer per bubble, in the band's space.
-    private let capsuleMask = UIView()
-    /// What the surface was made for: a blur or Reduce Transparency's fill.
-    private var surfaceIsOpaque = false
-    /// Accessibility, read when a stream starts. Tests set them.
-    var reducesTransparency: () -> Bool = { UIAccessibility.isReduceTransparencyEnabled }
+    /// Increased Contrast, read when a stream starts. A test sets it.
     var increasesContrast: () -> Bool = { UIAccessibility.isDarkerSystemColorsEnabled }
+    /// The letters' outline this stream draws with (#2339): read when it
+    /// starts, like the speed, never mid-flight.
+    private(set) var textOutline = TickerBubbleView.outline(increasedContrast: false)
     /// Where the band reads its appearance when a stream starts — the app's
     /// store; a test hands its own.
     var appearanceStore: MediaCommentPreferencesStore = .standard
@@ -292,10 +254,6 @@ final class SnapCommentTickerView: UIView {
         // CAPSULE end — the "+" anchor is a full-height circle, and a
         // capsule end nests inside its curvature, so no clipped bubble
         // sliver can peek out of the square zone's corner gaps.
-
-        capsuleMask.isUserInteractionEnabled = false
-        capsuleTintView.backgroundColor = .black
-        capsuleTintView.isUserInteractionEnabled = false
 
         // Horizontal-only pan for the scrub. The delegate declares the
         // band's priority over other pans (the timeline slide-to-pop, the
@@ -386,7 +344,8 @@ final class SnapCommentTickerView: UIView {
         #if DEBUG
         // `-ticker-demo`: a band with nothing to play plays samples — the
         // mock corpus rarely has enough reaction-shaped comments to fill one,
-        // and the capsules (#2172) have to be looked at over real pictures.
+        // and the letters' outline (#2339) has to be looked at over real
+        // pictures.
         if comments.isEmpty, ProcessInfo.processInfo.arguments.contains("-ticker-demo") {
             let samples = ["GG 🔥", "lol", "so good 😍", "W", "🔥🔥🔥", "no way 😂", "clean", "first!", "big mood", "😭😭",
                            "this light ✨", "again!!"]
@@ -476,9 +435,6 @@ final class SnapCommentTickerView: UIView {
             trailingFade.locations = [0, NSNumber(value: Double(start)), 1]
             CATransaction.commit()
         }
-        capsuleSurface?.frame = bounds
-        capsuleTintView.frame = bounds
-        capsuleMask.frame = bounds
         // Activation can precede first layout (configure → willBecomeActive
         // before the cell is sized); spawning needs a real width. A width
         // that changes mid-stream needs nothing: every spawn reads the band's
@@ -534,7 +490,7 @@ final class SnapCommentTickerView: UIView {
         #if DEBUG
         debugTrainsLaid += 1
         #endif
-        prepareCapsuleSurface()
+        textOutline = TickerBubbleView.outline(increasedContrast: increasesContrast())
         startTape()
         // ⚠️ NO PRE-FILL (#2000, the owner): every lane's first bubble enters
         // at the edge, lane 0 at once and the others staggered, and the steady
@@ -550,59 +506,21 @@ final class SnapCommentTickerView: UIView {
         for timer in spawnTimers { timer?.invalidate() }
         spawnTimers = Array(repeating: nil, count: SnapCommentTickerView.laneCount)
         stopCoast()
-        capsuleSurface?.isHidden = true
         // Cancel any in-progress grab (a page can deactivate mid-touch).
         panRecognizer.isEnabled = false
         panRecognizer.isEnabled = true
         for lane in 0..<Self.laneCount {
             for bubble in laneBubbles[lane] {
                 bubble.view.layer.removeAllAnimations()
-                bubble.view.capsule.removeAllAnimations()
                 recycle(bubble.view)
             }
             laneBubbles[lane].removeAll()
         }
     }
 
-    // MARK: - The capsules' surface (#2172)
-
-    /// Makes the surface on the first start (or remakes it when Reduce
-    /// Transparency changed), and shows it with the current tint.
-    private func prepareCapsuleSurface() {
-        let opaque = reducesTransparency()
-        if capsuleSurface == nil || opaque != surfaceIsOpaque {
-            capsuleSurface?.removeFromSuperview()
-            surfaceIsOpaque = opaque
-            let surface: UIView
-            if opaque {
-                surface = UIView()
-                surface.backgroundColor = Self.opaqueCapsuleColor
-                surface.addSubview(capsuleTintView)
-            } else {
-                let blur = UIVisualEffectView(effect: UIBlurEffect(style: Self.capsuleMaterial))
-                blur.contentView.addSubview(capsuleTintView)
-                surface = blur
-            }
-            surface.isUserInteractionEnabled = false
-            surface.accessibilityIdentifier = "ticker-capsule-surface"
-            // The mask on the surface itself — the way an effect view takes
-            // one — never on an ancestor.
-            surface.mask = capsuleMask
-            surface.frame = bounds
-            capsuleMask.frame = bounds
-            capsuleTintView.frame = bounds
-            insertSubview(surface, at: 0)
-            capsuleSurface = surface
-        }
-        capsuleTintView.alpha = Self.tint(setting: Self.capsuleTint, increasedContrast: increasesContrast())
-        capsuleSurface?.isHidden = false
-    }
-
-    /// Puts `bubble` at center-x `x` — its view and its capsule together,
-    /// with no implicit animation: the one write of a bubble's place.
+    /// Puts `bubble` at center-x `x`: the one write of a bubble's place.
     private func moveBubble(_ bubble: Bubble, toX x: CGFloat) {
         bubble.view.layer.position.x = x
-        bubble.view.capsule.position.x = x
     }
 
     private func armSpawn(lane: Int, after delay: TimeInterval) {
@@ -708,7 +626,10 @@ final class SnapCommentTickerView: UIView {
         _ item: TickerCommentModel, atIndex itemIndex: Int, lane: Int, leftEdge: CGFloat, width: CGFloat
     ) -> Bubble {
         let view = dequeueBubble()
-        view.configure(text: item.text, avatarURL: item.avatarURL, monogram: item.monogram, pipeline: imagePipeline)
+        view.configure(
+            text: item.text, avatarURL: item.avatarURL, monogram: item.monogram, pipeline: imagePipeline,
+            outline: textOutline
+        )
         view.alpha = Self.bubbleOpacity
         view.frame = CGRect(
             x: leftEdge,
@@ -718,14 +639,6 @@ final class SnapCommentTickerView: UIView {
         )
         view.layoutIfNeeded()
         addSubview(view)
-        // Its capsule in the mask, on the same frame, at the same opacity.
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        view.capsule.frame = view.frame
-        view.capsule.cornerRadius = view.frame.height / 2
-        view.capsule.opacity = Float(Self.bubbleOpacity)
-        capsuleMask.layer.addSublayer(view.capsule)
-        CATransaction.commit()
         return Bubble(view: view, width: width, itemIndex: itemIndex, itemID: item.id)
     }
 
@@ -756,12 +669,9 @@ final class SnapCommentTickerView: UIView {
         }
         // Model value rests at the exit before the animation is added, so if
         // the system strips animations the bubble sits off screen left rather
-        // than snapping back to the entry edge. Its capsule takes the same
-        // flight in the same transaction: the same begin time, so the two
-        // never drift apart.
+        // than snapping back to the entry edge.
         moveBubble(bubble, toX: exitX)
         layer.add(flight, forKey: "flight")
-        bubble.view.capsule.add(flight, forKey: "flight")
         CATransaction.commit()
     }
 
@@ -808,7 +718,6 @@ final class SnapCommentTickerView: UIView {
                 for bubble in laneBubbles[lane] {
                     let frozenX = currentVisualCenterX(of: bubble, lane: lane)
                     bubble.view.layer.removeAnimation(forKey: "flight")
-                    bubble.view.capsule.removeAnimation(forKey: "flight")
                     moveBubble(bubble, toX: frozenX)
                 }
             }
@@ -979,8 +888,8 @@ final class SnapCommentTickerView: UIView {
             var itemIndex = laneNextIndex[lane]
             var item = laneItem(lane, at: itemIndex)
             // Never a twin of the other lane, as the backfills below (#2154):
-            // wider capsules (#2172) empty a lane mid-drag more often, and the
-            // re-anchor laid the other lane's reaction again. Forward, the
+            // wide bubbles empty a lane mid-drag more often, and the re-anchor
+            // laid the other lane's reaction again. Forward, the
             // future has no fixed order: the next ones are tried; backward,
             // the one carried out is the past, so a twin leaves a gap.
             var passedOver = 0
@@ -1051,32 +960,8 @@ final class SnapCommentTickerView: UIView {
     // MARK: - Tests
 
     #if DEBUG
-    /// The capsules' surface, nil before the first start.
-    var debugCapsuleSurface: UIView? { capsuleSurface }
-    /// The capsule tint's alpha.
-    var debugCapsuleTint: CGFloat { capsuleTintView.alpha }
-    /// Every bubble on screen with its capsule, as (bubble frame, capsule
-    /// frame) — the model values, or the presentation's in flight.
-    ///
-    /// ⚠️ THE MODEL, NOT THE PRESENTATION: a presentation is the last frame
-    /// the render server drew, and it is not refreshed within the turn that
-    /// moves a layer. With the tests' frozen clock and a starved runner, a
-    /// bubble's flight had finished on screen (its presentation at the exit)
-    /// while the scrub had just put both back where the frozen clock says —
-    /// a capsule "off its bubble" that never was (#2186's follow-up CI).
-    /// The flights themselves are compared in `debugBubbleCapsuleFlights`.
-    var debugBubbleCapsuleFrames: [(bubble: CGRect, capsule: CGRect)] {
-        laneBubbles.joined().map { bubble in (bubble.view.layer.frame, bubble.view.capsule.frame) }
-    }
-
-    /// Each bubble's flight and its capsule's: the same move, begun at the
-    /// same time — nil for a bubble at rest.
-    var debugBubbleCapsuleFlights: [(bubble: CABasicAnimation?, capsule: CABasicAnimation?)] {
-        laneBubbles.joined().map { bubble in
-            (bubble.view.layer.animation(forKey: "flight") as? CABasicAnimation,
-             bubble.view.capsule.animation(forKey: "flight") as? CABasicAnimation)
-        }
-    }
+    /// Every bubble on screen, in flight or not (#2339).
+    var debugBubbles: [TickerBubbleView] { laneBubbles.joined().map(\.view) }
     #endif
 
     /// The clock flights and coasts are stamped and frozen with:
@@ -1190,8 +1075,8 @@ final class SnapCommentTickerView: UIView {
         let textWidth = measuringLabel.sizeThatFits(
             CGSize(width: .greatestFiniteMagnitude, height: bubbleHeight)
         ).width
-        // The capsule's leading inset, the avatar column (circle + gap) and
-        // its trailing room are fixed addends; the text takes whatever
+        // The leading inset, the avatar column (circle + gap) and the
+        // trailing room are fixed addends; the text takes whatever
         // remains up to the band cap.
         let full = TickerBubbleView.avatarInset + TickerBubbleView.avatarDiameter + TickerBubbleView.avatarGap
             + ceil(textWidth) + TickerBubbleView.trailingPadding
@@ -1203,8 +1088,6 @@ final class SnapCommentTickerView: UIView {
     }
 
     private func recycle(_ bubble: TickerBubbleView) {
-        bubble.capsule.removeAllAnimations()
-        bubble.capsule.removeFromSuperlayer()
         bubble.removeFromSuperview()
         bubble.prepareForReuse()
         // Steady state needs a handful per lane; a wide scrub can hold a few
@@ -1249,30 +1132,76 @@ private final class DisplayLinkProxy: NSObject {
 }
 
 /// A pooled danmaku bubble: a compact author avatar leading semibold caption
-/// text — a `[avatar] [text]` row on a blurred capsule (#2172). The whole
+/// text, a `[avatar] [text]` row straight over the media (#2339). The whole
 /// bubble is ONE view whose layer the conveyor animates on `position.x`; the
 /// avatar and text ride it as a unit.
 ///
-/// ⚠️ THE CAPSULE IS NOT THE BUBBLE'S OWN BLUR. It is `capsule`, a plain
-/// layer in the band's mask, flown with the bubble: the band draws ONE blur
-/// through every capsule (`SnapCommentTickerView.capsuleSurface`). A blur —
-/// like a `layer.shadow*` — on each moving bubble forces an offscreen render
-/// pass per frame per bubble over the video. The capsule is the lane's
-/// height: a roomier one grows the band and the whole corner sized from it
-/// (#1990, declined), a separate decision.
+/// ⚠️ THE OUTLINE AND THE SHADOW ARE DRAWN INTO THE TEXT'S PICTURE, ONCE
+/// (`OutlinedTickerLabel`), when the bubble is configured: the moving layer
+/// carries a finished bitmap. Never a `layer.shadow*` (or a blur, or a mask)
+/// on a moving bubble: each forces an offscreen render pass per frame per
+/// bubble over the video. The bubble is the lane's height: a roomier one
+/// grows the band and the whole corner sized from it (#1990, declined).
 final class TickerBubbleView: UIView {
     /// Sized to fit within the lane (the band height is derived from the
     /// caption line + text insets, so a compact circle sits centered without
     /// growing the band).
     static let avatarDiameter: CGFloat = 20
-    /// The avatar's inset from the capsule's leading end — concentric with
-    /// the capsule's round end in a lane a point or two taller than it.
+    /// The avatar's inset from the bubble's leading edge.
     static let avatarInset: CGFloat = 1
     static let avatarGap: CGFloat = 6
-    /// The capsule's room after the text.
+    /// The room after the text: the next bubble keeps `interItemGap` beyond.
     static let trailingPadding: CGFloat = Spacing.sm
     static let textInsets = UIEdgeInsets(top: 3, left: 0, bottom: 3, right: 0)
     static let font = UIFont.scaledFont(forTextStyle: .caption1, weight: .semibold)
+
+    // MARK: The letters' outline and shadow (#2339)
+
+    /// The outline drawn outside the letters: its width (outside the glyph's
+    /// edge, in points) and its ink.
+    struct TextOutline: Equatable {
+        let width: CGFloat
+        let color: UIColor
+    }
+
+    /// About 1 pt for the 12 pt text, as the danmaku libraries draw it
+    /// (danmaku-lite 1.25, DanmakuConvert 1.0); 0.75 and 1.25 were compared.
+    static let outlineWidth: CGFloat = 1
+    /// Increased Contrast widens it this much, and makes its ink opaque.
+    static let increasedContrastExtraWidth: CGFloat = 0.25
+    /// Black at 65 %, measured against an opaque dark grey (#3A3A3C) and
+    /// opaque black: over white it reads #595959 (7:1 against the white
+    /// letters), over a dark picture it melts into it where it isn't needed,
+    /// over a colour it takes a little of it, so it looks less drawn.
+    static let outlineInk = UIColor(white: 0, alpha: 0.65)
+    /// The light shadow over the outline: black 30 %, 2 pt blur, no offset.
+    /// It softens the outline's edge so the letters don't look cut out.
+    static let shadowColor = UIColor(white: 0, alpha: 0.3)
+    static let shadowBlur: CGFloat = 2
+
+    /// The outline for the current contrast setting.
+    static func outline(increasedContrast: Bool) -> TextOutline {
+        var width = outlineWidth
+        var ink = outlineInk
+        #if DEBUG
+        // `-danmaku-outline-width 0.75` and `-danmaku-outline-ink grey`
+        // (`black65`, `grey`, `black`): the comparisons, on the device.
+        let arguments = ProcessInfo.processInfo.arguments
+        if let index = arguments.firstIndex(of: "-danmaku-outline-width"), arguments.indices.contains(index + 1),
+           let value = Double(arguments[index + 1]), value >= 0 {
+            width = CGFloat(value)
+        }
+        if let index = arguments.firstIndex(of: "-danmaku-outline-ink"), arguments.indices.contains(index + 1) {
+            switch arguments[index + 1] {
+            case "grey": ink = UIColor(white: 0.23, alpha: 1)
+            case "black": ink = UIColor(white: 0, alpha: 1)
+            default: break
+            }
+        }
+        #endif
+        guard increasedContrast else { return TextOutline(width: width, color: ink) }
+        return TextOutline(width: width + increasedContrastExtraWidth, color: ink.withAlphaComponent(1))
+    }
 
     /// THE app's avatar (#1308): the author's initials as a permanent floor,
     /// the picture dissolved over them when it lands. The bubble used to load
@@ -1281,15 +1210,7 @@ final class TickerBubbleView: UIView {
     let avatarView = AvatarView(diameter: TickerBubbleView.avatarDiameter, size: .avatar)
     /// Emotes ride the band: the players are subviews of the label, so they
     /// travel with the bubble's own flight and cost nothing per frame.
-    private let label = EmoteLabel()
-    /// The bubble's capsule in the band's mask (see the type's note), sized
-    /// and flown by the band with the bubble.
-    let capsule: CALayer = {
-        let layer = CALayer()
-        layer.backgroundColor = UIColor.black.cgColor
-        layer.cornerCurve = .continuous
-        return layer
-    }()
+    private let label = OutlinedTickerLabel()
 
     init() {
         super.init(frame: .zero)
@@ -1312,14 +1233,23 @@ final class TickerBubbleView: UIView {
         let diameter = Self.avatarDiameter
         avatarView.frame = CGRect(x: Self.avatarInset, y: (bounds.height - diameter) / 2, width: diameter, height: diameter)
         let textX = Self.avatarInset + diameter + Self.avatarGap
+        // The text's box as before, the label `inkMargin` bigger all round:
+        // the outline and the shadow are drawn past the letters, and a label
+        // draws nothing outside its bounds.
+        let margin = OutlinedTickerLabel.inkMargin
         label.frame = CGRect(
             x: textX, y: 0, width: max(0, bounds.width - textX - Self.trailingPadding), height: bounds.height
-        )
+        ).insetBy(dx: -margin, dy: -margin)
     }
 
-    /// Sets the text, the author's initials, and their picture over them —
-    /// a missing url or pipeline leaves the initials, never an empty disc.
-    func configure(text: String, avatarURL: URL?, monogram: String, pipeline: ImagePipeline?) {
+    /// Sets the text, its outline, the author's initials, and their picture
+    /// over them — a missing url or pipeline leaves the initials, never an
+    /// empty disc.
+    func configure(
+        text: String, avatarURL: URL?, monogram: String, pipeline: ImagePipeline?,
+        outline: TextOutline = TickerBubbleView.outline(increasedContrast: false)
+    ) {
+        label.outline = outline
         label.text = text
         avatarView.setMonogram(monogram)
         avatarView.setPicture(avatarURL, pipeline: pipeline)
@@ -1330,5 +1260,64 @@ final class TickerBubbleView: UIView {
     func prepareForReuse() {
         avatarView.reset()
         label.text = nil
+    }
+
+    #if DEBUG
+    /// The text's label, its outline and its shadow (#2339).
+    var debugLabel: OutlinedTickerLabel { label }
+    #endif
+}
+
+/// The danmaku's text (#2339): white letters with a thin outline OUTSIDE
+/// their shapes and a light shadow, drawn into the label's own picture.
+///
+/// - **Outside only:** the text is drawn twice. First stroked, twice the
+///   outline's width (a stroke straddles the glyph's edge), with round joins
+///   so the letters' corners don't spike, recoloured to the outline's ink;
+///   then the white fill over it, which hides the stroke's inner half. The
+///   letters keep their full shape — CoreText's plain stroke attribute thins
+///   them and closes "e" and "a" at 12 pt.
+/// - **One shadow for the ring:** the stroke pass is one transparency layer
+///   cast with the shadow, so overlapping strokes don't darken it twice.
+/// - **Drawn once:** only when the text or the outline changes; flights move
+///   the finished bitmap.
+final class OutlinedTickerLabel: EmoteLabel {
+    /// How far past the text's box the label reaches, on every side: the
+    /// widest outline (1.25 pt, Increased Contrast) plus the shadow's blur.
+    static let inkMargin: CGFloat = 4
+
+    var outline = TickerBubbleView.outline(increasedContrast: false) {
+        didSet { if outline != oldValue { setNeedsDisplay() } }
+    }
+
+    /// Where the text is drawn: the label's bounds less the margin, so the
+    /// layout, the truncation and the emotes are exactly the plain label's.
+    override func emoteTextRect(forBounds bounds: CGRect) -> CGRect {
+        bounds.insetBy(dx: Self.inkMargin, dy: Self.inkMargin)
+    }
+
+    override func drawText(in rect: CGRect) {
+        let textRect = emoteTextRect(forBounds: rect)
+        guard outline.width > 0, let context = UIGraphicsGetCurrentContext() else {
+            super.drawText(in: textRect)
+            return
+        }
+        // 1. The outline under its shadow.
+        context.saveGState()
+        context.setShadow(offset: .zero, blur: TickerBubbleView.shadowBlur, color: TickerBubbleView.shadowColor.cgColor)
+        context.beginTransparencyLayer(auxiliaryInfo: nil)
+        context.setTextDrawingMode(.stroke)
+        context.setLineWidth(outline.width * 2)
+        context.setLineJoin(.round)
+        super.drawText(in: textRect)
+        // The stroke was drawn in the text's white: the ink takes its place,
+        // keeping its coverage.
+        context.setBlendMode(.sourceIn)
+        context.setFillColor(outline.color.cgColor)
+        context.fill(rect)
+        context.endTransparencyLayer()
+        context.restoreGState()
+        // 2. The white letters, whole, over it.
+        super.drawText(in: textRect)
     }
 }

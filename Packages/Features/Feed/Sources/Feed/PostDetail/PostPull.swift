@@ -64,6 +64,42 @@ enum PostPullRule {
         min(max(pulled / threshold, 0), 1)
     }
 
+    // MARK: - The pill follows the pull (#2349)
+
+    /// The pill's size where it comes out, a fraction of its own.
+    static let smallestScale: CGFloat = 0.6
+    /// Its size at the threshold's swell, with the tick, before it settles
+    /// back to 1.
+    static let swell: CGFloat = 1.06
+    /// Between the pill's foot and the composer's top (the stream's bottom
+    /// edge), and mirrored under the bar for the previous post: never stuck
+    /// to the field (the owner, 2026-11-12).
+    static let footGap: CGFloat = Spacing.lg
+    /// The pull, past `appearLift`, over which the pill's avatar, ring and
+    /// words come in.
+    static let materialiseSpan: CGFloat = 24
+
+    /// ⚠️ THE PILL'S SIZE FOLLOWS THE PULL, FRAME BY FRAME, BOTH WAYS (#2349):
+    /// a pure function of the pulled distance — the same on the way out and
+    /// on the way back, nothing timed. Gone short of `appearLift`; from there
+    /// it grows from `smallestScale` to 1 at the threshold; and never taller
+    /// than `room`, the height the gap the pull opens leaves it between its
+    /// foot's place and the rows, so it is never over the last row's words —
+    /// while the gap is smaller than the pill, the pill is smaller still.
+    static func pillScale(pulled: CGFloat, room: CGFloat, height: CGFloat) -> CGFloat {
+        guard pulled >= appearLift, height > 0 else { return 0 }
+        let along = min(max((pulled - appearLift) / (threshold - appearLift), 0), 1)
+        let grown = smallestScale + (1 - smallestScale) * along
+        return max(0, min(grown, room / height))
+    }
+
+    /// The pill's content's opacity for a pull: in over `materialiseSpan`
+    /// past `appearLift`, as its glass materialises.
+    static func contentPresence(pulled: CGFloat) -> CGFloat {
+        guard pulled >= appearLift else { return 0 }
+        return min(1, (pulled - appearLift) / materialiseSpan)
+    }
+
     /// Where a drag on a stream its room holds whole goes (#2298 § 1): it
     /// doesn't scroll, so the feed's own paging takes any vertical drag, as on
     /// a media post — up to the next post; down to the previous one when the

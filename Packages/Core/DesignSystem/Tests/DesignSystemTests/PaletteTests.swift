@@ -154,8 +154,16 @@ struct PaletteTests {
             #expect(Palette.storyRingGradient.map { Self.hex($0, appearance) } == theme.signatureContrastStops)
         }
         #expect(Palette.storyRingGradientLocations.map(\.doubleValue) == theme.signatureLocations)
-        #expect(Palette.loaderGradient(highContrast: false).map { Self.hex($0, Self.light) } == theme.signatureGradient)
-        #expect(Palette.loaderGradient(highContrast: true).map { Self.hex($0, Self.light) } == theme.signatureContrastStops)
+        // The loader (#2340): the primary's three steps in both appearances,
+        // the primary's IC value under Increased Contrast.
+        for appearance in [Self.light, Self.dark] {
+            #expect(Palette.loaderPillColors.map { Self.hex($0, appearance) } == theme.loaderSteps)
+        }
+        #expect(Palette.loaderPillColors.map { Self.hex($0, Self.traits(.light, high: true)) }
+                == Array(repeating: theme.primary.lightIC, count: theme.loaderSteps.count))
+        #expect(Palette.loaderPillColors.map { Self.hex($0, Self.traits(.dark, high: true)) }
+                == Array(repeating: theme.primary.darkIC, count: theme.loaderSteps.count))
+        #expect(theme.loaderSteps.first == theme.primary.light, "the loader's first pill is the primary")
     }
 
     /// The owner's values (#2282, 2026-11-11), as asked.

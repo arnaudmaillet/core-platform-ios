@@ -196,7 +196,7 @@ struct PostPullTests {
         #expect(PostPullPill.words(.next, armed: true) == "Release for the next post")
         #expect(PostPullPill.words(.previous, armed: false) == "Previous post")
         #expect(PostPullPill.words(.previous, armed: true) == "Release for the previous post")
-        let pill = pill(reducesMotion: false)
+        let pill = self.pill(reducesMotion: false)
         pill.apply(reading(threshold / 2))
         #expect(pill.isShown)
         #expect(pill.debugLine == "Next post")
@@ -215,7 +215,7 @@ struct PostPullTests {
     /// Reduce Motion: the ring does not fill with the pull — empty, then full
     /// at the threshold.
     @Test func underReduceMotionTheRingDoesNotFillWithThePull() {
-        let pill = pill(reducesMotion: true)
+        let pill = self.pill(reducesMotion: true)
         pill.apply(reading(threshold / 2))
         #expect(pill.isShown)
         #expect(pill.debugRingFill == 0)
@@ -223,10 +223,169 @@ struct PostPullTests {
         #expect(pill.debugRingFill == 1)
     }
 
+    // MARK: - The pill follows the pull (#2349)
+
+    /// ⚠️ ITS SIZE AND PRESENCE ARE THE PULL'S, BOTH WAYS: gone short of
+    /// `appearLift`; about 0.6 of its own where it comes out (when the gap
+    /// holds it), growing to 1 at the threshold; never taller than the gap.
+    @Test func thePillsSizeIsThePulls() {
+        let height = PostPullPill.height
+        let lift = PostPullRule.appearLift
+        let unbounded = CGFloat.greatestFiniteMagnitude
+        #expect(PostPullRule.pillScale(pulled: lift - 1, room: unbounded, height: height) == 0, "out before the lift")
+        #expect(PostPullRule.pillScale(pulled: lift, room: unbounded, height: height) == PostPullRule.smallestScale)
+        let midway = (lift + threshold) / 2
+        #expect(abs(PostPullRule.pillScale(pulled: midway, room: unbounded, height: height) - 0.8) < 0.001)
+        #expect(PostPullRule.pillScale(pulled: threshold, room: unbounded, height: height) == 1)
+        #expect(PostPullRule.pillScale(pulled: threshold + 60, room: unbounded, height: height) == 1, "past the threshold it holds")
+        // Never taller than the gap: at the lift, the gap is 8 pt.
+        #expect(PostPullRule.pillScale(pulled: lift, room: lift, height: height) == lift / height)
+        #expect(PostPullRule.pillScale(pulled: 30, room: -4, height: height) == 0, "no room, no pill")
+        // The content comes in over the first part of the range.
+        #expect(PostPullRule.contentPresence(pulled: lift - 1) == 0)
+        #expect(PostPullRule.contentPresence(pulled: lift + PostPullRule.materialiseSpan / 2) == 0.5)
+        #expect(PostPullRule.contentPresence(pulled: lift + PostPullRule.materialiseSpan) == 1)
+    }
+
+    /// ⚠️ NOTHING TIMED: a pull out to the threshold and released short, then
+    /// the spring back, reads the same size and presence at the same distance
+    /// on the way back as on the way out — and a pull wavering around the
+    /// lift never jumps.
+    @Test func theWayBackReadsTheSameAsTheWayOut() throws {
+        let pill = self.pill(reducesMotion: false)
+        pill.clear()
+        let distances: [CGFloat] = [4, PostPullRule.appearLift, 30, (PostPullRule.appearLift + threshold) / 2, threshold - 1]
+        var tracker = PostPullTracker()
+        _ = tracker.update(top: 0, bottom: 0, isTracking: true) { _ in true }
+        var out: [CGFloat: (CGFloat, Bool, CGRect)] = [:]
+        for pulled in distances {
+            let reading = try #require(tracker.update(top: 0, bottom: pulled, isTracking: true) { _ in true })
+            pill.apply(reading, room: pulled)
+            out[pulled] = (pill.scale, pill.isShown, pill.debugGlassFrame)
+        }
+        #expect(tracker.release() == nil, "released short")
+        for pulled in distances.reversed() {
+            let reading = try #require(tracker.update(top: 0, bottom: pulled, isTracking: false) { _ in true })
+            pill.apply(reading, room: pulled)
+            let way = try #require(out[pulled])
+            #expect(pill.scale == way.0 && pill.isShown == way.1, "at \(pulled): \(pill.scale) back, \(way.0) out")
+            #expect(pill.debugGlassFrame == way.2, "at \(pulled): the capsule is elsewhere on the way back")
+        }
+        #expect(tracker.update(top: 0, bottom: 0, isTracking: false) { _ in true } == nil)
+        pill.retract()
+        #expect(!pill.isShown && pill.scale == 0)
+        // Wavering around the lift: the size follows the distance, nothing more.
+        var waver = PostPullTracker()
+        _ = waver.update(top: 0, bottom: 0, isTracking: true) { _ in true }
+        for pulled: CGFloat in [7, 9, 7.5, 8.5, 6, 10] {
+            if let reading = waver.update(top: 0, bottom: pulled, isTracking: true, offers: { _ in true }) {
+                pill.apply(reading, room: pulled)
+            }
+            #expect(pill.scale == PostPullRule.pillScale(pulled: pulled, room: pulled, height: PostPullPill.height))
+            #expect(pill.isShown == (pulled >= PostPullRule.appearLift))
+        }
+    }
+
+    /// The capsule is the size the pull gives, anchored at its foot for the
+    /// next post (it grows away from the composer, never into it) and at its
+    /// head for the previous one.
+    @Test func theCapsuleGrowsFromItsFoot() {
+        let pill = self.pill(reducesMotion: false)
+        let box = pill.bounds
+        pill.apply(reading(60))
+        let small = pill.debugGlassFrame
+        #expect(abs(small.maxY - box.maxY) < 0.01, "the foot left the box's edge")
+        #expect(abs(small.height - PostPullPill.height * pill.scale) < 0.01)
+        pill.apply(reading(threshold - 1))
+        let large = pill.debugGlassFrame
+        #expect(abs(large.maxY - box.maxY) < 0.01)
+        #expect(large.height > small.height && large.width > small.width)
+        #expect(abs(large.midX - box.midX) < 0.01, "centred")
+        let previous = PostPullPill(reducesMotion: { false })
+        previous.configure(direction: .previous, target: PostPullTarget(authorName: "Ava Moreau", monogram: "AM"), pipeline: nil)
+        previous.frame = box
+        previous.apply(reading(60, direction: .previous))
+        #expect(abs(previous.debugGlassFrame.minY) < 0.01, "the previous post's pill hangs from its head")
+    }
+
+    /// At the threshold, a small swell with the tick, then back to 1 — never
+    /// under Reduce Motion, where the pill has no scale at all.
+    @Test func itSwellsAtTheThreshold() {
+        let pill = self.pill(reducesMotion: false)
+        pill.debugManualClock = true
+        pill.apply(reading(threshold - 1))
+        pill.apply(reading(threshold, armed: true))
+        let resting = PostPullPill.height
+        var tallest: CGFloat = 0
+        for _ in 0..<40 {
+            pill.step(1.0 / 60)
+            tallest = max(tallest, pill.debugGlassFrame.height)
+        }
+        #expect(tallest > resting * 1.04 && tallest <= resting * PostPullRule.swell + 0.01, "tallest \(tallest)")
+        #expect(abs(pill.debugGlassFrame.height - resting) < 0.01, "it did not settle back to its own size")
+
+        let still = self.pill(reducesMotion: true)
+        still.debugManualClock = true
+        still.apply(reading(PostPullRule.appearLift))
+        #expect(still.scale == 1, "Reduce Motion: no scale")
+        still.apply(reading(threshold, armed: true))
+        for _ in 0..<40 {
+            still.step(1.0 / 60)
+            #expect(abs(still.debugGlassFrame.height - resting) < 0.01, "Reduce Motion: no swell")
+        }
+    }
+
+    /// ⚠️ ITS WIDTH COVERS ITS WORDS IN EVERY STATE: to longer words it widens
+    /// first, then the words cross-fade; to shorter ones they cross-fade
+    /// first, then it narrows — frame by frame, a change reversed half-way
+    /// included, with and without Reduce Motion. No frame shows a cut word.
+    @Test(arguments: [false, true])
+    func itsWidthCoversItsWordsInEveryState(_ reducesMotion: Bool) {
+        let pill = self.pill(reducesMotion: reducesMotion)
+        pill.debugManualClock = true
+        pill.apply(reading(threshold - 1))
+        #expect(pill.debugWordsFitTheCapsule)
+        func run(_ frames: Int) {
+            for _ in 0..<frames {
+                pill.step(1.0 / 60)
+                #expect(pill.debugWordsFitTheCapsule, "a cut word: \(pill.debugShownWords) in \(pill.debugGlassFrame)")
+            }
+        }
+        pill.apply(reading(threshold, armed: true))
+        #expect(pill.debugWordsFitTheCapsule)
+        #expect(pill.debugShownWords.map { $0.0 } == ["Next post"], "the longer words came before the width")
+        run(4)
+        pill.apply(reading(threshold - 2))
+        run(3)
+        pill.apply(reading(threshold + 4, armed: true))
+        run(60)
+        #expect(pill.debugShownWords.map { $0.0 } == ["Release for the next post"])
+        #expect(abs(pill.debugGlassFrame.width - pill.width(limit: .greatestFiniteMagnitude)) < 1)
+        pill.apply(reading(threshold - 10))
+        #expect(pill.debugWordsFitTheCapsule)
+        run(60)
+        #expect(pill.debugShownWords.map { $0.0 } == ["Next post"])
+        #expect(pill.debugWordsFitTheCapsule)
+    }
+
+    /// Reduce Motion: the pill appears and goes at the lift, at its own size,
+    /// its content faded in with the glass rather than with the pull.
+    @Test func underReduceMotionItAppearsAtTheLiftAtItsOwnSize() {
+        let pill = self.pill(reducesMotion: true)
+        pill.apply(reading(PostPullRule.appearLift - 1))
+        #expect(!pill.isShown && pill.scale == 0)
+        pill.apply(reading(PostPullRule.appearLift))
+        #expect(pill.isShown && pill.scale == 1)
+        #expect(pill.debugPresence == 1)
+        pill.apply(reading(PostPullRule.appearLift - 1))
+        #expect(!pill.isShown)
+        #expect(pill.debugPresence == 0)
+    }
+
     /// The threshold's haptic: the app's role (`armed`), once per crossing,
     /// none while it holds past it or falls back.
     @Test func itTicksOncePerCrossing() {
-        let pill = pill()
+        let pill = self.pill()
         let played = HapticRecorder.recording {
             pill.apply(reading(threshold / 2))
             pill.apply(reading(threshold + 5, armed: true))

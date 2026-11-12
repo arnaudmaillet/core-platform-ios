@@ -962,7 +962,7 @@ final class ConversationThreadViewController: UIViewController {
     }
 
     /// The post's footer, with the peer's pill where the post's author pill
-    /// is (#671): `[peer pill] … [pin] [bell] [⋯]` (#2305). The emote strip
+    /// is (#671): `[peer pill] … [pin · bell] [⋯]` (#2305, #2344). The emote strip
     /// that held the slot is gone — the composer's own emote button is the
     /// way to emotes — and the camera and the library left for the
     /// composer's row (`attachmentSources`), the pin and the bell coming
@@ -985,19 +985,18 @@ final class ConversationThreadViewController: UIViewController {
     /// keeps it.
     private lazy var peerPillItem = BarItems.container(id: "conversation.peer-pill", view: peerPill)
 
-    /// `[peer pill] … [pin] [bell] [⋯]` (#2305): the pin and the bell are
-    /// each a bubble of their own, as they were on the top bar (the owner,
-    /// 2026-11-07) — a separator between them, as between them and ⋯ —
-    /// rather than one platter, which the bar makes of neighbouring items.
-    /// The pin always (disabled on a draft), the bell once there is a
-    /// conversation to mute. A channel's reader keeps both, as the top bar
-    /// gave them.
+    /// `[peer pill] … [pin · bell] [⋯]` (#2344, the owner 2026-11-12): the
+    /// pin and the bell share ONE platter — neighbouring items, which the
+    /// bar joins by itself — and ⋯ keeps its own bubble behind the
+    /// separator. (Reverses #2305's bubble each, 2026-11-07.) The pin
+    /// always (disabled on a draft), the bell once there is a conversation
+    /// to mute: the platter grows or shrinks for it by the bar's own
+    /// animation (`placeFooterItems`). A channel's reader keeps both, in
+    /// the same platter.
     private func footerItems() -> [UIBarButtonItem] {
         var actions = [pinItem]
         if muted != nil { actions.append(muteItem) }
-        return [peerPillItem] + SnapFooterToolbar.trailingItems(
-            actions: actions, more: moreItem, separatesActions: true
-        )
+        return [peerPillItem] + SnapFooterToolbar.trailingItems(actions: actions, more: moreItem)
     }
 
     /// The footer again — the bell come or gone. Rebuilt and handed to the
@@ -1074,7 +1073,8 @@ final class ConversationThreadViewController: UIViewController {
     private var toolbarShape = ToolbarShape()
 
     /// The camera and the library (#681), in the composer's row since #2305:
-    /// `[avatar][field][📷][🖼][☺]`, hidden while the reader writes — for a
+    /// `[avatar][field][📷 🖼][☺]` — one capsule, folded into the own bubble
+    /// while the reader writes (#2344) — for a
     /// thread whose driver sends media. A list of sources, not a pair of
     /// buttons: the conversation's declared attachments (#2308).
     /// The conversation's composer contract (#2308): what differs from a
@@ -2458,13 +2458,14 @@ final class ConversationThreadViewController: UIViewController {
         let itemPadding: CGFloat = 18
         if pillRidesToolbar {
             // The toolbar's leading slot (#671): what the footer's stock items
-            // leave — the pin, the bell once there is one, and ⋯, each its own
-            // bubble (#2305) — as the post's footer measures them, at this
-            // text size (#1679). A long name truncates in the pill; the
-            // bubbles never fold into `•••`.
-            let reserve = SnapBarPillWidths.toolbarReserve(
-                icon: SnapBarPillWidths.toolbarIcon(for: traitCollection), lone: muted == nil ? 1 : 2
-            )
+            // leave — the pin and the bell in one platter (#2344), as the
+            // post's [☆ ⇄]; the pin alone on a draft — and ⋯, as the post's
+            // footer measures them, at this text size (#1679). A long name
+            // truncates in the pill; the bubbles never fold into `•••`.
+            let icon = SnapBarPillWidths.toolbarIcon(for: traitCollection)
+            let reserve = muted == nil
+                ? SnapBarPillWidths.toolbarReserve(icon: icon, lone: 1)
+                : SnapBarPillWidths.toolbarReserve(icon: icon)
             peerPill.setWidthBudget(bar - reserve)
             return
         }

@@ -1,4 +1,5 @@
 import CoreModels
+import DesignSystem
 import Foundation
 import MediaCore
 import MediaPlayback
@@ -151,11 +152,12 @@ struct ProfileCardTests {
         #expect(card.wideLabel?.title == "Follow", "Follow is not the stretched item")
     }
 
-    /// Follow → Requested is the bar's own transition (#1678): the bar is
-    /// rebuilt — nothing restyled in place, no `UIButton` drawing its own
-    /// glass — every item keeps its identity, Follow and Requested one item
-    /// to UIKit, and the bar draws the stretched item's bubble.
-    @Test func followToRequestedIsTheBarsOwnTransition() async throws {
+    /// Follow ↔ Requested changes only that item (#2331, the owner's
+    /// recording): the same instances in the toolbar — Message and the QR
+    /// untouched, Follow's word and prominence changed in place — and the
+    /// bar is not handed the items again. No `UIButton` drawing its own
+    /// glass: the bar draws the stretched item's bubble (#1678).
+    @Test func followToRequestedChangesOnlyThatItem() async throws {
         let host = Host()
         let card = try await makeCard(following: false, host: host)
         let items = try #require(card.toolbarItems)
@@ -164,15 +166,65 @@ struct ProfileCardTests {
         #expect(items.first?.style == .prominent, "the bar does not draw Follow prominent")
         #expect(items.first?.hidesSharedBackground == false, "the stretched item draws its own bubble")
         #expect(!items.contains { $0.customView is UIButton }, "a button in the toolbar")
+        let writes = card.debugToolbarWrites
+        let leadingWrites = card.debugLeadingWrites
+        let more = card.navigationItem.leftBarButtonItems?.first
+
         card.debugApplyFollowButton(.requested)
-        let rebuilt = try #require(card.toolbarItems)
-        #expect(rebuilt.map(\.identifier) == identities, "an item lost its identity across the change")
-        #expect(rebuilt.first !== items.first, "Follow was restyled in place")
+        let requested = try #require(card.toolbarItems)
+        #expect(requested.elementsEqual(items, by: ===), "an item was minted anew: the bar redraws it")
+        #expect(card.debugToolbarWrites == writes, "the toolbar was handed its items again")
         #expect(card.wideLabel?.title == "Requested")
-        #expect(rebuilt.first?.style == .plain, "Requested kept the prominent bubble")
+        #expect(requested.first?.style == .plain, "Requested kept the prominent bubble")
+        #expect((requested.first?.customView as? StretchedBarLabel)?.ink == .label)
+
         card.debugApplyFollowButton(.follow)
+        let back = try #require(card.toolbarItems)
+        #expect(back.elementsEqual(items, by: ===))
+        #expect(card.debugToolbarWrites == writes, "the toolbar was handed its items again")
         #expect(card.wideLabel?.title == "Follow")
-        #expect(card.toolbarItems?.map(\.identifier) == identities)
+        #expect(back.first?.style == .prominent)
+        #expect((back.first?.customView as? StretchedBarLabel)?.ink == .white)
+        #expect(card.navigationItem.leftBarButtonItems?.first === more, "the ••• menu was minted anew")
+        #expect(card.debugLeadingWrites == leadingWrites, "the top bar was handed the ••• again")
+    }
+
+    /// Follow → followed (#2302, #2331): the bell comes in where Follow
+    /// was — the one change the bar is handed — and Message and the QR are
+    /// the same instances, Message taking the free width in place.
+    @Test func followingKeepsMessageAndTheQR() async throws {
+        let host = Host()
+        let card = try await makeCard(following: false, host: host)
+        let items = try #require(card.toolbarItems)
+        let message = try #require(items.first { $0.identifier == "profileCard.message" })
+        let qr = try #require(items.first { $0.identifier == "profileCard.qr" })
+        let writes = card.debugToolbarWrites
+
+        card.debugApplyFollowButton(.following)
+        let followed = try #require(card.toolbarItems)
+        #expect(followed.first { $0.identifier == "profileCard.message" } === message, "Message was minted anew")
+        #expect(followed.first { $0.identifier == "profileCard.qr" } === qr, "the QR was minted anew")
+        #expect(card.debugToolbarWrites == writes + 1, "the bell's arrival is one hand-over")
+        #expect(card.wideLabel === message.customView, "Message does not take the free width")
+
+        card.debugApplyFollowButton(.follow)
+        let unfollowed = try #require(card.toolbarItems)
+        #expect(unfollowed.first { $0.identifier == "profileCard.message" } === message)
+        #expect(unfollowed.first { $0.identifier == "profileCard.qr" } === qr)
+        #expect(card.wideLabel?.title == "Follow")
+        #expect((message.customView as? StretchedBarLabel)?.stretches == false, "Message kept the free width")
+    }
+
+    /// The identities UIKit matches items by stay as they are (#1678).
+    @Test func theBarIdentifiersStay() {
+        typealias Card = ProfileCardViewController
+        #expect(Card.barIdentifier(for: .follow) == "profileCard.follow")
+        #expect(Card.barIdentifier(for: .requested) == "profileCard.follow")
+        #expect(Card.barIdentifier(for: .message) == "profileCard.message")
+        #expect(Card.barIdentifier(for: .openProfile) == "profileCard.openProfile")
+        #expect(Card.barIdentifier(for: .bell) == "profileCard.bell")
+        #expect(Card.barIdentifier(for: .qr) == "profileCard.qr")
+        #expect(Card.moreIdentifier == "profileCard.more")
     }
 
     /// THE CARD READS THE PROFILE'S RELATION (#2014): the avatar's mark is

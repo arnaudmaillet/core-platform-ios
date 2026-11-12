@@ -512,6 +512,34 @@ struct CommentPanelRoomTests {
         #expect(!pill.isShown, "the pill outlived the page change")
     }
 
+    /// ⚠️ THE PILL STANDS 16 PT OFF THE EDGE IT WAS PULLED PAST (#2349): its
+    /// foot `PostPullRule.footGap` above the stream's bottom edge (where the
+    /// composer starts) however far the pull goes, never taller than the gap
+    /// the pull opens; the previous post's head as far under the top edge.
+    @Test func thePillStandsSixteenPointsOffTheEdge() async throws {
+        let log = PullLog()
+        let (_, window, stream) = await scrollingRecent(log)
+        defer { window.isHidden = true }
+        #expect(PostPullRule.footGap == 16)
+        let tail = stream.debugTailOffset
+        for pulled in [CGFloat(20), 60, PostPullRule.threshold - 1, PostPullRule.threshold + 10] {
+            stream.debugPull(to: tail + pulled, isTracking: true)
+            let capsule = try #require(stream.debugPullPillCapsule)
+            let edge = stream.debugStreamEdges.bottom
+            #expect(abs(capsule.maxY - (edge - PostPullRule.footGap)) < 0.5,
+                    "pulled \(pulled): the foot is \(edge - capsule.maxY) pt above the edge")
+            #expect(capsule.height <= pulled + 0.5, "pulled \(pulled): taller than the gap, over the rows")
+        }
+        stream.debugPull(to: tail, isTracking: true)
+        let top = -stream.collectionView.adjustedContentInset.top
+        stream.debugPull(to: top, isTracking: true)
+        stream.debugPull(to: top - 80, isTracking: true)
+        let pill = try #require(stream.debugPullPill)
+        #expect(pill.direction == .previous && pill.isShown)
+        let capsule = try #require(stream.debugPullPillCapsule)
+        #expect(abs(capsule.minY - (stream.debugStreamEdges.top + PostPullRule.footGap)) < 0.5)
+    }
+
     /// Let go short of the threshold: nothing — no commit, the pill goes back.
     @Test func aPullLetGoShortOfTheThresholdDoesNothing() async throws {
         let log = PullLog()
@@ -627,6 +655,59 @@ struct CommentPanelRoomTests {
         log.offers = [.next]
         #expect(actions[1].actionHandler?(actions[1]) == false, "the first post went back")
         #expect(log.commits == [.next, .previous])
+    }
+
+    // MARK: - The stream links (#2349)
+
+    /// ⚠️ "SEE ALL N COMMENTS" AND "EARLIER COMMENTS" ARE THE BRAND'S TEXT
+    /// BUTTON: the primary as text, `subheadline` semibold, the chevron in the
+    /// same ink, on the comments' text column, a 44 pt target — in every
+    /// state (the loader and the retry keep their place).
+    @Test func theStreamLinksAreTheBrandsTextButton() {
+        let width: CGFloat = 402
+        let contents: [CommentStreamLinkCell.Content] = [
+            .init(title: "See all 40 comments", symbol: "chevron.right", identifier: "comments.seeAll"),
+            .init(title: "12 earlier comments", symbol: "chevron.up", identifier: "comments.earlier", placement: .top),
+            .init(title: "12 earlier comments", symbol: "chevron.up", state: .loading, identifier: "comments.earlier", placement: .top),
+            .init(title: "12 earlier comments", symbol: "chevron.up", state: .failed, identifier: "comments.earlier", placement: .top),
+        ]
+        let font = UIFont.scaledFont(forTextStyle: .subheadline, weight: .semibold)
+        var heights: [CGFloat] = []
+        for content in contents {
+            let cell = CommentStreamLinkCell(frame: CGRect(x: 0, y: 0, width: width, height: 100))
+            let height = CommentStreamLinkCell.height(of: content, width: width, sizing: cell)
+            heights.append(height)
+            cell.frame.size.height = height
+            cell.layoutIfNeeded()
+            let label = cell.debugLabel
+            #expect(label.font.fontName == font.fontName && label.font.pointSize == font.pointSize,
+                    "\(content.state): \(label.font as UIFont)")
+            #expect(label.textColor == Palette.brandText, "\(content.state): not the primary as text")
+            #expect(cell.debugChevron.tintColor == Palette.brandText, "\(content.state): the chevron's ink")
+            let x = label.convert(label.bounds, to: cell.contentView).minX
+            #expect(abs(x - CommentRowView.replyIndent) < 0.5, "\(content.state): off the text column at \(x)")
+            let air = content.placement == .top ? CommentStreamLinkCell.threadAir : 0
+            #expect(height - air >= CommentStreamLinkCell.minimumTarget, "\(content.state): a \(height - air) pt target")
+        }
+        #expect(heights[0] == CommentStreamLinkCell.minimumTarget, "See all: the target alone, the thread's own air above it")
+        #expect(heights[1] == CommentStreamLinkCell.minimumTarget + Spacing.lg, "Earlier: 16 pt of air before the threads")
+        #expect(Set(heights.dropFirst()).count == 1, "the row's height moved with its state: \(heights)")
+    }
+
+    /// The thread folds stay as they were: grey footnote — a fold opens
+    /// inside a thread, the stream links lead out of what is shown.
+    @Test func theThreadFoldsAreUnchanged() throws {
+        func label(in view: UIView) -> UILabel? {
+            if let label = view as? UILabel { return label }
+            return view.subviews.lazy.compactMap { label(in: $0) }.first
+        }
+        for kind in [CommentThreadToggleRow.Kind.expand(hidden: 3), .collapse] {
+            let fold = CommentThreadToggleRow(kind: kind, parentID: "p")
+            let text = try #require(label(in: fold))
+            let footnote = UIFont.appFont(forTextStyle: .footnote)
+            #expect(text.font.fontName == footnote.fontName && text.font.pointSize == footnote.pointSize)
+            #expect(text.textColor == .secondaryLabel)
+        }
     }
 
     // MARK: - The rows' height

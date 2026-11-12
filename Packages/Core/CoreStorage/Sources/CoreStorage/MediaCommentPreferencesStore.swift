@@ -17,9 +17,6 @@ public struct MediaCommentPreferences: Codable, Equatable, Sendable {
     }
 
     public static let opacityRange: ClosedRange<Double> = 0.3...1
-    /// The band's bubbles carry no fill by default (legibility comes from the
-    /// page's scrim); a fill can be raised up to here.
-    public static let bandBackgroundRange: ClosedRange<Double> = 0...0.8
     /// The subtitle pill's fill. 0 leaves the text bare over the media.
     public static let subtitleBackgroundRange: ClosedRange<Double> = 0...0.9
 
@@ -29,11 +26,9 @@ public struct MediaCommentPreferences: Codable, Equatable, Sendable {
         didSet { bandOpacity = Self.clamp(bandOpacity, to: Self.opacityRange) }
     }
     public var bandSpeed: BandSpeed
-    /// The dark tint over each band bubble's blurred capsule (0 = the blur
-    /// alone, #2172), clamped to `bandBackgroundRange`.
-    public var bandBackgroundOpacity: Double {
-        didSet { bandBackgroundOpacity = Self.clamp(bandBackgroundOpacity, to: Self.bandBackgroundRange) }
-    }
+    // The band's Background (`bandBackgroundOpacity`, #2172's capsule tint)
+    // is gone with the capsules (#2339): the letters carry their own outline.
+    // A value an older build stored is ignored on decoding, never a failure.
     public var showsSubtitles: Bool
     /// Fill behind the subtitle pill, clamped to `subtitleBackgroundRange`.
     public var subtitleBackgroundOpacity: Double {
@@ -51,7 +46,6 @@ public struct MediaCommentPreferences: Codable, Equatable, Sendable {
         showsReactionBand: Bool = true,
         bandOpacity: Double = 1,
         bandSpeed: BandSpeed = .normal,
-        bandBackgroundOpacity: Double = 0,
         showsSubtitles: Bool = true,
         subtitleBackgroundOpacity: Double = 0.45,
         mutedKeywords: [String] = [],
@@ -61,7 +55,6 @@ public struct MediaCommentPreferences: Codable, Equatable, Sendable {
         self.showsReactionBand = showsReactionBand
         self.bandOpacity = Self.clamp(bandOpacity, to: Self.opacityRange)
         self.bandSpeed = bandSpeed
-        self.bandBackgroundOpacity = Self.clamp(bandBackgroundOpacity, to: Self.bandBackgroundRange)
         self.showsSubtitles = showsSubtitles
         self.subtitleBackgroundOpacity = Self.clamp(subtitleBackgroundOpacity, to: Self.subtitleBackgroundRange)
         self.mutedKeywords = mutedKeywords
@@ -70,14 +63,15 @@ public struct MediaCommentPreferences: Codable, Equatable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case showsReactionBand, bandOpacity, bandSpeed, bandBackgroundOpacity
+        case showsReactionBand, bandOpacity, bandSpeed
         case showsSubtitles, subtitleBackgroundOpacity
         case mutedKeywords, mutedHandles, avoidsPeople
     }
 
     /// Every key is optional: preferences saved by an older build (before a
     /// field existed) keep what they had and default the rest, instead of
-    /// failing to decode and losing everything.
+    /// failing to decode and losing everything. A key no field reads any
+    /// more (`bandBackgroundOpacity`, #2339) is skipped.
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let defaults = MediaCommentPreferences()
@@ -85,8 +79,6 @@ public struct MediaCommentPreferences: Codable, Equatable, Sendable {
             showsReactionBand: try container.decodeIfPresent(Bool.self, forKey: .showsReactionBand) ?? defaults.showsReactionBand,
             bandOpacity: try container.decodeIfPresent(Double.self, forKey: .bandOpacity) ?? defaults.bandOpacity,
             bandSpeed: try container.decodeIfPresent(BandSpeed.self, forKey: .bandSpeed) ?? defaults.bandSpeed,
-            bandBackgroundOpacity: try container.decodeIfPresent(Double.self, forKey: .bandBackgroundOpacity)
-                ?? defaults.bandBackgroundOpacity,
             showsSubtitles: try container.decodeIfPresent(Bool.self, forKey: .showsSubtitles) ?? defaults.showsSubtitles,
             subtitleBackgroundOpacity: try container.decodeIfPresent(Double.self, forKey: .subtitleBackgroundOpacity)
                 ?? defaults.subtitleBackgroundOpacity,

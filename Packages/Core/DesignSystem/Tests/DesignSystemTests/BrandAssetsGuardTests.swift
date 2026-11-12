@@ -1,9 +1,11 @@
 import CoreGraphics
+import CryptoKit
 import Foundation
+import ImageIO
 import Testing
 @testable import DesignSystem
 
-/// ⚠️ THE ASSETS HOLD THE BRAND TOO (#2062). `AccentColor`, the launch logo
+/// ⚠️ THE ASSETS HOLD THE BRAND TOO (#2062). `AccentColor`, the launch picture
 /// and the app icon carry colours outside the code, where `BrandTheme`
 /// cannot reach them: a theme change that forgets one ships the old brand
 /// in a corner — the light `AccentColor` was `D6337F` while the app drew in
@@ -15,6 +17,13 @@ import Testing
 /// `icon.json` as `srgb:` or `display-p3:` components, so they are converted
 /// to sRGB here before they are compared: the owner's display-p3 ground was
 /// `FF2155` in sRGB, not the primary.
+///
+/// The launch picture (#2340) is the icon itself: the owner's two renders,
+/// light and dark, copied byte for byte into `LaunchIcon.imageset`. A new
+/// asset and a new storyboard name (`Launch.storyboard`), not a new picture
+/// inside `LaunchLogo`: iOS replays a cached snapshot of the launch screen
+/// in its zoom, and kept showing #2062's logo after #2296 swapped it in
+/// place.
 ///
 /// CI only runs this in DesignSystem's lane: changing an asset's colour, run
 /// DesignSystem's tests too.
@@ -36,7 +45,17 @@ struct BrandAssetsGuardTests {
     private static let theme = BrandTheme.current
 
     static let iconPath = "App/Resources/AppIcon.icon"
-    static let launchLogoPath = "App/Resources/Assets.xcassets/LaunchLogo.imageset/LaunchLogo.svg"
+    static let launchIconPath = "App/Resources/Assets.xcassets/LaunchIcon.imageset"
+    static let launchStoryboardPath = "App/Resources/Base.lproj/Launch.storyboard"
+    static let projectPath = "core-platform-ios.xcodeproj/project.pbxproj"
+
+    /// The owner's renders (#2340), by appearance: their file names as they
+    /// came from the owner's Desktop, and their SHA-256 — the bytes as they
+    /// came, never re-encoded nor recoloured.
+    static let launchRenders: [String: (file: String, sha256: String)] = [
+        "light": ("AppIcon-test-iOS-Default-1024@1x.png", "32762194aab7fe749b3035dd35b06826d74bb0d3b333070face7fdda5b389626"),
+        "dark": ("AppIcon-test-iOS-Dark-1024@1x.png", "7b1add68b493f6c0b4803e3c944e0f2f88dcf4f28744138d3b293309c0c6777a"),
+    ]
 
     /// How far an icon colour may sit from the theme, in 0–255 units per
     /// sRGB channel: one unit, the rounding of a hex value written as
@@ -137,20 +156,42 @@ struct BrandAssetsGuardTests {
         try JSONDecoder().decode(Icon.self, from: read("\(iconPath)/icon.json"))
     }
 
-    // MARK: - The launch logo
+    // MARK: - The launch picture
 
-    /// An SVG's solid fills, first to last, as upper-case hex.
-    static func svgFills(_ svg: String) -> [String] {
-        svg.components(separatedBy: "fill=\"#").dropFirst().map { String($0.prefix(6)).uppercased() }
+    /// An imageset's files by appearance — "light" for the entry with no
+    /// luminosity, "dark" for the dark one — or nil when an entry has some
+    /// other appearance, a scale, or no file.
+    static func imagesetFiles(_ data: Data) throws -> [String: String]? {
+        struct Imageset: Decodable {
+            struct Entry: Decodable {
+                struct Appearance: Decodable {
+                    let appearance: String
+                    let value: String
+                }
+                let filename: String?
+                let scale: String?
+                let appearances: [Appearance]?
+            }
+            let images: [Entry]
+        }
+        var found: [String: String] = [:]
+        for entry in try JSONDecoder().decode(Imageset.self, from: data).images {
+            guard let file = entry.filename, entry.scale == nil else { return nil }
+            let appearances = entry.appearances ?? []
+            let key: String
+            switch appearances.map({ "\($0.appearance)=\($0.value)" }) {
+            case []: key = "light"
+            case ["luminosity=dark"]: key = "dark"
+            default: return nil
+            }
+            guard found[key] == nil else { return nil }
+            found[key] = file
+        }
+        return found
     }
 
-    /// What the launch logo must wear, first to last: the mark in the
-    /// primary, then its echo in the mint. One SVG for both appearances: the
-    /// echo sits on the primary mark, where the mint `16FFCB` stands out
-    /// (2.95:1 against `FF1358`) and the deep mint would not (1.13:1), so
-    /// the logo keeps the dark mint (`accent.dark`) on the light page too.
-    static func expectedLaunchLogoFills(_ theme: BrandTheme) -> [String] {
-        [theme.primary.light, theme.accent.dark].map(hex)
+    static func sha256(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
     static func hex(_ value: UInt32) -> String { String(format: "%06X", value) }
@@ -200,11 +241,58 @@ struct BrandAssetsGuardTests {
         #expect(assets.filter { !$0.hasPrefix(".") }.sorted() == ["mark.svg"])
     }
 
-    /// The launch logo wears the theme: the mark in the primary, its echo in
-    /// the mint.
-    @Test func theLaunchLogoWearsTheTheme() throws {
-        let svg = String(decoding: try Self.read(Self.launchLogoPath), as: UTF8.self)
-        #expect(Self.svgFills(svg) == Self.expectedLaunchLogoFills(Self.theme))
+    /// The launch picture is the owner's two renders, one per appearance,
+    /// as they came: the same bytes, 1024 px square PNGs with an alpha (the
+    /// icon's rounded corners are the render's transparency), and nothing
+    /// else in the imageset.
+    @Test func theLaunchPictureIsTheOwnersRenders() throws {
+        let files = try #require(
+            try Self.imagesetFiles(Self.read("\(Self.launchIconPath)/Contents.json")),
+            "the launch imageset has an entry the guard does not expect"
+        )
+        #expect(files == Self.launchRenders.mapValues(\.file))
+        for (appearance, render) in Self.launchRenders {
+            let data = try Self.read("\(Self.launchIconPath)/\(render.file)")
+            #expect(Self.sha256(data) == render.sha256, "the \(appearance) render is not the owner's file as it came")
+            let source = try #require(CGImageSourceCreateWithData(data as CFData, nil))
+            let image = try #require(CGImageSourceCreateImageAtIndex(source, 0, nil))
+            #expect(image.width == 1024 && image.height == 1024)
+            #expect(![.none, .noneSkipFirst, .noneSkipLast].contains(image.alphaInfo), "the \(appearance) render has no alpha")
+        }
+        let contents = try FileManager.default.contentsOfDirectory(
+            atPath: Self.root.appendingPathComponent(Self.launchIconPath).path
+        )
+        #expect(contents.filter { !$0.hasPrefix(".") }.sorted()
+                == (["Contents.json"] + Self.launchRenders.values.map(\.file)).sorted())
+    }
+
+    /// The launch screen is `Launch.storyboard`, and it names `LaunchIcon`;
+    /// nothing names `LaunchLogo` or `LaunchScreen` any more — the old asset
+    /// and the old storyboard are gone, so no build can hand iOS the cached
+    /// launch screen's names again.
+    @Test func theLaunchScreenNamesTheNewAsset() throws {
+        let storyboard = String(decoding: try Self.read(Self.launchStoryboardPath), as: UTF8.self)
+        #expect(storyboard.contains("launchScreen=\"YES\""))
+        #expect(storyboard.contains("image=\"LaunchIcon\""))
+        #expect(storyboard.contains("<image name=\"LaunchIcon\""))
+        #expect(!storyboard.contains("LaunchLogo"))
+
+        let project = String(decoding: try Self.read(Self.projectPath), as: UTF8.self)
+        let names = project.components(separatedBy: "INFOPLIST_KEY_UILaunchStoryboardName = ").dropFirst()
+            .map { String($0.prefix { $0 != ";" }) }
+        #expect(!names.isEmpty && names.allSatisfy { $0 == "Launch" }, "the launch storyboard names: \(names)")
+
+        let twin = String(decoding: try Self.read("App/AppCoordinator.swift"), as: UTF8.self)
+        #expect(twin.contains("static let logoAsset = \"LaunchIcon\""), "the launch screen's twin shows another asset")
+        #expect(!twin.contains("\"LaunchLogo\""))
+
+        let manager = FileManager.default
+        for gone in [
+            "App/Resources/Assets.xcassets/LaunchLogo.imageset",
+            "App/Resources/Base.lproj/LaunchScreen.storyboard",
+        ] {
+            #expect(!manager.fileExists(atPath: Self.root.appendingPathComponent(gone).path), "\(gone) is back")
+        }
     }
 
     /// The guard cannot pass by reading nothing: a value a few units out of
@@ -228,11 +316,15 @@ struct BrandAssetsGuardTests {
         colorset.replaceSubrange(range, with: "\"0x01\"")
         #expect(try Self.accentColorValues(Data(colorset.utf8)) != Self.expectedAccentColor(Self.theme))
 
-        let svg = String(decoding: try Self.read(Self.launchLogoPath), as: UTF8.self)
-        let first = Self.expectedLaunchLogoFills(Self.theme)[0]
-        let wrong = svg.replacingOccurrences(of: "#\(first)", with: "#010203", options: .caseInsensitive)
-        #expect(wrong != svg)
-        #expect(Self.svgFills(wrong) != Self.expectedLaunchLogoFills(Self.theme))
+        // The launch imageset: one appearance dropped, or a scale added,
+        // is not the owner's two renders; other bytes are not their hash.
+        let imageset = String(decoding: try Self.read("\(Self.launchIconPath)/Contents.json"), as: UTF8.self)
+        let noDark = imageset.replacingOccurrences(of: "\"dark\"", with: "\"light\"")
+        #expect(noDark != imageset)
+        #expect(try Self.imagesetFiles(Data(noDark.utf8)) != Self.launchRenders.mapValues(\.file))
+        let scaled = imageset.replacingOccurrences(of: "\"idiom\"", with: "\"scale\" : \"2x\", \"idiom\"")
+        #expect(try Self.imagesetFiles(Data(scaled.utf8)) == nil)
+        #expect(Self.sha256(Data("not the render".utf8)) != Self.launchRenders["light"]?.sha256)
     }
 }
 

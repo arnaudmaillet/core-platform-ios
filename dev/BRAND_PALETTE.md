@@ -15,11 +15,12 @@ The app's colours are one **theme**: **coral** — the primary `FF1358`, used al
   - the system controls, through the app's tint (`AccentColor` and the main window's `tintColor`);
   - the unseen-story ring, the hearts, and every unread mark.
 - **Every pill and badge is the solid primary** (`counter`), never a gradient, under a white count: the tab bar's badges, the bell's dot, the Messages selector's badges, the inbox's unread pills, the profile switcher's counts.
-- **The mint is the brand's second colour, not a UI colour** (#2282 § 3, the owner's pick). It is the icon's, the launch logo's and the signature's end. The theme holds it (`accent`, `accentText`, with a deep mint for light grounds, where the mint itself is 1.16:1 on the page), but no `Palette` role reads it. A place that wants the mint is a follow-up the owner names, with the deep mint on light grounds.
+- **The mint is the brand's second colour, not a UI colour** (#2282 § 3, the owner's pick). It is the icon's (and so the launch picture's, the icon's render) and the signature's end. The theme holds it (`accent`, `accentText`, with a deep mint for light grounds, where the mint itself is 1.16:1 on the page), but no `Palette` role reads it. A place that wants the mint is a follow-up the owner names, with the deep mint on light grounds.
 - **The violet appears only inside the signature gradient**, never as a UI colour on its own.
 - **Links, `@mentions` and `#hashtags` are a neutral grey** (`entityInk`), set apart by the semibold.
 - **A filled button wears white** (`onPrimary`) in both appearances.
-- **The signature gradient** (`brandGradient`, #2282) runs violet `7235FF` → mint `16FFCB`, without the primary: a gradient from the primary to the mint goes grey in the middle (`8A8992`), where violet → mint stays coloured through a sky blue (`449AE5`). **The unseen-story ring** (`storyRingGradient`, #2089) and **the loader** (`loaderGradient`, #2147) wear it. Under Increased Contrast both wear `signatureContrastStops`: opaque, the mint end deepened to `009E7B` (3.05:1 on the light page). **White text never sits over its mint half** (1.30:1), so no button wears it; it holds on the violet end (5.72:1).
+- **The loader wears the primary** (#2340, the owner 2026-11-12): its three pills `FF1358`, `FF598A`, `FF94B3`, one colour each, less saturated at each step (the owner's values; on the light page `F2F2F7` they measure 3.43, 2.67 and 1.86:1, on `1C1C1E` 4.44, 5.71 and 8.21:1). It left the signature, which #2147 masked through the pills.
+- **The signature gradient** (`brandGradient`, #2282) runs violet `7235FF` → mint `16FFCB`, without the primary: a gradient from the primary to the mint goes grey in the middle (`8A8992`), where violet → mint stays coloured through a sky blue (`449AE5`). **The unseen-story ring** (`storyRingGradient`, #2089) wears it; the loader left it (#2340). Under Increased Contrast the ring wears `signatureContrastStops`: opaque, the mint end deepened to `009E7B` (3.05:1 on the light page). **White text never sits over its mint half** (1.30:1), so no button wears it; it holds on the violet end (5.72:1).
 - **The system red is for errors and destruction only.**
 - **A warning is a yellow glyph with neutral words** (`Warning`).
 - **Dark mode is not an inversion.** Roles near the contrast line have Increased Contrast values.
@@ -46,8 +47,8 @@ The app's colours are one **theme**: **coral** — the primary `FF1358`, used al
 | `gemText` → `GemSymbol.textColor` | a gem amount or price as text | `8A6400` | `FFE600` | `7A5800` / `FFE600` |
 | `gemGround` → `GemSymbol.ground` | the wash under a price or a claim, at the reader's alpha | `FFE600` | `FFE600` | — |
 | `saveGold` | the saved star | `FFC53D` | `FFC53D` | — |
-| `signatureGradient` → `brandGradient`, `storyRingGradient`, `loaderGradient` | the unseen-story ring (#2089), the loader (#2147); sRGB interpolation | `7235FF` 0 · `16FFCB` 1 | same | `signatureContrastStops`: `7235FF` · `009E7B`, opaque |
-| `loaderOpacities` | each signature stop's opacity in the loader (its softness, the loader's own) | 0.75 · 0.55 | same | opaque |
+| `signatureGradient` → `brandGradient`, `storyRingGradient` | the unseen-story ring (#2089); sRGB interpolation | `7235FF` 0 · `16FFCB` 1 | same | `signatureContrastStops`: `7235FF` · `009E7B`, opaque |
+| `loaderSteps` → `loaderPillColors` | the loader's three pills, left to right, one opaque colour each (#2340): the primary, then its hue less saturated (HSB S 0.93 · 0.65 · 0.42, B 1), so they read as one gradient. Each lead wears its pill's colour at `loaderLeadOpacity` (0.45). Reduce Motion's dots are the same pills | `FF1358` · `FF598A` · `FF94B3` | same | the primary's IC value on all three, opaque: `C6003A` / `FF5C8C` |
 
 ### Measured contrast (WCAG 2.x)
 The raised ground is `F2F2F7` in the light and `1C1C1E` in the dark in every column.
@@ -82,7 +83,7 @@ Status colours stay the system's:
 
 ### Not the theme
 These sit in `BrandTheme.swift` only because they are hex. A theme change leaves them alone:
-- `BrandNeutrals`: the grouped page's light grey, which the loader mixes toward;
+- `BrandNeutrals`: the grouped page's light grey, where the brand's contrast is measured;
 - `BrandCosmetics`: the avatar frames' sweeps (gold, neon, aurora). A frame is a cosmetic item, the same object for everyone.
 
 ## The assets
@@ -91,7 +92,7 @@ Three assets hold the brand outside the code. `BrandAssetsGuardTests` (DesignSys
 | Asset | Holds | Checked against |
 |---|---|---|
 | `App/Resources/Assets.xcassets/AccentColor.colorset` | the app's tint: light, dark and the Increased Contrast pair (Xcode's "accent" is the **tint**: it carries the primary, not the mint) | `BrandTheme.primary` |
-| `App/Resources/Assets.xcassets/LaunchLogo.imageset/LaunchLogo.svg` | the launch logo: the mark in the primary, its echo in the mint, at the icon's offset and scale. One SVG for both appearances: the echo sits on the primary mark, where the mint stands out (2.95:1 against `FF1358`) and the deep mint would not (1.13:1) | `BrandTheme.primary`, then `accent` (the mint, its dark value) |
+| `App/Resources/Assets.xcassets/LaunchIcon.imageset` | the launch picture (#2340): the icon itself, the owner's renders copied byte for byte from their Desktop: `AppIcon-test-iOS-Default-1024@1x.png` (light) and `AppIcon-test-iOS-Dark-1024@1x.png` (dark), 1024 px with the icon's rounded corners as transparency. `Launch.storyboard` and its twin `LaunchViewController` show it at 120 pt on the page | the two files by appearance and their SHA-256; the storyboard names `LaunchIcon`; no `LaunchLogo` and no `LaunchScreen.storyboard` remain |
 | `App/Resources/AppIcon.icon/icon.json` | the icon's solid ground, and the fill of its mint glass layer (the mark's echo). Both layers draw the one mark, `Assets/mark.svg` | the ground: `primary`; the mint layer: `accent` (the mint), each within one unit per sRGB channel once converted from `srgb:` or `display-p3:` |
 
 The icon's mint layer is written in display-p3 (`0.46658, 0.98557, 0.80754`), the mint `16FFCB` within 0.4 of a unit. Its strength (0.4 fill alpha, 0.6 opacity) is the owner's: over the white mark it renders a pale grey (#2282, problem 1).
@@ -100,7 +101,7 @@ The icon's mint layer is written in display-p3 (`0.46658, 0.98557, 0.80754`), th
 1. **Write the new values** in `BrandTheme.swift`: a new `BrandTheme` value, then point `current` at it. Call sites do not change, because they read `Palette`'s roles.
 2. **Update the assets** until `BrandAssetsGuardTests` passes:
    - `AccentColor`'s four values (the primary's);
-   - the launch logo;
+   - the launch picture: re-render the icon (light and dark, 1024 px) and replace `LaunchIcon.imageset`'s two files **under a new asset name** (and update the guard's hashes). iOS replays a cached snapshot of the launch screen in its zoom: a picture swapped inside the same asset kept the old one on screen (#2340);
    - the icon, in Icon Composer: copy the `.icon` byte for byte, and render it with `ictool` (light, dark, tinted, clear).
 3. **Check the contrast.** `PaletteTests` and `PaletteThemeTests` measure every role where it is used, and `PaletteTests.everyRoleIsTheThemes` checks each role against `BrandTheme.current`. Update the table above.
 4. **Update this document's tables.**

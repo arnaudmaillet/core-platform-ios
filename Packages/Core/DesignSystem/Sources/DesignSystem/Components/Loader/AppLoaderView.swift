@@ -29,12 +29,14 @@ import UIKit
 /// Reduce Motion, the app's switch or Low Power Mode (`MotionPreference`): no
 /// wave — three dots, fading in with the pull and pulsing slowly while loading.
 ///
-/// ⚠️ **ONE GRADIENT, MASKED BY THE PILLS (#2147, the owner 2026-11-05).** The
-/// brand's signature, violet → mint since #2282, at the loader's own
-/// opacities, spans the whole mark; the pills are its mask, so a pill growing in the
-/// wave shows more of it along its height, as a cut through the logo would.
-/// The leads mask the same gradient at a lower opacity. It replaced one solid
-/// colour per pill (#2083), too loud.
+/// ⚠️ **ONE COLOUR PER PILL, THE PRIMARY IN THREE STEPS (#2340, the owner
+/// 2026-11-12).** The left pill is the primary, the next two the same hue
+/// less saturated (`Palette.loaderPillColors`), so the three read as one
+/// gradient; a pill growing in the wave keeps its colour. Each lead wears
+/// its pill's colour at `Palette.loaderLeadOpacity`. Increased Contrast
+/// takes all three to the primary's IC value, opaque. It replaced the
+/// signature masked by the pills (#2147, #2282); the signature stays for
+/// the story ring.
 public final class AppLoaderView: UIView {
     public enum Size: Sendable {
         /// Paging footers, rows, buttons: `UIActivityIndicatorView.medium`'s 20pt.
@@ -62,13 +64,12 @@ public final class AppLoaderView: UIView {
 
     private let side: CGFloat
     private let mark = CALayer()
-    /// The gradient the pills show, and the one under it the leads show.
-    private let pillGradient = CAGradientLayer()
-    private let leadGradient = CAGradientLayer()
-    /// The pills, left to right, as `pillGradient`'s mask; the leads as
-    /// `leadGradient`'s. Opaque shapes: their alpha is the mask's.
-    private let pillMask = CALayer()
-    private let leadMask = CALayer()
+    /// The pills' layer, and the one under it holding the leads at their
+    /// lower opacity.
+    private let pillLayer = CALayer()
+    private let leadLayer = CALayer()
+    /// The pills and the leads, left to right, each filled with its pill's
+    /// colour (`applyTones`).
     private let pills: [CALayer]
     private let leads: [CALayer]
     private var progress: CGFloat = 0
@@ -102,24 +103,22 @@ public final class AppLoaderView: UIView {
         layer.addSublayer(mark)
         let width = AppLoaderGeometry.pillWidth(side: side)
         let box = CGRect(x: 0, y: 0, width: side, height: side)
-        for (gradient, mask, pieces) in [(leadGradient, leadMask, leads), (pillGradient, pillMask, pills)] {
-            gradient.frame = box
-            gradient.startPoint = Palette.loaderGradientStart
-            gradient.endPoint = Palette.loaderGradientEnd
-            gradient.locations = Palette.loaderGradientLocations
-            mask.frame = box
+        for (holder, pieces) in [(leadLayer, leads), (pillLayer, pills)] {
+            holder.frame = box
             for piece in pieces {
-                piece.backgroundColor = UIColor.black.cgColor
                 piece.cornerRadius = width / 2
                 piece.cornerCurve = .circular
-                mask.addSublayer(piece)
+                holder.addSublayer(piece)
             }
-            gradient.mask = mask
-            mark.addSublayer(gradient)
+            mark.addSublayer(holder)
         }
-        leadGradient.opacity = Palette.loaderLeadOpacity
+        leadLayer.opacity = Palette.loaderLeadOpacity
         applyTones()
-        registerForTraitChanges([UITraitAccessibilityContrast.self]) { (self: Self, _: UITraitCollection) in
+        // The Increased Contrast value differs by appearance (C6003A light,
+        // FF5C8C dark): both traits re-resolve the colours.
+        registerForTraitChanges(
+            [UITraitAccessibilityContrast.self, UITraitUserInterfaceStyle.self]
+        ) { (self: Self, _: UITraitCollection) in
             self.applyTones()
         }
         apply(AppLoaderTimeline.pull(0))
@@ -140,14 +139,17 @@ public final class AppLoaderView: UIView {
         CATransaction.commit()
     }
 
-    /// The gradient's stops: the signature's, or opaque with Increased
-    /// Contrast.
+    /// Each pill's colour, and its lead's: the primary's three steps, or its
+    /// Increased Contrast value — resolved for the view's traits, as a layer
+    /// takes no dynamic colour.
     private func applyTones() {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        let colors = Palette.loaderGradient(highContrast: traitCollection.accessibilityContrast == .high).map(\.cgColor)
-        pillGradient.colors = colors
-        leadGradient.colors = colors
+        let colours = Palette.loaderPillColors.map { $0.resolvedColor(with: traitCollection).cgColor }
+        for (index, colour) in colours.enumerated() where index < pills.count {
+            pills[index].backgroundColor = colour
+            leads[index].backgroundColor = colour
+        }
         CATransaction.commit()
     }
 
@@ -346,38 +348,28 @@ public final class AppLoaderView: UIView {
     }
 
     /// The loader as it shows now — its pills where the wave has them, in
-    /// their gradient — drawn by hand on a margin `pad` wide: a toast blurs
-    /// it from this (#2285, `ToastPictured`). Inside the toast's glass a
-    /// layer mask isn't drawn, so a render of the masked gradient would not
-    /// be what shows.
+    /// their colours — drawn by hand on a margin `pad` wide: a toast blurs
+    /// it from this (#2285, `ToastPictured`).
     func picture(scale: CGFloat, pad: CGFloat) -> CGImage? {
         let origin = CGPoint(x: pad + (bounds.width - side) / 2, y: pad + (bounds.height - side) / 2)
         let shownMark = mark.presentation() ?? mark
-        let layers: [(CAGradientLayer, [CALayer])] = [(leadGradient, leads), (pillGradient, pills)]
+        let layers: [(CALayer, [CALayer])] = [(leadLayer, leads), (pillLayer, pills)]
         return ToastBlur.draw(size: bounds.size, pad: pad, scale: scale) { _ in
             guard let context = UIGraphicsGetCurrentContext() else { return }
-            for (gradientLayer, pieces) in layers {
-                let colours = (gradientLayer.colors ?? []) as CFArray
-                let locations = (gradientLayer.locations ?? []).map { CGFloat($0.doubleValue) }
-                guard let gradient = CGGradient(
-                    colorsSpace: nil, colors: colours, locations: locations.isEmpty ? nil : locations
-                ) else { continue }
-                let path = UIBezierPath()
-                for piece in pieces {
-                    let frame = (piece.presentation() ?? piece).frame.offsetBy(dx: origin.x, dy: origin.y)
-                    path.append(UIBezierPath(roundedRect: frame, cornerRadius: min(frame.width, frame.height) / 2))
-                }
+            for (holder, pieces) in layers {
                 context.saveGState()
-                context.setAlpha(CGFloat(shownMark.opacity * gradientLayer.opacity))
-                path.addClip()
-                let start = gradientLayer.startPoint
-                let end = gradientLayer.endPoint
-                context.drawLinearGradient(
-                    gradient,
-                    start: CGPoint(x: origin.x + start.x * side, y: origin.y + start.y * side),
-                    end: CGPoint(x: origin.x + end.x * side, y: origin.y + end.y * side),
-                    options: [.drawsBeforeStartLocation, .drawsAfterEndLocation]
-                )
+                // The holder's opacity over its pieces as one group, as Core
+                // Animation composites it.
+                context.setAlpha(CGFloat(shownMark.opacity * holder.opacity))
+                context.beginTransparencyLayer(auxiliaryInfo: nil)
+                for piece in pieces {
+                    guard let colour = piece.backgroundColor else { continue }
+                    let frame = (piece.presentation() ?? piece).frame.offsetBy(dx: origin.x, dy: origin.y)
+                    context.setFillColor(colour)
+                    context.addPath(UIBezierPath(roundedRect: frame, cornerRadius: min(frame.width, frame.height) / 2).cgPath)
+                    context.fillPath()
+                }
+                context.endTransparencyLayer()
                 context.restoreGState()
             }
         }
@@ -399,11 +391,11 @@ public final class AppLoaderView: UIView {
         return AppLoaderTimeline.Frame(heights: pills.map(fraction), leadHeights: leads.map(fraction))
     }
     var debugOpacity: Float { mark.opacity }
-    /// The gradient the pills show and the one the leads show, and their
-    /// masks: what a test reads of the look.
-    var debugPillGradient: CAGradientLayer { pillGradient }
-    var debugLeadGradient: CAGradientLayer { leadGradient }
-    var debugPillsMaskTheGradient: Bool { pillGradient.mask === pillMask && pills.allSatisfy { $0.superlayer === pillMask } }
-    var debugLeadsMaskTheGradient: Bool { leadGradient.mask === leadMask && leads.allSatisfy { $0.superlayer === leadMask } }
+    /// Each pill's colour and each lead's, left to right, and the leads'
+    /// opacity: what a test reads of the look.
+    var debugPillColors: [CGColor] { pills.compactMap(\.backgroundColor) }
+    var debugLeadColors: [CGColor] { leads.compactMap(\.backgroundColor) }
+    var debugLeadOpacity: Float { leadLayer.opacity }
+    var debugPillOpacity: Float { pillLayer.opacity }
     #endif
 }

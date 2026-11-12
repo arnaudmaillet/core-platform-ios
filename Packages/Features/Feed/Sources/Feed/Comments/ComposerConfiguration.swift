@@ -15,8 +15,9 @@ import VoiceKitUI
 /// - **tap to type**, everywhere;
 /// - **hold to talk**, wherever `voice` records: the same mic, lock, pause,
 ///   listen back and send (#2102), with the host's limit;
-/// - **the attachments** stand between the field and the own bubble, and
-///   hide while the reader writes (`CommentsInputBar.showsAttachments`);
+/// - **the attachments** stand between the field and the own bubble, one
+///   capsule that folds into the own bubble while the reader writes
+///   (`CommentsInputBar.showsAttachments`, #2344);
 /// - the keyboard ride, the growth with the text and the column staying
 ///   down, as before.
 ///
@@ -94,7 +95,8 @@ struct ComposerConfiguration {
 
     var voice: Voice
     /// The ORDERED list of what the reader can attach from the row: one
-    /// glass bubble per entry, between the field and the own bubble. The
+    /// glyph per entry in one glass capsule (#2344), between the field and
+    /// the own bubble. The
     /// composer only calls an entry's `action`; what is picked travels as a
     /// value the host owns, and the host sends it — the composer never
     /// uploads.

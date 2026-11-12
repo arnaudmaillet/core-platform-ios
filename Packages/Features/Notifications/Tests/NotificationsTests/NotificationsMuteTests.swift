@@ -219,9 +219,10 @@ struct NotificationsMuteTests {
         #expect(muted.debugMuteTimerText == "7 h 42")
     }
 
-    /// The bar contract (#1679): the wide item is a plain view whose bubble
-    /// the BAR draws, both items keep their identifiers, and a new look is a
-    /// new wide item under the same identifier — the bar animates the swap.
+    /// The bar contract (#1679, #2331): the wide item is a plain view whose
+    /// bubble the BAR draws, both items keep their identifiers, and a new
+    /// look changes the wide item IN PLACE — the same instance — while the
+    /// timer, whose text changed, is a new item under its identifier.
     @Test func theMuteItemsKeepTheirIdentitiesAndTheBarsBubble() async throws {
         let (window, controller) = hosting(PauseServer())
         defer { window.rootViewController = nil; window.isHidden = true }
@@ -236,9 +237,27 @@ struct NotificationsMuteTests {
         controller.shownPause = .indefinite
         controller.applyMuteToolbar()
         let after = try #require(controller.toolbarItems?.first)
-        #expect(after !== wide, "the new look restyled the item in place")
+        #expect(after === wide, "the new look minted the wide item anew: the bar redraws it")
         #expect(after.identifier == wide.identifier)
         #expect(controller.debugMuteButtonTitle == "Unmute")
+        #expect((after.customView as? StretchedBarLabel)?.image != nil)
+    }
+
+    /// A save starting changes the wide item alone (#2331): the timer, which
+    /// says the same, is the same instance — it used to be re-minted, and the
+    /// bar blurred it out and back.
+    @Test func aSaveStartingKeepsTheTimer() async throws {
+        let server = PauseServer(holds: true)
+        let (window, controller) = hosting(server)
+        defer { window.rootViewController = nil; window.isHidden = true }
+        let items = try #require(controller.toolbarItems)
+        controller.muteButton?.debugTap()
+        #expect(controller.debugMuteButtonIsBusy)
+        let busy = try #require(controller.toolbarItems)
+        #expect(busy.elementsEqual(items, by: ===), "an item that did not change was minted anew")
+        while await server.heldWrites == 0 { await Task.yield() }
+        await server.release()
+        await settle { !controller.debugMuteButtonIsBusy }
     }
 
     /// A write on its way (#1775): the wide button wears the loader and takes

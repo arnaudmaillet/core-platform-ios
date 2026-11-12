@@ -844,11 +844,22 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
 /// the fixture login round trip, which it covers rather than flashing the login
 /// form on the way past.
 final class LaunchViewController: UIViewController {
-    /// ⚠️ THE LAUNCH SCREEN'S TWIN (`LaunchScreen.storyboard`, the owner,
+    /// ⚠️ THE LAUNCH SCREEN'S TWIN (`Launch.storyboard`, the owner,
     /// 2026-10-27): the same logo, the same 120 pt, at the centre of the same
     /// ground — the pages' own (`Surface.page`) — so iOS's static screen hands
     /// over to this one without a seam.
+    ///
+    /// The logo is the icon itself (#2340): the owner's renders, light and
+    /// dark, in `LaunchIcon` — iOS zooms the app out of its home-screen icon,
+    /// and the same icon in the middle makes that one motion. The asset
+    /// follows the appearance, as the storyboard's does. Its rounded corners
+    /// are the render's transparency: nothing is masked here.
     static let logoSide: CGFloat = 120
+    /// The launch picture's asset (#2340). A new name, not `LaunchLogo`:
+    /// iOS replays a cached snapshot of the launch screen in its zoom, and an
+    /// update that swapped the picture inside the same asset kept showing the
+    /// old one.
+    static let logoAsset = "LaunchIcon"
     /// A loader under the logo only for a wait worth saying: the keychain read
     /// this covers is usually gone well before.
     static let loaderDelay: TimeInterval = 1
@@ -861,7 +872,7 @@ final class LaunchViewController: UIViewController {
         super.viewDidLoad()
         view.backgroundColor = Surface.page
 
-        let logo = UIImageView(image: UIImage(named: "LaunchLogo"))
+        let logo = UIImageView(image: UIImage(named: Self.logoAsset))
         logo.contentMode = .scaleAspectFit
         logo.constrain(in: view) { parent in
             logo.centerXAnchor.constraint(equalTo: parent.centerXAnchor)

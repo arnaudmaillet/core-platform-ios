@@ -108,6 +108,24 @@ struct HeroPageViewControllerTests {
         }
     }
 
+    /// The subtitle line's passage under the bar (#2334), what a bar title
+    /// follows: none at rest or on a pull, all of it once the header has
+    /// docked, and in between while the line itself crosses the bar's foot —
+    /// before the action row has gone under.
+    @Test func theSubtitleLinePassesUnderTheBarBeforeTheTray() throws {
+        try hosting { screen in
+            let line = try #require(screen.heroHeader.subtitleLineFrame(in: screen.headerHost))
+            let barFoot = screen.chromeTop
+            #expect(screen.subtitlePassage(travelled: 0) == 0, "passed at rest")
+            #expect(screen.subtitlePassage(travelled: -40) == 0, "passed on a pull")
+            #expect(screen.subtitlePassage(travelled: screen.headerTravel + 300) == 1, "not passed once docked")
+            // Half the line above the bar's foot.
+            let halfWay = line.midY - barFoot
+            #expect(abs(screen.subtitlePassage(travelled: halfWay) - 0.5) < 0.05)
+            #expect(!screen.isActionRowUnderBar(travelled: line.maxY - barFoot), "the tray went with the handle")
+        }
+    }
+
     /// ONE RULE (#2235): a finger's pull refreshes as it reaches the shared
     /// threshold — under the finger, not on the release — turning the
     /// spinner and asking the page kind; short of it, nothing.

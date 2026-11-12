@@ -47,11 +47,14 @@ extension NotificationsViewController {
         }
     }
 
-    /// Lays the toolbar out for `shownPause`, re-minting an item whenever
-    /// what it says changes — the timer's text (a bar measures a NEW item
-    /// only), the wide item's word and glyph — under the same identifiers,
-    /// so the bar animates the change itself (#1679), and arms the minute
-    /// tick.
+    /// Lays the toolbar out for `shownPause` and arms the minute tick.
+    ///
+    /// ⚠️ ONLY THE ITEM THAT CHANGED MOVES (#2331): the items are kept by
+    /// identifier (`BarItemStore`). The wide item takes its word, its glyph
+    /// and its loader in place; the timer is re-minted under its identifier
+    /// only when its text changes (a bar measures a NEW item only), which the
+    /// bar animates (#1679). A save starting used to re-mint the timer too,
+    /// and the bar blurred it out and back for nothing.
     func applyMuteToolbar() {
         guard let muteModel else { return }
         let now = muteModel.clock
@@ -59,15 +62,21 @@ extension NotificationsViewController {
             paused: shownPause.isPaused, timeLeft: NotificationsMuteModel.timeLeft(shownPause, now: now), busy: isWritingMute
         )
         if look != shownMuteLook {
-            let shown = toolbarItems?.first { $0.identifier == Self.muteWideIdentifier }
-            let same = look.paused == shownMuteLook?.paused && look.busy == shownMuteLook?.busy
-            let kept = same ? shown : nil
-            let animated = view.window != nil && shown != nil
+            let animated = view.window != nil && shownMuteLook != nil
             shownMuteLook = look
-            let wide = kept ?? makeMuteWideItem(paused: look.paused, busy: look.busy)
-            let timer = makeMuteTimerItem(look)
+            let wide = muteBarStore.item(Self.muteWideIdentifier) {
+                makeMuteWideItem()
+            } update: { item in
+                dressMuteWideItem(item, paused: look.paused, busy: look.busy)
+            }
+            let timer = muteBarStore.item(Self.muteTimerIdentifier, variant: look.timeLeft) {
+                makeMuteTimerItem(look)
+            }
             muteTimerItem = timer
-            setToolbarItems([wide, .fixedSpace(), timer], animated: animated)
+            muteBarStore.apply(
+                toolbar: [wide, muteBarStore.separator(before: Self.muteTimerIdentifier), timer], to: self,
+                animated: animated
+            )
         }
         if let timer = muteTimerItem {
             timer.accessibilityValue = NotificationsMuteModel.timeLeftForVoiceOver(shownPause, now: now)
@@ -79,19 +88,25 @@ extension NotificationsViewController {
 
     /// The stretched item (`BarItems.stretched`): there is no flexible-width
     /// bar item and a `.prominent` title item's `width` is ignored on iOS 27.
-    /// The bar draws its bubble (#1679). The glyph and the word say what a
-    /// tap WILL do.
-    private func makeMuteWideItem(paused: Bool, busy: Bool) -> UIBarButtonItem {
-        let made = BarItems.stretched(
-            id: Self.muteWideIdentifier,
-            title: paused ? "Unmute" : "Mute",
-            image: UIImage(systemName: paused ? "bell" : "bell.slash"),
-            busy: busy
-        ) { [weak self] in self?.muteButtonTapped() }
+    /// The bar draws its bubble (#1679). Made once; dressed by
+    /// `dressMuteWideItem`.
+    private func makeMuteWideItem() -> UIBarButtonItem {
+        let made = BarItems.stretched(id: Self.muteWideIdentifier, title: "Mute") { [weak self] in
+            self?.muteButtonTapped()
+        }
         made.label.accessibilityIdentifier = "notifications.mute"
-        made.label.accessibilityLabel = paused ? "Unmute notifications" : "Mute notifications for 8 hours"
         muteButton = made.label
         return made.item
+    }
+
+    /// The glyph and the word say what a tap WILL do; the loader while a
+    /// write is on its way (#1775). In place (#2331).
+    private func dressMuteWideItem(_ item: UIBarButtonItem, paused: Bool, busy: Bool) {
+        BarItems.update(
+            stretched: item, title: paused ? "Unmute" : "Mute",
+            image: UIImage(systemName: paused ? "bell" : "bell.slash"), busy: busy
+        )
+        item.customView?.accessibilityLabel = paused ? "Unmute notifications" : "Mute notifications for 8 hours"
     }
 
     /// The timer glyph, or the time left; it always opens the menu.
