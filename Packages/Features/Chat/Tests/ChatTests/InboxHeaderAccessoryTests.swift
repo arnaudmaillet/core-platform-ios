@@ -3,12 +3,13 @@ import Testing
 import UIKit
 @testable import Chat
 
-/// **The inbox header's injected items — the shell's bell and balance.**
+/// **The inbox header's injected items — the shell's bell, and no balance.**
 ///
 /// Items the shell injects are held by the screen and composed into its bar:
-/// `[bell] … [coins]`, the search stacked under the bar. These inboxes have
-/// no search composed, so no field (`InboxSystemSearchTests` pins the one
-/// with search).
+/// `[bell] …`, the search stacked under the bar. The balance left Messages
+/// (#2336, the owner 2026-11-12): no heart, no spend, no claim here. These
+/// inboxes have no search composed, so no field (`InboxSystemSearchTests`
+/// pins the one with search).
 @MainActor
 struct InboxHeaderAccessoryTests {
     /// The thinnest surface the container accepts: one page, no data.
@@ -75,37 +76,39 @@ struct InboxHeaderAccessoryTests {
         #expect(screen.navigationItem.leftBarButtonItems?.isEmpty ?? true)
     }
 
-    /// ⚠️ THE BELL LEADS; the balance trails (inboard of search, when there
-    /// is search — `InboxSystemSearchTests`).
-    @Test func theShellsItemsFrameTheHeader() throws {
+    /// ⚠️ THE BELL LEADS, AND NOTHING TRAILS (#2336): the shell hands the
+    /// inbox its bell alone — `MessagesTabCoordinator` builds no balance — and
+    /// the bar reserves no slot for one: its trailing group is empty.
+    @Test func theShellsBellLeadsAndNothingTrails() throws {
         let screen = inbox()
         let bell = item("Bell")
-        let balance = item("Balance")
         // Injected BEFORE the view loads — the shell's order — so the load's
-        // own write of the bar must pick them up rather than erase them.
+        // own write of the bar must pick it up rather than erase it.
         screen.setLeadingAccessoryItem(bell)
-        screen.setTrailingAccessoryItem(balance)
         screen.loadViewIfNeeded()
 
         let leading = try #require(screen.navigationItem.leftBarButtonItems)
-        let trailing = try #require(screen.navigationItem.rightBarButtonItems)
         #expect(leading.count == 1 && leading.first === bell)
-        #expect(trailing.count == 1)
-        #expect(trailing.last === balance)
+        #expect(screen.navigationItem.rightBarButtonItems?.isEmpty ?? true,
+                "the inbox's trailing group holds an item the shell no longer hands it")
     }
 
-    /// A fresh balance item (the badge re-mints one whenever its width moves)
-    /// replaces the old one rather than joining it.
-    @Test func replacingTheBalanceLeavesOneOfIt() throws {
+    /// The protocol's trailing slot still works if anything ever fills it: a
+    /// fresh item replaces the old one rather than joining it, and `nil`
+    /// clears it back to an empty trailing group.
+    @Test func aTrailingItemReplacesAndClears() throws {
         let screen = inbox()
         screen.loadViewIfNeeded()
 
-        screen.setTrailingAccessoryItem(item("Balance"))
-        let second = item("Balance")
+        screen.setTrailingAccessoryItem(item("Accessory"))
+        let second = item("Accessory")
         screen.setTrailingAccessoryItem(second)
 
         let trailing = try #require(screen.navigationItem.rightBarButtonItems)
         #expect(trailing.count == 1)
         #expect(trailing.last === second)
+
+        screen.setTrailingAccessoryItem(nil)
+        #expect(screen.navigationItem.rightBarButtonItems?.isEmpty ?? true)
     }
 }

@@ -60,9 +60,11 @@ final class ForYouTabCoordinator: TabCoordinator, GlyphTab {
         self.notificationsBell = notificationsBell
     }
 
-    /// The header's balance badge — the same object the Explore header wears,
+    /// The header's balance badge — the same object the profile's root wears,
     /// so the number, the claim countdown and the sheet cannot drift between
-    /// the two. Held for the coordinator's life, which is the process's.
+    /// the two. It stays here (#2336): For You is where likes are spent the
+    /// most, and the launch tab. Held for the coordinator's life, which is the
+    /// process's.
     private var walletBadge: WalletBadgeInstaller?
 
     func start() {

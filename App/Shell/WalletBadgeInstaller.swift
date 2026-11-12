@@ -7,9 +7,17 @@ import UIKit
 
 /// The wallet's toolbar face, and everything that keeps it true.
 ///
-/// The balance stands in almost every header now — the four root tabs, a pushed
-/// profile, and the post screen — and each of them needs the same four things
-/// around it: a badge
+/// The balance stands where likes are spent or earned (#2336, the owner
+/// 2026-11-12) — and leaves the screens where it never moves. This installer's
+/// hosts: the For You root (`ForYouTabCoordinator`), the own profile's root
+/// (`ProfileTabCoordinator`), and a pushed profile or post screen
+/// (`AppContainer`'s `attachBalance` → `attach(to:…)`). The snap feed, the text
+/// page, the comments sheet, a place's page and the search results build their
+/// own badge with the same identifier. NOT Messages (no heart, no spend, no
+/// claim) and NOT the map, Explore's root (a tap opens the post, which wears
+/// it): neither coordinator builds one. The gems stay out of the bars.
+///
+/// Each host needs the same four things around it: a badge
 /// whose count is current, a wake-up for the moment the hourly claim unlocks
 /// (the one state change that arrives by CLOCK, so no notification announces
 /// it), a re-installed bar item whenever the count changes width, and the sheet
@@ -35,7 +43,7 @@ final class WalletBadgeInstaller: NSObject {
 
     // A MEMBER'S ONLY (#1146, the owner 2026-10-14): a guest has no badge
     // anywhere, so no host builds one for a guest — the hosts ask
-    // (`ExploreTabCoordinator.installBarItems`, `ForYouTabCoordinator.start`,
+    // (`ForYouTabCoordinator.start`, `ProfileTabCoordinator`,
     // `AppContainer`'s `attachBalance`).
     private let wallet: WalletStore
     private let badge = WalletBadgeButton()
@@ -182,11 +190,11 @@ final class WalletBadgeInstaller: NSObject {
     /// `-wallet-claim-ready` (claimable state) or `-wallet-demo-claim` (fires
     /// the claim itself).
     ///
-    /// ⚠️ FROM THE TAB ON SCREEN (#1998). Every root with a badge asks, and
-    /// only the one whose presenter is in the window answers: the hook lived
-    /// on Explore's badge alone, and once the app launched on Shots (#1765)
-    /// it presented from a tab nobody saw — `WalletSheetUITests` found no
-    /// sheet.
+    /// ⚠️ FROM THE TAB ON SCREEN (#1998). A root with a badge asks, and only
+    /// the one whose presenter is in the window answers: the hook lived on
+    /// Explore's badge alone, and once the app launched on Shots (#1765) it
+    /// presented from a tab nobody saw — `WalletSheetUITests` found no sheet.
+    /// Since #2336 the map wears no badge, so For You is the one that asks.
     ///
     /// After `-switch-tab`, which selects its tab at 2.5 s, it waits for the
     /// tab to be on screen; and it opens one sheet per process, whichever
