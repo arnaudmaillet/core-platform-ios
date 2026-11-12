@@ -130,6 +130,55 @@ struct HeroHeaderViewTests {
         #expect(chevron.minX >= header.debugNameFrame.maxX - 0.5, "the chevron sits on the name")
     }
 
+    /// The name (#2334): title2 bold, on ONE line at the default size,
+    /// shrinking to 0.85 before its "…"; on TWO at the app's largest size,
+    /// which every accessibility size is drawn as (#482).
+    @Test(arguments: textSizes)
+    func theNameIsTitle2BoldOnOneLineUntilTheLargestSize(_ textSize: UIContentSizeCategory) throws {
+        let header = makeHeader(textSize: textSize)
+        let font = try #require(header.debugNameFont)
+        let weight = (font.fontDescriptor.object(forKey: .traits) as? [UIFontDescriptor.TraitKey: Any])?[.weight] as? CGFloat
+        #expect((weight ?? 0) >= UIFont.Weight.bold.rawValue - 0.01, "the name is not bold: \(String(describing: weight))")
+        let large = textSize == .large
+        if large {
+            #expect(abs(font.pointSize - UIFont.defaultPointSize(for: .title2)) < 0.5, "not title2: \(font.pointSize)")
+        } else {
+            #expect(font.pointSize > UIFont.defaultPointSize(for: .title2), "the name did not scale: \(font.pointSize)")
+        }
+        #expect(header.debugNameLineCount == (large ? 1 : 2), "\(textSize.rawValue): \(header.debugNameLineCount) lines")
+        #expect(header.debugNameShrinks == large, "\(textSize.rawValue): shrinks \(header.debugNameShrinks)")
+        #expect(header.debugNameMinimumScaleFactor == 0.85)
+    }
+
+    /// Every accessibility size and the largest standard one keep two lines;
+    /// the usual ones, one.
+    @Test func theNamesLinesFollowTheTextSize() {
+        for size in [UIContentSizeCategory.extraSmall, .large, .extraLarge, .extraExtraLarge] {
+            #expect(HeroHeaderView.nameLineCount(for: size) == 1, "\(size.rawValue)")
+        }
+        for size in [UIContentSizeCategory.extraExtraExtraLarge, .accessibilityMedium, .accessibilityExtraExtraExtraLarge] {
+            #expect(HeroHeaderView.nameLineCount(for: size) == 2, "\(size.rawValue)")
+        }
+    }
+
+    /// ⚠️ THE @HANDLE STAYS ON ITS OWN LINE UNDER THE NAME (#2334), long
+    /// name or short — never after it on the same line, where it would be
+    /// the first thing cut.
+    @Test(arguments: textSizes)
+    func theHandleStaysOnItsOwnLineUnderTheName(_ textSize: UIContentSizeCategory) {
+        for title in ["Lena", "Maximilian Alexander Christopher Montgomery-Wellington"] {
+            let header = makeHeader(textSize: textSize)
+            header.configure(with: HeroHeaderContent(title: title, subtitle: "@lena", counterValues: ["1", "2"]))
+            header.setNeedsLayout()
+            header.layoutIfNeeded()
+            let name = header.debugNameFrame
+            let handle = header.debugHandleFrame
+            #expect(handle.minY >= name.maxY - 0.5, "\(title): the handle is not under the name (\(name) / \(handle))")
+            #expect(abs(handle.minX - name.minX) < 0.5, "\(title): the handle does not start under the name")
+            #expect(handle.height > 0)
+        }
+    }
+
     @Test func aRedactedAvatarWearsOnlyItsOwnBone() async throws {
         let header = makeHeader(avatar: .person)
         header.setRedacted(true)
