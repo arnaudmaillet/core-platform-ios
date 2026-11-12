@@ -165,10 +165,15 @@ struct InboxSelectorInBarTests {
     @Test(arguments: [CGSize(width: 402, height: 874), CGSize(width: 375, height: 667)])
     func theBellAndTheSelectorAreInTheBar(size: CGSize) async throws {
         let (screen, surfaces) = inbox()
-        screen.setLeadingAccessoryItem(BarItems.icon(
+        // The shell's bell, as `NotificationsBell.makeItem` makes it: an
+        // image item in a bubble of its own.
+        let bellItem = BarItems.icon(
             id: BarItems.SharedID.notificationsBell, image: UIImage(systemName: "bell"),
             label: "Notifications", action: {}
-        ))
+        )
+        bellItem.tintColor = .label
+        bellItem.sharesBackground = false
+        screen.setLeadingAccessoryItem(bellItem)
         let navigation = UINavigationController(rootViewController: screen)
         let window = UIWindow(frame: CGRect(origin: .zero, size: size))
         window.rootViewController = navigation
@@ -182,7 +187,7 @@ struct InboxSelectorInBarTests {
         // narrowed from `viewDidAppear` on (`recoverSelectorFromOverflow`).
         let bar = navigation.navigationBar
         let strip = screen.debugSelector
-        for _ in 0..<100 where strip.window == nil || bell(in: bar) == nil {
+        for _ in 0..<100 where strip.window == nil || bellFrame(in: bar, leftOf: strip) == nil {
             try await Task.sleep(for: .milliseconds(50))
             window.layoutIfNeeded()
             bar.layoutIfNeeded()
@@ -194,18 +199,61 @@ struct InboxSelectorInBarTests {
         let stripFrame = strip.convert(strip.bounds, to: bar)
         #expect(stripFrame.width >= 1 && stripFrame.minX >= -0.5 && stripFrame.maxX <= bar.bounds.width + 0.5,
                 "\(label): the selector at \(stripFrame) in a \(bar.bounds.width)pt bar")
-        let bellView = try #require(bell(in: bar), "\(label): the bell is not in the navigation bar")
-        let bellFrame = bellView.convert(bellView.bounds, to: bar)
+        #expect(navigation.topViewController?.navigationItem.leftBarButtonItems?.first === bellItem,
+                "\(label): the bell does not lead the group")
+        let bellFrame = try #require(bellFrame(in: bar, leftOf: strip),
+                                     "\(label): the bell is not in the navigation bar")
         #expect(bellFrame.minX >= -0.5 && bellFrame.maxX <= stripFrame.minX + 0.5,
                 "\(label): the bell at \(bellFrame), the selector at \(stripFrame)")
         #expect(descendant(of: bar, where: { $0.accessibilityLabel == "More" }) == nil,
                 "\(label): an overflow control in the bar")
     }
 
-    /// The bell's view in the bar: whatever UIKit draws the image item with,
-    /// labelled as the item is, in a window.
-    private func bell(in bar: UIView) -> UIView? {
-        descendant(of: bar) { $0.accessibilityLabel == "Notifications" && $0.window != nil && $0.bounds.width > 1 }
+    /// Where the bell is in the bar, in the bar's space.
+    ///
+    /// ⚠️ **NOT A VIEW WHOSE `accessibilityLabel` READS "Notifications".** An
+    /// image item's label lives on the `UIBarButtonItem`; the view UIKit
+    /// draws it with did not carry it (the first version of this lookup
+    /// found nothing at either width while the bell was on screen). So:
+    ///   1. the accessibility tree, as XCUITest reads it — a view, or an
+    ///      element a view vends (`accessibilityElements`), labelled or
+    ///      identified as the bell;
+    ///   2. else the control UIKit made for the item: a `UIControl` in the
+    ///      bar, on screen, wholly left of the selector and outside it — the
+    ///      group's only other platter.
+    private func bellFrame(in bar: UINavigationBar, leftOf strip: UIView) -> CGRect? {
+        let stripFrame = strip.convert(strip.bounds, to: bar)
+        func isBell(_ element: NSObject) -> Bool {
+            element.accessibilityLabel == "Notifications"
+                || (element as? UIAccessibilityIdentification)?.accessibilityIdentifier
+                    == BarItems.SharedID.notificationsBell
+        }
+        func onScreen(_ frame: CGRect) -> Bool { frame.width > 1 && frame.height > 1 }
+        var found: CGRect?
+        func walk(_ view: UIView) {
+            guard found == nil, view.window != nil, !view.isHidden, view !== strip else { return }
+            if isBell(view) {
+                let frame = view.convert(view.bounds, to: bar)
+                if onScreen(frame) { found = frame; return }
+            }
+            for case let element as NSObject in view.accessibilityElements ?? [] where !(element is UIView) {
+                guard isBell(element) else { continue }
+                let frame = bar.convert(element.accessibilityFrame, from: nil)
+                if onScreen(frame) { found = frame; return }
+            }
+            view.subviews.forEach(walk)
+        }
+        walk(bar)
+        if let found { return found }
+        // The control UIKit made for the image item.
+        let control = descendant(of: bar) { view in
+            guard view is UIControl, view.window != nil, !view.isHidden,
+                  view !== strip, !view.isDescendant(of: strip), !strip.isDescendant(of: view)
+            else { return false }
+            let frame = view.convert(view.bounds, to: bar)
+            return frame.width >= 24 && frame.maxX <= stripFrame.minX + 0.5 && frame.minX >= -0.5
+        }
+        return control.map { $0.convert($0.bounds, to: bar) }
     }
 
     private func descendant(of root: UIView, where matches: (UIView) -> Bool) -> UIView? {
