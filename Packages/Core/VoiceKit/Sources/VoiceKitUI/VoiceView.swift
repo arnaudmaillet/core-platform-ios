@@ -7,8 +7,8 @@ import UIKit
 /// Feed so every surface that draws a voice post reaches it.
 ///
 /// - **`.full`:** play / pause, the waveform (tap and drag to seek), the
-///   slot at the trailing end — the timer, or the speed chip while it plays;
-///   its width says its length (#2329).
+///   slot at the trailing end — the timer, or the speed's words while it
+///   plays; its width says its length (#2329).
 /// - **`.compact`:** the same panel, 44 pt tall as well (#2329), with a
 ///   smaller glyph — and the width of its host whatever the length: a
 ///   shelf's card, a history row, the map's bubble fix it.
@@ -58,13 +58,18 @@ import UIKit
 ///   100 levels to however many fit, and drawn with the voice's own
 ///   contrast (`drawnShares`) so a flat-sounding take still has a shape.
 /// - **One slot at the trailing end (#2274):** the total length at rest, the
-///   speed chip while it plays, the time reached when paused mid-way, the
-///   total again at the end. One size for all of them (`slotSize`), so the
+///   speed while it plays, the time reached when paused mid-way, the total
+///   again at the end. One size for all of them (`slotSize`), so the
 ///   waveform is binned once and never moves.
-/// - **The timer reads as the chip's words (#2329):** the chip's title font
-///   with monospaced digits, in the chip's ink; between them the chip's
-///   ground grows out of the timer's text as the digits turn
-///   (`showSlot`).
+/// - **The slot hugs its words (#2364):** as wide as the widest of them —
+///   the voice's timer at its longest and the bare "1.5×" — and what it
+///   shows stands against its trailing edge, so no empty ground sits round
+///   the timer; the spare, when one is shorter, goes toward the waveform.
+/// - **The speed is a bare text button (#2364):** "1×", "1.5×", "2×" in the
+///   timer's font and ink, no capsule, no ground — dimmed under the finger,
+///   with an invisible 44 pt target round the words (`VoiceSpeedButton`).
+///   Between the timer and the speed the words cross-fade in place as the
+///   digits turn (`showSlot`).
 /// - **The timer's format is the voice's (#2294, `timerStyle`):** a post's
 ///   seconds, "30″"; a message's clock, "0:30".
 /// - **Under a finger on the waveform the whole panel swells (#2274),** as
@@ -160,8 +165,8 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
         /// The total length at rest and at the end, the time reached when
         /// paused mid-way.
         case timer
-        /// The speed chip, while it plays — and from the tap, while its
-        /// audio loads: the glyph and the slot change together.
+        /// The speed's words (#2364), while it plays — and from the tap,
+        /// while its audio loads: the glyph and the slot change together.
         case speed
     }
 
@@ -169,8 +174,9 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
     public enum SlotMotion: Equatable, Sendable {
         /// Off screen, a row filled afresh.
         case cut
-        /// The chip's ground grows out of the timer's text (or shrinks back
-        /// into it) while the words turn like a counter's digit.
+        /// The words cross-fade in place against the slot's trailing edge
+        /// while they turn like a counter's digit (#2329, #2364: no ground
+        /// grows any more).
         case morph
         /// Reduce Motion: one dissolves into the other in place.
         case crossFade
@@ -185,8 +191,8 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
         /// The played bars and the play glyph (#2274).
         public var played: UIColor
         public var unplayed: UIColor
-        /// The timer's words and the speed chip's (#2329): one ink, so the
-        /// two read as one thing — the chip's own, the label's, by default.
+        /// The timer's words and the speed's (#2329, #2364): one ink, so the
+        /// two read as one thing — the label's, by default.
         public var timer: UIColor
 
         public init(played: UIColor, unplayed: UIColor, timer: UIColor) {
@@ -196,7 +202,7 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
         }
 
         /// `VoiceView.ink`, spelled out: a static here is not the view's actor's.
-        /// The timer in the speed chip's ink (#2329), no longer a grey.
+        /// The timer and the speed in the label's ink (#2329), not a grey.
         public static var standard: Inks {
             Inks(played: UIColor.label.withAlphaComponent(0.7), unplayed: .tertiaryLabel, timer: .label)
         }
@@ -303,7 +309,10 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
         6
     }
 
-    /// The panel's air after the slot (or the dot), its trailing end.
+    /// The panel's air after the slot (or the dot), its trailing end: 12 pt,
+    /// read against the play glyph's air on the leading side (#2364) — the
+    /// 6 pt padding and the glyph's inset in its 32 pt frame, about 13 pt —
+    /// now that the words stand against the slot's trailing edge.
     public static let panelTrailingPadding: CGFloat = Spacing.md
 
     /// The panel's height at the default text size: the glyph's frame and
@@ -330,9 +339,10 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
     // MARK: - The width says the length (#2329)
 
     /// The panel's narrowest, a voice of `minimumWidthLength` or less: the
-    /// glyph, a dozen bars and the slot at the default text size (about 12
-    /// bars on a post, 10 on a message, whose unplayed dot's place comes out
-    /// of them). Telegram's is 120 pt, round a smaller timer.
+    /// glyph, the bars and the slot at the default text size — about 18 bars
+    /// on a post, 16 on a message, whose unplayed dot's place comes out of
+    /// them, since the slot hugs its words (#2364; a dozen before).
+    /// Telegram's is 120 pt, round a smaller timer.
     public static let minimumPanelWidth: CGFloat = 168
     /// Up to this length the panel stands at its narrowest.
     public static let minimumWidthLength: TimeInterval = 2
@@ -362,18 +372,36 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
     /// The unplayed dot's side.
     public static let dotSide: CGFloat = 6
 
-    /// The widest speed the chip says (#2274): the slot holds it.
+    /// The widest speed the slot says (#2274), as bare words (#2364): the
+    /// slot holds it.
     public static let widestSpeedLabel = "1.5×"
+
+    /// The speed's target round its words, at least, on both axes (#2364):
+    /// the HIG's 44 pt, invisible — it may reach over the waveform's end and
+    /// the panel's trailing air.
+    public static let speedTargetSide: CGFloat = 44
+    /// The speed's words under the finger (#2364): dimmed, as a text
+    /// button's are — no ground appears.
+    public static let speedPressedAlpha: CGFloat = 0.35
+    /// The speed's words changing (1× → 1.5× → 2×): a short cross-fade in
+    /// place.
+    public static let speedChangeDuration: TimeInterval = 0.15
+
+    /// The speed's target round words standing at `words` (#2364): grown
+    /// evenly to at least `speedTargetSide` on each axis, centred on them.
+    public static func speedTarget(around words: CGRect) -> CGRect {
+        let dx = max(0, (speedTargetSide - words.width) / 2)
+        let dy = max(0, (speedTargetSide - words.height) / 2)
+        return words.insetBy(dx: -dx, dy: -dy)
+    }
 
     // MARK: - The slot's morph (#2329)
 
-    /// The timer ⇄ chip morph: one motion, eased in and out, no overshoot.
+    /// The timer ⇄ speed change: one motion, eased in and out, no overshoot.
     public static let slotMorphDuration: TimeInterval = 0.25
-    /// How far the words travel as they turn — up and out, up and in — at
-    /// most: never further than the chip's ground reaches round the timer's
-    /// text, so the ground always covers what its mask reveals.
+    /// How far the words travel as they turn — up and out, up and in.
     public static let slotTurnDistance: CGFloat = 6
-    /// Reduce Motion's cross-fade between the timer and the chip.
+    /// Reduce Motion's cross-fade between the timer and the speed.
     public static let slotCrossFadeDuration: TimeInterval = 0.2
 
     /// The slot's change: cut off screen or for a row filled afresh, the
@@ -383,19 +411,41 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
         return reducesMotion ? .crossFade : .morph
     }
 
-    /// The timer's font (#2329): the speed chip's title font
-    /// (`AppButton.titleFont(for: .row)`, the subheadline on the app's
-    /// scale, scaled with the text size) with monospaced digits, so the
-    /// count never jiggles and the two read at one size.
+    /// The timer's font (#2329), and the speed's (#2364): a row button's
+    /// title font (`AppButton.titleFont(for: .row)`, the subheadline on the
+    /// app's scale, scaled with the text size) with monospaced digits, so
+    /// the count never jiggles and the two read at one size.
     public static var timerFont: UIFont {
-        AppButton.titleFont(for: speedChipSize, monospacedDigits: true)
+        timerFont(compatibleWith: nil)
     }
 
-    /// The speed chip's size: a list row's pill.
-    static let speedChipSize: AppButton.Size = .row
+    /// `timerFont` at `traits`' text size — nil: the app's.
+    public static func timerFont(compatibleWith traits: UITraitCollection?) -> UIFont {
+        UIFont.appMonospacedDigitFont(forTextStyle: .subheadline, compatibleWith: traits)
+    }
 
-    /// What the slot shows for `playback` (#2274): the speed chip while it
-    /// plays (and loads, from the tap), the timer otherwise.
+    /// The slot's one size (#2364): as wide as the widest of its states as
+    /// words in `font` — the timer at its longest, the voice's total `length`
+    /// in its own `style` (a post's "30″", a message's "0:30"), and the bare
+    /// `widestSpeedLabel` — and as tall as a line of them. Nothing round
+    /// the words: no capsule, no inset.
+    public static func slotSize(forLength length: TimeInterval, style: TimerStyle, font: UIFont) -> CGSize {
+        let attributes: [NSAttributedString.Key: Any] = [.font: font]
+        let longest = (timerText(length, style: style) as NSString).size(withAttributes: attributes)
+        let speed = (widestSpeedLabel as NSString).size(withAttributes: attributes)
+        let width = max(longest.width, speed.width)
+        let height = max(longest.height, speed.height, font.lineHeight)
+        return CGSize(width: ceil(width), height: ceil(height))
+    }
+
+    /// `slotSize(forLength:style:font:)` in the timer's font at `traits`'
+    /// text size — nil: the app's.
+    public static func slotSize(forLength length: TimeInterval, style: TimerStyle, traits: UITraitCollection?) -> CGSize {
+        slotSize(forLength: length, style: style, font: timerFont(compatibleWith: traits))
+    }
+
+    /// What the slot shows for `playback` (#2274): the speed while it plays
+    /// (and loads, from the tap), the timer otherwise.
     public static func slotContent(for playback: State.Playback) -> SlotContent {
         switch playback {
         case .playing, .loading: .speed
@@ -597,8 +647,8 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
     /// frame — while the panel's transform scales the rest evenly. Laid by
     /// hand (`layoutGround`), never by a constraint.
     private let panelGround = UIView()
-    /// The panel's line: the glyph's frame's height, or the timer's (or the
-    /// chip's) when larger text makes it taller — centred in the panel.
+    /// The panel's line: the glyph's frame's height, or the slot's words'
+    /// when larger text makes it taller — centred in the panel.
     private let line = UILayoutGuide()
     /// The app's icon button as a bare glyph (#2274: the disc is gone), in
     /// the played bars' ink, with the app's swell under the finger and a
@@ -610,16 +660,15 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
     /// The waveform's box: the line's whole height, between the glyph and
     /// the slot; the bars fill it.
     private let scrubber = UIView()
-    /// The trailing slot (#2274): one size for the timer and the speed chip,
-    /// whatever the state — the waveform ends at its leading edge.
+    /// The trailing slot (#2274): one size for the timer and the speed,
+    /// whatever the state — the waveform ends at its leading edge. It hugs
+    /// its words (#2364).
     private let slot = UILayoutGuide()
     private var slotWidth: NSLayoutConstraint?
     private var slotHeight: NSLayoutConstraint?
     /// What the slot was last sized for: the voice's length, its timer's
     /// format (#2294), the text size.
     private var slotSizedFor: (duration: TimeInterval, style: TimerStyle, category: UIContentSizeCategory)?
-    /// The speed chip's size for the widest speed, per text size.
-    private var widestChip: (category: UIContentSizeCategory, size: CGSize)?
     /// The panel's content ends at the slot (a post) or at the unplayed
     /// dot's place after it (a message), whatever the state.
     private var endsAtSlot: NSLayoutConstraint?
@@ -628,26 +677,19 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
     private var panelEndsView: NSLayoutConstraint?
     public let waveform = WaveformBars()
     private let timerLabel = UILabel()
-    /// The app's pill (the owner's device check, 2026-11-07): its ground,
-    /// its swell under the finger, its morph when the speed changes, a 44 pt
-    /// target. It fills the slot (#2274), inside `chipHolder`.
-    private let speedChip = AppButton(aspect: .pill(.quiet), size: VoiceView.speedChipSize, content: .title("1×"))
-    /// What the slot's morph moves and masks (#2329) — never the chip
-    /// itself, whose transform is its press's: it rises and fades, and its
-    /// mask (`chipMask`) grows from the timer's text to the slot.
-    private let chipHolder = VoiceSlotChipHolder()
-    /// The chip's ground's reach during a morph: a capsule from the timer's
-    /// text bounds to the slot's. On the holder only while a morph needs it
-    /// — at rest the chip's swell is never clipped.
-    private let chipMask = UIView()
+    /// The speed as a bare text button (#2364, the owner 2026-11-12): its
+    /// words in the timer's font and ink, no capsule, no ground, dimmed
+    /// under the finger, a 44 pt target round them. It fills the slot, its
+    /// words against the slot's trailing edge, as the timer's are.
+    private let speedButton = VoiceSpeedButton()
     /// The width rule's constraints (#2329), rebuilt for a new length.
     private var lengthRule: [NSLayoutConstraint] = []
     /// The slot's last change (#2329).
     private var lastSlotMotion: SlotMotion = .cut
     private let dot = UIView()
     private let failedLabel = UILabel()
-    /// VoiceOver's voice while the speed chip shows (#2274): the panel then
-    /// reads as this element, and the chip as its own beside it.
+    /// VoiceOver's voice while the speed shows (#2274): the panel then reads
+    /// as this element, and the speed as its own beside it.
     private lazy var playElement = VoicePlayElement(owner: self)
     public private(set) var state = State()
     private var shownGlyph = ""
@@ -736,17 +778,18 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
         waveform.spreadsLevels = true
         loader.isHidden = true
 
-        // The chip's words (#2329): its title font, monospaced digits,
-        // scaled with the text size; its ink (`applyInks`).
+        // The timer's words (#2329): a row button's title font, monospaced
+        // digits, scaled with the text size; its ink (`applyInks`). Against
+        // the slot's trailing edge (#2364).
         timerLabel.font = Self.timerFont
         timerLabel.adjustsFontForContentSizeCategory = true
-        timerLabel.textAlignment = .center
+        timerLabel.textAlignment = .natural
 
-        chipHolder.isHidden = true
-        chipHolder.alpha = 0
-        chipMask.backgroundColor = .black
-        chipMask.layer.cornerCurve = .continuous
-        speedChip.addAction(UIAction { [weak self] _ in self?.onSpeedTap?() }, for: .primaryActionTriggered)
+        // The speed's words, the same font and ink (#2364).
+        speedButton.font = Self.timerFont
+        speedButton.isHidden = true
+        speedButton.alpha = 0
+        speedButton.onTap = { [weak self] in self?.onSpeedTap?() }
 
         dot.layer.cornerRadius = Self.dotSide / 2
         dot.isHidden = true
@@ -769,7 +812,7 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
             return restingFraction(at: gesture.location(in: self))
         }
 
-        for part in [playButton, loader, scrubber, waveform, timerLabel, chipHolder, speedChip, dot, failedLabel] as [UIView] {
+        for part in [playButton, loader, scrubber, waveform, timerLabel, speedButton, dot, failedLabel] as [UIView] {
             part.translatesAutoresizingMaskIntoConstraints = false
         }
         frameView.addSubview(playButton)
@@ -778,9 +821,9 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
         scrubber.addSubview(waveform)
         frameView.addSubview(timerLabel)
         frameView.addSubview(dot)
-        // Over the timer: its ground grows round the timer's words (#2329).
-        frameView.addSubview(chipHolder)
-        chipHolder.addSubview(speedChip)
+        // Over the timer and the waveform's end: its target reaches past the
+        // slot (#2364).
+        frameView.addSubview(speedButton)
         // Under the panel, outside its ground.
         addSubview(failedLabel)
         // The panel's line: the glyph's frame's height, or the timer's when
@@ -846,18 +889,17 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
             slot.centerYAnchor.constraint(equalTo: line.centerYAnchor),
             slotWidth, slotHeight,
             line.heightAnchor.constraint(greaterThanOrEqualTo: slot.heightAnchor),
-            // The timer centred in it; the chip's pill fills it.
-            timerLabel.centerXAnchor.constraint(equalTo: slot.centerXAnchor),
+            // The timer against its trailing edge (#2364): the spare goes
+            // toward the waveform.
+            timerLabel.trailingAnchor.constraint(equalTo: slot.trailingAnchor),
+            timerLabel.leadingAnchor.constraint(greaterThanOrEqualTo: slot.leadingAnchor),
             timerLabel.centerYAnchor.constraint(equalTo: slot.centerYAnchor),
             line.heightAnchor.constraint(greaterThanOrEqualTo: timerLabel.heightAnchor),
-            chipHolder.leadingAnchor.constraint(equalTo: slot.leadingAnchor),
-            chipHolder.trailingAnchor.constraint(equalTo: slot.trailingAnchor),
-            chipHolder.topAnchor.constraint(equalTo: slot.topAnchor),
-            chipHolder.bottomAnchor.constraint(equalTo: slot.bottomAnchor),
-            speedChip.leadingAnchor.constraint(equalTo: chipHolder.leadingAnchor),
-            speedChip.trailingAnchor.constraint(equalTo: chipHolder.trailingAnchor),
-            speedChip.topAnchor.constraint(equalTo: chipHolder.topAnchor),
-            speedChip.bottomAnchor.constraint(equalTo: chipHolder.bottomAnchor),
+            // The speed fills it, its words against the same edge.
+            speedButton.leadingAnchor.constraint(equalTo: slot.leadingAnchor),
+            speedButton.trailingAnchor.constraint(equalTo: slot.trailingAnchor),
+            speedButton.topAnchor.constraint(equalTo: slot.topAnchor),
+            speedButton.bottomAnchor.constraint(equalTo: slot.bottomAnchor),
             // The dot keeps its own place after the slot.
             dot.leadingAnchor.constraint(equalTo: slot.trailingAnchor, constant: Spacing.xs),
             dot.centerYAnchor.constraint(equalTo: line.centerYAnchor),
@@ -1019,12 +1061,12 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
         // timer turning away from "0:34" changed its words mid-motion. It
         // is written only while it is the slot's — before it comes back.
         if Self.slotContent(for: state.playback) == .timer { showTimerText() }
-        // Only on a change: written every frame of playback, it restyled the
-        // chip under a finger trying to press it.
-        if speedChip.content.title != state.speedLabel {
-            speedChip.setContent(.title(state.speedLabel), animated: animated && previous.speedLabel != state.speedLabel)
+        // Only on a change: written every frame of playback, it would redraw
+        // the words under a finger trying to press them. On screen the new
+        // speed cross-fades in place (Reduce Motion too: a fade is no move).
+        if speedButton.title != state.speedLabel {
+            speedButton.setTitle(state.speedLabel, animated: onScreen && previous.speedLabel != state.speedLabel)
         }
-        speedChip.accessibilityLabel = "Speed \(state.speedLabel)"
         showSlot(Self.slotContent(for: state.playback), animated: onScreen)
 
         // The unplayed dot fades once playback starts.
@@ -1079,11 +1121,13 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
 
     // MARK: - The slot (#2274)
 
-    /// The slot's one size: as wide as the wider of the widest timer this
-    /// voice can show — its total length in its own format (a post's
-    /// seconds, a message's clock, #2294), the digits monospaced — and the
-    /// chip at its widest speed; as tall as that chip. Re-measured for a new
-    /// voice, a new format or a new text size, never for a state.
+    /// The slot's one size (#2364, `slotSize(forLength:style:font:)`): as
+    /// wide as the widest of its words — the widest timer this voice can
+    /// show, its total length in its own format (a post's seconds, a
+    /// message's clock, #2294), the digits monospaced, and the bare
+    /// "1.5×" — at the view's text size; as tall as a line of them.
+    /// Re-measured for a new voice, a new format or a new text size, never
+    /// for a state.
     private func refreshSlotSize() {
         let category = traitCollection.preferredContentSizeCategory
         let style = timerStyle
@@ -1091,13 +1135,15 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
             return
         }
         slotSizedFor = (state.duration, style, category)
-        let chip = widestChipSize(for: category)
-        let font = timerLabel.font ?? Self.timerFont
-        let timer = (Self.timerText(state.duration, style: style) as NSString).size(withAttributes: [.font: font])
-        let width = ceil(max(chip.width, timer.width)), height = ceil(chip.height)
-        guard width != slotWidth?.constant || height != slotHeight?.constant else { return }
-        slotWidth?.constant = width
-        slotHeight?.constant = height
+        // The words' font at the view's own text size — the window's, under
+        // the app's ceiling — set on both, so what is measured is drawn.
+        let font = Self.timerFont(compatibleWith: category == .unspecified ? nil : traitCollection)
+        timerLabel.font = font
+        speedButton.font = font
+        let measured = Self.slotSize(forLength: state.duration, style: style, font: font)
+        guard measured.width != slotWidth?.constant || measured.height != slotHeight?.constant else { return }
+        slotWidth?.constant = measured.width
+        slotHeight?.constant = measured.height
         relayout()
     }
 
@@ -1125,36 +1171,29 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
         timerLabel.text = Self.timerText(shownTime, style: timerStyle)
     }
 
-    private func widestChipSize(for category: UIContentSizeCategory) -> CGSize {
-        if let cached = widestChip, cached.category == category { return cached.size }
-        let measured = speedChip.fittingSize(for: .title(Self.widestSpeedLabel))
-        widestChip = (category, measured)
-        return measured
-    }
-
-    /// The timer or the speed chip (#2274) — one motion between them
-    /// (#2329, `slotMotion`):
+    /// The timer or the speed (#2274) — one motion between them (#2329,
+    /// `slotMotion`), the words against the slot's trailing edge (#2364):
     ///
     /// ```
-    ///  to playing   the chip's ground grows from the timer's text bounds to
-    ///               the slot; the timer's words go up a few points and fade
-    ///               out as "1×" comes up from below and fades in — a
-    ///               counter's digit turning
-    ///  to paused    the reverse: the ground shrinks back into the timer's
-    ///               text, "1×" goes down and out, the time comes down and in
+    ///  to playing   the timer's words go up a few points and fade out as
+    ///               "1×" comes up from below and fades in — a counter's
+    ///               digit turning, in place
+    ///  to paused    the reverse: "1×" goes down and out, the time comes
+    ///               down and in
     /// ```
     ///
     /// One motion, `slotMorphDuration`, eased in and out with no overshoot,
     /// interruptible from where it is. The two overlap throughout — the one
     /// fading out as the other fades in, never an empty slot — and the slot
-    /// keeps its one size, so nothing beside it moves. Under Reduce Motion a
-    /// plain cross-fade; off screen, a cut.
+    /// keeps its one size, so nothing beside it moves. No ground grows any
+    /// more (#2364: the speed has none). Under Reduce Motion a plain
+    /// cross-fade; off screen, a cut.
     ///
     /// ⚠️ NOTHING IS LAID OUT HERE. A spring around `layoutIfNeeded` held
     /// the play button's new glyph back until it settled (filmed, 2026-11-06);
     /// the chip used to re-bin the waveform narrower and push the timer
     /// aside (the owner's recording, 2026-11-10: the bars' end moved 43 pt).
-    /// The morph moves transforms, opacities and a mask's frame only.
+    /// The change moves transforms and opacities only.
     private func showSlot(_ content: SlotContent, animated: Bool) {
         guard content != shownSlot else { return }
         shownSlot = content
@@ -1176,16 +1215,22 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
 
     /// No change in flight on the slot's parts.
     private func stopSlotAnimations() {
-        for layer in [chipHolder.layer, chipMask.layer, timerLabel.layer] { layer.removeAllAnimations() }
+        for layer in [speedButton.layer, timerLabel.layer] { layer.removeAllAnimations() }
     }
 
-    /// The slot at rest on the chip or the timer: whole, unmasked, in place.
+    /// The speed takes touches only while it is the slot's: a tap on a
+    /// fading speed is the waveform's or the panel's.
+    private func setSpeedTakesTouches(_ speed: Bool) {
+        speedButton.isUserInteractionEnabled = speed
+    }
+
+    /// The slot at rest on the speed or the timer: whole, in place.
     private func settleSlot(speed: Bool) {
         stopSlotAnimations()
-        chipHolder.mask = nil
-        chipHolder.transform = .identity
-        chipHolder.alpha = speed ? 1 : 0
-        chipHolder.isHidden = !speed
+        setSpeedTakesTouches(speed)
+        speedButton.transform = .identity
+        speedButton.alpha = speed ? 1 : 0
+        speedButton.isHidden = !speed
         timerLabel.transform = .identity
         timerLabel.alpha = speed ? 0 : 1
     }
@@ -1194,103 +1239,72 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
     private func crossFadeSlot(speed: Bool) {
         let id = slotChangeID
         stopSlotAnimations()
-        chipHolder.mask = nil
-        chipHolder.transform = .identity
+        setSpeedTakesTouches(speed)
+        speedButton.transform = .identity
         timerLabel.transform = .identity
-        if speed { chipHolder.isHidden = false }
+        if speed { speedButton.isHidden = false }
         UIView.animate(
             withDuration: Self.slotCrossFadeDuration, delay: 0,
             options: [.curveEaseInOut, .beginFromCurrentState, .allowUserInteraction]
         ) {
-            self.chipHolder.alpha = speed ? 1 : 0
+            self.speedButton.alpha = speed ? 1 : 0
             self.timerLabel.alpha = speed ? 0 : 1
         } completion: { _ in
             guard id == self.slotChangeID else { return }
-            self.chipHolder.isHidden = !speed
+            self.speedButton.isHidden = !speed
         }
     }
 
-    /// The timer's words in the slot's own space: their text bounds,
-    /// centred, as the timer stands.
-    private func timerTextRect(in bounds: CGRect) -> CGRect {
-        let text = timerLabel.intrinsicContentSize
-        let width = min(bounds.width, max(0, text.width))
-        let height = min(bounds.height, max(0, text.height))
-        return CGRect(x: (bounds.width - width) / 2, y: (bounds.height - height) / 2, width: width, height: height)
-    }
-
-    /// The morph (#2329). The chip's ground is the chip's own, revealed by a
-    /// capsule mask that grows from the timer's text bounds to the slot; the
-    /// holder carries the chip up the turn's distance as it fades in, the
-    /// mask held back by as much so its reach grows in place. The words'
-    /// distance is never more than the ground's reach round the timer's
-    /// text, so the ground covers whatever the mask shows.
+    /// The turn (#2329, #2364): the timer's words and the speed's trade
+    /// places in the slot, each rising and fading — up and out, up and in —
+    /// against its trailing edge. No mask, no ground: the words alone.
     private func morphSlot(speed: Bool) {
-        let bounds = chipHolder.bounds
-        guard bounds.width > 0, bounds.height > 0 else { return settleSlot(speed: speed) }
         let id = slotChangeID
-        let text = timerTextRect(in: bounds)
-        let turn = min(Self.slotTurnDistance, max(0, text.minY))
-        let up = CGAffineTransform(translationX: 0, y: -turn)
-        let down = CGAffineTransform(translationX: 0, y: turn)
-        let textReach = text.offsetBy(dx: 0, dy: -turn)
+        let up = CGAffineTransform(translationX: 0, y: -Self.slotTurnDistance)
+        let down = CGAffineTransform(translationX: 0, y: Self.slotTurnDistance)
+        setSpeedTakesTouches(speed)
         // From rest, each part starts where the other direction leaves it;
         // mid-way, from where it is now (`beginFromCurrentState`).
-        let resting = [chipHolder.layer, chipMask.layer, timerLabel.layer].allSatisfy { ($0.animationKeys() ?? []).isEmpty }
+        let resting = [speedButton.layer, timerLabel.layer].allSatisfy { ($0.animationKeys() ?? []).isEmpty }
         UIView.performWithoutAnimation {
             if resting {
                 if speed {
-                    chipHolder.alpha = 0
-                    chipHolder.transform = down
-                    chipMask.frame = textReach
-                    chipMask.layer.cornerRadius = text.height / 2
+                    speedButton.alpha = 0
+                    speedButton.transform = down
                     timerLabel.transform = .identity
                     timerLabel.alpha = 1
                 } else {
-                    chipHolder.alpha = 1
-                    chipHolder.transform = .identity
-                    chipMask.frame = bounds
-                    chipMask.layer.cornerRadius = bounds.height / 2
+                    speedButton.alpha = 1
+                    speedButton.transform = .identity
                     timerLabel.transform = up
                     timerLabel.alpha = 0
                 }
-            } else if chipHolder.mask == nil {
-                // Overtaking a cross-fade (Reduce Motion just turned off):
-                // the ground as it stands, whole, from there.
-                chipMask.frame = bounds
-                chipMask.layer.cornerRadius = bounds.height / 2
             }
-            chipHolder.isHidden = false
-            chipHolder.mask = chipMask
+            speedButton.isHidden = false
         }
         UIView.animate(
             withDuration: Self.slotMorphDuration, delay: 0,
             options: [.curveEaseInOut, .beginFromCurrentState, .allowUserInteraction]
         ) {
             if speed {
-                self.chipHolder.alpha = 1
-                self.chipHolder.transform = .identity
-                self.chipMask.frame = bounds
-                self.chipMask.layer.cornerRadius = bounds.height / 2
+                self.speedButton.alpha = 1
+                self.speedButton.transform = .identity
                 self.timerLabel.transform = up
                 self.timerLabel.alpha = 0
             } else {
-                self.chipHolder.alpha = 0
-                self.chipHolder.transform = down
-                self.chipMask.frame = textReach
-                self.chipMask.layer.cornerRadius = text.height / 2
+                self.speedButton.alpha = 0
+                self.speedButton.transform = down
                 self.timerLabel.transform = .identity
                 self.timerLabel.alpha = 1
             }
         } completion: { _ in
             guard id == self.slotChangeID else { return }
-            // At rest: the chip whole and unmasked — its swell is never
-            // clipped — or gone, its holder back in place.
-            self.chipHolder.mask = nil
+            // At rest: the timer back in place; the speed gone, back in
+            // place too.
             self.timerLabel.transform = .identity
             if !speed {
-                self.chipHolder.isHidden = true
-                self.chipHolder.transform = .identity
+                self.speedButton.isHidden = true
+                self.speedButton.transform = .identity
             }
         }
     }
@@ -1350,12 +1364,12 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
     }
 
     /// The host's inks on every part (#2241): the bars, the play glyph, the
-    /// timer and the speed chip's words — one ink (#2329) — the panel's
+    /// timer's and the speed's words — one ink (#2329) — the panel's
     /// ground derived from the played ink, and the unplayed dot in the
     /// label's ink — never the brand's colour.
     private func applyInks() {
         timerLabel.textColor = inks.timer
-        speedChip.inkColor = inks.timer
+        speedButton.ink = inks.timer
         waveform.playedInk = inks.played
         waveform.unplayedInk = inks.unplayed
         // The bare glyph in the played bars' ink (#2274).
@@ -1448,13 +1462,13 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
     @objc private func retryTapped() { onRetry?() }
 
     /// Whether a press at `point` (own coordinates) is the bubble's: on the
-    /// play button, the waveform or the speed chip — never the row's long
-    /// press.
+    /// play button, the waveform or the speed's target — never the row's
+    /// long press.
     public func keepsPress(at point: CGPoint) -> Bool {
         guard !isHidden, let hit = hitTest(point, with: nil) else { return false }
         return sequence(first: hit, next: { $0.superview })
             .prefix { $0 !== self }
-            .contains { $0 === playButton || $0 === waveform || $0 === speedChip }
+            .contains { $0 === playButton || $0 === waveform || $0 === speedButton }
     }
 
     /// The play button's hold: every other drag waits for it, so the
@@ -1510,8 +1524,9 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
     // MARK: - Accessibility
 
     /// The panel reads as one element — its label, its time and speed, its
-    /// ±5 s adjustment, play on a double tap — and, while the speed chip
-    /// shows, the chip as its own element beside it (#2274).
+    /// ±5 s adjustment, play on a double tap — and, while the speed shows,
+    /// the speed as its own element beside it (#2274): "Playback speed",
+    /// "1×" (`VoiceSpeedButton`).
     private func updateAccessibility() {
         let label = Self.accessibilityLabel(
             role: role, senderName: senderName, duration: state.duration, unplayed: state.unplayed
@@ -1543,12 +1558,12 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
         playElement.accessibilityCustomActions = actions
     }
 
-    /// One element, or the voice and the chip while the chip shows.
+    /// One element, or the voice and the speed while the speed shows.
     private func refreshAccessibilityElements() {
-        let chipShows = shownSlot == .speed
-        isAccessibilityElement = !chipShows
-        let elements: [Any] = [playElement, speedChip]
-        accessibilityElements = chipShows ? elements : nil
+        let speedShows = shownSlot == .speed
+        isAccessibilityElement = !speedShows
+        let elements: [Any] = [playElement, speedButton]
+        accessibilityElements = speedShows ? elements : nil
         updateAccessibility()
     }
 
@@ -1594,67 +1609,73 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
     public var debugSideHoldEnabled: Bool { sideHold.isEnabled }
     public var debugPlayHoldEnabled: Bool { debugPlayButtonHold?.isEnabled ?? false }
     public var debugTimerText: String? { timerLabel.text }
-    /// The speed chip shows in the slot (#2274).
-    public var debugShowsChip: Bool { shownSlot == .speed && !chipHolder.isHidden }
+    /// The speed shows in the slot (#2274).
+    public var debugShowsSpeed: Bool { shownSlot == .speed && !speedButton.isHidden }
     /// The timer shows in the slot (#2274).
     public var debugShowsTimer: Bool { shownSlot == .timer }
     public var debugSlotContent: SlotContent? { shownSlot }
-    /// The timer's and the chip's opacity now (their model values).
+    /// The timer's and the speed's opacity now (their model values).
     public var debugTimerAlpha: CGFloat { timerLabel.alpha }
-    public var debugChipAlpha: CGFloat { chipHolder.alpha }
+    public var debugSpeedAlpha: CGFloat { speedButton.alpha }
     /// Whether the slot is fading now (an opacity animation on the timer or
-    /// the chip).
+    /// the speed).
     public var debugSlotIsFading: Bool {
-        [timerLabel.layer, chipHolder.layer].contains { $0.animationKeys()?.contains("opacity") == true }
+        [timerLabel.layer, speedButton.layer].contains { $0.animationKeys()?.contains("opacity") == true }
     }
     /// Whether the words are turning now (#2329): a transform animation on
-    /// the timer and on the chip.
+    /// the timer and on the speed.
     public var debugSlotIsTurning: Bool {
-        [timerLabel.layer, chipHolder.layer].allSatisfy { $0.animationKeys()?.contains("transform") == true }
+        [timerLabel.layer, speedButton.layer].allSatisfy { $0.animationKeys()?.contains("transform") == true }
     }
     /// The slot's last change (#2329).
     public var debugSlotMotion: SlotMotion { lastSlotMotion }
-    /// The timer's and the chip's opacity animations' durations now — one
+    /// The timer's and the speed's opacity animations' durations now — one
     /// each while they trade places, the same: they overlap throughout.
     public var debugSlotOpacityDurations: [CFTimeInterval] {
-        [timerLabel.layer, chipHolder.layer].compactMap { $0.animation(forKey: "opacity")?.duration }
+        [timerLabel.layer, speedButton.layer].compactMap { $0.animation(forKey: "opacity")?.duration }
     }
-    /// The chip's mask, in the slot's space, while a morph has one — the
-    /// ground's reach; nil at rest.
-    public var debugChipMaskFrame: CGRect? { chipHolder.mask == nil ? nil : chipMask.frame }
-    /// The chip's mask's corner (its model value).
-    public var debugChipMaskCornerRadius: CGFloat { chipMask.layer.cornerRadius }
-    /// The chip's and the timer's transforms now (their model values).
-    public var debugChipTransform: CGAffineTransform { chipHolder.transform }
+    /// The speed's and the timer's transforms now (their model values).
+    public var debugSpeedTransform: CGAffineTransform { speedButton.transform }
     public var debugTimerTransform: CGAffineTransform { timerLabel.transform }
-    /// The timer's font.
+    /// The timer's font, and the speed's.
     public var debugTimerFont: UIFont? { timerLabel.font }
-    /// The speed chip's words' ink.
-    public var debugChipInk: UIColor? { speedChip.inkColor }
-    public var debugChipTitle: String? { speedChip.content.title }
+    public var debugSpeedFont: UIFont? { speedButton.font }
+    /// The speed's words' ink.
+    public var debugSpeedInk: UIColor? { speedButton.ink }
+    public var debugSpeedTitle: String? { speedButton.title }
+    /// The speed's button (#2364): its accessibility, its taps.
+    public var debugSpeedButton: UIControl { speedButton }
+    /// The speed's words' opacity — dimmed under the finger (#2364).
+    public var debugSpeedWordsAlpha: CGFloat { speedButton.wordsAlpha }
+    /// Whether the speed draws anything but its words (#2364): a fill, a
+    /// border, a shadow, a corner, another view — none.
+    public var debugSpeedHasAGround: Bool { speedButton.hasAGround }
     public var debugShowsDot: Bool { !dot.isHidden }
     public var debugWaveformRising: Bool { waveform.debugRising }
     public var debugPlayEnabled: Bool { playButton.isEnabled }
     public var debugShowsLoader: Bool { !loader.isHidden }
-    public var debugChipFrame: CGRect { speedChip.convert(speedChip.bounds, to: self) }
+    /// The speed's button, in this view: the slot (#2364).
+    public var debugSpeedFrame: CGRect { speedButton.convert(speedButton.bounds, to: self) }
+    /// The speed's words, in this view (#2364).
+    public var debugSpeedWordsFrame: CGRect { speedButton.convert(speedButton.wordsFrame, to: self) }
+    /// The speed's invisible target, in this view (#2364).
+    public var debugSpeedTargetFrame: CGRect { speedButton.convert(speedButton.targetFrame, to: self) }
     public var debugTimerFrame: CGRect { timerLabel.convert(timerLabel.bounds, to: self) }
     /// The slot (#2274), in this view.
     public var debugSlotFrame: CGRect { frameView.convert(slot.layoutFrame, to: self) }
     /// The panel's line, in this view.
     public var debugLineFrame: CGRect { frameView.convert(line.layoutFrame, to: self) }
-    /// The speed chip is the app's pill.
-    public var debugChipIsTheAppsPill: Bool { speedChip.aspect == .pill(.quiet) }
     public var debugWaveformFrame: CGRect { waveform.convert(waveform.bounds, to: self) }
     public var debugScrubberFrame: CGRect { scrubber.convert(scrubber.bounds, to: self) }
     public func debugSetSpeedLabel(_ label: String) {
-        speedChip.setContent(.title(label), animated: false)
+        speedButton.setTitle(label, animated: false)
         layoutIfNeeded()
     }
     /// What a press at `point` (own coordinates) lands on.
     public var debugSideHold: UIGestureRecognizer { sideHold }
     public func debugPressTarget(at point: CGPoint) -> String {
         let hit = hitTest(point, with: nil)
-        if hit === speedChip || hit?.isDescendant(of: speedChip) == true { return "chip" }
+        if hit === speedButton || hit?.isDescendant(of: speedButton) == true { return "speed" }
         if hit === waveform { return "waveform" }
         return "other"
     }
@@ -1694,7 +1715,7 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
     public var debugPartTransforms: [CGAffineTransform] {
         [
             playButton.transform, waveform.transform, scrubber.transform, timerLabel.transform,
-            chipHolder.transform, speedChip.transform, dot.transform,
+            speedButton.transform, dot.transform,
         ]
     }
     public var debugPanelFill: UIColor? { panelGround.backgroundColor }
@@ -1703,7 +1724,7 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
     public var debugTimerInk: UIColor? { timerLabel.textColor }
     /// The seek fraction a finger at `point` (own coordinates) reads (#2274).
     public func debugSeekFraction(at point: CGPoint) -> Double { restingFraction(at: point) }
-    /// VoiceOver's elements while the chip shows; nil while the panel is one.
+    /// VoiceOver's elements while the speed shows; nil while the panel is one.
     public var debugAccessibilityElements: [Any]? { accessibilityElements }
     public var debugPlayElementValue: String? { playElement.accessibilityValue }
     public func debugTapPlay() { onPlayTap?() }
@@ -1711,7 +1732,7 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
     #endif
 }
 
-/// VoiceOver's voice while the speed chip shows beside it (#2274): what the
+/// VoiceOver's voice while the speed shows beside it (#2274): what the
 /// panel reads as one element otherwise — its label, its time and speed, its
 /// ±5 s adjustment, play on a double tap.
 @MainActor
@@ -2074,12 +2095,116 @@ public final class WaveformBars: UIView, UIGestureRecognizerDelegate {
     #endif
 }
 
-/// What the slot's morph moves and masks round the speed chip (#2329). It
-/// hands its touches to the chip, whose 44 pt target reaches past the slot:
-/// a point the chip takes is the holder's.
-final class VoiceSlotChipHolder: UIView {
+/// The voice panel's speed as a bare text button (#2364, the owner
+/// 2026-11-12): "1×", "1.5×", "2×" as words — no capsule, no ground — in the
+/// timer's font and ink, against its trailing edge (the slot's).
+///
+/// - **A target of at least 44 × 44 pt round the words**, invisible
+///   (`VoiceView.speedTarget(around:)`): it may reach over the waveform's
+///   end and the panel's trailing air.
+/// - **Pressed, the words dim** (`VoiceView.speedPressedAlpha`), as a text
+///   button's do; nothing else appears.
+/// - **VoiceOver:** "Playback speed", its value the words.
+final class VoiceSpeedButton: UIControl {
+    /// Told on a tap (and VoiceOver's activation).
+    var onTap: (() -> Void)?
+    private let label = UILabel()
+
+    var font: UIFont {
+        get { label.font }
+        set { label.font = newValue }
+    }
+
+    var ink: UIColor {
+        get { label.textColor }
+        set { label.textColor = newValue }
+    }
+
+    private(set) var title = "1×"
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = nil
+        label.text = title
+        label.adjustsFontForContentSizeCategory = true
+        label.textAlignment = .natural
+        label.isUserInteractionEnabled = false
+        label.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(label)
+        // Against the trailing edge; the spare, if any, before the words.
+        NSLayoutConstraint.activate([
+            label.trailingAnchor.constraint(equalTo: trailingAnchor),
+            label.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor),
+            label.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+        addAction(UIAction { [weak self] _ in self?.onTap?() }, for: .touchUpInside)
+        isAccessibilityElement = true
+        accessibilityTraits = .button
+        accessibilityLabel = "Playback speed"
+        accessibilityValue = title
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// The words — on screen, a short cross-fade in place.
+    func setTitle(_ newTitle: String, animated: Bool) {
+        guard newTitle != title else { return }
+        title = newTitle
+        accessibilityValue = newTitle
+        guard animated else {
+            label.text = newTitle
+            return
+        }
+        UIView.transition(
+            with: label, duration: VoiceView.speedChangeDuration,
+            options: [.transitionCrossDissolve, .allowUserInteraction, .beginFromCurrentState]
+        ) {
+            self.label.text = newTitle
+        }
+    }
+
+    /// The words' frame, in its own space.
+    var wordsFrame: CGRect { label.frame }
+
+    /// Where a finger counts, in its own space: at least 44 × 44 round the
+    /// words, and the whole slot.
+    var targetFrame: CGRect { VoiceView.speedTarget(around: label.frame).union(bounds) }
+
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
-        subviews.contains { !$0.isHidden && $0.point(inside: convert(point, to: $0), with: event) }
+        targetFrame.contains(point)
+    }
+
+    /// Pressed, the words dim — at once under the finger, back in a beat.
+    override var isHighlighted: Bool {
+        didSet {
+            guard isHighlighted != oldValue else { return }
+            let alpha: CGFloat = isHighlighted ? VoiceView.speedPressedAlpha : 1
+            guard !isHighlighted, window != nil else {
+                label.alpha = alpha
+                return
+            }
+            UIView.animate(withDuration: AppearMotion.fadeDuration, delay: 0, options: [.allowUserInteraction, .beginFromCurrentState]) {
+                self.label.alpha = alpha
+            }
+        }
+    }
+
+    override func accessibilityActivate() -> Bool {
+        onTap?()
+        return true
+    }
+
+    /// The words' opacity now (their model value).
+    var wordsAlpha: CGFloat { label.alpha }
+
+    /// Whether it draws anything but its words: a fill, a border, a
+    /// shadow, a corner, another view.
+    var hasAGround: Bool {
+        let fill = backgroundColor.map { $0.cgColor.alpha > 0 } ?? false
+        let drawn = layer.backgroundColor.map { $0.alpha > 0 } ?? false
+        let edge = layer.borderWidth > 0 || layer.shadowOpacity > 0 || layer.cornerRadius > 0
+        return fill || drawn || edge || subviews != [label]
     }
 }
 

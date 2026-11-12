@@ -23,13 +23,18 @@ func rgba(_ color: UIColor?, _ style: UIUserInterfaceStyle) -> [CGFloat] {
 /// the brand's.
 @MainActor
 struct VoicePanelTests {
-    /// A voice `width` wide at its own height, laid out.
+    /// A voice `width` wide at its own height, laid out — at `textSize`,
+    /// or the app's.
     private func laidOut(
         _ size: VoiceView.Size, width: CGFloat, duration: TimeInterval = 2, levels: [UInt8]? = VoiceView.genericLevels,
         leadingInset: CGFloat = 0, cap: CGFloat? = nil, role: VoiceView.Role = .post(author: nil),
-        playback: VoiceView.State.Playback = .rest
+        playback: VoiceView.State.Playback = .rest, textSize: UIContentSizeCategory? = nil
     ) -> VoiceView {
         let view = VoiceView(size: size, leadingInset: leadingInset, maxPanelWidth: cap)
+        if let textSize {
+            view.traitOverrides.preferredContentSizeCategory = textSize
+            view.updateTraitsIfNeeded()
+        }
         view.role = role
         view.configure(VoiceView.State(levels: levels, duration: duration, playback: playback))
         let height = view.systemLayoutSizeFitting(
@@ -360,7 +365,7 @@ struct VoicePanelTests {
 
     // MARK: - One slot (#2274)
 
-    /// What the slot shows: the total at rest, the chip while it plays (and
+    /// What the slot shows: the total at rest, the speed while it plays (and
     /// from the tap, while it loads), the time reached when paused mid-way,
     /// the total again at the end.
     @Test(arguments: [VoiceView.Role.message, .post(author: "Ava")])
@@ -369,23 +374,23 @@ struct VoicePanelTests {
         let view = laidOut(.full, width: 340, duration: 12, role: role)
         // A message's clock, a post's seconds (#2294).
         let (total, reached) = role == .message ? ("0:12", "0:07") : ("12\u{2033}", "7\u{2033}")
-        #expect(view.debugShowsTimer && !view.debugShowsChip && view.debugTimerText == total)
-        #expect(view.debugTimerAlpha == 1 && view.debugChipAlpha == 0)
+        #expect(view.debugShowsTimer && !view.debugShowsSpeed && view.debugTimerText == total)
+        #expect(view.debugTimerAlpha == 1 && view.debugSpeedAlpha == 0)
 
         state.playback = .loading
         view.update(state)
-        #expect(view.debugShowsChip, "the glyph and the slot change together, on the tap")
+        #expect(view.debugShowsSpeed, "the glyph and the slot change together, on the tap")
 
         state.playback = .playing(progress: 0.5)
         state.speedLabel = "1.5×"
         view.update(state)
-        #expect(view.debugShowsChip && !view.debugShowsTimer)
-        #expect(view.debugChipTitle == "1.5×")
-        #expect(view.debugTimerAlpha == 0 && view.debugChipAlpha == 1)
+        #expect(view.debugShowsSpeed && !view.debugShowsTimer)
+        #expect(view.debugSpeedTitle == "1.5×")
+        #expect(view.debugTimerAlpha == 0 && view.debugSpeedAlpha == 1)
 
         state.playback = .paused(progress: 7.0 / 12)
         view.update(state)
-        #expect(view.debugShowsTimer && !view.debugShowsChip)
+        #expect(view.debugShowsTimer && !view.debugShowsSpeed)
         #expect(view.debugTimerText == reached, "paused, the time it resumes from")
 
         state.playback = .rest
@@ -395,8 +400,9 @@ struct VoicePanelTests {
     }
 
     /// One slot, one size, whatever it shows: the waveform's frame and its
-    /// bars never change between states — binned once — and the chip's pill
-    /// fills the slot, the timer centred in it.
+    /// bars never change between states — binned once — and the speed's
+    /// button fills the slot; the timer and the speed's words stand against
+    /// its trailing edge (#2364).
     @Test(arguments: [VoiceView.Size.full, .compact], [VoiceView.Role.message, .post(author: nil)])
     func theSlotAndTheWaveformNeverMove(_ size: VoiceView.Size, role: VoiceView.Role) {
         var state = VoiceView.State(levels: VoiceView.genericLevels, duration: 12, unplayed: role == .message)
@@ -407,7 +413,7 @@ struct VoicePanelTests {
         let bars = view.debugWaveformFrame
         let count = view.waveform.bars.count
         #expect(slot.width > 0 && slot.height > 0)
-        #expect(abs(view.debugTimerFrame.midX - slot.midX) < 0.5, "the timer isn't centred in the slot")
+        #expect(abs(view.debugTimerFrame.maxX - slot.maxX) < 0.5, "the timer isn't against the slot's trailing edge")
         let playbacks: [VoiceView.State.Playback] = [.loading, .playing(progress: 0.3), .paused(progress: 0.6), .rest, .failed]
         for (index, playback) in playbacks.enumerated() {
             state.playback = playback
@@ -417,8 +423,9 @@ struct VoicePanelTests {
             #expect(view.debugSlotFrame == slot, "\(playback): the slot moved")
             #expect(view.debugWaveformFrame == bars, "\(playback): the waveform moved")
             #expect(view.waveform.bars.count == count, "\(playback): the bars were re-binned")
-            if view.debugShowsChip {
-                #expect(view.debugChipFrame == slot, "the chip's pill doesn't fill the slot")
+            if view.debugShowsSpeed {
+                #expect(view.debugSpeedFrame == slot, "the speed doesn't fill the slot")
+                #expect(abs(view.debugSpeedWordsFrame.maxX - slot.maxX) < 0.5, "the speed isn't against the trailing edge")
             }
         }
         // A message's unplayed dot keeps its own place after the slot.
@@ -443,13 +450,14 @@ struct VoicePanelTests {
         view.update(state)
         view.debugSetSpeedLabel(VoiceView.widestSpeedLabel)
         #expect(view.debugSlotFrame == slot)
-        #expect(view.debugChipFrame == slot)
+        #expect(view.debugSpeedFrame == slot)
+        #expect(view.debugSpeedWordsFrame.width <= slot.width + 0.5, "the widest speed overflows the slot")
     }
 
     /// The slot is measured on the voice's own format (#2294) — a post's
     /// seconds, a message's clock — and again when a laid-out panel's role
     /// changes. An hour's length, which no post has, so the timer is wider
-    /// than the chip and decides the slot.
+    /// than the speed and decides the slot.
     @Test func theSlotIsMeasuredOnTheVoicesOwnFormat() {
         let post = laidOut(.full, width: 340, duration: 3_723, role: .post(author: nil))
         let message = laidOut(.full, width: 340, duration: 3_723, role: .message)
@@ -463,10 +471,130 @@ struct VoicePanelTests {
         #expect(abs(message.debugSlotFrame.width - post.debugSlotFrame.width) < 0.5, "the slot kept the clock's width")
     }
 
+    // MARK: - The slot hugs its words (#2364)
+
+    /// The width `text` takes in `font`, as the slot measures it.
+    private func wordsWidth(_ text: String, _ font: UIFont) -> CGFloat {
+        (text as NSString).size(withAttributes: [.font: font]).width
+    }
+
+    /// The slot's width is the widest of its states as words (#2364): the
+    /// voice's timer at its longest — a post's "30″", a message's "0:30" —
+    /// and the bare "1.5×", at the text size; nothing round them. About 30
+    /// pt at the default size (about 50 with #2329's capsule), wider at
+    /// XXXL. A laid-out panel's slot is that width.
+    @Test(arguments: [VoiceView.TimerStyle.seconds, .clock], [UIContentSizeCategory.large, .extraExtraExtraLarge])
+    func theSlotIsTheWidestOfItsWords(_ style: VoiceView.TimerStyle, textSize: UIContentSizeCategory) {
+        let traits = UITraitCollection(preferredContentSizeCategory: textSize)
+        let font = VoiceView.timerFont(compatibleWith: traits)
+        let longest = wordsWidth(VoiceView.timerText(30, style: style), font)
+        let speed = wordsWidth(VoiceView.widestSpeedLabel, font)
+        let slot = VoiceView.slotSize(forLength: 30, style: style, traits: traits)
+        #expect(slot.width == ceil(max(longest, speed)), "\(style) at \(textSize.rawValue): \(slot.width)")
+        #expect(slot.width >= ceil(longest) && slot.width >= ceil(speed))
+        #expect(slot.height >= ceil(font.lineHeight), "the slot is shorter than a line of its words")
+        if textSize == .large {
+            #expect(slot.width >= 20 && slot.width <= 36, "no longer hugs its words: \(slot.width)")
+        } else {
+            let large = VoiceView.slotSize(forLength: 30, style: style, traits: UITraitCollection(preferredContentSizeCategory: .large))
+            #expect(slot.width > large.width, "the slot doesn't follow the text size")
+        }
+        // A short voice's slot still holds the bare "1.5×".
+        let short = VoiceView.slotSize(forLength: 2, style: style, traits: traits)
+        #expect(short.width == ceil(max(wordsWidth(VoiceView.timerText(2, style: style), font), speed)))
+
+        let role: VoiceView.Role = style == .clock ? .message : .post(author: nil)
+        let view = laidOut(.full, width: 390, duration: 30, role: role, textSize: textSize)
+        let drawn = view.debugSlotFrame.width
+        #expect(abs(drawn - slot.width) < 0.5, "\(style) at \(textSize.rawValue): the panel's slot \(drawn) vs \(slot.width)")
+        #expect(view.debugTimerFont?.pointSize == font.pointSize, "the timer isn't at the view's text size")
+    }
+
+    /// The timer and the speed stand against the slot's trailing edge, not
+    /// centred (#2364): the spare, when one is shorter than the other, goes
+    /// toward the waveform.
+    @Test(arguments: [VoiceView.Role.message, .post(author: nil)])
+    func theTimerAndTheSpeedAreTrailingAligned(_ role: VoiceView.Role) {
+        var state = VoiceView.State(levels: VoiceView.genericLevels, duration: 2)
+        let view = laidOut(.full, width: 340, duration: 2, role: role)
+        let slot = view.debugSlotFrame
+        let timer = view.debugTimerFrame
+        #expect(abs(timer.maxX - slot.maxX) < 0.5, "\(timer) in \(slot)")
+        if role != .message {
+            // "2″" is shorter than "1.5×": the spare stands before it.
+            #expect(timer.minX > slot.minX + 1, "the spare isn't toward the waveform: \(timer) in \(slot)")
+        }
+        state.playback = .playing(progress: 0.3)
+        for speed in ["1×", "1.5×", "2×"] {
+            state.speedLabel = speed
+            view.update(state)
+            view.layoutIfNeeded()
+            let words = view.debugSpeedWordsFrame
+            #expect(abs(words.maxX - slot.maxX) < 0.5, "\(speed): \(words) in \(slot)")
+            #expect(words.minX >= slot.minX - 0.5, "\(speed) overflows the slot")
+            #expect(abs(words.midY - slot.midY) < 0.5, "\(speed) isn't level with the slot")
+        }
+        #expect(view.debugSlotFrame == slot, "the slot moved")
+    }
+
+    /// The speed is a bare text button (#2364): no capsule, no ground —
+    /// pressed, its words dim and nothing appears — with an invisible
+    /// target of at least 44 × 44 pt round its words, which reaches past
+    /// the slot into the panel's trailing air.
+    @Test(arguments: [VoiceView.Role.message, .post(author: nil)])
+    func theSpeedIsBareWordsWithA44PointTarget(_ role: VoiceView.Role) {
+        var state = VoiceView.State(levels: VoiceView.genericLevels, duration: 12)
+        let view = laidOut(.full, width: 340, duration: 12, role: role)
+        let slot = view.debugSlotFrame
+        // At rest the timer has the slot: the speed takes no press.
+        #expect(view.debugPressTarget(at: CGPoint(x: slot.midX, y: slot.midY)) != "speed")
+
+        state.playback = .playing(progress: 0.3)
+        view.update(state)
+        view.layoutIfNeeded()
+        #expect(!view.debugSpeedHasAGround, "the speed has a ground")
+        let words = view.debugSpeedWordsFrame
+        let target = view.debugSpeedTargetFrame
+        #expect(target.width >= VoiceView.speedTargetSide - 0.01 && target.height >= VoiceView.speedTargetSide - 0.01, "\(target)")
+        #expect(target.contains(words.insetBy(dx: 0.5, dy: 0.5)) && target.contains(slot.insetBy(dx: 0.5, dy: 0.5)))
+        #expect(abs(target.midY - words.midY) < 0.5, "the target isn't round the words")
+        // A press on the words, above them, below them, and in the trailing
+        // air after them is the speed's.
+        let points = [
+            CGPoint(x: words.midX, y: words.midY),
+            CGPoint(x: words.midX, y: words.midY - 18),
+            CGPoint(x: words.midX, y: words.midY + 18),
+            CGPoint(x: min(target.maxX, view.debugPanelFrame.maxX) - 1, y: words.midY),
+        ]
+        for point in points {
+            #expect(view.debugPressTarget(at: point) == "speed", "\(point) misses the speed (\(target))")
+            #expect(view.keepsPress(at: point), "\(point): the row would take the speed's press")
+        }
+        #expect(view.debugPressTarget(at: CGPoint(x: view.debugWaveformFrame.minX + 2, y: words.midY)) == "waveform")
+
+        // Pressed, the words dim; no ground appears.
+        view.debugSpeedButton.isHighlighted = true
+        #expect(abs(view.debugSpeedWordsAlpha - VoiceView.speedPressedAlpha) < 0.001)
+        #expect(!view.debugSpeedHasAGround, "a ground appeared under the finger")
+        #expect(view.debugSpeedTransform == .identity, "the press moved the words")
+        view.debugSpeedButton.isHighlighted = false
+        #expect(view.debugSpeedWordsAlpha == 1)
+    }
+
+    /// The speed's target: at least 44 pt each way, centred on the words;
+    /// words already larger keep their own size.
+    @Test func theSpeedsTargetIsAtLeast44Points() {
+        let small = VoiceView.speedTarget(around: CGRect(x: 100, y: 10, width: 18, height: 17))
+        #expect(small.width == 44 && small.height == 44)
+        #expect(small.midX == 109 && small.midY == 18.5)
+        let large = VoiceView.speedTarget(around: CGRect(x: 0, y: 0, width: 60, height: 50))
+        #expect(large == CGRect(x: 0, y: 0, width: 60, height: 50))
+    }
+
     /// On screen the change is the morph (#2329): the timer's words go up
-    /// and out as the chip's come up and in, the chip's ground growing from
-    /// the timer's text bounds to the slot — both fading on one curve, so
-    /// the slot is never empty; to paused, the reverse. Under Reduce Motion
+    /// and out as the speed's come up and in, in place against the slot's
+    /// trailing edge — both fading on one curve, so the slot is never empty;
+    /// to paused, the reverse. No ground grows (#2364). Under Reduce Motion
     /// a plain cross-fade; off screen, a cut.
     @Test(arguments: [false, true])
     func theSlotMorphsOrCrossFades(_ reduced: Bool) {
@@ -479,45 +607,37 @@ struct VoicePanelTests {
         window.addSubview(view)
         view.layoutIfNeeded()
         let slot = view.debugSlotFrame
-        let timer = view.debugTimerFrame
 
         state.playback = .playing(progress: 0.2)
         view.update(state)
-        #expect(view.debugShowsChip)
-        #expect(view.debugTimerAlpha == 0 && view.debugChipAlpha == 1)
+        #expect(view.debugShowsSpeed)
+        #expect(view.debugTimerAlpha == 0 && view.debugSpeedAlpha == 1)
         #expect(view.debugSlotMotion == (reduced ? .crossFade : .morph))
         #expect(view.debugSlotIsFading, "the slot cut")
         let durations = view.debugSlotOpacityDurations
         let duration = reduced ? VoiceView.slotCrossFadeDuration : VoiceView.slotMorphDuration
         #expect(durations.count == 2 && durations.allSatisfy { abs($0 - duration) < 0.001 },
-                "the timer and the chip don't trade places together: \(durations)")
+                "the timer and the speed don't trade places together: \(durations)")
+        // No ground, whatever the motion (#2364), and the words in place.
+        #expect(!view.debugSpeedHasAGround)
+        #expect(view.debugSpeedFrame == slot && abs(view.debugSpeedWordsFrame.maxX - slot.maxX) < 0.5)
         if reduced {
-            #expect(!view.debugSlotIsTurning && view.debugChipMaskFrame == nil, "Reduce Motion moved the words")
+            #expect(!view.debugSlotIsTurning && view.debugSpeedTransform == .identity, "Reduce Motion moved the words")
         } else {
             #expect(view.debugSlotIsTurning, "the words don't turn")
             #expect(view.debugTimerTransform.ty < 0, "the timer doesn't go up")
-            #expect(view.debugChipTransform == .identity, "the chip doesn't land in place")
-            // The ground ends at the slot, a capsule.
-            let mask = view.debugChipMaskFrame
-            #expect(mask.map { abs($0.width - slot.width) < 0.5 && abs($0.height - slot.height) < 0.5 } == true,
-                    "\(String(describing: mask)) vs \(slot)")
-            #expect(abs(view.debugChipMaskCornerRadius - slot.height / 2) < 0.5)
+            #expect(view.debugTimerTransform.tx == 0, "the timer moves sideways")
+            #expect(view.debugSpeedTransform == .identity, "the speed doesn't land in place")
         }
 
         state.playback = .paused(progress: 0.5)
         view.update(state)
-        #expect(view.debugShowsTimer && view.debugTimerAlpha == 1 && view.debugChipAlpha == 0)
+        #expect(view.debugShowsTimer && view.debugTimerAlpha == 1 && view.debugSpeedAlpha == 0)
         #expect(view.debugSlotMotion == (reduced ? .crossFade : .morph))
         if !reduced {
             #expect(view.debugTimerTransform == .identity, "the timer doesn't land in place")
-            #expect(view.debugChipTransform.ty > 0, "the chip doesn't go down")
-            // The ground shrinks back into the timer's text — held back by
-            // the chip's travel, so it stands on the words.
-            let mask = view.debugChipMaskFrame
-            #expect(mask.map { $0.height < slot.height && $0.width < slot.width } == true, "\(String(describing: mask))")
-            #expect(mask.map { abs($0.height - timer.height) < 1 } == true, "\(String(describing: mask)) vs \(timer)")
-            #expect(mask.map { abs(($0.minY + view.debugChipTransform.ty) - (timer.minY - slot.minY)) < 1 } == true,
-                    "the ground doesn't shrink onto the words")
+            #expect(view.debugSpeedTransform.ty > 0, "the speed doesn't go down")
+            #expect(view.debugSpeedTransform.tx == 0, "the speed moves sideways")
         }
         view.removeFromSuperview()
 
@@ -526,7 +646,7 @@ struct VoicePanelTests {
         state.playback = .playing(progress: 0.2)
         still.update(state)
         #expect(still.debugSlotMotion == .cut && !still.debugSlotIsFading)
-        #expect(still.debugChipMaskFrame == nil && still.debugChipTransform == .identity)
+        #expect(still.debugSpeedTransform == .identity && still.debugSpeedAlpha == 1)
     }
 
     /// A tap goes rest → loading → playing (#2329, filmed: the morph and the
@@ -550,13 +670,13 @@ struct VoicePanelTests {
         view.update(state)
         #expect(view.debugSlotMotion == .morph && view.debugSlotIsTurning, "the tap didn't start the morph")
         #expect(PlayPauseGlyph.debugCopies(of: view.debugPlayButton) > 0, "the tap didn't start the glyph's swap")
-        let mask = view.debugChipMaskFrame
+        let speed = view.debugSpeedTransform
 
         state.playback = .playing(progress: 0)
         view.update(state)
         #expect(view.debugSlotIsTurning, "playing cut the morph")
         #expect(view.debugSlotOpacityDurations.count == 2, "playing cut the fades")
-        #expect(view.debugChipMaskFrame == mask, "playing moved the chip's ground")
+        #expect(view.debugSpeedTransform == speed, "playing moved the speed's words")
         #expect(PlayPauseGlyph.debugCopies(of: view.debugPlayButton) > 0, "playing cut the glyph's swap")
         #expect(view.debugTimerText == "0:34", "the leaving timer's words changed mid-motion")
         for progress in [0.01, 0.02] {
@@ -572,26 +692,28 @@ struct VoicePanelTests {
         view.removeFromSuperview()
     }
 
-    /// The timer reads as the speed chip's words (#2329): the chip's title
-    /// font — the subheadline on the app's scale, scaled with the text size
-    /// — with monospaced digits, in the chip's ink; no longer caption1 grey.
-    @Test func theTimerReadsAsTheChipsWords() throws {
+    /// The timer and the speed read as one set of words (#2329, #2364): a
+    /// row button's title font — the subheadline on the app's scale, scaled
+    /// with the text size — with monospaced digits, in one ink; no longer
+    /// caption1 grey.
+    @Test func theTimerAndTheSpeedReadAsOne() throws {
         let view = laidOut(.full, width: 340, duration: 12)
         let font = try #require(view.debugTimerFont)
-        let chip = AppButton.titleFont(for: .row)
-        #expect(font.pointSize == chip.pointSize, "\(font.pointSize) vs the chip's \(chip.pointSize)")
-        #expect(font.familyName == chip.familyName)
+        let row = AppButton.titleFont(for: .row)
+        #expect(font.pointSize == row.pointSize, "\(font.pointSize) vs a row button's \(row.pointSize)")
+        #expect(font.familyName == row.familyName)
         #expect(font.pointSize > UIFont.defaultPointSize(for: .caption1), "still the caption's size")
         #expect(font.pointSize == VoiceView.timerFont.pointSize)
+        #expect(view.debugSpeedFont == font, "the speed isn't in the timer's font")
         let widths = ["1", "8"].map { ($0 as NSString).size(withAttributes: [.font: font]).width }
         #expect(abs(widths[0] - widths[1]) < 0.01, "the digits aren't monospaced: \(widths)")
         for style in [UIUserInterfaceStyle.light, .dark] {
             #expect(rgba(view.debugTimerInk, style) == rgba(UIColor.label, style), "the timer is still a grey")
-            #expect(rgba(view.debugChipInk, style) == rgba(view.debugTimerInk, style), "the timer and the chip differ")
+            #expect(rgba(view.debugSpeedInk, style) == rgba(view.debugTimerInk, style), "the timer and the speed differ")
         }
         // A host's ink reaches both.
         view.inks = VoiceView.Inks(played: .white, unplayed: .gray, timer: .white)
-        #expect(rgba(view.debugTimerInk, .light) == [1, 1, 1, 1] && rgba(view.debugChipInk, .light) == [1, 1, 1, 1])
+        #expect(rgba(view.debugTimerInk, .light) == [1, 1, 1, 1] && rgba(view.debugSpeedInk, .light) == [1, 1, 1, 1])
     }
 
     // MARK: - The whole panel swells (#2274)
@@ -710,9 +832,10 @@ struct VoicePanelTests {
         #expect(actions.contains("Play") && !actions.contains { $0.hasPrefix("Speed") })
     }
 
-    /// While it plays, the voice says its time and speed, and the speed chip
-    /// stands as its own element beside it (#2274).
-    @Test func voiceOverReadsTheChipAsItsOwnWhileItShows() {
+    /// While it plays, the voice says its time and speed, and the speed
+    /// stands as its own element beside it (#2274): "Playback speed", its
+    /// words its value — bare words now, read the same (#2364).
+    @Test func voiceOverReadsTheSpeedAsItsOwnWhileItShows() {
         var state = VoiceView.State(levels: VoiceView.genericLevels, duration: 12)
         let view = laidOut(.full, width: 320, duration: 12, role: .post(author: "Ava"))
         state.playback = .playing(progress: 0.5)
@@ -720,6 +843,10 @@ struct VoicePanelTests {
         view.update(state)
         #expect(!view.isAccessibilityElement)
         #expect(view.debugAccessibilityElements?.count == 2)
+        #expect(view.debugAccessibilityElements?.last as? UIControl === view.debugSpeedButton)
+        #expect(view.debugSpeedButton.isAccessibilityElement && view.debugSpeedButton.accessibilityTraits.contains(.button))
+        #expect(view.debugSpeedButton.accessibilityLabel == "Playback speed")
+        #expect(view.debugSpeedButton.accessibilityValue == "1.5×")
         #expect(view.debugPlayElementValue == "6 seconds, speed 1.5×", "a post's time, spoken (#2294)")
         #expect(view.accessibilityCustomActions?.map(\.name).contains("Speed 1.5×") == true)
         state.playback = .paused(progress: 0.5)

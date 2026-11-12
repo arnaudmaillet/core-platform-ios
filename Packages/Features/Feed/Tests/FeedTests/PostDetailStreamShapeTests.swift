@@ -196,9 +196,11 @@ struct PostDetailStreamShapeTests {
 
         let covered: CGFloat = 300
         let screen = window.screen.bounds
+        // Aimed at this test's window (`KeyboardNotificationScope`): the
+        // screens of the suites running alongside never hear it.
         NotificationCenter.default.post(
             name: UIResponder.keyboardWillShowNotification,
-            object: nil,
+            object: window,
             userInfo: [
                 UIResponder.keyboardFrameEndUserInfoKey:
                     NSValue(cgRect: CGRect(x: 0, y: screen.maxY - covered, width: screen.width, height: covered)),
@@ -208,12 +210,46 @@ struct PostDetailStreamShapeTests {
         #expect(controller.bottomAnchorSlack < resting - 100, "the stream stayed down: \(resting) → \(controller.bottomAnchorSlack)")
         #expect(abs(stream.contentInset.top - (120 + controller.bottomAnchorSlack)) < 0.5)
 
-        NotificationCenter.default.post(name: UIResponder.keyboardWillHideNotification, object: nil)
+        NotificationCenter.default.post(name: UIResponder.keyboardWillHideNotification, object: window)
         controller.view.layoutIfNeeded()
         #expect(abs(controller.bottomAnchorSlack - resting) < 1, "the stream did not settle back")
     }
 
     /// The experiment off: the engaged top alone, as before.
+    /// A keyboard aimed at ANOTHER window (a test running alongside) moves
+    /// nothing here: neither the stream nor the composer rises
+    /// (`KeyboardNotificationScope`). A system keyboard, with no window as its
+    /// object, still does.
+    @Test func aKeyboardAimedAtAnotherWindowMovesNothing() async throws {
+        let (controller, stream, window) = try await makeStream(Self.spreadAcrossDays)
+        defer { window.isHidden = true }
+        engage(controller, stream, anchored: true)
+        let resting = controller.bottomAnchorSlack
+        #expect(resting > 100)
+
+        let other = UIWindow(frame: window.frame)
+        let covered: CGFloat = 300
+        let screen = window.screen.bounds
+        let frame = NSValue(cgRect: CGRect(x: 0, y: screen.maxY - covered, width: screen.width, height: covered))
+        NotificationCenter.default.post(
+            name: UIResponder.keyboardWillShowNotification, object: other,
+            userInfo: [UIResponder.keyboardFrameEndUserInfoKey: frame]
+        )
+        controller.view.layoutIfNeeded()
+        #expect(abs(controller.bottomAnchorSlack - resting) < 1, "another window's keyboard moved this stream")
+        NotificationCenter.default.post(name: UIResponder.keyboardWillHideNotification, object: other)
+
+        // The same keyboard aimed at this window does move it: the scope
+        // filters, it doesn't deafen.
+        defer { NotificationCenter.default.post(name: UIResponder.keyboardWillHideNotification, object: window) }
+        NotificationCenter.default.post(
+            name: UIResponder.keyboardWillShowNotification, object: window,
+            userInfo: [UIResponder.keyboardFrameEndUserInfoKey: frame]
+        )
+        controller.view.layoutIfNeeded()
+        #expect(controller.bottomAnchorSlack < resting - 100, "this window's keyboard did not move it")
+    }
+
     @Test func withoutTheExperimentTheStreamHangsFromTheEngagedTop() async throws {
         let (controller, stream, window) = try await makeStream(Self.spreadAcrossDays)
         defer { window.isHidden = true }

@@ -187,6 +187,27 @@ struct VoiceComponentTests {
         #expect(page.state.playback == .paused(progress: 0.4))
     }
 
+    /// A tap on the speed's words cycles the speed (#2364: a bare text
+    /// button now) — 1×, 1.5×, 2×, round — and every view on the player
+    /// shows the new words; VoiceOver's activation does the same.
+    @Test func aTapOnTheSpeedCyclesIt() {
+        let engines = Engines()
+        let hub = hub(engines)
+        let card = VoiceView(size: .full)
+        hub.bind(card, id: "post-1", url: url, duration: 10, levels: nil)
+        card.onPlayTap?()
+        #expect(hub.player.speed == .normal && card.state.speedLabel == "1×")
+        for (speed, label) in [(VoicePlaybackSpeed.fast, "1.5×"), (.faster, "2×"), (.normal, "1×")] {
+            card.debugSpeedButton.sendActions(for: .touchUpInside)
+            #expect(hub.player.speed == speed, "a tap didn't cycle the speed to \(label)")
+            #expect(card.state.speedLabel == label)
+            #expect(card.debugSpeedTitle == label, "the words don't follow the speed")
+            #expect(card.debugSpeedButton.accessibilityValue == label)
+        }
+        #expect(card.debugSpeedButton.accessibilityActivate())
+        #expect(hub.player.speed == .fast, "VoiceOver's activation didn't cycle the speed")
+    }
+
     /// Stopped (its card left the screen), a voice keeps its place.
     @Test func aStoppedVoiceKeepsItsPlace() {
         let engines = Engines()
