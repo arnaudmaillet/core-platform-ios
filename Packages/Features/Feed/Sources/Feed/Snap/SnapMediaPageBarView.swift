@@ -233,28 +233,31 @@ final class SnapMediaPageBarView: UIView {
     /// one, stops being able to say how big the gallery is — and on a clip the
     /// run is a bar and says neither. Two characters and a slash say both, for
     /// the width of a word.
+    ///
+    /// ⚠️ THE LABEL ALONE, NO PLATE (#2326, the owner 2026-11-11): its 0.45
+    /// black plate, ~21 pt tall on a 2 pt line, touched the column above and
+    /// crowded the bar's glass below. The digits keep their legibility over
+    /// a bright photograph the caption's way — its soft text shadow
+    /// (`SnapChromeView.captionTextShadow`), drawn with the glyphs, over the
+    /// bottom scrim that already covers this zone (#2175).
     private let counter: UILabel = {
         let label = UILabel()
-        // Fixed size (#482): part of the page bar's pill over the media.
-        label.font = .monospacedDigitSystemFont(ofSize: 11, weight: .semibold)
-        label.textColor = .white
         label.textAlignment = .center
         label.isUserInteractionEnabled = false
+        label.isHidden = true
         return label
     }()
 
-    /// The counter's own plate, so it survives a bright photograph the way the
-    /// scrub card's does.
-    private let counterPlate: UIView = {
-        let view = UIView()
-        view.backgroundColor = UIColor.black.withAlphaComponent(0.45)
-        view.layer.cornerCurve = .continuous
-        view.isUserInteractionEnabled = false
-        return view
-    }()
-
-    /// What the counter's plate adds around its text.
-    static let counterPadding = CGSize(width: 12, height: 4)
+    /// The counter's face: fixed size (#482), part of the page strip over the
+    /// media — 11 pt semibold monospaced digits, white, the caption's shadow.
+    static let counterFont = UIFont.monospacedDigitSystemFont(ofSize: 11, weight: .semibold)
+    private static func counterText(_ text: String) -> NSAttributedString {
+        NSAttributedString(string: text, attributes: [
+            .font: counterFont,
+            .foregroundColor: UIColor.white,
+            .shadow: SnapChromeView.captionTextShadow,
+        ])
+    }
 
     /// The gap between the run of segments and the counter — wider than the
     /// gap between two segments, because it separates two DIFFERENT things
@@ -309,8 +312,7 @@ final class SnapMediaPageBarView: UIView {
         alpha = Self.restingOpacity
         scrubGesture.addTarget(self, action: #selector(handleScrubGesture))
         addGestureRecognizer(scrubGesture)
-        addSubview(counterPlate)
-        counterPlate.addSubview(counter)
+        addSubview(counter)
     }
 
     @available(*, unavailable)
@@ -364,7 +366,7 @@ final class SnapMediaPageBarView: UIView {
         }
         position = CGFloat(min(max(current, 0), count - 1))
         // A lone clip has nothing to count — "1/1" is a fact nobody asked for.
-        counterPlate.isHidden = count < 2
+        counter.isHidden = count < 2
         updateCounter()
         setNeedsLayout()
         layoutIfNeeded()
@@ -376,7 +378,9 @@ final class SnapMediaPageBarView: UIView {
     private func updateCounter() {
         guard pageCount >= 2 else { return }
         let page = min(max(Int(position.rounded()), 0), pageCount - 1)
-        counter.text = "\(page + 1)/\(pageCount)"
+        let text = "\(page + 1)/\(pageCount)"
+        guard counter.attributedText?.string != text else { return }
+        counter.attributedText = Self.counterText(text)
         counter.sizeToFit()
         // ⚠️ AND IT DOES NOT ASK FOR A LAYOUT. This runs from inside
         // `layoutSegments`, which runs from `layoutSubviews` — dirtying the
@@ -941,23 +945,21 @@ final class SnapMediaPageBarView: UIView {
         max(bounds.width - counterFootprint, 1)
     }
 
+    /// The counter's corner: the label's width and `counterInset` before
+    /// it (#2326: the plate's padding went with the plate).
     private var counterFootprint: CGFloat {
-        counterPlate.isHidden ? 0 : counterPlate.bounds.width + Self.counterInset
+        counter.isHidden ? 0 : counter.bounds.width + Self.counterInset
     }
 
     /// The counter sits at the trailing end, vertically centred on the run —
     /// taller than the strip, which is why the strip's touch area was already
-    /// grown to a thumb's size.
+    /// grown to a thumb's size. Its digits are centred on the line too: the
+    /// label's line box keeps as much over the digits as under them (an
+    /// ascender less a cap height ≈ the descender).
     private func layoutCounter() {
-        guard !counterPlate.isHidden else { return }
-        let size = CGSize(
-            width: counter.bounds.width + Self.counterPadding.width * 2,
-            height: counter.bounds.height + Self.counterPadding.height * 2
-        )
-        counterPlate.bounds = CGRect(origin: .zero, size: size)
-        counterPlate.center = CGPoint(x: bounds.width - size.width / 2, y: bounds.height / 2)
-        counterPlate.layer.cornerRadius = size.height / 2
-        counter.center = CGPoint(x: size.width / 2, y: size.height / 2)
+        guard !counter.isHidden else { return }
+        let size = counter.bounds.size
+        counter.center = CGPoint(x: bounds.width - size.width / 2, y: bounds.height / 2)
     }
 
     /// How many segments the strip draws at once.
@@ -1356,14 +1358,16 @@ final class SnapMediaPageBarView: UIView {
     }
 
     /// What the counter reads, and how much room it takes from the run.
-    var debugCounterText: String? { counterPlate.isHidden ? nil : counter.text }
+    var debugCounterText: String? { counter.isHidden ? nil : counter.attributedText?.string }
     var debugCounterFrame: CGRect? {
-        counterPlate.isHidden ? nil : CGRect(
-            x: counterPlate.center.x - counterPlate.bounds.width / 2,
-            y: counterPlate.center.y - counterPlate.bounds.height / 2,
-            width: counterPlate.bounds.width, height: counterPlate.bounds.height
+        counter.isHidden ? nil : CGRect(
+            x: counter.center.x - counter.bounds.width / 2,
+            y: counter.center.y - counter.bounds.height / 2,
+            width: counter.bounds.width, height: counter.bounds.height
         )
     }
+    /// The counter's label itself (#2326: no plate, the caption's shadow).
+    var debugCounterLabel: UILabel { counter }
 
     /// How lit the strip is as a whole — the wake, which is a property of the
     /// container and not of any segment.

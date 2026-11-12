@@ -942,6 +942,36 @@ struct SnapMediaPageBarTests {
         #expect(abs(count.minX - last.maxX - SnapMediaPageBarView.counterInset) < 0.5)
     }
 
+    /// ⚠️ THE LABEL ALONE (#2326, the owner 2026-11-11): no plate behind the
+    /// digits — its 0.45 black touched the column above — only the caption's
+    /// soft text shadow, and the run still gives the counter its footprint:
+    /// the label's width and `counterInset`, at the trailing end, centred on
+    /// the line.
+    @Test func theCountHasNoPlateAndKeepsItsFootprint() throws {
+        let width: CGFloat = 370
+        let view = bar(pages: 3, current: 1, width: width)
+        let label = view.debugCounterLabel
+        #expect(label.superview === view, "the counter stands on a plate")
+        #expect(label.backgroundColor == nil || label.backgroundColor == .clear)
+        // 11 pt semibold monospaced digits, white, the caption's shadow.
+        let text = try #require(label.attributedText)
+        let attributes = text.attributes(at: 0, effectiveRange: nil)
+        let font = try #require(attributes[.font] as? UIFont)
+        #expect(font.pointSize == 11)
+        #expect(attributes[.foregroundColor] as? UIColor == .white)
+        let shadow = try #require(attributes[.shadow] as? NSShadow)
+        let caption = SnapChromeView.captionTextShadow
+        #expect(shadow.shadowBlurRadius == caption.shadowBlurRadius && shadow.shadowOffset == caption.shadowOffset)
+        #expect((shadow.shadowColor as? UIColor) == (caption.shadowColor as? UIColor))
+        // The footprint: the label's width and the inset — no padding left.
+        let count = try #require(view.debugCounterFrame)
+        #expect(abs(count.width - label.intrinsicContentSize.width) < 0.5, "the counter kept a plate's padding")
+        #expect(abs(count.maxX - width) < 0.5)
+        #expect(abs(count.midY - SnapMediaPageBarView.thickness / 2) < 0.5, "the digits left the line")
+        let last = try #require(view.debugSegmentFrame(2))
+        #expect(abs(count.minX - last.maxX - SnapMediaPageBarView.counterInset) < 0.5)
+    }
+
     // MARK: - Consecutive clips, and the rest of the strip
 
     /// ⚠️ TWO CLIPS IN A ROW STAY A BAR ALL THE WAY ACROSS.
@@ -1325,10 +1355,76 @@ struct SnapMediaPageBarTests {
             let photo = chrome(pages: 1, overTabBar: overTabBar)
             #expect(carousel.debugCaptionFrame == photo.debugCaptionFrame, "over the tab bar: \(overTabBar)")
             #expect(carousel.debugSoundStationFrame == photo.debugSoundStationFrame, "over the tab bar: \(overTabBar)")
-            // The column stays on the composer's line (the owner, option c):
-            // the caption stands the lift above the cover's bottom.
-            let lift = SnapChromeView.coverLineLift(overTabBar: overTabBar)
-            #expect(abs(photo.debugSoundStationFrame.maxY - photo.debugCaptionFrame.maxY - lift) < 0.5)
+            // The column's bottom on the caption's letters' line (#2326).
+            #expect(abs(photo.debugSoundStationFrame.maxY - lettersBottom(photo)) < 0.5)
+        }
+    }
+
+    /// ⚠️ THE COLUMN'S BOTTOM ON THE CAPTION'S LINE, ON BOTH BARS (#2326, the
+    /// owner 2026-11-11, reversing #2301's option c, where it stayed on the
+    /// composer's line and looked glued to the strip): the sound cover on
+    /// Shots, the share bubble on a pushed post, `captionAboveStrip` (16 pt)
+    /// over the strip's top, where the caption's letters end. The whole
+    /// column rises by one lift — the like pill keeps its height and its gap
+    /// over the cover.
+    @Test func theColumnStandsOnTheCaptionsLineOnBothBars() {
+        for overTabBar in [false, true] {
+            let view = chrome(pages: 3, overTabBar: overTabBar)
+            let strip = view.debugPageBarFrame
+            let column = view.debugSoundStationFrame
+            #expect(abs(strip.minY - column.maxY - SnapActionColumn.captionAboveStrip) < 0.5,
+                    "over the tab bar: \(overTabBar) — the column's bottom \(strip.minY - column.maxY) pt over the strip")
+            #expect(abs(column.maxY - lettersBottom(view)) < 0.5, "over the tab bar: \(overTabBar)")
+            // The composer's line, less the column's lift.
+            let breath = overTabBar ? SnapActionColumn.shotsBottomBreath : SnapActionColumn.bottomBreath
+            let composerLine = Self.barLine - breath - SnapActionColumn.inputRestingGap
+            let lift = SnapChromeView.columnLineLift(overTabBar: overTabBar)
+            #expect(abs(column.maxY - (composerLine - lift)) < 0.5, "over the tab bar: \(overTabBar)")
+            #expect(lift > SnapChromeView.coverLineLift(overTabBar: overTabBar), "the column rose less than the caption")
+            // The like pill rises with it: same height, same gap over the cover.
+            let like = view.debugFrame(of: view.debugBoostButton)
+            #expect(abs(like.height - SnapActionColumn.likePillHeight) < 0.5, "over the tab bar: \(overTabBar)")
+            #expect(abs(column.minY - like.maxY - SnapActionColumn.gap) < 0.5, "over the tab bar: \(overTabBar)")
+        }
+    }
+
+    /// ⚠️ A TEXT PAGE KEEPS #2252'S LINE (#2326, as #2301): no caption to
+    /// stand on, so its column stays on the composer's line.
+    @Test func aTextPagesColumnKeepsTheComposersLine() {
+        for overTabBar in [false, true] {
+            let view = SnapChromeView(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+            view.setFixedInsets(UIEdgeInsets(top: 103, left: 0, bottom: 83, right: 0))
+            view.sitsOverTabBar = overTabBar
+            view.configure(with: FeedItemDisplayModel(
+                id: PostID("post-text"), authorID: ProfileID("a"), authorName: "Ava",
+                metaText: "@ava · 3m", avatarURL: nil, caption: "Words only.",
+                mediaURL: nil, mediaKind: .image, thumbnailURL: nil, audioText: nil
+            ))
+            view.layoutIfNeeded()
+            let breath = overTabBar ? SnapActionColumn.shotsBottomBreath : SnapActionColumn.bottomBreath
+            let composerLine = Self.barLine - breath - SnapActionColumn.inputRestingGap
+            #expect(abs(view.debugSoundStationFrame.maxY - composerLine) < 0.5, "over the tab bar: \(overTabBar)")
+            #expect(view.debugColumnLineLift == 0)
+        }
+    }
+
+    /// ⚠️ THE COUNTER BREATHES (#2326): with the column on the caption's line
+    /// and no plate, the digits stand about 13 pt under the column's bottom
+    /// and about 7 pt over the bar's glass, on both bars — everything here is
+    /// stated from the glass, so the two screens agree.
+    @Test func theCountersDigitsClearTheColumnAndTheGlass() throws {
+        for overTabBar in [false, true] {
+            let view = chrome(pages: 3, overTabBar: overTabBar)
+            let strip = view.debugPageBarFrame
+            let count = try #require(view.debugPageBar.debugCounterFrame)
+            let mid = strip.minY + count.midY
+            let half = SnapMediaPageBarView.counterFont.capHeight / 2
+            let above = (mid - half) - view.debugSoundStationFrame.maxY
+            let below = glassTop(overTabBar: overTabBar) - (mid + half)
+            #expect(above > 12 && above < 14, "over the tab bar: \(overTabBar) — \(above) pt to the column")
+            #expect(below > 6 && below < 8, "over the tab bar: \(overTabBar) — \(below) pt to the glass")
+            // Under the column: the strip's trailing end is the column's edge.
+            #expect(abs(strip.minX + count.maxX - view.debugSoundStationFrame.maxX) < 0.5)
         }
     }
 
