@@ -9,7 +9,9 @@ import Testing
 /// - A package depends on its own layer or a lower one.
 /// - A feature never depends on another feature, not even from its tests: it
 ///   reaches it through the other's interface.
-/// - `Tools` (this package) sits outside the layers and depends on nothing.
+/// - `Tools` (this package, the test support) sits outside the layers: a
+///   tool depends on nothing, and any package (its tests, in practice) may
+///   depend on a tool.
 ///
 /// The app (`App/`) is the composition root and may see everything.
 ///
@@ -58,6 +60,7 @@ struct LayeringGuardTests {
         let fromLayer = String(from.split(separator: "/")[0])
         let toLayer = String(to.split(separator: "/")[0])
         if fromLayer == "Tools" { return "a tool depends on nothing" }
+        if toLayer == "Tools" { return nil }
         guard let source = layers.firstIndex(of: fromLayer), let target = layers.firstIndex(of: toLayer) else {
             return "\(toLayer) is not a layer"
         }
@@ -96,5 +99,6 @@ struct LayeringGuardTests {
         #expect(Self.violation(from: "Core/HeroPage", to: "FeatureInterfaces/FeedInterface") != nil)
         #expect(Self.violation(from: "Kit/CoreModels", to: "Core/DesignSystem") != nil)
         #expect(Self.violation(from: "Tools/RepoGuards", to: "Kit/CoreModels") != nil)
+        #expect(Self.violation(from: "Features/Chat", to: "Tools/TestSupport") == nil)
     }
 }
