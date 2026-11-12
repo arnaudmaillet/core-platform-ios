@@ -214,10 +214,11 @@ struct DiscoverListPageTests {
         #expect(asked == 1)
     }
 
-    /// "View all ›" sits right-aligned and close under its chunk (2026-09-29):
-    /// the footer flush with the chunk's foot and as wide as the chunk, the
-    /// chevron ending on the chunk's right edge, the title just under the
-    /// tiles — and the control still the footer's full 44pt tall.
+    /// "View all ›" sits right-aligned under its chunk (2026-09-29; the gaps
+    /// #2342): the footer flush with the chunk's foot and as wide as the
+    /// chunk, the chevron ending on the chunk's right edge, the words' top
+    /// 12pt under the tiles and their foot 16pt over the next post's line —
+    /// and the control at least 44pt tall.
     @Test func viewAllSitsRightAlignedJustUnderItsChunk() throws {
         let page = page(corpus(60))
         let view = collectionView(of: page)
@@ -242,8 +243,62 @@ struct DiscoverListPageTests {
         #expect(control.maxX == footer.bounds.maxX, "the chevron ends on the chunk's right edge")
         #expect(control.minX > footer.bounds.midX, "right-aligned, not centred: \(control)")
         #expect(control.height >= 44, "the hit target stays a control's")
-        let title = try #require(footer.debugTitleFrame)
-        #expect(title.minY <= DiscoverViewAllFooterView.titleTopInset + 2, "the title sits at the top: \(title)")
+        let lines = try #require(footer.debugTitleLines)
+        #expect(abs(lines.capTop - 12) < 0.5, "the words' top 12pt under the tiles: \(lines.capTop)")
+        // The next post's row draws its line half the rows' gap over its head.
+        let next = try #require(view.layoutAttributesForItem(at: IndexPath(item: 0, section: section + 1))?.frame)
+        let line = next.minY - PostGridListRowCell.separatorOffset - footer.frame.minY
+        #expect(abs(line - lines.baseline - 16) < 0.5,
+                "the words' foot 16pt over the line: \(lines.baseline) → \(line)")
+    }
+
+    // MARK: - A media row first in the list (#2342)
+
+    /// Vertical photos first, so the list opens on a block of PAIRS — the
+    /// profile's Posts as the owner filmed it.
+    private func pairsFirstCorpus() -> [GalleryPost] {
+        let verticals = (0..<4).map { index in
+            GalleryPost(
+                id: PostID("v\(index)"), kind: .photo, isRepost: false,
+                thumbnailURL: URL(string: "https://example.com/v\(index).jpg"),
+                aspectRatio: 9.0 / 16.0, caption: "vertical \(index)", publishedAtMS: Int64(20_000 - index),
+                authorID: ProfileID("v\(index)"), authorName: "Author \(index)", authorHandle: "author\(index)"
+            )
+        }
+        return verticals + corpus(30)
+    }
+
+    /// ⚠️ A media row first in the list stands 16pt under the line over it
+    /// (#2342): 12pt under the content's top, where the hero header's line
+    /// stands 4pt over (the profile, a place page) — and the same 12pt under
+    /// a lead (For You's rows, a shelf and its list's title), where a first
+    /// row's words would stand. It was flush (4pt from the line).
+    @Test func aMediaRowFirstStandsSixteenUnderTheLine() throws {
+        let page = pairedPage(pairsFirstCorpus())
+        let view = collectionView(of: page)
+        view.layoutIfNeeded()
+        #expect(page.segments.first?.isPairs == true, "the list opens on pairs: \(page.segments.prefix(2))")
+        let first = try #require(view.layoutAttributesForItem(at: IndexPath(item: 0, section: 0))?.frame)
+        #expect(abs(first.minY - DiscoverListLayout.leadingMediaInset) < 0.5, "pairs at \(first.minY)")
+        #expect(abs(first.minY + PostGridListRowCell.separatorOffset - 16) < 0.5, "16pt under the header's line")
+
+        let leadHeight: CGFloat = 120
+        let lead = UIView()
+        page.setLead(lead, height: leadHeight)
+        view.layoutIfNeeded()
+        let underLead = try #require(view.layoutAttributesForItem(at: IndexPath(item: 0, section: 0))?.frame)
+        #expect(abs(underLead.minY - leadHeight - DiscoverListLayout.leadingMediaInset) < 0.5,
+                "under the lead: \(underLead.minY)")
+    }
+
+    /// A list that opens on a run keeps it flush: its rows pad themselves.
+    @Test func aRunFirstTakesNoInset() throws {
+        let page = page(corpus(60))
+        let view = collectionView(of: page)
+        view.layoutIfNeeded()
+        #expect(page.segments.first?.posts.count == MosaicChunkPlanner.firstGap)
+        let first = try #require(view.layoutAttributesForItem(at: IndexPath(item: 0, section: 0))?.frame)
+        #expect(abs(first.minY) < 0.5, "\(first)")
     }
 
     // MARK: - The hero's questions, per post

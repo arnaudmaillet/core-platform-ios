@@ -29,22 +29,45 @@ import UIKit
 public enum DiscoverListLayout {
     /// The element kind of a chunk's "View all" footer.
     public static let viewAllElementKind = "DiscoverListLayout.viewAll"
-    /// The footer's height — a control's 44pt, which is its hit target.
+    /// The footer's height at `displayScale` (#2342): what its two gaps and
+    /// the next post's line need — `DiscoverViewAllFooterView.preferredHeight`.
     ///
-    /// It starts FLUSH WITH THE CHUNK'S FOOT (no inset between them) and its
-    /// control draws its title at its top (`DiscoverViewAllFooterView`), so
-    /// the words sit just under the tiles they belong to and the rest of the
-    /// 44pt is the air before the next row — no separate gap below.
-    public static let viewAllHeight: CGFloat = 44
+    /// It starts FLUSH WITH THE CHUNK'S FOOT (no inset between them): the
+    /// words stand `titleTopInset` (12pt) under the tiles and the next
+    /// post's line `gapBelowTitle` (16pt) under the words — the line a row
+    /// draws half the rows' gap over its head, inside this footer. Shorter
+    /// than 44pt at the default text size; the control's target still is
+    /// 44pt, reaching up over the chunk's foot.
+    public static func viewAllHeight(displayScale: CGFloat) -> CGFloat {
+        DiscoverViewAllFooterView.preferredHeight(displayScale: displayScale)
+    }
     /// The feed mosaic's gutter, so a chunk reads as a window onto the same
     /// wall — see `ChaoticSliceLayout.harmonisedGutter`.
     public static let gutter: CGFloat = ChaoticSliceLayout.harmonisedGutter
-    /// Air between the last row of a run and the chunk under it: more than
-    /// two rows keep between them (`PostGridListLayout.rowSpacing`), so the
-    /// chunk reads as a shelf of its own rather than as one more row. Set
-    /// when the rows were cards 10pt apart; the value stays (#2290, #2289
-    /// may revisit it).
-    public static let gapAboveChunk: CGFloat = 20
+    /// The flat lists' air on each side of a line (#2289, #2342): 16pt from
+    /// a line to the tiles under it, and from the tiles' foot to the line
+    /// under them.
+    public static let gapAtLine: CGFloat = 16
+    /// Air between the last row of a run and the chunk (or the pairs) under
+    /// it, and under a chunk without "View all" or a block of pairs: the
+    /// line a row draws stands half the rows' gap
+    /// (`PostGridListRowCell.separatorOffset`) outside it, so the tiles keep
+    /// `gapAtLine` from that line — 20pt, the value it had when the rows
+    /// were cards 10pt apart.
+    public static let gapAboveChunk: CGFloat = gapAtLine + PostGridListLayout.rowSpacing / 2
+    /// The top inset of the list's FIRST stretch when it is tiles or paired
+    /// cards (#2342): what keeps them `gapAtLine` under the line a hero
+    /// page's header draws half the rows' gap over its foot
+    /// (`HeroHeaderView.drawsFootHairline`) — 4pt before, on the profile.
+    ///
+    /// Only the first: any other media stretch follows a run of rows, whose
+    /// trailing `gapAboveChunk` already keeps it there, or another media
+    /// stretch, whose spacing stays. Under a lead (For You's rows, a shelf
+    /// and its list's title) or at a bare list's top, the same 12pt stands
+    /// the tiles where a first row's words stand (its own padding). Not
+    /// under a section's title: a title is not a line, and it keeps its own
+    /// gap.
+    public static let leadingMediaInset: CGFloat = gapAtLine - PostGridListLayout.rowSpacing / 2
 
     /// The element kind of the list's LEADING header — whatever a host puts
     /// above the first stretch (For You's Friends and Following rows).
@@ -126,6 +149,13 @@ public enum DiscoverListLayout {
             let section = stretch(
                 index, environment: environment, chunk: chunk, isPairs: isPairs, showsViewAll: showsViewAll()
             )
+            // A media stretch first in the list stands `gapAtLine` under the
+            // header's line (#2342). Its trailing gap is unchanged.
+            if index == 0, !isTitled(index), isPairs(index) || chunk(index) != nil {
+                var insets = section.contentInsets
+                insets.top = leadingMediaInset
+                section.contentInsets = insets
+            }
             if endsGroup(index) {
                 var insets = section.contentInsets
                 insets.bottom = PostGridListLayout.sectionGap(traits: environment.traitCollection)
@@ -204,16 +234,19 @@ public enum DiscoverListLayout {
             )
             section.supplementariesFollowContentInsets = true
             if showsViewAll {
-                section.boundarySupplementaryItems = [
-                    NSCollectionLayoutBoundarySupplementaryItem(
-                        layoutSize: .init(
-                            widthDimension: .fractionalWidth(1),
-                            heightDimension: .absolute(viewAllHeight)
-                        ),
-                        elementKind: viewAllElementKind,
-                        alignment: .bottom
-                    )
-                ]
+                let footer = NSCollectionLayoutBoundarySupplementaryItem(
+                    layoutSize: .init(
+                        widthDimension: .fractionalWidth(1),
+                        heightDimension: .absolute(viewAllHeight(displayScale: scale))
+                    ),
+                    elementKind: viewAllElementKind,
+                    alignment: .bottom
+                )
+                // Over the tiles: the control's 44pt target reaches up over
+                // the chunk's foot when the footer is shorter (#2342), and a
+                // tile under it would take the touch first.
+                footer.zIndex = 1
+                section.boundarySupplementaryItems = [footer]
             }
             return section
         }
