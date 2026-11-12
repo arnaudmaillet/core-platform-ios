@@ -533,7 +533,11 @@ struct VoiceComposerTests {
         bar.frame = CGRect(x: 0, y: 700, width: 390, height: 120)
         window.addSubview(bar)
         window.makeKeyAndVisible()
-        defer { window.isHidden = true }
+        // ⚠️ The REAL keyboard: given back however the test ends (#2392).
+        defer {
+            bar.debugTextView.resignFirstResponder()
+            window.isHidden = true
+        }
         bar.defaultPlaceholder = "Message…"
         bar.layoutIfNeeded()
         #expect(bar.debugPlaceholder == CommentsInputBar.speakOrWritePlaceholder)

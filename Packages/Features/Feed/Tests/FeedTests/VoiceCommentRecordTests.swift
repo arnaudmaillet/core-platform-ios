@@ -189,8 +189,13 @@ struct VoiceCommentRecordTests {
     /// records nothing.
     @Test func thePostsFieldHoldsForAVoiceCommentAndATapStillTypes() throws {
         let (controller, window) = page(VoiceCommentSource())
-        defer { window.isHidden = true }
         let bar = controller.composeBar
+        // ⚠️ The REAL keyboard: given back however the test ends, or every
+        // suite running alongside lays out under it (#2392).
+        defer {
+            bar.debugTextView.resignFirstResponder()
+            window.isHidden = true
+        }
         #expect(bar.configuration.voice == .comment)
         let composer = try #require(controller.voiceComposer, "nothing records the comments' hold")
         #expect(composer.recorder.limit == 60)
@@ -204,7 +209,6 @@ struct VoiceCommentRecordTests {
         try #require(bar.debugTextView.isFirstResponder, "a tap didn't type")
         #expect(!bar.debugFieldHoldBegins, "the focused field's long press records")
         #expect(composer.phase == .idle)
-        bar.debugTextView.resignFirstResponder()
     }
 
     /// The sheet's composer records the same voice comment.
@@ -261,9 +265,15 @@ struct VoiceCommentRecordTests {
     @Test func aRepliesVoiceGoesToTheParent() async throws {
         let source = VoiceCommentSource(seeded: [comment("c1")])
         let (controller, window) = page(source)
-        defer { window.isHidden = true }
-        let composer = try #require(controller.voiceComposer)
         let bar = controller.composeBar
+        // ⚠️ A reply raises the REAL keyboard (`enterReplyState` focuses the
+        // field) and this test waits with it up: given back however it ends,
+        // or every suite running alongside lays out under it (#2392).
+        defer {
+            bar.debugTextView.resignFirstResponder()
+            window.isHidden = true
+        }
+        let composer = try #require(controller.voiceComposer)
         controller.enterReplyState(for: CommentDisplayModel(entry: comment("c1")))
         #expect(bar.debugFieldHoldBegins, "a reply's voice can't be held")
         // The hold begins, then the keyboard goes over the empty field.
