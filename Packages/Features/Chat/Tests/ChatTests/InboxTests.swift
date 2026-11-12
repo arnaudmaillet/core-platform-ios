@@ -1674,7 +1674,6 @@ struct InboxOneListTests {
         #expect(list.debugRowIDs.map(\.rawValue) == ["new-1", "new-2", "old-1", "old-2"])
         let headerHeight = table.delegate?.tableView?(table, heightForHeaderInSection: 0) ?? 0
         #expect(headerHeight < 1, "a header over the one list: \(headerHeight)")
-        #expect(list.pinnedSection == nil, "Chats named a section in the bar")
     }
 
     /// Requests draws one unheaded list too.

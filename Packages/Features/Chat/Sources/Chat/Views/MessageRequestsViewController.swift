@@ -14,9 +14,13 @@ import UIKit
 /// Pushed on its own over the HIDDEN REQUESTS folder, it is also the **Hidden
 /// requests** list (#552) that the Requests list's last row opens.
 ///
-/// With channels (#2230), the list leads with a **Join requests** section,
-/// always titled: one row per channel the viewer runs with requests
-/// waiting, which opens that channel's requests list.
+/// With channels (#2230), the list leads with the channels' **join
+/// requests**: one row per channel the viewer runs with requests waiting,
+/// which opens that channel's requests list. They wear NO HEADER (#2328, the
+/// owner 2026-11-11): the row names itself ("Studio drops · 3 requests"), as
+/// the Hidden requests row at the other end does, and the Accept and ×
+/// buttons tell the conversation requests between them apart. A gap under
+/// the last channel row is all that separates the two kinds.
 ///
 /// The conversation requests are ONE LIST with no header (#2292, the owner
 /// 2026-11-11): the New / Recent split went. An unviewed request keeps its
@@ -70,43 +74,7 @@ final class MessageRequestsViewController: UIViewController {
     /// channel's requests list.
     var onOpenJoinRequests: ((_ presenter: UIViewController, _ channel: RunChannel) -> Void)?
 
-    /// The section at `index` when it wears a header: the Join requests
-    /// section only (#2230) — alone, nothing else would say what its rows
-    /// are. The conversation requests have none (#2292).
-    private func headedSection(at index: Int) -> InboxListSection? {
-        dataSource.headedSection(at: index)
-    }
-
-    /// What the Join requests header counts: every request waiting there,
-    /// as the badge adds them (#2230).
-    private func headerCount(for section: InboxListSection) -> Int {
-        section == .joinRequests ? viewModel.joinRequests.reduce(0) { $0 + $1.count } : 0
-    }
-
-    /// The visible header's count, re-read after a render.
-    private func refreshHeaderCounts() {
-        for index in 0..<tableView.numberOfSections {
-            guard let section = headedSection(at: index),
-                  let header = tableView.headerView(forSection: index) as? InboxSectionHeaderView else { continue }
-            header.setCount(headerCount(for: section))
-        }
-        // The bar names the stuck section with the same count.
-        updatePinnedSection()
-    }
     private var hasRenderedContent = false
-
-    /// The section the list has scrolled into, which the inbox names in its
-    /// bar (#1301). Re-read on every scroll and every render.
-    private let pinnedTracker = PinnedSectionTracker<InboxPinnedSection>()
-
-    private func updatePinnedSection() {
-        // A list off screen behind the skeleton or a status names nothing.
-        let isShowing = !tableView.isHidden
-        pinnedTracker.update(in: tableView) { index in
-            guard isShowing, let section = self.headedSection(at: index) else { return nil }
-            return InboxPinnedSection(section: section, count: self.headerCount(for: section))
-        }
-    }
 
     private(set) var chrome = InboxSurfaceChrome() {
         didSet { onChromeChange?(chrome) }
@@ -248,16 +216,9 @@ final class MessageRequestsViewController: UIViewController {
         // `applyTopEdge(for:)`.
         tableView.applyTopEdge(for: .titled)
         tableView.delegate = self
-        tableView.register(
-            InboxSectionHeaderView.self,
-            forHeaderFooterViewReuseIdentifier: InboxSectionHeaderView.reuseIdentifier
-        )
-        tableView.estimatedSectionHeaderHeight = 44
-        // A plain table reserves ~22pt above every section header by default,
-        // which under a floating pill is a band of nothing between the tab
-        // capsule and the first row. The pill carries its own breathing room
-        // (`SectionHeaderPillButton.Metrics.float`), so this is padding on top
-        // of padding.
+        // No section header (#2328): a plain table reserves ~22pt above every
+        // section's header by default, a band of nothing between the tab
+        // capsule and the first row.
         tableView.sectionHeaderTopPadding = 0
         // No hairlines, matching every other people list in the app: a 48pt
         // disc and two lines of type already make each row its own object.
@@ -312,12 +273,9 @@ final class MessageRequestsViewController: UIViewController {
         case .loading:
             loading.load()
         case .content(let models):
-            // After this pass's apply: a header on screen whose section stays
-            // is not dequeued again, and reading a row changes its count.
-            DispatchQueue.main.async { [weak self] in self?.refreshHeaderCounts() }
             var snapshot = NSDiffableDataSourceSnapshot<InboxListSection, ConversationID>()
             // The channels' join requests first (#2230): what waits on the
-            // viewer as the channel's owner or admin.
+            // viewer as the channel's owner or admin. No header (#2328).
             let joinRequests = viewModel.joinRequests
             let previousJoinRequests = joinRequestsByID
             joinRequestsByID = Dictionary(joinRequests.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
@@ -371,7 +329,6 @@ final class MessageRequestsViewController: UIViewController {
             )
             loading.showStatus()
         }
-        updatePinnedSection()
     }
 
     /// Swaps the skeleton for the populated table — hydration in place, and
@@ -446,10 +403,6 @@ final class MessageRequestsViewController: UIViewController {
 }
 
 extension MessageRequestsViewController: UITableViewDelegate {
-    func scrollViewDidScroll(_ scrollView: UIScrollView) {
-        updatePinnedSection()
-    }
-
     /// Paging: one of the last rows coming on screen asks for the next page
     /// (#593), early enough that it usually lands before the end does.
     func tableView(_ tableView: UITableView, willDisplay cell: UITableViewCell, forRowAt indexPath: IndexPath) {
@@ -460,41 +413,22 @@ extension MessageRequestsViewController: UITableViewDelegate {
         viewModel.loadMore()
     }
 
-    // MARK: - Section headers
+    // MARK: - No section header (#2292, #2328)
 
-    /// The glass pill, and the tap that scrolls to the section it names.
-    func tableView(_ tableView: UITableView, viewForHeaderInSection index: Int) -> UIView? {
-        guard let section = headedSection(at: index) else { return nil }
-        let header = tableView.dequeueReusableHeaderFooterView(
-            withIdentifier: InboxSectionHeaderView.reuseIdentifier
-        ) as? InboxSectionHeaderView
-        // The separation between sections is the footer's job — see
-        // `heightForFooterInSection` — so the header has nothing to pad.
-        header?.setTitle(section.title)
-        header?.setCount(headerCount(for: section))
-        // The section's own first row under the bar.
-        header?.onTap = { [weak self] in
-            guard let self else { return }
-            dataSource.scroll(tableView, toSectionAt: index)
-        }
-        return header
-    }
-
-    /// Zero for the unheaded requests — a table gives an unclaimed plain-style
-    /// section a default height even when its header view is nil, which would
-    /// leave a blank band above a list that has no header at all.
+    /// None, on either section: the conversation requests are one list with
+    /// no title (#2292), and the join requests above them name themselves
+    /// on their rows (#2328). ⚠️ A plain table gives a section a default
+    /// header height even when its header view is nil, which would leave a
+    /// blank band above the first row.
     func tableView(_ tableView: UITableView, heightForHeaderInSection index: Int) -> CGFloat {
-        headedSection(at: index) == nil ? .leastNormalMagnitude : UITableView.automaticDimension
+        .leastNormalMagnitude
     }
 
-    /// ⚠️ A FOOTER, not a bigger header margin.
-    ///
-    /// The section gap used to sit above the next header, which put the break in
-    /// the right place visually and the pill in the wrong one: a plain table PINS
-    /// its headers, so that margin travelled with the pill and hung a stuck
-    /// header lower than the first one's. Spending the space at the END of the
-    /// previous section separates the join requests from the requests without
-    /// moving anything that pins.
+    /// ⚠️ A FOOTER: the gap under the last channel row, before the first
+    /// conversation request — what separates the two kinds of request now
+    /// that no header does (#2328). It was spent at the end of the previous
+    /// section rather than above the next header so nothing pinned moved;
+    /// with no header left, the footer stays the one place it lives.
     func tableView(_ tableView: UITableView, heightForFooterInSection index: Int) -> CGFloat {
         index < tableView.numberOfSections - 1
             ? SectionHeaderPillButton.sectionGap(traits: tableView.traitCollection)
@@ -573,17 +507,8 @@ extension MessageRequestsViewController: UITableViewDelegate {
 extension MessageRequestsViewController: InboxSurface {
     var listScrollView: UIScrollView? { tableView }
 
-    var pinnedSection: InboxPinnedSection? { pinnedTracker.pinned }
-
-    var onPinnedSectionChange: ((InboxPinnedSection?) -> Void)? {
-        get { pinnedTracker.onChange }
-        set { pinnedTracker.onChange = newValue }
-    }
-
-    func scrollToPinnedSection() {
-        guard let index = pinnedTracker.index else { return }
-        dataSource.scroll(tableView, toSectionAt: index)
-    }
+    // No `pinnedSection`: no section is headed, so none is named in the bar
+    // (#2328).
 
     var category: MessagesCategory { .requests }
 
@@ -606,10 +531,26 @@ extension MessageRequestsViewController {
     /// The sections on show, in order (#2292). Tests.
     var debugSections: [InboxListSection] { dataSource.snapshot().sectionIdentifiers }
 
-    /// The sections that wear a header: the Join requests only (#2292). Tests.
+    /// The sections that wear a header, as the table lays them out: a
+    /// header view, or a header height of a point or more. None since
+    /// #2328. Tests.
     var debugHeadedSections: [InboxListSection] {
-        (0..<dataSource.snapshot().numberOfSections).compactMap { headedSection(at: $0) }
+        let sections = dataSource.snapshot().sectionIdentifiers
+        return sections.indices.compactMap { index in
+            let height = tableView.delegate?.tableView?(tableView, heightForHeaderInSection: index) ?? 0
+            let view = tableView.delegate?.tableView?(tableView, viewForHeaderInSection: index)
+            return height >= 1 || view != nil || tableView.headerView(forSection: index) != nil
+                ? sections[index] : nil
+        }
     }
+
+    /// The gap under section `index`: its footer's height. Tests.
+    func debugGap(underSectionAt index: Int) -> CGFloat {
+        tableView.delegate?.tableView?(tableView, heightForFooterInSection: index) ?? 0
+    }
+
+    /// The list's table. Tests.
+    var debugTableView: UITableView { tableView }
 
     /// The rows of `section`, in order; empty when it is not on show. Tests.
     func debugRowIDs(in section: InboxListSection) -> [ConversationID] {
