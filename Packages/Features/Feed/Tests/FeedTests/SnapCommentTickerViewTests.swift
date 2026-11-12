@@ -550,80 +550,52 @@ struct SnapCommentTickerViewTests {
         #expect(SnapCommentTickerView.entryDeferral(lastRightEdge: 100, bandWidth: 400, speed: 22) == 0)
     }
 
-    // MARK: - The capsules (#2172)
+    // MARK: - The letters' outline (#2339)
 
-    /// Each bubble and its capsule share a frame, flight for flight.
-    private func expectCapsulesMatch(_ ticker: SnapCommentTickerView, _ moment: String,
-                                     sourceLocation: SourceLocation = #_sourceLocation) {
-        let pairs = ticker.debugBubbleCapsuleFrames
-        #expect(!pairs.isEmpty, "no bubble \(moment)", sourceLocation: sourceLocation)
-        for pair in pairs {
-            #expect(abs(pair.bubble.midX - pair.capsule.midX) < 0.5 && pair.bubble.size == pair.capsule.size
-                    && abs(pair.bubble.midY - pair.capsule.midY) < 0.5,
-                    "a capsule left its bubble \(moment): \(pair.capsule) vs \(pair.bubble)", sourceLocation: sourceLocation)
-        }
-        // Flight for flight: the same move, begun at the same time.
-        for flight in ticker.debugBubbleCapsuleFlights {
-            #expect((flight.bubble == nil) == (flight.capsule == nil), "one flies without the other \(moment)",
-                    sourceLocation: sourceLocation)
-            guard let bubble = flight.bubble, let capsule = flight.capsule else { continue }
-            #expect(bubble.beginTime == capsule.beginTime
-                    && (bubble.fromValue as? CGFloat) == (capsule.fromValue as? CGFloat)
-                    && (bubble.toValue as? CGFloat) == (capsule.toValue as? CGFloat)
-                    && bubble.duration == capsule.duration,
-                    "a capsule flies another flight \(moment)", sourceLocation: sourceLocation)
-        }
-    }
-
-    /// The capsules follow their bubbles through a spawn, a scrub, a coast
-    /// and the hand-back — and no wash rises on the drag.
-    @Test func theCapsulesNeverLeaveTheirBubbles() {
+    /// No capsule surface, no mask, no blur and no layer shadow in the band
+    /// (#2339 reverses #2172): at rest, during a scrub, in the coast and
+    /// after the hand-back — and no wash rises on the drag.
+    @Test func theBandDrawsNoCapsuleSurfaceOrMask() {
         hosting { window in
             let ticker = makeTicker(in: window)
             ticker.setActive(true)
             ticker.debugFillBand()
-            expectCapsulesMatch(ticker, "after a spawn")
-            for view in bubbleViews(ticker) {
-                #expect(view.layer.animation(forKey: "flight") != nil)
+            #expect(!ticker.debugBubbles.isEmpty)
+            @MainActor func expectBare(_ moment: String, sourceLocation: SourceLocation = #_sourceLocation) {
+                // Nothing in the band but its bubbles: no surface behind them.
+                #expect(ticker.subviews.allSatisfy { $0 is TickerBubbleView }, "a surface in the band \(moment)",
+                        sourceLocation: sourceLocation)
+                #expect(ticker.layer.mask == nil, "the band masked \(moment)", sourceLocation: sourceLocation)
+                #expect(ticker.layer.sublayers?.allSatisfy { sublayer in ticker.subviews.contains { $0.layer === sublayer } } ?? true,
+                        "a capsule layer in the band \(moment)", sourceLocation: sourceLocation)
+                for bubble in ticker.debugBubbles {
+                    let label = bubble.debugLabel
+                    #expect(bubble.mask == nil && bubble.layer.mask == nil && label.layer.mask == nil,
+                            "a bubble masked \(moment)", sourceLocation: sourceLocation)
+                    #expect(bubble.layer.shadowOpacity == 0 && label.layer.shadowOpacity == 0,
+                            "a layer shadow on a moving bubble \(moment)", sourceLocation: sourceLocation)
+                    #expect(!bubble.subviews.contains { $0 is UIVisualEffectView }, "a bubble carries a blur \(moment)",
+                            sourceLocation: sourceLocation)
+                    #expect(bubble.layer.sublayers?.allSatisfy { sublayer in bubble.subviews.contains { $0.layer === sublayer } } ?? true,
+                            "a capsule layer rides a bubble \(moment)", sourceLocation: sourceLocation)
+                    #expect(bubble.backgroundColor == nil,
+                            "a bubble carries a fill \(moment)", sourceLocation: sourceLocation)
+                }
             }
+            expectBare("after a spawn")
 
             ticker.beginScrub()
             ticker.applyScrubTranslation(-60)
             ticker.applyScrubTranslation(25)
-            expectCapsulesMatch(ticker, "during a scrub")
-            #expect(!ticker.subviews.contains { $0.accessibilityIdentifier == "ticker-kinetic-backdrop" },
-                    "a wash behind the band")
+            expectBare("during a scrub")
 
             ticker.endScrub(releaseVelocity: 900)
             ticker.coastStep(now: ticker.coastStartTime + 0.016)
-            expectCapsulesMatch(ticker, "in the coast")
+            expectBare("in the coast")
 
             ticker.coastStep(now: ticker.coastStartTime + 30) // handover
             #expect(ticker.debugIsConveying)
-            expectCapsulesMatch(ticker, "after the hand-back")
-        }
-    }
-
-    /// One blur for the whole band, masked by one capsule per bubble.
-    @Test func oneBlurForTheWholeBand() throws {
-        try hosting { window in
-            let ticker = makeTicker(in: window)
-            ticker.reducesTransparency = { false }
-            ticker.setActive(true)
-            ticker.debugFillBand()
-            let surface = try #require(ticker.debugCapsuleSurface as? UIVisualEffectView)
-            #expect(!surface.isHidden)
-            let blurs = ticker.subviews.filter { $0 is UIVisualEffectView }
-            #expect(blurs.count == 1, "\(blurs.count) blurs")
-            #expect(bubbleViews(ticker).allSatisfy { !$0.subviews.contains { $0 is UIVisualEffectView } },
-                    "a bubble carries its own blur")
-            let mask = try #require(surface.mask)
-            #expect(mask.layer.sublayers?.count == bubbleViews(ticker).count, "one capsule per bubble")
-
-            // Parked, the band draws no blur (#580).
-            ticker.setActive(false)
-            #expect(surface.isHidden)
-            #expect(mask.layer.sublayers?.isEmpty ?? true, "a capsule outlived its bubble")
+            expectBare("after the hand-back")
         }
     }
 
@@ -633,48 +605,115 @@ struct SnapCommentTickerViewTests {
         #expect(SnapCommentTickerView.bandHeight == 2 * lane + 3)
         let ticker = SnapCommentTickerView(frame: .zero)
         #expect(ticker.intrinsicContentSize.height == SnapCommentTickerView.bandHeight)
+        #expect(TickerBubbleView.textInsets == UIEdgeInsets(top: 3, left: 0, bottom: 3, right: 0))
     }
 
-    /// Reduce Transparency: an opaque dark capsule, no blur.
-    @Test func reduceTransparencyDrawsOpaqueCapsules() throws {
-        try hosting { window in
-            let ticker = makeTicker(in: window)
-            ticker.reducesTransparency = { true }
-            ticker.setActive(true)
-            ticker.debugFillBand()
-            let surface = try #require(ticker.debugCapsuleSurface)
-            #expect(!(surface is UIVisualEffectView), "a blur under Reduce Transparency")
-            #expect(surface.backgroundColor == SnapCommentTickerView.opaqueCapsuleColor)
-            #expect(!ticker.subviews.contains { $0 is UIVisualEffectView })
-        }
+    /// The outline: about 1 pt of black at 65 %; Increased Contrast widens it
+    /// by a quarter point and makes it opaque.
+    @Test func theOutlineFollowsTheContrastSetting() {
+        let standard = TickerBubbleView.outline(increasedContrast: false)
+        #expect(standard.width == 1)
+        #expect(standard.color == UIColor(white: 0, alpha: 0.65))
+        let contrast = TickerBubbleView.outline(increasedContrast: true)
+        #expect(contrast.width == 1.25)
+        #expect(contrast.color == UIColor(white: 0, alpha: 1))
     }
 
-    /// The Background setting is the capsules' dark tint over their blur,
-    /// darker with Increased Contrast.
-    @Test func theBackgroundSettingTintsTheCapsules() {
+    /// The band reads Increased Contrast when its stream starts, and every
+    /// bubble it lays wears that outline.
+    @Test func everyBubbleWearsTheStreamsOutline() {
         hosting { window in
-            let store = MediaCommentPreferencesStore(defaults: UserDefaults(suiteName: "ticker-tint-\(UUID().uuidString)")!)
-            defer { SnapCommentTickerView.refreshAppearance(from: MediaCommentPreferencesStore(defaults: UserDefaults(suiteName: "reset-\(UUID().uuidString)")!)) }
-
-            let bare = makeTicker(in: window)
-            bare.appearanceStore = store
-            bare.increasesContrast = { false }
-            bare.setActive(true)
-            #expect(bare.debugCapsuleTint == 0, "the default is the blur alone")
-
-            store.update { $0.bandBackgroundOpacity = 0.4 }
-            let tinted = makeTicker(in: window)
-            tinted.appearanceStore = store
-            tinted.increasesContrast = { false }
-            tinted.setActive(true)
-            #expect(abs(tinted.debugCapsuleTint - 0.4) < 0.001)
+            let plain = makeTicker(in: window)
+            plain.increasesContrast = { false }
+            plain.setActive(true)
+            plain.debugFillBand()
+            #expect(!plain.debugBubbles.isEmpty)
+            #expect(plain.debugBubbles.allSatisfy { $0.debugLabel.outline == TickerBubbleView.outline(increasedContrast: false) })
 
             let contrast = makeTicker(in: window)
-            contrast.appearanceStore = store
             contrast.increasesContrast = { true }
             contrast.setActive(true)
-            #expect(abs(contrast.debugCapsuleTint - (0.4 + SnapCommentTickerView.increasedContrastTint)) < 0.001)
+            contrast.debugFillBand()
+            #expect(!contrast.debugBubbles.isEmpty)
+            #expect(contrast.debugBubbles.allSatisfy { $0.debugLabel.outline == TickerBubbleView.outline(increasedContrast: true) })
         }
+    }
+
+    /// The light shadow: black at 30 %, a 2 pt blur, no offset (drawn with
+    /// `.zero` in `OutlinedTickerLabel.drawText(in:)`).
+    @Test func theShadowIsLight() {
+        #expect(TickerBubbleView.shadowColor == UIColor(white: 0, alpha: 0.3))
+        #expect(TickerBubbleView.shadowBlur == 2)
+        #expect(OutlinedTickerLabel.inkMargin >= TickerBubbleView.outline(increasedContrast: true).width + TickerBubbleView.shadowBlur,
+                "the label's margin cuts the outline or its shadow")
+    }
+
+    /// The label's text box is the plain one: the bubble's text column, the
+    /// label only `inkMargin` bigger all round for the ink past the letters.
+    @Test func theLabelReachesPastTheTextBoxByItsMargin() {
+        let bubble = TickerBubbleView()
+        bubble.frame = CGRect(x: 0, y: 0, width: 160, height: 22)
+        bubble.layoutIfNeeded()
+        let textX = TickerBubbleView.avatarInset + TickerBubbleView.avatarDiameter + TickerBubbleView.avatarGap
+        let margin = OutlinedTickerLabel.inkMargin
+        let label = bubble.debugLabel
+        #expect(label.frame == CGRect(x: textX - margin, y: -margin,
+                                      width: 160 - textX - TickerBubbleView.trailingPadding + 2 * margin,
+                                      height: 22 + 2 * margin))
+        #expect(label.emoteTextRect(forBounds: label.bounds) == label.bounds.insetBy(dx: margin, dy: margin))
+    }
+
+    /// The pixels the label draws on a transparent ground: the count of
+    /// white ones (the letters) and of dark, fairly opaque ones (the
+    /// outline; the shadow alone stays under 30 %).
+    private func inkCounts(_ outline: TickerBubbleView.TextOutline) -> (white: Int, dark: Int) {
+        let label = OutlinedTickerLabel()
+        label.font = TickerBubbleView.font
+        label.textColor = .white
+        label.text = "GG ae so good"
+        label.outline = outline
+        label.frame = CGRect(x: 0, y: 0, width: 160, height: 22 + 2 * OutlinedTickerLabel.inkMargin)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 2
+        format.opaque = false
+        let image = UIGraphicsImageRenderer(bounds: label.bounds, format: format).image { _ in
+            label.drawText(in: label.bounds)
+        }
+        guard let cgImage = image.cgImage else { return (0, 0) }
+        let width = cgImage.width, height = cgImage.height
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        let drawn: Bool = pixels.withUnsafeMutableBytes { buffer in
+            guard let context = CGContext(
+                data: buffer.baseAddress, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+                space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ) else { return false }
+            context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+            return true
+        }
+        guard drawn else { return (0, 0) }
+        var white = 0, dark = 0
+        for index in stride(from: 0, to: pixels.count, by: 4) {
+            let alpha = Int(pixels[index + 3])
+            guard alpha > 0 else { continue }
+            // Premultiplied: the colour over its alpha.
+            let luminance = Int(pixels[index]) * 255 / alpha
+            if alpha > 200, luminance > 200 { white += 1 }
+            if alpha > 110, luminance < 90 { dark += 1 }
+        }
+        return (white, dark)
+    }
+
+    /// The outline is drawn OUTSIDE the letters: a dark ring the plain label
+    /// doesn't have, and the white letters keep their full shape (a stroke
+    /// across the glyph's edge would eat into them).
+    @Test func theOutlineIsDrawnOutsideTheLetters() {
+        let plain = inkCounts(TickerBubbleView.TextOutline(width: 0, color: .clear))
+        let outlined = inkCounts(TickerBubbleView.outline(increasedContrast: false))
+        #expect(plain.white > 100, "the label drew no letters: \(plain)")
+        #expect(plain.dark == 0, "a ring without an outline: \(plain)")
+        #expect(outlined.dark > plain.white / 4, "no ring around the letters: \(outlined) vs \(plain)")
+        #expect(Double(outlined.white) >= Double(plain.white) * 0.85,
+                "the outline ate into the letters: \(outlined.white) white pixels against \(plain.white)")
     }
 
     // MARK: - Decay math
