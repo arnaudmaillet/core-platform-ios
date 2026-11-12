@@ -6,6 +6,7 @@ import CoreNetworking
 import CoreNetworkingMocks
 import Foundation
 import MediaCore
+import TestSupport
 import Testing
 import UIKit
 @testable import Chat
@@ -126,14 +127,6 @@ struct ChatSendAckLossTests {
             inFlightRetryDelays: Array(repeating: .zero, count: waits)
         )
         return Rig(repository: repository, relay: relay, blobs: blobs)
-    }
-
-    private func settle(_ condition: () -> Bool) async -> Bool {
-        for _ in 0..<400 {
-            if condition() { return true }
-            try? await Task.sleep(for: .milliseconds(5))
-        }
-        return condition()
     }
 
     private static func solid() -> UIImage {
@@ -330,13 +323,6 @@ private actor LandedOnceProvider: ChatProviding {
 
 @MainActor
 struct ChatReplayOnScreenTests {
-    private func settle(_ condition: () -> Bool) async -> Bool {
-        for _ in 0..<400 {
-            if condition() { return true }
-            try? await Task.sleep(for: .milliseconds(5))
-        }
-        return condition()
-    }
 
     /// ⚠️ A REPLAY CAN ANSWER A MESSAGE ALREADY ON SCREEN: the first send
     /// landed and failed, a reload drew it as `t1`, and the retry under the

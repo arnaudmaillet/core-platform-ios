@@ -5,6 +5,7 @@ import CoreNetworking
 import CoreNetworkingMocks
 import FeedInterface
 import Foundation
+import TestSupport
 import Testing
 import UIKit
 @testable import Chat
@@ -53,12 +54,6 @@ struct PublicGroupsTests {
             showsChannels: false
         )
         return Rig(repository: repository, proposals: proposals, chat: chat)
-    }
-
-    private func settle(until condition: () -> Bool) async {
-        for _ in 0..<300 where !condition() {
-            try? await Task.sleep(for: .milliseconds(10))
-        }
     }
 
     private let hike = ConversationID("grp-hike")

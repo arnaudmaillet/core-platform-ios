@@ -4,6 +4,7 @@ import CoreModels
 import CoreNetworking
 import CoreNetworkingMocks
 import Foundation
+import TestSupport
 import Testing
 import UIKit
 @testable import Chat
@@ -41,12 +42,6 @@ struct ChannelShowcaseShareTests {
             showsGroups: false,
             showsChannels: true
         )
-    }
-
-    private func settle(until condition: () -> Bool) async {
-        for _ in 0..<300 where !condition() {
-            try? await Task.sleep(for: .milliseconds(10))
-        }
     }
 
     private let daily = ConversationID("ch-daily")

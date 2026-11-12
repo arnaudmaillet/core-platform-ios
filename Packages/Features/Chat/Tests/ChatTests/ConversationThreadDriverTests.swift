@@ -1,6 +1,7 @@
 import CoreModels
 import FeedInterface
 import Foundation
+import TestSupport
 import Testing
 @testable import Chat
 
@@ -54,12 +55,6 @@ struct ConversationThreadDriverTests {
         let stub = Stub(messages: Self.seed)
         let viewModel = ConversationViewModel(conversationID: ConversationID("c1"), repository: stub)
         return (stub, ConversationThreadDriver(viewModel: viewModel, viewer: stub, avatars: nil))
-    }
-
-    private func settle(until condition: () -> Bool) async {
-        for _ in 0..<200 where !condition() {
-            try? await Task.sleep(for: .milliseconds(10))
-        }
     }
 
     @Test func messagesArriveOldestFirstWithTheirQuotesResolved() async throws {
