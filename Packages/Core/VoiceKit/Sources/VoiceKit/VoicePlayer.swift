@@ -7,7 +7,7 @@ public enum VoicePlaybackSpeed: Double, CaseIterable, Sendable {
     case fast = 1.5
     case faster = 2
 
-    /// The chip's label: "1×", "1.5×", "2×".
+    /// The speed's words (#2364): "1×", "1.5×", "2×".
     public var label: String {
         switch self {
         case .normal: "1×"
@@ -16,7 +16,7 @@ public enum VoicePlaybackSpeed: Double, CaseIterable, Sendable {
         }
     }
 
-    /// The next speed a tap on the chip picks, round.
+    /// The next speed a tap on the speed's words picks, round.
     public var next: VoicePlaybackSpeed {
         let all = Self.allCases
         return all[(all.firstIndex(of: self)! + 1) % all.count]
