@@ -61,10 +61,16 @@ struct SnapActionColumnLayoutTests {
     /// Read in the chrome's space: the buttons are the glass column's items
     /// (#1872), each in its bubble's glass. Every media post wears a sound
     /// face (greyed when it has none), which stands the sound in the column.
-    static func mediaColumn(insets: UIEdgeInsets = insets) -> (like: CGRect, sound: CGRect) {
+    ///
+    /// ⚠️ ENGAGED BY DEFAULT (#2326): at rest a media page's column stands on
+    /// the caption's line, `columnLineLift` higher; it glides down to the
+    /// composer's line as the comments open, and THAT is where the composer's
+    /// stake and rail meet it. `engaged: false` reads it at rest.
+    static func mediaColumn(insets: UIEdgeInsets = insets, engaged: Bool = true) -> (like: CGRect, sound: CGRect) {
         let chrome = chrome(insets: insets)
         chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true))
         chrome.layoutIfNeeded()
+        if engaged { chrome.setCommentsEngaged(true) }
         let like = chrome.debugBoostButton
         let sound = chrome.debugSoundBubble
         return (like.convert(like.bounds, to: chrome), sound.convert(sound.bounds, to: chrome))
@@ -316,6 +322,61 @@ struct SnapActionColumnLayoutTests {
         // The strip runs on under the cover to the column's edge (#2291).
         #expect(abs(chrome.debugPageBarFrame.maxX - sound.maxX) < 0.5)
         #expect(chrome.interactionRoots.contains { $0 === chrome.debugSoundBubble })
+    }
+
+    /// ⚠️ THE GLIDE (#2326): the column's two positions — the caption's line
+    /// at rest, the composer's line engaged — are one lift apart, and the
+    /// comments' progress puts it between them: half way, half the lift. The
+    /// whole column moves as one (the like pill, the sound), and the stations
+    /// the caption and the strip keep against it do not move at all.
+    @Test func theColumnGlidesBetweenItsTwoLinesWithTheComments() {
+        let chrome = Self.chrome()
+        chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true))
+        chrome.layoutIfNeeded()
+        let lift = chrome.debugColumnLineLift
+        #expect(abs(lift - SnapChromeView.columnLineLift(overTabBar: false)) < 0.5)
+        #expect(lift > 0)
+        let station = chrome.debugSoundStationFrame
+        func column() -> (like: CGRect, sound: CGRect) {
+            (chrome.debugFrame(of: chrome.debugBoostButton), chrome.debugFrame(of: chrome.debugSoundBubble))
+        }
+        let rest = column()
+        #expect(abs(rest.sound.maxY - station.maxY) < 0.5, "at rest the column is off its station")
+
+        chrome.setCommentsEngaged(true)
+        let engaged = column()
+        let composerLine = Self.screen.height - Self.insets.bottom - SnapActionColumn.bottomBreath
+            - SnapActionColumn.inputRestingGap
+        #expect(abs(engaged.sound.maxY - composerLine) < 0.5, "engaged, the cover is off the composer's line")
+        #expect(abs(engaged.sound.minY - rest.sound.minY - lift) < 0.5)
+        #expect(abs(engaged.like.minY - rest.like.minY - lift) < 0.5, "the like pill did not glide with the cover")
+
+        // An interactive pull half way back: half the lift.
+        chrome.setCommentsEngagedProgress(0.5)
+        let half = column()
+        #expect(abs(half.sound.minY - (rest.sound.minY + lift / 2)) < 0.5, "mid-way, the column is not between its lines")
+        #expect(half.sound.minY > rest.sound.minY && half.sound.minY < engaged.sound.minY)
+
+        // The sheet's share drives the same glide (#2087).
+        chrome.setCommentsEngaged(false)
+        #expect(chrome.debugColumnGlide == 0)
+        chrome.setCommentsSheetShare(0.25)
+        #expect(abs(column().sound.minY - (rest.sound.minY + lift / 4)) < 0.5, "the sheet's share did not move the column")
+        // A drag that cancels takes it back with the finger.
+        chrome.setCommentsSheetShare(0)
+        #expect(column().sound == rest.sound)
+        #expect(chrome.debugSoundStationFrame == station, "the station moved with the glide")
+    }
+
+    /// A text page has no lift: the comments never move its column.
+    @Test func aTextPagesColumnDoesNotGlide() {
+        let chrome = Self.chrome(mediaURL: nil)
+        chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true))
+        chrome.layoutIfNeeded()
+        let rest = chrome.debugFrame(of: chrome.debugSoundBubble)
+        chrome.setCommentsEngaged(true)
+        #expect(chrome.debugColumnGlide == 0)
+        #expect(chrome.debugFrame(of: chrome.debugSoundBubble) == rest)
     }
 
     /// Every page's column, a text page's included (#695).

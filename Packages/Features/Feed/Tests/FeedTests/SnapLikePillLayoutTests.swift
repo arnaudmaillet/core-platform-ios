@@ -33,9 +33,9 @@ struct SnapLikePillLayoutTests {
         return chrome
     }
 
-    /// The sound bubble's bottom is `glassGap` above the toolbar's glass; the
-    /// like pill runs from the band's top down to `gap` above it, taller than
-    /// wide.
+    /// Engaged (#2326: where the composer meets it), the sound bubble's
+    /// bottom is `glassGap` above the toolbar's glass; the like pill runs
+    /// from the band's top down to `gap` above it, taller than wide.
     @Test func theSoundSitsOnTheFieldLineAndTheLikeIsAPill() {
         let column = Layout.mediaColumn()
         #expect(abs(column.sound.maxY - (Layout.toolbarGlassTop - SnapActionColumn.glassGap - SnapActionColumn.bottomBreath)) < 0.5,
@@ -62,11 +62,18 @@ struct SnapLikePillLayoutTests {
     }
 
     /// A text page has no sound bubble on the page; the pill keeps its
-    /// media-page frame.
+    /// media-page size — and, the comments open, its frame: at rest a media
+    /// page's column stands its lift higher, on the caption's line (#2326).
     @Test func thePillIsTheSameSizeOnATextPage() {
         let media = Self.chrome(Self.model())
         let text = Self.chrome(Self.model(media: false))
-        #expect(text.debugFrame(of: text.debugBoostButton) == media.debugFrame(of: media.debugBoostButton))
+        let pill = media.debugFrame(of: media.debugBoostButton)
+        let textPill = text.debugFrame(of: text.debugBoostButton)
+        #expect(pill.size == textPill.size)
+        #expect(abs(textPill.minY - pill.minY - media.debugColumnLineLift) < 0.5, "the media pill is not its lift higher")
+        media.setCommentsEngaged(true)
+        text.setCommentsEngaged(true)
+        #expect(Layout.same(media.debugFrame(of: media.debugBoostButton), text.debugFrame(of: text.debugBoostButton)))
     }
 
     /// ⚠️ EVEN GAPS (#680): top → heart, heart → count, count → bottom —

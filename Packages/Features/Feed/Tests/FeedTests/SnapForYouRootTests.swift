@@ -338,14 +338,14 @@ struct SnapForYouRootTests {
         // — Shots' 12 pt, another feed's 6 (#1722).
         let barLine = shots.bounds.height - SnapActionColumnLayoutTests.insets.bottom
         let plainSound = frame(plain.debugSoundBubble, in: plain)
-        // The column stays on the composer's line (#2301, the owner's option
-        // c); only the caption rises, by the seat's lift.
-        let shotsLift = SnapChromeView.coverLineLift(overTabBar: true)
-        let plainLift = SnapChromeView.coverLineLift(overTabBar: false)
-        #expect(abs(sound.maxY - (barLine - SnapActionColumn.shotsBottomBreath - SnapActionColumn.inputRestingGap)) < 0.5,
-                "Shots' cover is not its breath over the bar")
-        #expect(abs(plainSound.maxY - (barLine - SnapActionColumn.bottomBreath - SnapActionColumn.inputRestingGap)) < 0.5,
-                "another feed's cover is not its breath over the bar")
+        // The column rises onto the caption's line (#2326, reversing #2301's
+        // option c): the composer's line, less the column's lift.
+        let shotsColumn = SnapChromeView.columnLineLift(overTabBar: true)
+        let plainColumn = SnapChromeView.columnLineLift(overTabBar: false)
+        #expect(abs(sound.maxY - (barLine - SnapActionColumn.shotsBottomBreath - SnapActionColumn.inputRestingGap
+            - shotsColumn)) < 0.5, "Shots' cover is not its breath and its lift over the bar")
+        #expect(abs(plainSound.maxY - (barLine - SnapActionColumn.bottomBreath - SnapActionColumn.inputRestingGap
+            - plainColumn)) < 0.5, "another feed's cover is not its breath and its lift over the bar")
         // A breath apart, and each 10 pt over its own bar's glass (#2301):
         // the toolbar's drops further under the safe-area line than the tab
         // bar's.
@@ -354,18 +354,22 @@ struct SnapForYouRootTests {
         #expect(abs(frame(plain.debugPageBar, in: plain).minY - bar.minY
             - (SnapActionColumn.shotsBottomBreath - SnapActionColumn.bottomBreath) - centring) < 0.5,
                 "the strips are not a breath apart")
-        // The caption on the cover's line over a strip too (#2252).
-        #expect(abs(sound.maxY - shots.debugCaptionFrame.maxY - shotsLift) < 0.5, "the caption is not its lift over the cover")
-        #expect(abs(plainSound.maxY - plain.debugCaptionFrame.maxY - plainLift) < 0.5, "the caption is not its lift over the cover")
+        // The cover's bottom on the caption's letters' line over a strip too
+        // (#2326): one line for the caption and the column, as #2252 meant.
+        let drop = SnapChromeView.captionLetterDrop
+        #expect(abs(shots.debugCaptionFrame.maxY - drop - sound.maxY) < 0.5, "Shots' cover is off the caption's line")
+        #expect(abs(plain.debugCaptionFrame.maxY - drop - plainSound.maxY) < 0.5, "the cover is off the caption's line")
 
         let lone = laidOut(pages: 1, shots: true)
         let loneSound = frame(lone.debugSoundBubble, in: lone)
-        #expect(abs(loneSound.maxY - lone.debugCaptionFrame.maxY - shotsLift) < 0.5, "with no strip the caption left its seat")
+        #expect(abs(lone.debugCaptionFrame.maxY - drop - loneSound.maxY) < 0.5, "with no strip the column left its seat")
+        #expect(SnapActionColumnLayoutTests.same(loneSound, sound), "the column moved for the strip")
     }
 
-    /// Every feed's no-strip caption takes the same seat as over a strip:
-    /// the seat's lift above the cover's line (#2301, option c; #1726 had it
-    /// on the line).
+    /// Every feed's no-strip caption and column take the same seat as over a
+    /// strip: the column's bottom on the caption's letters' line (#2326;
+    /// #2301 had the column on the composer's line, #1726 the caption on
+    /// the column's bottom).
     @Test func everyFeedsCaptionTakesItsSeatWithNoStrip() {
         let chrome = SnapActionColumnLayoutTests.chrome()
         chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true))
@@ -373,8 +377,8 @@ struct SnapForYouRootTests {
         chrome.setNeedsLayout()
         chrome.layoutIfNeeded()
         let cover = chrome.debugSoundBubble.convert(chrome.debugSoundBubble.bounds, to: chrome)
-        let lift = SnapChromeView.coverLineLift(overTabBar: false)
-        #expect(abs(cover.maxY - chrome.debugCaptionFrame.maxY - lift) < 0.5, "the caption is off its seat")
+        let letters = chrome.debugCaptionFrame.maxY - SnapChromeView.captionLetterDrop
+        #expect(abs(cover.maxY - letters) < 0.5, "the column is off the caption's line")
     }
 
     // MARK: - The column

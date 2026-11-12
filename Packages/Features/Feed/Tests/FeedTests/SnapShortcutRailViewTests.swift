@@ -460,9 +460,13 @@ struct SnapShortcutRailViewTests {
         let media = try corner(mediaURL: URL(string: "mock://media/1"))
         let text = try corner(mediaURL: nil)
 
-        // Pixel-identical rail + "+" across formats — one unified anchor.
-        #expect(media.rail == text.rail)
-        #expect(media.compose == text.compose)
+        // One unified anchor across formats, a media page's standing the
+        // column's lift higher at rest, on the caption's line (#2326): the
+        // same "+", the rail's bottom on it.
+        let lift = SnapChromeView.columnLineLift(overTabBar: false)
+        #expect(SnapActionColumnLayoutTests.same(media.compose.offsetBy(dx: 0, dy: lift), text.compose))
+        #expect(media.rail.minX == text.rail.minX && media.rail.width == text.rail.width)
+        #expect(abs(text.rail.maxY - media.rail.maxY - lift) < 0.5)
 
         // Collision guard: the pill's bottom stands one gap over the sound
         // bubble's station (#680), on every format, so it never reaches the

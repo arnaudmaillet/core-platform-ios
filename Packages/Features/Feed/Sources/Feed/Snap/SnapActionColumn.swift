@@ -28,6 +28,13 @@ import UIKit
 /// - The Messages thread and the comments sheet: no column (a conversation
 ///   has nothing to like); the row's own bubble ends it.
 ///
+/// - ⚠️ AT REST ON A MEDIA PAGE (#2326, the owner 2026-11-11) the whole
+///   column stands `SnapChromeView.columnLineLift` higher, its bottom on the
+///   caption's letters' line, `captionAboveStrip` over the page strip; it
+///   glides down to the coordinates below — the composer's — inside the
+///   comments' opening, on the opening's own progress, and back up inside
+///   the close. A text page's column never leaves them.
+///
 /// The like pill and the dropped lower bubble began behind `-snap-like-pill`
 /// (#669) and became the layout on 2026-10-08 (#680).
 /// - KEYBOARD UP the column still does not move (asked 2026-10-02): only the

@@ -1616,6 +1616,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // The interface, and the action column riding above it (#695).
         chrome.alpha = 1 - hidden
         columnStage.alpha = 1 - hidden
+        // …which glides down to the composer's line on the same share, and
+        // back up as the interface comes back (#2326): the sheet's own
+        // movement is the clock, a drag that cancels included.
+        chrome.setCommentsSheetShare(hidden)
         guard let stage = mediaCard.superview else { return }
         let mediaRegion = stage.convert(mediaRegion, from: nil)
         guard mediaRegion.width > 0, mediaRegion.height > 0 else { return }
@@ -1868,6 +1872,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         commentsSheetMediaFade = 1
         chrome.alpha = 1
         columnStage.alpha = 1
+        chrome.setCommentsSheetShare(0)
         mediaCard.transform = .identity
         // Back to the page before the mask goes: the spread's sides never
         // show.

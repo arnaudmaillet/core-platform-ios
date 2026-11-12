@@ -180,17 +180,43 @@ final class SnapChromeView: UIView {
     /// strip or not. Stated from the glass, so it is the same on both bars:
     /// about 6 pt on a pushed post, 10 on Shots.
     ///
-    /// ⚠️ THE COLUMN DOES NOT RISE (the owner, 2026-11-11, option c): the
-    /// sound cover stays on the composer's line (`inputRestingGap`), level
-    /// with the engaged composer's field, and the composer's stake and rail
-    /// keep standing exactly on the like and the sound. The caption's bottom
-    /// leaves the cover's line by this lift (#2252's level is given up).
+    /// The column rises too since #2326 (`columnLineLift`), which reverses
+    /// #2301's option (c), where it stayed on the composer's line.
     static func coverLineLift(overTabBar: Bool, breathApplied: Bool = true) -> CGFloat {
-        let glass: CGFloat = SnapActionColumn.glassBelowMargins(overTabBar: overTabBar, breathApplied: breathApplied)
-        let lettersAboveMargins: CGFloat = SnapActionColumn.stripAboveGlass + SnapMediaPageBarView.thickness
-            + SnapActionColumn.captionAboveStrip - glass
+        let lettersAboveMargins: CGFloat = captionLettersAboveMargins(overTabBar: overTabBar, breathApplied: breathApplied)
         let captionBottomAboveMargins: CGFloat = lettersAboveMargins - captionLetterDrop
         return max(0, captionBottomAboveMargins - SnapActionColumn.inputRestingGap)
+    }
+
+    /// Where the caption's letters end above the margins line on a media
+    /// page (#2301): `captionAboveStrip` over the strip's top, which stands
+    /// `stripAboveGlass` over the bar's glass.
+    static func captionLettersAboveMargins(overTabBar: Bool, breathApplied: Bool = true) -> CGFloat {
+        let glass: CGFloat = SnapActionColumn.glassBelowMargins(overTabBar: overTabBar, breathApplied: breathApplied)
+        return SnapActionColumn.stripAboveGlass + SnapMediaPageBarView.thickness
+            + SnapActionColumn.captionAboveStrip - glass
+    }
+
+    /// ⚠️ THE COLUMN ON THE CAPTION'S LINE (#2326, the owner 2026-11-11,
+    /// reversing #2301's option c): how far the whole action column — the
+    /// sound cover or the share bubble at its bottom, the post's actions, the
+    /// like pill and the emote rail over it — stands above the composer's
+    /// line (`inputRestingGap`) on a media page at rest. Its bottom lands on
+    /// the caption's letters' line, `captionAboveStrip` (16 pt) over the
+    /// strip's top, on both bars: 10 pt on a pushed post, 14 on Shots.
+    ///
+    /// This is the cover line's lift (`coverLineLift`) plus the caption's
+    /// letter drop: the caption's frame keeps what its line box holds under
+    /// the baseline, the column has nothing under its bottom.
+    ///
+    /// ⚠️ THE OTHER POSITION IS THE COMPOSER'S LINE. The engaged composer's
+    /// stake and rail stand on the like pill and the sound bubble (#669,
+    /// #680) at `inputRestingGap`; the column glides down to it inside the
+    /// comments' opening, driven by the opening's own progress, and back up
+    /// inside the close (`applyColumnGlide`).
+    static func columnLineLift(overTabBar: Bool, breathApplied: Bool = true) -> CGFloat {
+        let lettersAboveMargins: CGFloat = captionLettersAboveMargins(overTabBar: overTabBar, breathApplied: breathApplied)
+        return max(0, lettersAboveMargins - SnapActionColumn.inputRestingGap)
     }
 
     /// What the caption's line box keeps under its baseline: the bottom of
@@ -300,6 +326,9 @@ final class SnapChromeView: UIView {
     /// (#2301) so the band keeps its place over it.
     private var captionFloorBottom: NSLayoutConstraint?
     private var railBottom: NSLayoutConstraint?
+    /// The sound station's bottom: the column's, on the caption's line at
+    /// rest on a media page (#2326).
+    private var soundStationBottom: NSLayoutConstraint?
 
     /// The insets the cell handed over (`setFixedInsets`), before the
     /// bottom breath is added to them.
@@ -1100,10 +1129,13 @@ final class SnapChromeView: UIView {
             soundStation.widthAnchor.constraint(equalTo: bandSeat.heightAnchor)
             soundStation.heightAnchor.constraint(equalTo: bandSeat.heightAnchor)
         }
-        // On the composer's line, not raised with the caption (#2301, c).
-        soundStation.bottomAnchor.constraint(
+        // On the caption's line at rest (#2326, `applySeat` raises it from
+        // the composer's line).
+        let soundBottom = soundStation.bottomAnchor.constraint(
             equalTo: layoutMarginsGuide.bottomAnchor, constant: -SnapActionColumn.inputRestingGap
-        ).isActive = true
+        )
+        soundStationBottom = soundBottom
+        soundBottom.isActive = true
         captionLabel.trailingAnchor.constraint(
             equalTo: soundStation.leadingAnchor, constant: -Spacing.md
         ).isActive = true
@@ -1258,14 +1290,36 @@ final class SnapChromeView: UIView {
     /// pill and its rail rise by the capsule's room, the capsule shows on a
     /// media page (the sound bubble's rule).
     private func applyPostActionsLayout() {
-        let lift = showsPostActions ? SnapPostActionsCapsule.columnExtent : 0
-        // The band rises with the caption (#2301); the like pill keeps its
-        // top where the column stands (option c).
-        boostStationTop?.constant = -lift + currentCoverLineLift
-        boostStationBottom?.constant = -(Self.boostStationBottomInset + lift)
-        railBottom?.constant = -lift + currentCoverLineLift
+        applyColumnSeat()
         applySoundVisibility()
         setNeedsLayout()
+    }
+
+    /// The column's stations as the page stands (#2326): risen by the
+    /// column's lift on a media page at rest — the like pill, the post's
+    /// actions and the sound together, the rail's bottom with them — and the
+    /// like pill and its rail risen by the capsule's room (#1681) while the
+    /// capsule shows. The like pill's top hangs off the band's seat, which
+    /// already rose by the cover line's lift with the caption floor: only
+    /// the difference is added. True when a constant changed.
+    @discardableResult
+    private func applyColumnSeat() -> Bool {
+        let actionsLift: CGFloat = showsPostActions ? SnapPostActionsCapsule.columnExtent : 0
+        let column = currentColumnLineLift
+        let overBand = currentCoverLineLift - column
+        let constants: [(NSLayoutConstraint?, CGFloat)] = [
+            (boostStationTop, -actionsLift + overBand),
+            (boostStationBottom, -(Self.boostStationBottomInset + actionsLift + column)),
+            (railBottom, -actionsLift + overBand),
+            (soundStationBottom, -(SnapActionColumn.inputRestingGap + column)),
+        ]
+        var changed = false
+        for (constraint, constant) in constants {
+            guard let constraint, constraint.constant != constant else { continue }
+            constraint.constant = constant
+            changed = true
+        }
+        return changed
     }
 
     /// The sound bubble: shown for a post with a face — every media post has
@@ -1315,7 +1369,9 @@ final class SnapChromeView: UIView {
         glassColumn.layoutIfNeeded()
         // The wheel on its seat (#1872) — by size and centre: a scroll view's
         // bounds origin is its offset.
-        let wheelFrame = railSeat.convert(railSeat.bounds, to: railLayer)
+        // Into the column's layer, which the wheel's layer fills: the wheel's
+        // layer's own glide (#2326) is not undone by the conversion.
+        let wheelFrame = railSeat.convert(railSeat.bounds, to: columnLayer)
         if shortcutRail.bounds.size != wheelFrame.size { shortcutRail.bounds.size = wheelFrame.size }
         let centre = CGPoint(x: wheelFrame.midX, y: wheelFrame.midY)
         if shortcutRail.center != centre { shortcutRail.center = centre }
@@ -1338,9 +1394,9 @@ final class SnapChromeView: UIView {
         let fixedZones = SnapShortcutRailView.restingWindowHeight
             + SnapShortcutRailView.edgeFadeLength
             + seat.height
-        // The rail stands the seat's lift below the risen band (#2301,
-        // option c): its bottom stays with the column.
-        let headroom = seat.maxY + currentCoverLineLift - base - fixedZones
+        // The rail's bottom rides the column, not the band (#2326): the
+        // column rose by its own lift, the band by the cover line's.
+        let headroom = seat.maxY + currentCoverLineLift - currentColumnLineLift - base - fixedZones
         guard headroom > 0 else { return }
         let aligned = (headroom / SnapShortcutRailView.step).rounded(.down) * SnapShortcutRailView.step
         let constant = base + (headroom - aligned)
@@ -1389,30 +1445,99 @@ final class SnapChromeView: UIView {
     /// media page's; a text page keeps #2252's line.
     private var currentCoverLineLift: CGFloat {
         guard hasMedia else { return 0 }
-        let raw: CGFloat = Self.coverLineLift(overTabBar: sitsOverTabBar, breathApplied: fixedInsets != nil)
-        // On the pixel grid, so the band, the floor and the rail's headroom
-        // all move by the same drawn amount.
+        return onPixels(Self.coverLineLift(overTabBar: sitsOverTabBar, breathApplied: fixedInsets != nil))
+    }
+
+    /// The column's lift for this chrome as it stands (#2326): a media
+    /// page's; a text page keeps #2252's line.
+    private var currentColumnLineLift: CGFloat {
+        guard hasMedia else { return 0 }
+        return onPixels(Self.columnLineLift(overTabBar: sitsOverTabBar, breathApplied: fixedInsets != nil))
+    }
+
+    /// On the pixel grid, so the band, the floor, the column and the rail's
+    /// headroom all move by the same drawn amount.
+    private func onPixels(_ raw: CGFloat) -> CGFloat {
         let scale: CGFloat = max(traitCollection.displayScale, 1)
         return (raw * scale).rounded() / scale
     }
 
-    /// Raises the caption and its floor (the band rides it) by the lift;
-    /// the column stays on the composer's line (option c).
+    /// Raises the caption and its floor (the band rides it) by the cover
+    /// line's lift, and the whole column by its own (#2326), so its bottom
+    /// stands on the caption's letters' line.
     private func applySeat() {
         let lift = currentCoverLineLift
         let captionBottom: CGFloat = -(SnapActionColumn.inputRestingGap + lift)
-        guard captionOnCoverLine?.constant != captionBottom else { return }
-        captionOnCoverLine?.constant = captionBottom
-        captionFloorBottom?.constant = -(Spacing.xl + lift)
-        // The band rises with the floor; the like pill (whose top is the
-        // band's) stays with the column.
-        let actionsLift: CGFloat = showsPostActions ? SnapPostActionsCapsule.columnExtent : 0
-        boostStationTop?.constant = -actionsLift + lift
-        // The shortcut rail is the column's too: its bottom stays on the
-        // like pill's square, not on the risen band.
-        railBottom?.constant = -actionsLift + lift
-        setNeedsLayout()
+        var changed = false
+        if captionOnCoverLine?.constant != captionBottom {
+            captionOnCoverLine?.constant = captionBottom
+            captionFloorBottom?.constant = -(Spacing.xl + lift)
+            changed = true
+        }
+        if applyColumnSeat() { changed = true }
+        // The glide is a share of the column's lift, which may have changed.
+        applyColumnGlide()
+        if changed { setNeedsLayout() }
     }
+
+    // MARK: - The column's glide with the comments (#2326)
+
+    /// How far the comments' opening has gone, as the in-page engagement
+    /// tells it (`setCommentsEngagedProgress`): 0 at rest, 1 engaged.
+    private var engagementColumnShare: CGFloat = 0
+    /// How far the comments sheet has taken the page's interface
+    /// (`setCommentsSheetShare`): 0 at rest, 1 the sheet up.
+    private var sheetColumnShare: CGFloat = 0
+
+    /// ⚠️ THE COLUMN GLIDES WITH THE COMMENTS, ON THEIR CLOCK (#2326). Its
+    /// two positions:
+    /// - AT REST, on the caption's line: the stations' constraints, risen by
+    ///   `columnLineLift` (`applyColumnSeat`);
+    /// - ENGAGED, on the composer's line (`inputRestingGap`), where the
+    ///   engaged composer's stake and rail stand on the like pill and the
+    ///   sound bubble (#669, #680): the same stations, shown that lift lower.
+    ///
+    /// Between them, the drop is the lift times how far the comments'
+    /// transition has gone — the in-page engagement's progress or the sheet's
+    /// share of the interface, whichever is further — so the column follows
+    /// the finger, the spring and the sheet's own movement with no clock of
+    /// its own: a drag that cancels takes it back with the finger.
+    ///
+    /// A translation of the column's glass and of the wheel's layer: the
+    /// stations — and every constraint the caption, the band and the strip
+    /// keep against them — stay at rest, nothing is laid out again on a
+    /// frame of the transition, and the glass column's own morph is left
+    /// alone. Inside an animation block (the engagement's spring), the
+    /// translation animates on that block's curve.
+    private func applyColumnGlide() {
+        let share = min(max(0, max(engagementColumnShare, sheetColumnShare)), 1)
+        let drop = currentColumnLineLift * share
+        let shift: CGAffineTransform = drop == 0 ? .identity : CGAffineTransform(translationX: 0, y: drop)
+        guard glassColumn.transform != shift || railLayer.transform != shift else { return }
+        glassColumn.transform = shift
+        railLayer.transform = shift
+        // The wheel's capsule is glass of the column's container: placed
+        // again against the wheel, both moved alike.
+        shortcutRail.capsule.layout()
+    }
+
+    /// How far the comments SHEET has taken the page's interface (#2087,
+    /// #2326): 0 at rest, 1 the sheet up — the pose's `interface`, read
+    /// every frame from the sheet's own movement. The column glides down to
+    /// the composer's line with it, and back up as it comes back.
+    func setCommentsSheetShare(_ share: CGFloat) {
+        let clamped = min(max(0, share), 1)
+        guard clamped != sheetColumnShare else { return }
+        sheetColumnShare = clamped
+        applyColumnGlide()
+    }
+
+    #if DEBUG
+    /// How far the column stands below its resting seat right now (#2326).
+    var debugColumnGlide: CGFloat { glassColumn.transform.ty }
+    /// The column's lift at rest, as this chrome stands.
+    var debugColumnLineLift: CGFloat { currentColumnLineLift }
+    #endif
 
     /// The caption block's height on a media page (#2252): two caption lines,
     /// rounded up to this screen's pixels — the height the label takes for
@@ -1635,20 +1760,27 @@ final class SnapChromeView: UIView {
     private static func captionAttributes(
         secondary: Bool
     ) -> [NSAttributedString.Key: Any] {
-        let shadow = NSShadow()
-        shadow.shadowColor = UIColor.black.withAlphaComponent(0.5)
-        shadow.shadowBlurRadius = 3
-        shadow.shadowOffset = .zero
-        return [
+        [
             .font: UIFont.appFont(forTextStyle: secondary ? .footnote : CaptionRegister.textStyle),
             .foregroundColor: secondary ? CaptionRegister.timestampInk : CaptionRegister.ink,
-            .shadow: shadow,
+            .shadow: captionTextShadow,
             // GEOMETRY LOCK: every line takes the PRIMARY (body) line height —
             // identical on every run — so a line ending on the smaller
             // footnote timestamp is still a full body line: the block is
             // exactly one or two body lines tall.
             .paragraphStyle: captionParagraphStyle,
         ]
+    }
+
+    /// The caption's soft text shadow over the media: half-black, a 3 pt
+    /// blur, no offset. Worn too by the carousel's page counter, which has no
+    /// plate since #2326. A new one each time: `NSShadow` is mutable.
+    static var captionTextShadow: NSShadow {
+        let shadow = NSShadow()
+        shadow.shadowColor = UIColor.black.withAlphaComponent(0.5)
+        shadow.shadowBlurRadius = 3
+        shadow.shadowOffset = .zero
+        return shadow
     }
 
     /// The shared paragraph style baked into every caption run. It pins the
@@ -2296,6 +2428,10 @@ final class SnapChromeView: UIView {
         alpha = resolved
         // The wheel fades with the chrome.
         railLayer.alpha = resolved
+        // The column glides to the composer's line on the same progress
+        // (#2326) — on the same curve inside the engagement's spring.
+        engagementColumnShare = 1 - resolved
+        applyColumnGlide()
         shortcutRail.capsule.layout()
         if returnedToRest { commentEmptyState.restartLabelDwell() }
     }
@@ -2349,7 +2485,9 @@ final class SnapChromeView: UIView {
     private func columnSlots() -> [[SnapGlassColumn.Slot]] {
         func slot(_ id: String, _ item: UIView, _ station: UIView) -> SnapGlassColumn.Slot? {
             guard !item.isHidden, station.bounds.width > 0 else { return nil }
-            return SnapGlassColumn.Slot(id: id, frame: station.convert(station.bounds, to: glassColumn))
+            // Into the column's layer, which the glass fills: the glass's own
+            // glide (#2326) is not undone by the conversion.
+            return SnapGlassColumn.Slot(id: id, frame: station.convert(station.bounds, to: columnLayer))
         }
         let sound = slot(ColumnItem.sound, soundBubble, soundStation)
         return [
@@ -2418,6 +2556,10 @@ final class SnapChromeView: UIView {
         alpha = 1
         railLayer.alpha = 1
         lastEngagedProgress = 1
+        // The column back on its resting seat (#2326).
+        engagementColumnShare = 0
+        sheetColumnShare = 0
+        applyColumnGlide()
         caption = nil
         applyCaptionVisibility()
         onCommentsTapped = nil

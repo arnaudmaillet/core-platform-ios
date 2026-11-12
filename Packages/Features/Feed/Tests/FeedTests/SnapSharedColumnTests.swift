@@ -53,7 +53,8 @@ struct SnapSharedColumnTests {
 
     /// ⚠️ THE COMMENTS TAKE THE CHROME, NOT THE COLUMN: engaged, the chrome
     /// is at zero and the same pill and bubble are still drawn, on the same
-    /// frames, above it.
+    /// frames in their glass, above it — the glass glided down to the
+    /// composer's line by the column's lift (#2326).
     @Test func theColumnStaysWhenTheCommentsTakeThePage() {
         let (chrome, _, window) = Self.mounted()
         defer { window.isHidden = true }
@@ -67,10 +68,14 @@ struct SnapSharedColumnTests {
         #expect(Self.isDrawn(pill), "the like pill left with the chrome")
         #expect(Self.isDrawn(bubble), "the sound bubble left with the chrome")
         #expect(chrome.debugBoostButton === pill && chrome.debugSoundBubble === bubble)
-        #expect(pill.frame == frames.0 && bubble.frame == frames.1, "the column moved")
+        #expect(pill.frame == frames.0 && bubble.frame == frames.1, "the items moved in their glass")
+        #expect(chrome.debugColumnLineLift > 0)
+        #expect(abs(chrome.debugColumnGlide - chrome.debugColumnLineLift) < 0.01,
+                "the column did not glide to the composer's line")
 
         chrome.setCommentsEngaged(false)
         #expect(Self.isDrawn(pill) && Self.isDrawn(bubble))
+        #expect(chrome.debugColumnGlide == 0, "the column did not come back to the caption's line")
     }
 
     /// The column's frames are the stations the chrome kept: the same as
