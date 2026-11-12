@@ -312,9 +312,12 @@ struct TextPostComposePageTests {
         // keyboard notification carries, and what the page must read it as.
         let covered: CGFloat = 220
         let screen = page.window.screen.bounds
+        // Aimed at this test's window (`KeyboardNotificationScope`), and put
+        // down again however the test ends.
+        defer { NotificationCenter.default.post(name: UIResponder.keyboardWillHideNotification, object: page.window) }
         NotificationCenter.default.post(
             name: UIResponder.keyboardWillShowNotification,
-            object: nil,
+            object: page.window,
             userInfo: [
                 UIResponder.keyboardFrameEndUserInfoKey:
                     NSValue(cgRect: CGRect(
@@ -375,7 +378,8 @@ struct TextPostComposePageTests {
         #expect(!anywhere())
         #expect(page.composer.toolbarItems?.first?.customView == nil, "the footer still leads with a view")
 
-        NotificationCenter.default.post(name: UIResponder.keyboardWillShowNotification, object: nil)
+        defer { NotificationCenter.default.post(name: UIResponder.keyboardWillHideNotification, object: page.window) }
+        NotificationCenter.default.post(name: UIResponder.keyboardWillShowNotification, object: page.window)
         try await Task.sleep(for: .milliseconds(50))
         #expect(!anywhere(), "a pill rode up with the keyboard")
         #expect((page.composer.navigationItem.rightBarButtonItems ?? []).map(\.title) == ["Drafts"])

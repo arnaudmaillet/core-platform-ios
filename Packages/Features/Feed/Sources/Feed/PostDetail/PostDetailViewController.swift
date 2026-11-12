@@ -1869,14 +1869,26 @@ final class PostDetailViewController: UIViewController {
             // the main actor's isolation, and a `CGRect` can.
             center.addObserver(forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main) { [weak self] note in
                 let frame = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue
-                MainActor.assumeIsolated { self?.keyboardIsMoving(endingAt: frame) }
+                let scope = KeyboardNotificationScope.window(of: note)
+                MainActor.assumeIsolated {
+                    guard let self, self.view.hearsKeyboard(aimedAt: scope) else { return }
+                    self.keyboardIsMoving(endingAt: frame)
+                }
             },
             center.addObserver(forName: UIResponder.keyboardWillChangeFrameNotification, object: nil, queue: .main) { [weak self] note in
                 let frame = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue
-                MainActor.assumeIsolated { self?.keyboardIsMoving(endingAt: frame) }
+                let scope = KeyboardNotificationScope.window(of: note)
+                MainActor.assumeIsolated {
+                    guard let self, self.view.hearsKeyboard(aimedAt: scope) else { return }
+                    self.keyboardIsMoving(endingAt: frame)
+                }
             },
-            center.addObserver(forName: UIResponder.keyboardWillHideNotification, object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.keyboardWentDown() }
+            center.addObserver(forName: UIResponder.keyboardWillHideNotification, object: nil, queue: .main) { [weak self] note in
+                let scope = KeyboardNotificationScope.window(of: note)
+                MainActor.assumeIsolated {
+                    guard let self, self.view.hearsKeyboard(aimedAt: scope) else { return }
+                    self.keyboardWentDown()
+                }
             },
         ]
     }
