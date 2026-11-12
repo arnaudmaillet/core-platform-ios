@@ -83,6 +83,9 @@ final class GuestModeUITests: XCTestCase {
         let app = launch(["-guest-sign-in-after", "40"])
         let bar = app.tabBars.firstMatch
         XCTAssertTrue(bar.waitForExistence(timeout: 25), "no tab bar")
+        // ⚠️ THE APP OPENS ON FOR YOU → SHOTS (#1765), not on Explore: the
+        // map's header is reached through its tab.
+        bar.buttons["Explore"].firstMatch.tap()
         let search = app.navigationBars.buttons["Search"]
         XCTAssertTrue(search.waitForExistence(timeout: 15), "Explore's header has no search")
         assertNoMemberItems(in: app, on: "Explore")
@@ -117,6 +120,11 @@ final class GuestModeUITests: XCTestCase {
         let app = launch(["-guest-sign-in-after", "10", "-guest-sign-out-after", "20"])
         let bar = app.tabBars.firstMatch
         XCTAssertTrue(bar.waitForExistence(timeout: 25), "no tab bar")
+        // ⚠️ THE APP OPENS ON FOR YOU → SHOTS (#1765): without this tap the
+        // checks below read For You's header, which a member's sign-in dresses
+        // with the balance — rightly.
+        bar.buttons["Explore"].firstMatch.tap()
+        XCTAssertTrue(app.navigationBars.buttons["Search"].waitForExistence(timeout: 15), "Explore's header has no search")
         let bell = app.navigationBars.buttons["Notifications"]
         XCTAssertTrue(bell.waitForExistence(timeout: 40), "the member's Explore never showed the bell")
         XCTAssertFalse(balance(in: app).exists, "the member's map wears the balance (#2336)")
