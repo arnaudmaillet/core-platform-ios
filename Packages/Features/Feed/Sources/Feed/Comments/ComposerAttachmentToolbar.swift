@@ -89,6 +89,14 @@ final class ComposerAttachmentToolbar: UIToolbar {
         scrollEdgeAppearance = clear
         compactScrollEdgeAppearance = clear
         accessibilityIdentifier = "composer.attachments"
+        // Its items' place is its own, not the screen's: no safe area or
+        // superview margins that would move the anchor as the toolbar moves.
+        insetsLayoutMarginsFromSafeArea = false
+        preservesSuperviewLayoutMargins = false
+        // The anchor placed — installed, sized — wherever the toolbar
+        // places it (a content view of its own may lay it out without the
+        // toolbar's own pass): the composer re-reads it.
+        anchorView.onLayout = { [weak self] in self?.onLayout?() }
         setItems(currentItems, animated: false)
     }
 
@@ -153,10 +161,11 @@ final class ComposerAttachmentToolbar: UIToolbar {
         capsuleWidth(count: count) + CommentsInputBar.Metrics.controlSize + 96
     }
 
-    /// After each of the toolbar's own layout passes, its items placed: the
-    /// composer reads the anchor there (`CommentsInputBar
-    /// .attachmentBarDidLayOut`) — its own pass runs before the toolbar's,
-    /// and read from it the anchor stood a margin short of the own bubble.
+    /// After each of the toolbar's own layout passes, its items placed, and
+    /// each of the anchor's: the composer reads the anchor there
+    /// (`CommentsInputBar.attachmentBarDidLayOut`) — its own pass runs
+    /// before the toolbar's, and read from it the anchor stood a margin
+    /// short of the own bubble.
     var onLayout: (() -> Void)?
 
     override func layoutSubviews() {
@@ -202,4 +211,19 @@ final class OwnBubbleAnchorView: UIView {
     }
 
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool { false }
+
+    /// Laid out (installed or resized): by then every view above it is
+    /// placed, so the toolbar's owner reads where it stands.
+    var onLayout: (() -> Void)?
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        onLayout?()
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        guard window != nil else { return }
+        onLayout?()
+    }
 }

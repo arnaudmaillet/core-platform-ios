@@ -538,11 +538,11 @@ final class CommentsInputBar: UIView {
         let bar = ComposerAttachmentToolbar(sources: sources, tint: Self.restingTint) { [weak self] id in
             self?.attachmentTapped(id)
         }
-        // ⚠️ THE TOOLBAR PLACES ITS ITEMS IN ITS OWN PASS, after ours — and
-        // its first one may come later still, once its items are installed.
-        // Read from our pass only, the anchor was not where the toolbar
-        // finally put it, and the capsule stood a margin (15.5 pt) short of
-        // the own bubble. Each of its passes re-reads the anchor.
+        // ⚠️ THE TOOLBAR PLACES ITS ITEMS IN ITS OWN PASSES, after ours —
+        // the first may come later still, once its items are installed, and
+        // in a view of its own rather than the toolbar. Read from our pass
+        // only, the capsule stood a margin (15.5 pt) short of the own
+        // bubble. The toolbar's passes and the anchor's own re-read it.
         bar.onLayout = { [weak self] in self?.attachmentBarDidLayOut() }
         bar.translatesAutoresizingMaskIntoConstraints = false
         bar.maximumContentSizeCategory = .large
@@ -570,33 +570,77 @@ final class CommentsInputBar: UIView {
 
     /// Lays the toolbar so its anchor stands exactly on the own bubble's
     /// resting place: the toolbar keeps margins of its own, read off its
-    /// layout rather than assumed. Settled passes only — never inside an
-    /// animation, which would slide the capsule. Returns whether it moved.
+    /// layout rather than assumed. Returns whether it moved.
     /// `laysOutToolbar`: from our pass, the toolbar is laid out first; from
     /// its own (`attachmentBarDidLayOut`), it just was.
+    ///
+    /// Read inside an animation too: the anchor's place in the toolbar is
+    /// its final one (the model, not the presentation), and the same in
+    /// both states, so a fold reads "aligned". A guard that skipped
+    /// animated passes left the anchor unread when the toolbar first
+    /// placed its items inside one (the screen's appearance, a keyboard).
+    ///
+    /// ⚠️ ASSIGNED, NEVER ACCUMULATED: the constants come from where the
+    /// anchor stands INSIDE the toolbar (its distance from the toolbar's
+    /// trailing edge, its height in it), which the toolbar's place in the
+    /// row does not change. A read made before the toolbar moved — this
+    /// runs from our pass and, nested, from the toolbar's — then gives the
+    /// same answer twice instead of adding the correction twice.
     private func alignAttachmentBar(laysOutToolbar: Bool = true) -> Bool {
-        guard let bar = attachmentBar, let trailing = attachmentBarTrailing, let centreY = attachmentBarCentreY,
-              UIView.inheritedAnimationDuration == 0, bar.bounds.width > 0 else { return false }
-        if laysOutToolbar { UIView.performWithoutAnimation { bar.layoutIfNeeded() } }
-        let anchor = bar.anchorView
-        guard anchor.superview != nil, anchor.bounds.width > 0 else { return false }
-        let centre = anchor.convert(CGPoint(x: anchor.bounds.midX, y: anchor.bounds.midY), to: self)
-        let slot = ownBubbleSlot.layoutFrame
-        let dx = slot.midX - centre.x
-        let dy = slot.midY - centre.y
-        // A toolbar not laid out yet reads nonsense: no chase across the row.
-        guard abs(dx) > 0.5 || abs(dy) > 0.5, abs(dx) < bar.bounds.width, abs(dy) < bar.bounds.height else {
+        guard let bar = attachmentBar, let trailing = attachmentBarTrailing, let centreY = attachmentBarCentreY else {
             return false
         }
-        // Leading/trailing constants run against the layout direction.
-        trailing.constant += dx * layoutDirectionSign
-        centreY.constant += dy
+        guard bar.bounds.width > 0 else { return noteAlignment("bailed: toolbar unsized") }
+        // Never forced inside an animation (the toolbar's own fold, the
+        // keyboard's ride): its items would land unanimated.
+        if laysOutToolbar, UIView.inheritedAnimationDuration == 0 {
+            UIView.performWithoutAnimation { bar.layoutIfNeeded() }
+        }
+        let anchor = bar.anchorView
+        guard anchor.superview != nil else { return noteAlignment("bailed: anchor not installed") }
+        guard anchor.bounds.width > 0 else { return noteAlignment("bailed: anchor unsized") }
+        let inBar = anchor.convert(CGPoint(x: anchor.bounds.midX, y: anchor.bounds.midY), to: bar)
+        let half = ownBubbleSlot.layoutFrame.width / 2
+        // The anchor's centre from the toolbar's trailing edge; the slot's
+        // centre is `half` from its own: the toolbar's trailing edge stands
+        // the difference past the slot's (leading/trailing constants run
+        // with the layout direction, so one formula serves both).
+        let rightToLeft = effectiveUserInterfaceLayoutDirection == .rightToLeft
+        let fromTrailing = rightToLeft ? inBar.x - bar.bounds.minX : bar.bounds.maxX - inBar.x
+        let wantedTrailing = fromTrailing - half
+        let wantedCentreY = bar.bounds.midY - inBar.y
+        // A toolbar not laid out yet reads nonsense: no chase across the row.
+        guard abs(wantedTrailing) < bar.bounds.width, abs(wantedCentreY) < bar.bounds.height else {
+            return noteAlignment("bailed: anchor at \(inBar) in a toolbar of \(bar.bounds)")
+        }
+        guard abs(trailing.constant - wantedTrailing) > 0.25 || abs(centreY.constant - wantedCentreY) > 0.25 else {
+            return noteAlignment("aligned: trailing \(trailing.constant), centreY \(centreY.constant)")
+        }
+        trailing.constant = wantedTrailing
+        centreY.constant = wantedCentreY
+        _ = noteAlignment("applied: trailing \(wantedTrailing), centreY \(wantedCentreY) (anchor at \(inBar) in \(bar.bounds))")
         return true
     }
 
-    /// The toolbar has placed its items: the anchor read where they landed,
-    /// and the toolbar moved onto the own bubble on our next pass — a move
-    /// that keeps its size, so it lays nothing out again.
+    /// What the last alignment did, for tests; always `false`, so a bail
+    /// returns through it.
+    private func noteAlignment(_ note: @autoclosure () -> String) -> Bool {
+        #if DEBUG
+        debugAnchorAlignments.append(note())
+        if debugAnchorAlignments.count > 12 { debugAnchorAlignments.removeFirst() }
+        #endif
+        return false
+    }
+
+    #if DEBUG
+    /// The last alignments of the capsule's anchor, oldest first: what was
+    /// applied, or why it bailed.
+    private(set) var debugAnchorAlignments: [String] = []
+    #endif
+
+    /// The toolbar or its anchor has been laid out: the anchor read where
+    /// the toolbar put it, and the toolbar moved onto the own bubble on our
+    /// next pass — a move that keeps its size, so it lays nothing out again.
     private func attachmentBarDidLayOut() {
         guard alignAttachmentBar(laysOutToolbar: false) else { return }
         setNeedsLayout()

@@ -138,8 +138,14 @@ struct ConversationRowAttachmentsTests {
         toolbar.layoutIfNeeded()
         let anchorView = toolbar.anchorView
         let anchorCentre = anchorView.convert(CGPoint(x: anchorView.bounds.midX, y: anchorView.bounds.midY), to: bar)
+        // What the alignment did, oldest first: printed so a failing run
+        // says whether it bailed (and why) or applied a correction.
+        let trail = bar.debugAnchorAlignments.joined(separator: "\n  ")
+        print("[#2344] anchor alignments:\n  \(trail)")
+        #expect(bar.debugAnchorAlignments.contains { $0.hasPrefix("applied") },
+                "the anchor was never aligned:\n  \(trail)")
         #expect(abs(anchorCentre.x - own.frame.midX) < 1 && abs(anchorCentre.y - own.frame.midY) < 1,
-                "the anchor \(anchorCentre) is off the own bubble \(own.frame)")
+                "the anchor \(anchorCentre) is off the own bubble \(own.frame):\n  \(trail)")
     }
 
     /// A draft folds the capsule into the own bubble — the anchor alone —
