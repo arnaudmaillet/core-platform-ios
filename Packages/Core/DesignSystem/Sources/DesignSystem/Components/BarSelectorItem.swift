@@ -52,6 +52,9 @@ public final class BarSelectorItem {
     private let separator = BarItems.separator()
     /// The width the strip last stated; nil before the first fit.
     private var statedWidth: CGFloat?
+    /// The title budget the host last fitted with, kept for the narrowing a
+    /// sweep asks for.
+    private var lastTitleBudget: BarSelectorBudget?
 
     public init(strip: PagedTabBar, id: String) {
         strip.hosting = .platter
@@ -71,10 +74,17 @@ public final class BarSelectorItem {
     /// Fits the strip to the room `budget` leaves: the title size and the
     /// ceiling. Returns true when the width the strip states moved, so the
     /// host lays its bar out again — the item stays the same.
+    ///
+    /// `titleBudget`, when given, decides the title size instead of `budget`:
+    /// an item that comes into the bar without taking the titles' size — the
+    /// inbox's magnifier (#2361) — narrows the strip, which scrolls, and no
+    /// title shrinks for it.
     @discardableResult
-    public func fit(_ budget: BarSelectorBudget) -> Bool {
+    public func fit(_ budget: BarSelectorBudget, titleBudget: BarSelectorBudget? = nil) -> Bool {
         let ceiling = ceiling(for: budget)
-        strip.titleSize = strip.preferredWidth(at: .regular) <= ceiling + 0.5 ? .regular : .compact
+        lastTitleBudget = titleBudget
+        let titleRoom = titleBudget.map(self.ceiling(for:)) ?? ceiling
+        strip.titleSize = strip.preferredWidth(at: .regular) <= titleRoom + 0.5 ? .regular : .compact
         strip.widthCeiling = ceiling
         let width = strip.intrinsicContentSize.width
         if let statedWidth, abs(statedWidth - width) <= 0.5 { return false }
@@ -103,7 +113,7 @@ public final class BarSelectorItem {
     public func narrowAfterOverflow(_ budget: BarSelectorBudget) -> Bool {
         guard ceiling(for: budget) > strip.intrinsicContentSize.height + 0.5 else { return false }
         trim += Self.trimStep
-        fit(budget)
+        fit(budget, titleBudget: lastTitleBudget)
         item = BarItems.container(id: id, view: strip)
         return true
     }

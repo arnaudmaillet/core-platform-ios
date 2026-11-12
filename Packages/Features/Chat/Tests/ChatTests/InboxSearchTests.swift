@@ -1,6 +1,7 @@
 import CoreModels
 import CoreNavigation
 import CoreNetworking
+import DesignSystem
 import Foundation
 import Testing
 import UIKit
@@ -576,5 +577,110 @@ struct InboxSystemSearchTests {
         screen.willPresentSearchController(search)
         screen.willDismissSearchController(search)
         #expect(screen.searchPlaceholderShown == "Search people and chats")
+    }
+}
+
+/// **`-inbox-search-in-bar` (#2361): the search is UIKit's integrated
+/// magnifier on the bar's right, after the selector.** Flag off, the field
+/// stays stacked under the bar (#1901, #2337). The same search controller, the
+/// same results, the same placeholder: only the placement changes. The
+/// selector's container narrows for the magnifier and scrolls; no title
+/// shrinks for it, and the selected tab stays whole.
+@MainActor
+struct InboxSearchInBarTests {
+    /// A page with a count on its segment.
+    private final class Surface: UIViewController, InboxSurface {
+        let category: MessagesCategory
+        var chrome = InboxSurfaceChrome()
+        var onChromeChange: ((InboxSurfaceChrome) -> Void)?
+        func surfaceDidBecomeActive() {}
+        init(_ category: MessagesCategory) {
+            self.category = category
+            super.init(nibName: nil, bundle: nil)
+        }
+        @available(*, unavailable)
+        required init?(coder: NSCoder) { fatalError() }
+        func publish(_ badge: Int) {
+            chrome.badgeCount = badge
+            onChromeChange?(chrome)
+        }
+    }
+
+    private func inbox(searchInBar: Bool) -> (MessagesInboxViewController, [Surface]) {
+        let repository = StubChatProvider()
+        let viewModel = InboxSearchViewModel(
+            catalog: InboxCatalog(repository: repository), viewer: repository,
+            people: StubPeopleDirectory([]), debounce: .zero
+        )
+        let surfaces = [Surface(.all), Surface(.requests), Surface(.suggestions)]
+        let screen = MessagesInboxViewController(
+            surfaces: surfaces, searchResults: InboxSearchResultsViewController(viewModel: viewModel),
+            searchInBar: searchInBar
+        )
+        return (screen, surfaces)
+    }
+
+    @Test func inTheBarTheSearchIsTheIntegratedMagnifier() throws {
+        let (screen, _) = inbox(searchInBar: true)
+        screen.loadViewIfNeeded()
+
+        let search = try #require(screen.navigationItem.searchController)
+        #expect(screen.navigationItem.preferredSearchBarPlacement == .integratedButton)
+        #expect(!screen.navigationItem.hidesSearchBarWhenScrolling, "no field under the bar to collapse")
+        #expect(search.searchResultsController is InboxSearchResultsViewController)
+        #expect(search.searchBar.placeholder == MessagesInboxViewController.searchPlaceholder)
+        // UIKit places the magnifier: it is not one of the screen's items.
+        #expect(screen.navigationItem.rightBarButtonItems?.isEmpty ?? true)
+        #expect(screen.navigationItem.titleView == nil)
+    }
+
+    @Test func flagOffTheFieldStaysStacked() throws {
+        let (screen, _) = inbox(searchInBar: false)
+        screen.loadViewIfNeeded()
+
+        #expect(screen.navigationItem.searchController != nil)
+        #expect(screen.navigationItem.preferredSearchBarPlacement == .stacked)
+        #expect(screen.navigationItem.hidesSearchBarWhenScrolling)
+    }
+
+    /// An iPhone SE's bar, the bell leading, counts 43 and 99+: the magnifier
+    /// takes its platter first, and the selector's container takes what is
+    /// left — narrower than its content, so it scrolls — at the titles' own
+    /// size. Selecting the last tab keeps it whole in view.
+    @Test func theSelectorNarrowsScrollsAndKeepsTheSelectedTabInView() throws {
+        func hosted(searchInBar: Bool) -> (MessagesInboxViewController, UIWindow) {
+            let (screen, surfaces) = inbox(searchInBar: searchInBar)
+            let bell = UIBarButtonItem(customView: UIView())
+            screen.setLeadingAccessoryItem(bell)
+            let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 375, height: 667))
+            window.rootViewController = UINavigationController(rootViewController: screen)
+            window.isHidden = false
+            window.layoutIfNeeded()
+            surfaces[0].publish(43)
+            surfaces[1].publish(150)
+            window.layoutIfNeeded()
+            return (screen, window)
+        }
+        let (inBar, inBarWindow) = hosted(searchInBar: true)
+        defer { inBarWindow.isHidden = true }
+        let (stacked, stackedWindow) = hosted(searchInBar: false)
+        defer { stackedWindow.isHidden = true }
+
+        let strip = inBar.debugSelector
+        let ceiling = try #require(strip.widthCeiling)
+        let stackedCeiling = try #require(stacked.debugSelector.widthCeiling)
+        #expect(ceiling <= stackedCeiling - BarSelectorBudget.platter + 0.5,
+                "the magnifier's platter was not taken first: \(ceiling) vs \(stackedCeiling)")
+        #expect(strip.titleSize == stacked.debugSelector.titleSize, "a title shrank for the magnifier")
+        #expect(strip.debugContentWidth > strip.debugViewportWidth + 0.5,
+                "the container is not narrower than its content: \(strip.debugContentWidth) in \(strip.debugViewportWidth)")
+        #expect(strip.debugStripAcceptsScrolling)
+
+        strip.select(2)
+        inBarWindow.layoutIfNeeded()
+        strip.layoutIfNeeded()
+        let pill = strip.debugPillInViewport
+        #expect(pill.minX >= -0.5 && pill.maxX <= strip.debugViewportWidth + 0.5,
+                "the selected tab is cut: \(pill) in \(strip.debugViewportWidth)")
     }
 }

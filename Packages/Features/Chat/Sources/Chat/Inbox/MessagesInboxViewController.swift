@@ -90,14 +90,21 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     /// answer anyway — see `InboxSearchViewModel`.
     private let searchResults: InboxSearchResultsViewController?
 
+    /// `-inbox-search-in-bar` (#2361): the search is UIKit's integrated
+    /// magnifier on the bar's right, after the selector, instead of the field
+    /// stacked under the bar. Read once, at launch.
+    let searchInBar: Bool
+
     init(
         surfaces: [any InboxSurface],
         searchResults: InboxSearchResultsViewController? = nil,
-        initialCategory: MessagesCategory = .all
+        initialCategory: MessagesCategory = .all,
+        searchInBar: Bool = DebugFlags.isOn("-inbox-search-in-bar")
     ) {
         precondition(!surfaces.isEmpty, "The inbox needs at least one surface")
         self.surfaces = surfaces
         self.searchResults = searchResults
+        self.searchInBar = searchInBar
         categoryBar = PagedTabBar(
             titles: surfaces.map(\.category.title), style: .navigationTitle
         )
@@ -435,8 +442,16 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
             // The results cover the inbox, not the tab bar controller.
             definesPresentationContext = true
             navigationItem.searchController = searchController
-            navigationItem.preferredSearchBarPlacement = .stacked
-            navigationItem.hidesSearchBarWhenScrolling = true
+            if searchInBar {
+                // `[bell][selector] ——— [🔍]` (#2361): UIKit puts the magnifier
+                // at the bar's trailing end and unfolds the field from it. No
+                // field under the bar, so the pages start right under it.
+                navigationItem.preferredSearchBarPlacement = .integratedButton
+                navigationItem.hidesSearchBarWhenScrolling = false
+            } else {
+                navigationItem.preferredSearchBarPlacement = .stacked
+                navigationItem.hidesSearchBarWhenScrolling = true
+            }
         }
         applyRestingBar()
     }
@@ -483,7 +498,7 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         // A back chevron (none on the tab root) would keep its place before
         // the group.
         navigationItem.leftItemsSupplementBackButton = true
-        selector.fit(selectorBudget)
+        selector.fit(selectorBudget, titleBudget: selectorTitleBudget)
         applyLeadingGroup()
     }
 
@@ -501,7 +516,7 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     /// bar to lay out again. The item stays the same: no group is rewritten
     /// (`BarSelectorItem`'s note on why it is never re-minted).
     private func refitSelector() {
-        guard isViewLoaded, selector.fit(selectorBudget) else { return }
+        guard isViewLoaded, selector.fit(selectorBudget, titleBudget: selectorTitleBudget) else { return }
         navigationController?.navigationBar.setNeedsLayout()
         traceSelector("fit")
         // A wider strip (a count arriving) on a bar on show can tip it over.
@@ -551,10 +566,25 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     }
 
     /// The room the bar leaves the selector: the bell before it, whatever
-    /// trails (nothing today, #2336). Nothing can come into the trailing
+    /// trails (nothing today, #2336). Nothing else can come into the trailing
     /// corner on this screen (no editing, no batch action, no Cancel of its
-    /// own — the search's Cancel is in the stacked field, under the bar).
+    /// own — the stacked search's Cancel is in its field, under the bar).
+    ///
+    /// With the search in the bar (#2361), UIKit's magnifier trails too: it
+    /// takes its platter first, and the selector's container takes what is
+    /// left, scrolling past it — the selected tab kept in view by the strip
+    /// (`PagedTabBar`'s reveal).
     private var selectorBudget: BarSelectorBudget {
+        var budget = selectorTitleBudget
+        if searchInBar, searchController != nil {
+            budget.trailingWidths.append(BarSelectorBudget.platter)
+        }
+        return budget
+    }
+
+    /// The room without the magnifier (#2361): what decides the titles' size,
+    /// so the magnifier narrows the container and never shrinks a title.
+    private var selectorTitleBudget: BarSelectorBudget {
         let navigationBarWidth = navigationController?.navigationBar.bounds.width ?? 0
         let barWidth = navigationBarWidth > 1 ? navigationBarWidth : (view.window?.bounds.width ?? view.bounds.width)
         return BarSelectorBudget(
@@ -649,8 +679,22 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     /// selector is re-fitted (15pt or 13pt, its ceiling) and the bar told to
     /// lay out again when the stated width moved (`BarSelectorItem`).
     private func setBadge(_ count: Int, at index: Int) {
-        categoryBar.setBadge(count, at: index)
+        categoryBar.setBadge(Self.debugForcedBadge(at: index) ?? count, at: index)
         refitSelector()
+    }
+
+    /// `-inbox-badges 43,150,0` (DEBUG): the counts the segments wear, in
+    /// order, whatever the pages publish — the width captures #2361 asks for
+    /// (0, 43 and "99+" on each phone).
+    private static func debugForcedBadge(at index: Int) -> Int? {
+        #if DEBUG
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let flag = arguments.firstIndex(of: "-inbox-badges"), flag + 1 < arguments.count else { return nil }
+        let counts = arguments[flag + 1].split(separator: ",").compactMap { Int($0) }
+        return counts.indices.contains(index) ? counts[index] : nil
+        #else
+        return nil
+        #endif
     }
 
 }
