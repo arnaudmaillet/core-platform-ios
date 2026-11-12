@@ -56,17 +56,39 @@ public final class CountryAtlas: Sendable {
         /// the overseas territories — France without Guiana and Réunion, which
         /// would frame half the planet. Falls back to the widest piece.
         public var mainlandBounds: (minLon: Double, minLat: Double, maxLon: Double, maxLat: Double) {
-            let outlines = polygons.compactMap(\.first)
-            let box = { (ring: [CLLocationCoordinate2D]) in
-                (minLon: ring.map(\.longitude).min() ?? 0, minLat: ring.map(\.latitude).min() ?? 0,
-                 maxLon: ring.map(\.longitude).max() ?? 0, maxLat: ring.map(\.latitude).max() ?? 0)
+            let outlines: [[CLLocationCoordinate2D]] = polygons.compactMap(\.first)
+            if let home = outlines.first(where: { Self.ring($0, contains: label.longitude, label.latitude) }) {
+                return Self.box(of: home)
             }
-            let home = outlines.first { Self.ring($0, contains: label.longitude, label.latitude) }
-                ?? outlines.max { lhs, rhs in
-                    let (a, b) = (box(lhs), box(rhs))
-                    return (a.maxLon - a.minLon) * (a.maxLat - a.minLat) < (b.maxLon - b.minLon) * (b.maxLat - b.minLat)
+            // Explicit types and one plain loop: the closure-and-tuple form of
+            // this cost the Maps target 4–5 s of type-checking (#2369).
+            var widest: Box?
+            var widestArea = -Double.infinity
+            for ring in outlines {
+                let candidate = Self.box(of: ring)
+                let area: Double = (candidate.maxLon - candidate.minLon) * (candidate.maxLat - candidate.minLat)
+                if area > widestArea {
+                    widest = candidate
+                    widestArea = area
                 }
-            return home.map(box) ?? bounds
+            }
+            return widest ?? bounds
+        }
+
+        /// A ring's bounding box.
+        typealias Box = (minLon: Double, minLat: Double, maxLon: Double, maxLat: Double)
+
+        private static func box(of ring: [CLLocationCoordinate2D]) -> Box {
+            var minLon = Double.infinity, minLat = Double.infinity
+            var maxLon = -Double.infinity, maxLat = -Double.infinity
+            for point in ring {
+                minLon = min(minLon, point.longitude)
+                maxLon = max(maxLon, point.longitude)
+                minLat = min(minLat, point.latitude)
+                maxLat = max(maxLat, point.latitude)
+            }
+            guard !ring.isEmpty else { return (0, 0, 0, 0) }
+            return (minLon: minLon, minLat: minLat, maxLon: maxLon, maxLat: maxLat)
         }
 
         /// How far `coordinate` is from the country's outline, in degrees of
