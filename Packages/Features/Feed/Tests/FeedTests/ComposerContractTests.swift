@@ -63,12 +63,12 @@ struct ComposerContractTests {
         #expect(VoiceComposer(for: .message, draftKey: nil).recorder.limit == VoiceRecorder.maximumDuration)
     }
 
-    /// A post's comments: no voice (#2309 comes next), no attachments (#2310
-    /// is on hold), the post's column; in the sheet, no column. A fresh
+    /// A post's comments: a voice comment (#2309), no attachments (#2310 is
+    /// on hold), the post's column; in the sheet, no column. A fresh
     /// composer is a post's comments.
-    @Test func theCommentsDeclareNoVoiceAndNoAttachments() {
+    @Test func theCommentsDeclareAVoiceCommentAndNoAttachments() {
         for contract in [ComposerConfiguration.comments, .commentsSheet] {
-            #expect(contract.voice == .none)
+            #expect(contract.voice == .comment)
             #expect(contract.attachments.isEmpty)
             #expect(contract.emote == .emotes)
         }
@@ -80,14 +80,18 @@ struct ComposerContractTests {
     // MARK: - A post's comments
 
     /// On the post screens the comments composer is the one composer, from
-    /// the comments' contract: no hold, no voice promised, and no waveform —
-    /// the field holds the emote button alone, the own bubble the rest.
-    @Test func thePostsComposerHasNoVoiceAndNoInlineWaveform() throws {
+    /// the comments' contract. From a source that carries no voice (#2309:
+    /// `commentsVoice`) — this panel has none — no hold, no voice promised,
+    /// and no waveform: the field holds the emote button alone, the own
+    /// bubble the rest.
+    @Test func thePostsComposerWithoutAVoiceSourceHasNoVoiceAndNoInlineWaveform() throws {
         let (controller, window) = SnapActionColumnLayoutTests.engagedPanel()
         defer { window.isHidden = true }
         let bar = controller.composeBar
         bar.onVoiceHold = { _ in }
-        #expect(bar.configuration.laysOutLike(.comments))
+        #expect(bar.configuration.column == .post && bar.configuration.attachments.isEmpty)
+        #expect(bar.configuration.voice == .none, "a source with no voice records one")
+        #expect(controller.voiceComposer == nil)
         #expect(!bar.speaksFromField)
         #expect(!bar.debugFieldHoldBegins, "a comment's field records")
         #expect(bar.debugPlaceholder != CommentsInputBar.speakOrWritePlaceholder)
@@ -123,7 +127,9 @@ struct ComposerContractTests {
         defer { window.isHidden = true }
         controller.setComposerBare()
         let bar = controller.composeBar
-        #expect(bar.configuration.laysOutLike(.commentsSheet))
+        #expect(bar.configuration.column == .none && bar.configuration.attachments.isEmpty)
+        // The sheet's voice is the page's (#2309): none from this source.
+        #expect(bar.configuration.voice == controller.commentsVoice)
         #expect(!bar.showsStake && bar.railFace == .noSlot && !bar.showsPostActions)
         // A page's later asks do not bring the column back.
         bar.showsStake = true
@@ -224,8 +230,8 @@ struct ComposerContractTests {
 
     // MARK: - Voice, where a host declares it
 
-    /// Turned on (a text post's draft records a voice post, #2209; voice
-    /// comments later, #2309): the field's hold begins over an empty field
+    /// Turned on (a text post's draft records a voice post, #2209; a post's
+    /// comments a voice comment, #2309): the field's hold begins over an empty field
     /// at rest, the field says so and VoiceOver offers it under the host's
     /// wording; turned off, all of it goes.
     @Test func aDeclaredVoiceTurnsTheHoldOnAndOff() {

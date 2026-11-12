@@ -10,8 +10,9 @@ public struct CommentDisplayModel: Equatable, Sendable, Identifiable {
     /// The relative time alone — the header shows ONLY the clean display
     /// name beside it (the @handle identifier was removed for reading
     /// comfort; the handle still travels on `CommentEntry` for routing
-    /// stubs).
-    public let metaText: String
+    /// stubs). Empty while the viewer's comment is on its way (`delivery`):
+    /// the spinner or the failed mark stands in its place.
+    public internal(set) var metaText: String
     /// Empty for a voice alone (#2309): the row hides its body label then.
     public let body: String
     /// The comment's attachment (#2309), drawn by kind in the row's slot:
@@ -58,6 +59,19 @@ public struct CommentDisplayModel: Equatable, Sendable, Identifiable {
     public var likeCount: Int = 0
     /// The viewer has a point on it.
     public var isLiked = false
+    /// The viewer's voice comment on its way, or failed (#2309): the row
+    /// draws a spinner, or the red mark (a tap sends it again), where its
+    /// time goes. Nil for every comment the server holds.
+    var delivery: CommentRowView.Delivery?
+
+    /// This row as the viewer's comment still on its way (`.sending`) or
+    /// failed (`.failed`): no time yet — the row's delivery stands there.
+    func awaiting(_ delivery: CommentRowView.Delivery) -> CommentDisplayModel {
+        var model = self
+        model.delivery = delivery
+        model.metaText = ""
+        return model
+    }
 
     public init(
         entry: CommentEntry, now: Date = Date(), canReview: Bool = false, isOwnThread: Bool = false,

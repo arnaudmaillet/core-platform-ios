@@ -601,9 +601,10 @@ struct TextPostComposePageTests {
 
     /// The draft's composer declares a voice post's voice (#2308): its field
     /// records a minute, the own bubble and the post's column as on every
-    /// post. Published, the page is a post's comments again, whose field
-    /// records nothing (voice comments are #2309). Without `-voice-posts`,
-    /// no voice at all.
+    /// post. Published, the draft's voice goes with the draft: the page just
+    /// published records nothing (a post opened again records a voice
+    /// comment where its source carries one, #2309). Without
+    /// `-voice-posts`, no voice at all.
     @Test func theDraftDeclaresAPostsVoiceUntilItIsPublished() async throws {
         let page = try await openPage(recordsVoice: true)
         let bar = page.panel.composeBar

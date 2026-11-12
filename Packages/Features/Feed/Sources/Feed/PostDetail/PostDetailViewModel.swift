@@ -580,6 +580,136 @@ public final class PostDetailViewModel {
     /// A voice post that didn't go (#2209): its take and words, to try again.
     var onVoicePublishFailed: ((TextPostVoice, String) -> Void)?
 
+    // MARK: - Voice comments (#2309)
+
+    /// A voice comment the viewer sent that the server doesn't hold yet: on
+    /// its way, or failed. Drawn at once as the viewer's own row — the take
+    /// playing from the device — as a sent message is (#719): a spinner in
+    /// its time's place, the red mark when it failed, and a tap sends it
+    /// again (`retryVoiceComment`).
+    struct PendingVoiceComment: Equatable {
+        /// comment.v1's idempotency key (#795), minted once for this comment
+        /// and sent again with every retry — and the row's id meanwhile.
+        let commentID: String
+        let take: CommentVoiceTake
+        /// The typed words that go with it; empty for a voice alone.
+        let body: String
+        let parentID: String?
+        let createdAt: Date
+        /// The take's asset once uploaded: a retry after a failed create
+        /// doesn't upload it again.
+        var uploaded: PostVoice?
+        var failed = false
+    }
+
+    /// The voice comments on their way or failed, newest first.
+    private(set) var pendingVoiceComments: [PendingVoiceComment] = []
+
+    /// Whether the comments' field records a voice comment (#2309): a post's
+    /// comments — never a draft, whose host records a voice POST (#2209) —
+    /// from a source that uploads voices.
+    var acceptsVoiceComments: Bool { !isDraft && commentsProvider?.uploadsCommentVoices == true }
+
+    /// A voice comment failed: whether the author refused it (#397), rather
+    /// than it simply failing. The row keeps it, with its retry.
+    var onVoiceCommentFailed: ((_ refused: Bool) -> Void)?
+
+    /// Sends `take` as a voice comment, with `text` (possibly empty) as its
+    /// body, under `parentID` for a reply. Optimistic, as a message is: its
+    /// row shows at once, sending; the take uploads (the voice posts' way,
+    /// #2209), then the comment is created carrying it, and the server's
+    /// comment takes the row's place.
+    func submitVoiceComment(_ take: CommentVoiceTake, text: String, parentID: String?) {
+        guard acceptsVoiceComments, postID != nil, !isUnavailable, take.duration > 0 else { return }
+        let pending = PendingVoiceComment(
+            commentID: UUID().uuidString, take: take, body: text.trimmingCharacters(in: .whitespacesAndNewlines),
+            parentID: parentID, createdAt: now()
+        )
+        pendingVoiceComments.insert(pending, at: 0)
+        // The row arrives where the viewer can see it (#921).
+        onCommentPosted?(pending.commentID)
+        emitComments()
+        sendVoiceComment(pending.commentID)
+    }
+
+    /// A failed voice comment, sent again: the same take under the same id
+    /// (#795) — and not uploaded twice when only the create failed.
+    func retryVoiceComment(_ commentID: String) {
+        guard let index = pendingVoiceComments.firstIndex(where: { $0.commentID == commentID }),
+              pendingVoiceComments[index].failed else { return }
+        pendingVoiceComments[index].failed = false
+        emitComments()
+        sendVoiceComment(commentID)
+    }
+
+    private func sendVoiceComment(_ commentID: String) {
+        guard let commentsProvider, let postID,
+              let pending = pendingVoiceComments.first(where: { $0.commentID == commentID }) else { return }
+        Task { [weak self] in
+            do {
+                let voice: PostVoice
+                if let uploaded = pending.uploaded {
+                    voice = uploaded
+                } else {
+                    voice = try await commentsProvider.uploadCommentVoice(pending.take, commentID: commentID)
+                    self?.voiceCommentUploaded(commentID, voice: voice)
+                }
+                let entry = try await commentsProvider.addComment(
+                    pending.body, attachment: .voice(voice), to: postID, parentID: pending.parentID,
+                    commentID: commentID
+                )
+                self?.voiceCommentLanded(commentID, entry: entry, take: pending.take)
+            } catch {
+                self?.voiceCommentFailed(commentID, refused: (error as? CommentsError) == .notAllowed)
+            }
+        }
+    }
+
+    private func voiceCommentUploaded(_ commentID: String, voice: PostVoice) {
+        guard let index = pendingVoiceComments.firstIndex(where: { $0.commentID == commentID }) else { return }
+        pendingVoiceComments[index].uploaded = voice
+    }
+
+    /// The server's comment in the sending row's place. The author's own
+    /// voice goes on playing from the take, as a voice post's does (#2209).
+    private func voiceCommentLanded(_ commentID: String, entry: CommentEntry, take: CommentVoiceTake) {
+        pendingVoiceComments.removeAll { $0.commentID == commentID }
+        let landed = entry.playing(from: take.fileURL)
+        postedDuringFirstPage.append((landed, firstPageGeneration))
+        insertSubmitted(landed)
+        popular.addOwn(landed, notify: false)
+        emitComments()
+    }
+
+    private func voiceCommentFailed(_ commentID: String, refused: Bool) {
+        guard let index = pendingVoiceComments.firstIndex(where: { $0.commentID == commentID }) else { return }
+        // A failure is not proof it didn't land (#795): a reload that brought
+        // it in has the last word.
+        if comments.contains(where: { $0.id == commentID }) {
+            pendingVoiceComments.remove(at: index)
+        } else {
+            pendingVoiceComments[index].failed = true
+            onVoiceCommentFailed?(refused)
+        }
+        emitComments()
+    }
+
+    /// `list` with the viewer's voice comments still on their way where a
+    /// new comment goes (`inserting`): a top-level one first, a reply after
+    /// its parent's replies — and only under a parent the list shows. One
+    /// the list already holds (a reload brought it in) is not drawn twice.
+    private func withPendingVoices(_ list: [CommentEntry]) -> [CommentEntry] {
+        guard !pendingVoiceComments.isEmpty else { return list }
+        let present = Set(list.map(\.id))
+        let author = shownIdentity
+        // Oldest first, so the newest ends on top.
+        return pendingVoiceComments.reversed().reduce(list) { result, pending in
+            guard !present.contains(pending.commentID),
+                  pending.parentID.map({ parent in result.contains { $0.id == parent } }) ?? true else { return result }
+            return Self.inserting(pending.entry(by: author), into: result)
+        }
+    }
+
     /// Becomes the post the draft just published — in ONE turn, so nothing can
     /// observe a screen that is half draft and half post.
     ///
@@ -1065,33 +1195,37 @@ public final class PostDetailViewModel {
             if popular.hasFailed { onPopularCommentsChange?(.failed(message: Self.commentsFailureMessage)) }
             return
         }
-        let now = now()
-        let viewer = shownIdentity?.profileID
-        let canReview = isViewerPostOwner && commentsProvider is any HeldCommentReviewing
-        onPopularCommentsChange?(.loaded(popular.shown.map {
-            CommentDisplayModel(
-                entry: $0, now: now, canReview: canReview && !reviewing.contains($0.id),
-                isOwnThread: Self.isOwnThread($0, viewer: viewer), likes: commentLikes[$0.id]
-            )
-        }))
+        onPopularCommentsChange?(.loaded(displayModels(for: withPendingVoices(popular.shown))))
         askForCommentLikes()
     }
 
-    private func emitComments() {
+    /// `list` as rows: each with its likes, its review state, whether it is
+    /// one of the viewer's threads — and a voice comment still on its way
+    /// drawn as such (`awaiting`).
+    private func displayModels(for list: [CommentEntry]) -> [CommentDisplayModel] {
         let now = now()
         let viewer = shownIdentity?.profileID
-        // ⚠️ RECENT IS A CONVERSATION (#2007): the server's chronology, the
-        // viewer's threads in it — they lead Popular instead
-        // (`RankedCommentsStream`).
-        let ordered = comments
         let canReview = isViewerPostOwner && commentsProvider is any HeldCommentReviewing
-        showsAnswer = true
-        onCommentsChange?(.loaded(ordered.map {
-            CommentDisplayModel(
+        let pendingFailed: [String: Bool] = Dictionary(
+            pendingVoiceComments.map { ($0.commentID, $0.failed) }, uniquingKeysWith: { first, _ in first }
+        )
+        return list.map {
+            let model = CommentDisplayModel(
                 entry: $0, now: now, canReview: canReview && !reviewing.contains($0.id),
                 isOwnThread: Self.isOwnThread($0, viewer: viewer), likes: commentLikes[$0.id]
             )
-        }))
+            guard let failed = pendingFailed[$0.id] else { return model }
+            return model.awaiting(failed ? .failed : .sending)
+        }
+    }
+
+    private func emitComments() {
+        // ⚠️ RECENT IS A CONVERSATION (#2007): the server's chronology, the
+        // viewer's threads in it — they lead Popular instead
+        // (`RankedCommentsStream`).
+        let ordered = withPendingVoices(comments)
+        showsAnswer = true
+        onCommentsChange?(.loaded(displayModels(for: ordered)))
         askForCommentLikes()
         // A like, a review, a reply count: the same comment in Popular too.
         if popular.hasAnswered { emitPopular() }
@@ -1208,5 +1342,46 @@ public final class PostDetailViewModel {
     private func setComposing(_ composing: Bool) {
         isComposing = composing
         onComposingChange?(composing)
+    }
+}
+
+extension PostDetailViewModel.PendingVoiceComment {
+    /// The row it is drawn as meanwhile: the viewer's comment, by the face
+    /// the composer wears ("You" before one is known), its voice playing
+    /// from the take on the device.
+    func entry(by author: ViewerIdentity?) -> CommentEntry {
+        CommentEntry(
+            id: commentID,
+            authorID: author?.profileID ?? ProfileID(""),
+            authorName: author?.name ?? "You",
+            authorHandle: author?.handle ?? "",
+            authorAvatarURL: author?.avatarURL,
+            body: body,
+            attachment: .voice(PostVoice(
+                assetID: uploaded?.assetID ?? "", url: take.fileURL, duration: take.servedDuration,
+                waveform: take.waveform
+            )),
+            createdAt: createdAt,
+            parentID: parentID
+        )
+    }
+}
+
+extension CommentEntry {
+    /// This comment with its voice playing from `fileURL` — the author's own
+    /// take, on the device (#2309, as a voice post's, #2209). Anything else
+    /// is unchanged.
+    func playing(from fileURL: URL) -> CommentEntry {
+        guard case .voice(let voice) = attachment else { return self }
+        var entry = CommentEntry(
+            id: id, authorID: authorID, authorName: authorName, authorHandle: authorHandle,
+            authorAvatarURL: authorAvatarURL, authorAvatarFrameID: authorAvatarFrameID, body: body,
+            attachment: .voice(PostVoice(
+                assetID: voice.assetID, url: fileURL, duration: voice.duration, waveform: voice.waveform
+            )),
+            createdAt: createdAt, parentID: parentID, isHeld: isHeld
+        )
+        entry.replyCount = replyCount
+        return entry
     }
 }

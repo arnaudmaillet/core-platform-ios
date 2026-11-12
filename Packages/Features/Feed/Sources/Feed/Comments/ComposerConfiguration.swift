@@ -23,7 +23,7 @@ import VoiceKitUI
 /// BUILT TO GROW: nothing here names a kind of media. A conversation's
 /// camera and library are entries in its `attachments`; comments with
 /// photos later (#2310) declare the same entries, with no change to the
-/// composer. Voice comments (#2309) turn `voice` to `.comment`.
+/// composer. Voice comments (#2309) are `voice` at `.comment`.
 struct ComposerConfiguration {
     /// What the empty field's hold records, and so the host's limit. `.none`:
     /// the field doesn't record, and nothing promises it (no "Hold for
@@ -32,7 +32,8 @@ struct ComposerConfiguration {
         case none
         /// A voice message: five minutes, on the clock (#2102).
         case message
-        /// A voice comment: a minute (#2309). Declared, not used yet.
+        /// A voice comment: a minute, in seconds (#2309) — a post's
+        /// comments, on the post screens and in the sheet.
         case comment
         /// A voice post's caption: a minute, in seconds (#2209, #2294).
         case post
@@ -114,13 +115,15 @@ struct ComposerConfiguration {
         Self(voice: voice, attachments: attachments, column: .none)
     }
 
-    /// A post's comments on the post screens: no voice (#2309 comes next),
-    /// no attachments (#2310 is on hold), the post's column.
-    static var comments: Self { Self(voice: .none, attachments: [], column: .post) }
+    /// A post's comments on the post screens: hold the field to record a
+    /// voice comment (#2309, a minute), no attachments (#2310 is on hold),
+    /// the post's column. A host whose comments can't carry a voice turns
+    /// `voice` off (`PostDetailViewController.commentsVoice`).
+    static var comments: Self { Self(voice: .comment, attachments: [], column: .post) }
 
     /// A post's comments in the comments sheet (#2087): the avatar, the
-    /// field and the own bubble — no column.
-    static var commentsSheet: Self { Self(voice: .none, attachments: [], column: .none) }
+    /// field and the own bubble — no column — and the same voice comment.
+    static var commentsSheet: Self { Self(voice: .comment, attachments: [], column: .none) }
 
     /// Whether `other` lays the composer out the same: the same voice,
     /// emote and column, and the same attachment ENTRIES (ids, glyphs,
