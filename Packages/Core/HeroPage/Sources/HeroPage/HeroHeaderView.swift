@@ -428,6 +428,10 @@ open class HeroHeaderView: UIView {
 
     public override func didMoveToWindow() {
         super.didMoveToWindow()
+        // The window's text size (`TextSizeCeiling`'s override) reaches the
+        // header here first: its name's lines follow at once (#2334), not
+        // only on a later trait change.
+        applyNameLines()
         applyBandCard()
         if let bandAvatarLine, bandAvatarLine.constant != bandAvatarLineConstant {
             bandAvatarLine.constant = bandAvatarLineConstant
@@ -524,6 +528,35 @@ open class HeroHeaderView: UIView {
         holdBandCardTop()
         bannerView.setTravelled(travelled)
         applyIdentityInk()
+    }
+
+    // MARK: - The name's type (#2334)
+
+    /// The name: title2 bold, scaled like title2 — a step bigger than the
+    /// title3 semibold it wore up to #2334, the same on every page on this
+    /// header (a profile, a group's info, a place).
+    public static var nameFont: UIFont { UIFont.scaledFont(forTextStyle: .title2, weight: .bold) }
+
+    /// How far a long name shrinks on its one line before it ends in "…":
+    /// a little, so a name is almost always read whole (#2334).
+    public static let nameMinimumScaleFactor: CGFloat = 0.85
+
+    /// The name's lines at `size`: ONE at the usual sizes, shrinking first;
+    /// TWO from the app's largest, which is also what every accessibility
+    /// size is drawn as (`TextSizeCeiling`) — there a one-line name was cut
+    /// to its first few letters (#482).
+    public static func nameLineCount(for size: UIContentSizeCategory) -> Int {
+        size.isAccessibilityCategory || size >= TextSizeCeiling.maximum ? 2 : 1
+    }
+
+    /// The name's lines and shrink for the text size it is drawn at.
+    private func applyNameLines() {
+        let lines = Self.nameLineCount(for: traitCollection.preferredContentSizeCategory)
+        // Shrinking only on one line: on two the name wraps, then ends in "…".
+        let shrinks = lines == 1
+        guard nameLabel.numberOfLines != lines || nameLabel.adjustsFontSizeToFitWidth != shrinks else { return }
+        nameLabel.numberOfLines = lines
+        nameLabel.adjustsFontSizeToFitWidth = shrinks
     }
 
     // MARK: - Identity ink
@@ -925,6 +958,15 @@ open class HeroHeaderView: UIView {
     public func actionTrayMaxY(in view: UIView) -> CGFloat? {
         guard let row = actionRowView else { return nil }
         return row.convert(row.bounds, to: view).maxY
+    }
+
+    /// The subtitle's line (a profile's @handle, under the name) in `view`'s
+    /// space, nil while it shows nothing: the line the eye follows into the
+    /// bar, whose title comes in as it passes under it (#2334).
+    public func subtitleLineFrame(in view: UIView) -> CGRect? {
+        guard !handleLabel.isHidden, let text = handleLabel.text,
+              !text.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+        return handleLabel.convert(handleLabel.bounds, to: view)
     }
 
     /// The bubbles' side, and so the action row's height.
@@ -1522,12 +1564,22 @@ open class HeroHeaderView: UIView {
     public var debugShowsTitleChevron: Bool { !titleChevron.isHidden }
     /// The chevron's frame, in the header's space.
     public var debugTitleChevronFrame: CGRect { titleChevron.convert(titleChevron.bounds, to: self) }
-    /// Whether the name is cut short now.
+    /// Whether the name is cut short now: on one line, wider than its room
+    /// even at its smallest shrink; on two, taller than them.
     public var debugNameIsTruncated: Bool {
+        if nameLabel.numberOfLines == 1, let text = nameLabel.text, let font = nameLabel.font {
+            let smallest = font.withSize(font.pointSize * nameLabel.minimumScaleFactor)
+            return (text as NSString).size(withAttributes: [.font: smallest]).width > nameLabel.bounds.width + 0.5
+        }
         let fits = nameLabel.textRect(forBounds: CGRect(x: 0, y: 0, width: nameLabel.bounds.width, height: .greatestFiniteMagnitude),
                                       limitedToNumberOfLines: 0)
         return fits.height > nameLabel.bounds.height + 0.5
     }
+    /// The name's font, lines and shrink, as drawn now (#2334).
+    public var debugNameFont: UIFont? { nameLabel.font }
+    public var debugNameLineCount: Int { nameLabel.numberOfLines }
+    public var debugNameShrinks: Bool { nameLabel.adjustsFontSizeToFitWidth }
+    public var debugNameMinimumScaleFactor: CGFloat { nameLabel.minimumScaleFactor }
     /// The name's tap, as a finger would.
     public func debugTapTitle() { onTitleTapped?() }
 
@@ -1667,21 +1719,25 @@ open class HeroHeaderView: UIView {
         statsRow.distribution = .fillEqually
         statsRow.spacing = 0
 
-        // Type hierarchy of the identity block, three clear steps: title3
-        // semibold display name (the block's anchor; SF applies its tighter
-        // large-size tracking automatically), subheadline secondary @handle,
-        // subheadline bio below — name > handle = body copy, one weight jump.
-        nameLabel.font = UIFont.scaledFont(forTextStyle: .title3, weight: .semibold)
+        // Type hierarchy of the identity block, three clear steps: title2
+        // bold display name (the block's anchor, #2334; SF applies its
+        // tighter large-size tracking automatically), subheadline secondary
+        // @handle ON ITS OWN LINE under it, subheadline bio below.
+        nameLabel.font = Self.nameFont
         nameLabel.adjustsFontForContentSizeCategory = true
         // Page ink until a banner says otherwise — see `applyIdentityInk`.
         nameLabel.textColor = Self.pageNameInk
-        // Two lines, not one (#482): at accessibility sizes a one-line name
-        // was cut to its first few letters.
-        nameLabel.numberOfLines = 2
+        // One line at the usual sizes, shrinking a little before its "…";
+        // two from the app's largest (#482) — `applyNameLines`.
+        nameLabel.minimumScaleFactor = Self.nameMinimumScaleFactor
         // ⚠️ A LONG NAME IS CUT, NEVER ITS CHEVRON (the owner, 2026-11-08):
         // the chevron and the badge resist being squeezed, the name gives
-        // way and ends in "…" on its second line.
+        // way, shrinks, and ends in "…".
         nameLabel.lineBreakMode = .byTruncatingTail
+        applyNameLines()
+        registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (header: HeroHeaderView, _: UITraitCollection) in
+            header.applyNameLines()
+        }
 
         handleLabel.font = .appFont(forTextStyle: .subheadline)
         handleLabel.adjustsFontForContentSizeCategory = true
@@ -1700,7 +1756,7 @@ open class HeroHeaderView: UIView {
 
         // The name's own ink and weight, a step smaller.
         titleChevron.preferredSymbolConfiguration = UIImage.SymbolConfiguration(
-            font: UIFont.scaledFont(forTextStyle: .title3, weight: .semibold), scale: .small
+            font: Self.nameFont, scale: .small
         )
         titleChevron.contentMode = .center
         titleChevron.setContentHuggingPriority(.required, for: .horizontal)

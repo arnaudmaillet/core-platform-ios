@@ -86,6 +86,22 @@ public struct HeroScrollCoordinator: Equatable, Sendable {
         return foot - min(travelled, dockLine) <= safeTop
     }
 
+    /// How much of a line of the header (its `top` and `foot` in the header's
+    /// own space, at rest) has gone under the bar for `travelled`, 0…1: 0
+    /// while its top is still below the bar's foot, 1 once its foot has
+    /// passed it, in proportion between — a function of a POSITION, as a
+    /// large title's handoff is (#2334: a profile's @handle line, which the
+    /// bar's @handle follows).
+    ///
+    /// ⚠️ AT REST NOTHING HAS PASSED, whatever the frames say (as
+    /// `isUnderBar`): a line not laid out yet (a foot at 0) is no line.
+    public func passage(top: CGFloat, foot: CGFloat, travelled: CGFloat) -> CGFloat {
+        guard travelled > 0, foot > 0, foot > top else { return 0 }
+        let lineTopOnScreen = top - min(travelled, dockLine)
+        let under = safeTop - lineTopOnScreen
+        return min(1, max(0, under / (foot - top)))
+    }
+
     /// Where a release comes to rest while the header is on screen, in the
     /// header's travelled space: the top, an optional catching notch (a band
     /// card's avatar just under the bar, #1208), and the first row of

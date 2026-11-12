@@ -11,6 +11,45 @@ public enum HeroPageMetrics {
     static let pullIndicatorHeight: CGFloat = 44
 }
 
+/// The bar's title arriving with the scroll, as a large title's does (#2334):
+/// the NATIVE title (`navigationItem.title`, no custom `titleView` — native
+/// chrome is UIKit's), drawn through iOS 26's `navigationItem.attributedTitle`
+/// while the header's subtitle line passes under the bar — its ink faded by
+/// how far the line has gone, and lowered a few points that it climbs back
+/// as it comes in. Only the title changes: no item, no appearance, no
+/// cross-dissolve of the bar (#2331's flaw).
+///
+/// Whole, it is no attributed title at all (`attributed` answers nil): the
+/// plain title in the bar's own dress, exactly as before the scrub.
+///
+/// ⚠️ STEPPED, NOT PER POINT: the passage is rounded to `steps` (a write per
+/// ~1 pt of a 20 pt line), and a title is written only when its step
+/// changes — scrolling anywhere else writes nothing.
+public enum HeroBarTitle {
+    /// How many steps the arrival takes.
+    public static let steps: CGFloat = 20
+    /// How far below its place the title starts, in points: it rises that
+    /// much while it fades in. None under Reduce Motion, a plain fade.
+    public static let rise: CGFloat = 4
+
+    /// `passage` (0…1) on the steps.
+    public static func step(_ passage: CGFloat) -> CGFloat {
+        (min(1, max(0, passage)) * steps).rounded() / steps
+    }
+
+    /// `title` at `opacity` (a stepped passage), in `ink` — nil once whole
+    /// (the bar's own title then) or with nothing to show.
+    public static func attributed(
+        _ title: String, opacity: CGFloat, ink: UIColor, reduceMotion: Bool
+    ) -> AttributedString? {
+        guard opacity > 0, opacity < 1 else { return nil }
+        var string = AttributedString(title)
+        string.uiKit.foregroundColor = ink.withAlphaComponent(opacity)
+        string.uiKit.baselineOffset = reduceMotion ? 0 : -rise * (1 - opacity)
+        return string
+    }
+}
+
 /// The hero page (#1655): the screen a profile and a place page share — a
 /// banner behind paged content, a header floating over it, docking under a
 /// transparent bar as the pages climb.
@@ -477,6 +516,17 @@ open class HeroPageViewController<Tab: Equatable>: UIViewController {
         return scroll.isUnderBar(foot: rowFoot, travelled: travelled) || heroHeader.alpha < 0.5
     }
 
+    /// How much of the header's subtitle line (a profile's @handle) has gone
+    /// under the bar at `travelled`, 0…1 (`HeroScrollCoordinator.passage`):
+    /// what the bar's title follows, as a large title's handoff (#2334).
+    /// 0 at rest and while the header has not laid out, as
+    /// `isActionRowUnderBar`.
+    public func subtitlePassage(travelled: CGFloat) -> CGFloat {
+        guard travelled > 0, heroHeader.bounds.height > 0,
+              let line = heroHeader.subtitleLineFrame(in: headerHost) else { return 0 }
+        return scroll.passage(top: line.minY, foot: line.maxY, travelled: travelled)
+    }
+
     /// Fades the identity block out as it reaches the navigation bar, and back
     /// in on the way down — a function of a POSITION, not a state.
     private func applyIdentityFade(travelled: CGFloat) {
@@ -522,6 +572,12 @@ open class HeroPageViewController<Tab: Equatable>: UIViewController {
     /// drew a title in this bar until the pushed profile's @handle, so the
     /// white of a banner-less profile, on the light page, was never seen.
     private var restingTitleInk: UIColor { heroHeader.hasPictureBehindChrome ? .white : .label }
+
+    /// The ink the bar's title wears now: the see-through dress's at rest,
+    /// the system's (`.label`, the docked dress sets none) once the page
+    /// has moved — what a title drawn with its own attributes must wear to
+    /// look like the bar's own (`HeroBarTitle`, #2334).
+    public var barTitleInk: UIColor { isBarTransparent ? restingTitleInk : .label }
 
     /// Re-inks the see-through dress when the ground behind the bar changes
     /// (a picture landing, a profile with none) — and the bar now, if it
