@@ -33,9 +33,11 @@ import UIKit
 /// contributes rides its own tab: a badge, and the menu its long press offers.
 /// The one exception is search, which takes the title slot for its field —
 /// a `titleView` outranks a `title`, so the name hides and returns by itself.
-/// The shell adds two items of its own through `HeaderAccessoryHosting` — the
-/// notifications bell leading and the balance trailing — which
-/// are the app's rather than the inbox's, and so page with nothing either.
+/// The shell adds an item of its own through `HeaderAccessoryHosting` — the
+/// notifications bell leading — which is the app's rather than the inbox's,
+/// and so pages with nothing either. No balance trails it (#2336, the owner
+/// 2026-11-12): the likes balance shows where likes are spent or earned, and
+/// the inbox has no heart, no spend and no claim.
 final class MessagesInboxViewController: UIViewController, MessagesInboxCategorySelecting,
     HeaderAccessoryHosting {
     /// The inbox's surfaces, in paging order.
@@ -464,7 +466,9 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     }
 
     /// The shell's items: the notifications bell at the head of the leading
-    /// group, the balance trailing.
+    /// group. The trailing slot is the protocol's, and the shell hands
+    /// nothing into it since #2336 (no balance in Messages); it reserves no
+    /// room while empty.
     private var leadingAccessoryItem: UIBarButtonItem?
     private var trailingAccessoryItem: UIBarButtonItem?
 
@@ -475,20 +479,23 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         applyRestingBar()
     }
 
-    /// Installs (or replaces, or clears) the balance.
+    /// Installs (or replaces, or clears) a trailing item. The shell installs
+    /// none (#2336): the balance left Messages.
     func setTrailingAccessoryItem(_ item: UIBarButtonItem?) {
         trailingAccessoryItem = item
         guard isViewLoaded else { return }
         applyRestingBar()
     }
 
-    /// `[ bell ]————————————————[ coins ][ search ]`
+    /// `[ bell ]————————————————————————————————`
+    /// `[ search people and chats            ]`
     ///
-    /// What the shell hands in: the bell leading, the balance trailing. No
-    /// section is named after the bell any more (#2328): one list per tab
+    /// What the shell hands in: the bell leading, nothing trailing (#2336: no
+    /// balance in Messages), so the header's one other control is the search.
+    /// No section is named after the bell any more (#2328): one list per tab
     /// (#2292), and the join requests on Requests, the last section with a
     /// name, wear no header now. The search is not among the items: it is
-    /// stacked under the bar (`searchController`).
+    /// stacked under the bar (`searchController`), at rest and open alike.
     ///
     /// ⚠️ NEVER `searchBarPlacementBarButtonItem` IN THE NAVIGATION BAR: iOS 26
     /// throws ("only supported in UIToolbar") — iOS 27 accepts it, which is

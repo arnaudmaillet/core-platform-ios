@@ -512,8 +512,6 @@ struct InboxSystemSearchTests {
 
     @Test func theSearchIsTheSystemsStackedField() throws {
         let screen = searchableInbox()
-        let balance = UIBarButtonItem(customView: UIView())
-        screen.setTrailingAccessoryItem(balance)
         screen.loadViewIfNeeded()
 
         let search = try #require(screen.navigationItem.searchController)
@@ -523,9 +521,36 @@ struct InboxSystemSearchTests {
         #expect(search.searchResultsController is InboxSearchResultsViewController)
         // ⚠️ The placement item is NOT among the bar's items: iOS 26 throws
         // ("only supported in UIToolbar").
-        let trailing = try #require(screen.navigationItem.rightBarButtonItems)
-        #expect(trailing.count == 1 && trailing.first === balance)
+        #expect(screen.navigationItem.rightBarButtonItems?.isEmpty ?? true)
         #expect(screen.navigationItem.titleView == nil, "a field in the title slot")
+    }
+
+    /// **The search alone on the trailing side (#2336).** The shell's
+    /// Messages header is `[bell] …` over the stacked field: no balance, at
+    /// rest or with the search open — the inbox has no heart, no spend and no
+    /// claim. Composed the shell's way (the bell injected, nothing trailing),
+    /// the bar's trailing group stays empty through an open and a close, and
+    /// the search is the header's one control besides the bell.
+    @Test func theSearchStandsAloneWithNoBalanceAtRestOrOpen() throws {
+        let screen = searchableInbox()
+        let bell = UIBarButtonItem(customView: UIView())
+        screen.setLeadingAccessoryItem(bell)
+        screen.loadViewIfNeeded()
+
+        let search = try #require(screen.navigationItem.searchController)
+        func assertBellAndSearchAlone(_ moment: String) {
+            #expect(screen.navigationItem.leftBarButtonItems?.count == 1, "\(moment): leading group")
+            #expect(screen.navigationItem.leftBarButtonItems?.first === bell, "\(moment): the bell left the lead")
+            #expect(screen.navigationItem.rightBarButtonItems?.isEmpty ?? true,
+                    "\(moment): a trailing item beside the search")
+            #expect(screen.navigationItem.searchController === search, "\(moment): the search left the bar")
+        }
+        assertBellAndSearchAlone("at rest")
+        screen.willPresentSearchController(search)
+        screen.didPresentSearchController(search)
+        assertBellAndSearchAlone("search open")
+        screen.willDismissSearchController(search)
+        assertBellAndSearchAlone("search closed")
     }
 
     /// The field names its scope (#918) — what the search really finds:

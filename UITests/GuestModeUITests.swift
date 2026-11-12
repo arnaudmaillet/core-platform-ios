@@ -77,7 +77,8 @@ final class GuestModeUITests: XCTestCase {
 
     /// No bell, no balance and no Shop in a guest's bars (#1146, the owner
     /// 2026-10-14) — Explore, For You and a post — and signing in brings them
-    /// back on Explore and For You without a relaunch.
+    /// back without a relaunch: the bell and the balance on For You, the bell
+    /// alone on Explore (the map wears no balance, #2336).
     func testAGuestSeesNoBellBalanceOrShopUntilTheySignIn() {
         let app = launch(["-guest-sign-in-after", "40"])
         let bar = app.tabBars.firstMatch
@@ -104,18 +105,22 @@ final class GuestModeUITests: XCTestCase {
         XCTAssertTrue(balance(in: app).waitForExistence(timeout: 60), "signing in did not bring For You's balance back")
         XCTAssertTrue(app.navigationBars.buttons["Notifications"].exists, "signing in did not bring For You's bell back")
         bar.buttons["Explore"].firstMatch.tap()
-        XCTAssertTrue(balance(in: app).waitForExistence(timeout: 10), "signing in did not bring Explore's balance back")
-        XCTAssertTrue(app.navigationBars.buttons["Notifications"].exists, "signing in did not bring Explore's bell back")
+        XCTAssertTrue(app.navigationBars.buttons["Notifications"].waitForExistence(timeout: 10),
+                      "signing in did not bring Explore's bell back")
+        XCTAssertFalse(balance(in: app).exists, "the member's map wears the balance (#2336)")
     }
 
     /// Signing out takes the bell, the balance and the Shop off Explore and
-    /// For You, in place (#1146).
+    /// For You, in place (#1146). The member's Explore wears the bell and no
+    /// balance (#2336), so the bell is what comes and goes there.
     func testSigningOutTakesTheMemberItemsAway() {
         let app = launch(["-guest-sign-in-after", "10", "-guest-sign-out-after", "20"])
         let bar = app.tabBars.firstMatch
         XCTAssertTrue(bar.waitForExistence(timeout: 25), "no tab bar")
-        XCTAssertTrue(balance(in: app).waitForExistence(timeout: 40), "the member's Explore never showed the balance")
-        XCTAssertTrue(balance(in: app).waitForNonExistence(timeout: 60), "signing out left Explore's balance")
+        let bell = app.navigationBars.buttons["Notifications"]
+        XCTAssertTrue(bell.waitForExistence(timeout: 40), "the member's Explore never showed the bell")
+        XCTAssertFalse(balance(in: app).exists, "the member's map wears the balance (#2336)")
+        XCTAssertTrue(bell.waitForNonExistence(timeout: 60), "signing out left Explore's bell")
         assertNoMemberItems(in: app, on: "Explore after signing out")
         bar.buttons["For You"].firstMatch.tap()
         XCTAssertTrue(app.collectionViews.firstMatch.waitForExistence(timeout: 15), "For You never showed a list")

@@ -55,14 +55,13 @@ final class ExploreTabCoordinator: TabCoordinator {
         self?.container.router.route(to: .search)
     }
 
-    /// The wallet's toolbar face: coin + balance, pulsing while a claim waits.
-    /// Everything around it — the store observation, the claim wake-up, the
-    /// width-change reinstall, the sheet — lives in `WalletBadgeInstaller`,
-    /// which the For You and Profile headers wear too.
-    private var walletBadge: WalletBadgeInstaller?
-    /// The badge's latest item (`WalletBadgeInstaller` hands a fresh one when
-    /// the count's width changes); nil for a guest.
-    private var walletItem: UIBarButtonItem?
+    // NO BALANCE ON THE MAP (#2336, the owner 2026-11-12): the likes balance
+    // shows where likes are spent or earned, and nothing is spent on the map —
+    // a tap opens the post, which wears the balance itself. So this
+    // coordinator builds no `WalletBadgeInstaller`; a screen pushed onto this
+    // stack (a post, a profile, the search results) brings its own badge, and
+    // the shared identifier lets UIKit take it in and out of the bar cleanly.
+
     /// The screen wearing the bar items, for the reinstall.
     private weak var mapViewController: UIViewController?
 
@@ -89,13 +88,10 @@ final class ExploreTabCoordinator: TabCoordinator {
         //
         // The avatar that used to sit to its right is gone: Profile is a root
         // tab now, and two entry points to one destination is one too many.
-        // The wallet badge now stands where it stood — trailing group, inboard
-        // of the bell ([coin] [bell]) — in its own glass bubble via
-        // `sharesBackground = false` rather than the fixedSpace the avatar
-        // era used.
         // ⚠️ THE BELL MOVED TO THE LEADING EDGE and the "+" is gone — the
         // compose screen it opened has been removed from the product. The
-        // header now reads `[bell] … [coins][search]`.
+        // balance that stood inboard of the search went too (#2336): the
+        // header now reads `[bell] … [search]`.
         // ⚠️ NO TITLE IN THE BAR. "Maps" (the tab's name then; "Explore" now)
         // was written here for a while (the controller is navigation-agnostic,
         // so the coordinator was the one place to write it); it went with For
@@ -111,31 +107,15 @@ final class ExploreTabCoordinator: TabCoordinator {
             self?.applyBarItems()
         }
         installBarItems()
-
-        #if DEBUG
-        walletBadge?.presentSheetIfAskedAtLaunch()
-        #endif
+        // No `-open-wallet` here any more: the map wears no badge (#2336), and
+        // For You presents the sheet at launch.
     }
 
-    /// The header for the viewer now: a member's `[bell] … [likes][search]`,
-    /// a guest's `… [search]` alone (#1146, the owner 2026-10-14: no bell, no
-    /// balance for a guest). Run at start and on every
+    /// The header for the viewer now: a member's `[bell] … [search]`, a
+    /// guest's `… [search]` alone (#1146, the owner 2026-10-14: no bell for a
+    /// guest). No balance for either (#2336). Run at start and on every
     /// sign-up and sign-out, so the items come and go without a relaunch.
     private func installBarItems() {
-        let member = container.memberGate.isMember
-        if member, walletBadge == nil {
-            walletBadge = WalletBadgeInstaller(
-                wallet: container.walletStore,
-                presenter: navigationController,
-                makeSheet: { [unowned container] in container.makeWalletSheet() }
-            ) { [weak self] item in
-                self?.walletItem = item
-                self?.applyBarItems()
-            }
-        } else if !member {
-            walletBadge = nil
-            walletItem = nil
-        }
         applyBarItems()
     }
 
@@ -172,9 +152,9 @@ final class ExploreTabCoordinator: TabCoordinator {
         }
         map.navigationItem.leftBarButtonItem = notificationsButtonItem
         // ⚠️ `[0]` IS THE SCREEN EDGE: search takes the corner the bell used
-        // to hold, and the likes badge stays inboard of it — [likes][search]
-        // reads right to left here. No Shop door (#1494, the owner
-        // 2026-10-21): the Rewards sheet's Shop tile and the stake menu open it.
-        map.setOwnTrailingBarItems([searchButtonItem, walletItem].compactMap { $0 }, animated: false)
+        // to hold, alone — no balance on the map (#2336). No Shop door (#1494,
+        // the owner 2026-10-21): the Rewards sheet's Shop tile and the stake
+        // menu open it.
+        map.setOwnTrailingBarItems([searchButtonItem], animated: false)
     }
 }

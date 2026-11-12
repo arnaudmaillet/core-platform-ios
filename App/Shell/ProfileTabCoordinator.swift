@@ -132,7 +132,8 @@ final class ProfileTabCoordinator: TabCoordinator {
         (profile as? any HeaderAccessoryHosting)?
             .setLeadingAccessoryItem(notificationsBell.makeItem())
         // The balance, inboard of the switcher + settings pair — the same
-        // installer every root header uses.
+        // installer For You's root uses. It stays here (#2336): the profile
+        // lists posts with hearts, and it is the wallet's door.
         //
         // ⚠️ A PUSHED PROFILE WEARS ONE TOO NOW, and did not before: the rule
         // was "a pushed profile is someone else's, and a viewer's balance has

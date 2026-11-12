@@ -24,9 +24,11 @@ final class MessagesTabCoordinator: TabCoordinator, GlyphTab {
     private let container: AppContainer
     /// The shell's bell, minted into this header's leading edge.
     private let notificationsBell: NotificationsBell
-    /// The header's balance badge — the installer every root header wears.
-    /// Held for the coordinator's life, which is the process's.
-    private var walletBadge: WalletBadgeInstaller?
+    // NO BALANCE HERE (#2336, the owner 2026-11-12): the likes balance shows
+    // where likes are spent or earned, and the inbox has no heart, no spend
+    // and no claim. This coordinator builds no `WalletBadgeInstaller`; the
+    // badge's shared identifier lets UIKit take it out of the bar cleanly on
+    // a switch from a tab that wears it.
 
     private(set) lazy var tab = UITab(
         title: "Messages",
@@ -52,7 +54,6 @@ final class MessagesTabCoordinator: TabCoordinator, GlyphTab {
     /// without an account, and nothing is loaded for one).
     func show(member: Bool) {
         guard member else {
-            walletBadge = nil
             tab.badgeValue = nil
             setUnread(false)
             navigationController.viewControllers = [GuestSignInViewController(
@@ -72,19 +73,14 @@ final class MessagesTabCoordinator: TabCoordinator, GlyphTab {
             self?.setUnread(total > 0)
         }
         navigationController.viewControllers = [inbox]
-        // The header reads `[bell] … [coins][search]`. Both items reach the bar
-        // THROUGH the inbox rather than onto its `navigationItem`, because the
-        // inbox rewrites its own bar whenever search opens and closes — an item
-        // written from out here would not survive the first search.
+        // The header reads `[bell] …`, the search stacked under the bar — no
+        // balance (#2336). The bell reaches the bar THROUGH the inbox rather
+        // than onto its `navigationItem`, because the inbox rewrites its own
+        // bar whenever search opens and closes — an item written from out here
+        // would not survive the first search. The trailing accessory is left
+        // empty.
         (inbox as? any HeaderAccessoryHosting)?
             .setLeadingAccessoryItem(notificationsBell.makeItem())
-        walletBadge = WalletBadgeInstaller(
-            wallet: container.walletStore,
-            presenter: navigationController,
-            makeSheet: { [unowned container] in container.makeWalletSheet() }
-        ) { [weak inbox] item in
-            (inbox as? any HeaderAccessoryHosting)?.setTrailingAccessoryItem(item)
-        }
         // Loaded now, not on first appearance. The inbox's own reload happens
         // in `viewWillAppear`, which never fires on a launch that lands on
         // another tab — so without this the badge that exists to say "there is
