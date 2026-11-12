@@ -1,3 +1,4 @@
+import CoreModels
 import AudioToolbox
 import AVFoundation
 import Foundation
@@ -78,13 +79,13 @@ public final class FeedSoundSession {
     /// A voice holds the floor (#2207): a voice post or a voice message plays,
     /// or a take records (VoiceKit's `VoiceAudioFocus`). The feed — the clip
     /// pool, the song — is not heard meanwhile, and comes back when it lets
-    /// go, under the same rules as before. Read by name: MediaPlayback does
-    /// not import VoiceKit.
+    /// go, under the same rules as before. MediaPlayback does not import
+    /// VoiceKit: the names are CoreModels' `AudioFocus`, which both read.
     public private(set) var voiceHoldsFloor = false
 
-    /// VoiceKit's `VoiceAudioFocus` names, spelled here.
-    public static let voiceTakesFloor = Notification.Name("VoiceAudioFocus.didTake")
-    public static let voiceReleasesFloor = Notification.Name("VoiceAudioFocus.didRelease")
+    /// The voice engine's floor (`AudioFocus`, #2373).
+    public static let voiceTakesFloor = AudioFocus.voiceDidTake
+    public static let voiceReleasesFloor = AudioFocus.voiceDidRelease
 
     private var floorObservers: [NSObjectProtocol] = []
 

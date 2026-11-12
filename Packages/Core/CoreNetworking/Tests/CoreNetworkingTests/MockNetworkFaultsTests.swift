@@ -2,7 +2,6 @@ import Connect
 import CoreContracts
 import CoreNetworkingMocks
 import Foundation
-import MediaCore
 import Testing
 @testable import CoreNetworking
 

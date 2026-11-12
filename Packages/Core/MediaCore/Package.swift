@@ -14,10 +14,13 @@ let package = Package(
         // The device cache (#891): resident animated icons live in its UI
         // assets class (#971); the image pipeline's memory and disk caches,
         // fills and budgets (#894).
-        .package(path: "../CacheKit")
+        .package(path: "../CacheKit"),
+        // `HostRewrite` (#2373): the dev host mapping the image fetcher and
+        // CoreNetworking's upload transport share.
+        .package(path: "../../Kit/CoreModels")
     ],
     targets: [
-        .target(name: "MediaCore", dependencies: ["DesignSystem", "CacheKit"]),
+        .target(name: "MediaCore", dependencies: ["DesignSystem", "CacheKit", "CoreModels"]),
         .testTarget(name: "MediaCoreTests", dependencies: ["MediaCore", "CacheKit"])
     ]
 )

@@ -13,7 +13,6 @@ let package = Package(
     dependencies: [
         .package(path: "../../Kit/CoreContracts"),
         .package(path: "../../Kit/CoreModels"),
-        .package(path: "../MediaCore"),
         .package(url: "https://github.com/connectrpc/connect-swift.git", from: "1.0.0"),
         .package(url: "https://github.com/apple/swift-protobuf.git", from: "1.28.0")
     ],
@@ -31,8 +30,6 @@ let package = Package(
                 // `AuthorSummary(profileView:)` (#1858): a profile view as the
                 // person every screen shows.
                 .product(name: "CoreModels", package: "CoreModels"),
-                // `MediaAssetUploader` hands bytes to a `MediaUploadTransport`.
-                .product(name: "MediaCore", package: "MediaCore"),
                 .product(name: "Connect", package: "connect-swift"),
                 // `PostVoiceWire` (#2206) reads and writes a message's
                 // unknown fields; `ProposedChat` (#2213) carries its JSON in
@@ -47,7 +44,6 @@ let package = Package(
                 "CoreContracts",
                 // `PostVoice`, the seeded voice posts (#2206).
                 .product(name: "CoreModels", package: "CoreModels"),
-                .product(name: "MediaCore", package: "MediaCore"),
                 .product(name: "Connect", package: "connect-swift"),
                 .product(name: "SwiftProtobuf", package: "swift-protobuf")
             ],
@@ -67,7 +63,6 @@ let package = Package(
             name: "CoreNetworkingTests",
             dependencies: [
                 "CoreNetworking", "CoreNetworkingMocks", "CoreContracts",
-                .product(name: "MediaCore", package: "MediaCore"),
                 // A like batch's `first_tap_at` (#676).
                 .product(name: "SwiftProtobuf", package: "swift-protobuf")
             ]

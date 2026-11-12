@@ -1,3 +1,4 @@
+import CoreModels
 import AVFoundation
 import UIKit
 
@@ -170,12 +171,13 @@ public struct VoiceSessionRole: Equatable, Sendable {
 /// While a voice message records or plays, everything else that makes sound
 /// pauses — the feed's audible video, the sound sheet's track — and gets
 /// the sound back when it ends (#2101). The voice engine POSTS these; the
-/// players that must yield observe them, with no dependency on this package.
+/// players that must yield observe them through CoreModels' `AudioFocus`,
+/// with no dependency on this package.
 public enum VoiceAudioFocus {
     /// A take started recording, or a voice message started playing.
-    public static let didTake = Notification.Name("VoiceAudioFocus.didTake")
+    public static let didTake = AudioFocus.voiceDidTake
     /// It ended, paused or was cancelled: the others may play again.
-    public static let didRelease = Notification.Name("VoiceAudioFocus.didRelease")
+    public static let didRelease = AudioFocus.voiceDidRelease
 }
 
 /// The microphone permission (#2101): asked on the first recording attempt,

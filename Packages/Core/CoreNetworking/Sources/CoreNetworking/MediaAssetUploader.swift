@@ -1,6 +1,5 @@
 import CoreContracts
 import Foundation
-import MediaCore
 
 /// The media.v1 upload dance: IssueUploadTicket → byte upload (through a
 /// `MediaUploadTransport`) → CommitUpload → ResolveDelivery. Shared by the

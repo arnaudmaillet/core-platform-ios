@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import MediaCore
+@testable import CoreNetworking
 
 /// Records the bytes handed to the in-memory path so we can assert the
 /// file-based default forwards the file's contents unchanged.
