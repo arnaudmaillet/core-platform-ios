@@ -1,4 +1,5 @@
 import Foundation
+import ProfileSettings
 
 /// The History tab's groups (#1344, the owner 2026-10-17): the posts viewed,
 /// newest first, under the time they were viewed — "Today", "Yesterday",

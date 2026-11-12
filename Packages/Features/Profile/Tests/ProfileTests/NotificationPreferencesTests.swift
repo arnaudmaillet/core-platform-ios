@@ -6,6 +6,7 @@ import Foundation
 import Testing
 import UserNotifications
 @testable import Profile
+@testable import ProfileSettings
 
 /// Settings → Notifications (#392, backend #725), over the mock.
 @MainActor

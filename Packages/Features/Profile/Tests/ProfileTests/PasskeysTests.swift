@@ -6,6 +6,7 @@ import CoreNetworkingMocks
 import Foundation
 import Testing
 @testable import Profile
+@testable import ProfileSettings
 
 /// Settings → Security and Login → Passkeys (#551, backend #808), end to end
 /// over the mock: the list, adding behind a step-up, removing, and the

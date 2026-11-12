@@ -6,6 +6,7 @@ import CoreNetworkingMocks
 import Foundation
 import Testing
 @testable import Profile
+@testable import ProfileSettings
 
 /// Settings → Privacy → Who Can Mention and Who Can Message (#397, backend
 /// #656), over the mock.

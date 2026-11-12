@@ -5,6 +5,7 @@ import MediaCore
 import Testing
 import UIKit
 @testable import Profile
+@testable import ProfileSettings
 
 /// An unavailable profile is a PLAIN PAGE (#1406, the owner 2026-10-18): no
 /// banner card — with no picture it drew its placeholder ramp, a banner that

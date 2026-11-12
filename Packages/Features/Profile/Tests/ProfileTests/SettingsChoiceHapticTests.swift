@@ -3,6 +3,7 @@ import Foundation
 import Testing
 import UIKit
 @testable import Profile
+@testable import ProfileSettings
 
 /// A settings choice is a `tick` (#1884); the choice already made, nothing.
 @MainActor

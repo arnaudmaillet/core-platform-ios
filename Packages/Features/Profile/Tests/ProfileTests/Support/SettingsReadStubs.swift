@@ -1,6 +1,7 @@
 import CoreNetworking
 import Foundation
 @testable import Profile
+@testable import ProfileSettings
 
 /// Settings reads that fail on command (#799): `fails` flips without a
 /// clock, so a test steps failure → retry → success deterministically.

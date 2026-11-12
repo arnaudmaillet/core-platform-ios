@@ -1,6 +1,7 @@
 import DesignSystem
 import Testing
 @testable import Profile
+@testable import ProfileSettings
 
 /// Settings → Account's email, phone and date-of-birth rows (#799): a failed
 /// read is a failed row with retry, never "Not set" or "Add".

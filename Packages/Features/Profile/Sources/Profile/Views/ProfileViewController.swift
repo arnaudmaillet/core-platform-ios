@@ -9,6 +9,7 @@ import MapsInterface
 import MediaPlayback
 import DesignSystem
 import PostGrid
+import ProfileSettings
 import ShareSheet
 import UIKit
 

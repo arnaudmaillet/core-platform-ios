@@ -6,6 +6,7 @@ import CoreNetworkingMocks
 import Foundation
 import Testing
 @testable import Profile
+@testable import ProfileSettings
 
 /// ⚠️ THE PEOPLE PROFILE SHOWS ARE KNOWN WHEN OPENED FROM ANYWHERE (#1858): a
 /// relationship list reports every row's person; a profile read in full is

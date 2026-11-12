@@ -3,6 +3,7 @@ import CoreNavigation
 import Testing
 import UIKit
 @testable import Profile
+@testable import ProfileSettings
 
 /// **The relations screen pops with the native back swipe (#1300).** Pushed
 /// from a profile's counters, it follows `PagedScreenDismissalPolicy`: on

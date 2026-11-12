@@ -7,6 +7,7 @@ import Testing
 import UIKit
 @testable import Feed
 @testable import Profile
+@testable import ProfileSettings
 
 /// Where a scrub lands when the finger lets go.
 ///

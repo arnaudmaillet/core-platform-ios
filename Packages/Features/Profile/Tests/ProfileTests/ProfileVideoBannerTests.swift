@@ -7,6 +7,7 @@ import Testing
 import UIKit
 import HeroPage
 @testable import Profile
+@testable import ProfileSettings
 
 /// The video banner (#944): read off the profile's own banner media, played
 /// over its still by the header when the screen says so.

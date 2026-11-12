@@ -1,0 +1,456 @@
+import CoreNetworking
+import DesignSystem
+import UIKit
+
+/// Edit Profile → Account Type (#415, backend #734): Personal, Creator or
+/// Business. The type is public on the profile; a business also shows its
+/// category and a contact card. Not optimistic. Below, the verified badge:
+/// where the profile stands, and the way to ask for one.
+package final class AccountTypeViewController: UIViewController {
+    package enum Phase: Equatable {
+        case loading
+        case loaded(AccountType, BusinessContact?)
+        case failed
+    }
+
+    package enum Section: Hashable {
+        case type, contact, verification
+    }
+
+    /// The badge row's state, loaded on its own: a failure there leaves the
+    /// account type usable.
+    package enum VerificationPhase: Equatable {
+        case loading
+        case loaded(VerificationStatus)
+        case failed
+    }
+
+    package enum ContactField: Hashable, CaseIterable {
+        case category, email, phone
+
+        package var title: String {
+            switch self {
+            case .category: "Category"
+            case .email: "Email"
+            case .phone: "Phone"
+            }
+        }
+
+        package var placeholder: String {
+            switch self {
+            case .category: "Bakery, Musician…"
+            case .email: "hello@example.com"
+            case .phone: "+33 6 12 34 56 78"
+            }
+        }
+    }
+
+    private enum Item: Hashable {
+        case type(AccountType)
+        case contact(ContactField)
+        case verification
+        case loading
+        case failed
+        /// The account type ran past 10 s (#1770): a row a tap retries.
+        case takingLonger
+    }
+
+    private let manager: any AccountTypeManaging
+    private let verifier: (any VerificationRequesting)?
+    private var phase: Phase = .loading {
+        didSet { applySnapshot() }
+    }
+    /// Why the last load failed, kept beside `.failed` so the failed row
+    /// can say "You’re offline" when that is the cause (#794). Set before
+    /// the phase, so the redraw `.failed` triggers already reads it.
+    private var loadFailure: NetworkFailure?
+    /// The same, for the verification row's own read.
+    private var verificationFailure: NetworkFailure?
+    private var verification: VerificationPhase = .loading {
+        didSet { applySnapshot() }
+    }
+    private var isSaving = false
+    private var collectionView: UICollectionView!
+    private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
+
+    package init(manager: any AccountTypeManaging, verifier: (any VerificationRequesting)? = nil) {
+        self.manager = manager
+        self.verifier = verifier
+        super.init(nibName: nil, bundle: nil)
+        title = "Account Type"
+        hidesBottomBarWhenPushed = true
+    }
+
+    @available(*, unavailable)
+    package required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    package override func viewDidLoad() {
+        super.viewDidLoad()
+        navigationItem.largeTitleDisplayMode = .never
+        var config = UICollectionLayoutListConfiguration(appearance: .insetGrouped)
+        config.headerMode = .supplementary
+        config.footerMode = .supplementary
+        collectionView = UICollectionView(
+            frame: view.bounds,
+            collectionViewLayout: UICollectionViewCompositionalLayout.list(using: config)
+        )
+        collectionView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        collectionView.prefersSoftTopEdge()
+        collectionView.delegate = self
+        view.addSubview(collectionView)
+        configureDataSource()
+        applySnapshot()
+        load()
+        loadVerification()
+    }
+
+    private func loadVerification() {
+        guard let verifier else { return }
+        verification = .loading
+        Task { [weak self] in
+            do {
+                let status = try await verifier.verificationStatus()
+                self?.verification = .loaded(status)
+            } catch {
+                self?.verificationFailure = NetworkFailure.of(error)
+                self?.verification = .failed
+            }
+        }
+    }
+
+    /// The badge row's words for each state; `failure` words the failed one
+    /// ("You’re offline…" when that is why, #794).
+    package static func verificationRow(
+        _ phase: VerificationPhase, failure: NetworkFailure? = nil
+    ) -> (title: String, detail: String?) {
+        switch phase {
+        case .loading:
+            // The detail is a bone while it loads (`.verification`, #1769).
+            ("Verification", "Your verification status")
+        case .failed:
+            (
+                "Verification",
+                FailureCopy.row(for: failure, fallback: "Couldn't load your verification status. Tap to try again.")
+            )
+        case .loaded(.notRequested):
+            ("Request Verification", "Ask for a verified badge next to your name.")
+        case .loaded(.pending(let category, let submittedAt)):
+            (
+                "Verification Requested",
+                [category?.title, "Sent \(submittedAt.formatted(date: .abbreviated, time: .omitted))", "Waiting for a decision"]
+                    .compactMap { $0 }.joined(separator: " · ")
+            )
+        case .loaded(.rejected(let reason, _)):
+            ("Not Approved", (reason.isEmpty ? "" : reason + "\n") + "You can ask again.")
+        case .loaded(.verified(let category)):
+            ("Verified", category.map { "\($0.title) · The badge shows next to your name." } ?? "The badge shows next to your name.")
+        }
+    }
+
+    private func load() {
+        phase = .loading
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let current = try await manager.accountType()
+                phase = .loaded(current.type, current.contact)
+            } catch {
+                loadFailure = NetworkFailure.of(error)
+                phase = .failed
+            }
+        }
+    }
+
+    package static func footer(_ section: Section, type: AccountType?) -> String? {
+        switch section {
+        case .type:
+            type == .bot ? AccountType.bot.detail : "Everyone can see your account type. Applies to this profile only."
+        case .contact:
+            "Shown on your profile to everyone. The category is required; email and phone are optional."
+        case .verification:
+            "A verified badge shows next to your name everywhere. You'll see the decision here."
+        }
+    }
+
+    // MARK: - List
+
+    private func configureDataSource() {
+        let registration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { [weak self] cell, _, item in
+            guard let self else { return }
+            cell.accessories = []
+            var content = UIListContentConfiguration.subtitleCell()
+            content.secondaryTextProperties.color = .secondaryLabel
+            switch item {
+            case .type(let type):
+                content.text = type.title
+                content.secondaryText = type.detail
+                if case .loaded(let current, _) = phase {
+                    if current == type { cell.accessories = [.checkmark()] }
+                    content.textProperties.color = current == .bot ? .secondaryLabel : .label
+                }
+            case .contact(let field):
+                content = .valueCell()
+                content.text = field.title
+                if case .loaded(_, let contact) = phase {
+                    let value = switch field {
+                    case .category: contact?.category
+                    case .email: contact?.email
+                    case .phone: contact?.phone
+                    }
+                    content.secondaryText = (value?.isEmpty ?? true) ? "Add" : value
+                }
+                cell.accessories = [.disclosureIndicator()]
+            case .verification:
+                let row = Self.verificationRow(verification, failure: verificationFailure)
+                content.text = row.title
+                content.secondaryText = row.detail
+                if case .loading = verification {
+                    // The row redacted while its status loads (#1769).
+                    cell.contentConfiguration = SkeletonRowConfiguration(redacting: content)
+                    cell.accessories = []
+                    return
+                }
+                switch verification {
+                case .loaded(.verified):
+                    content.image = UIImage(systemName: "checkmark.seal.fill")
+                    content.imageProperties.tintColor = .systemBlue
+                case .loaded(let status) where status.canRequest:
+                    cell.accessories = [.disclosureIndicator()]
+                default:
+                    break
+                }
+            case .loading:
+                cell.contentConfiguration = SkeletonRowConfiguration(sample: "A row of this list")
+                cell.accessories = []
+                return
+            case .failed:
+                content = .cell()
+                // "You’re offline…" when that is why (#794).
+                content.text = FailureCopy.row(
+                    for: loadFailure, fallback: "Couldn't load your account type. Tap to try again."
+                )
+                content.textProperties.color = .secondaryLabel
+            case .takingLonger:
+                content = .cell()
+                content.text = TakingLongerCopy.row
+                content.textProperties.color = .secondaryLabel
+            }
+            cell.contentConfiguration = content
+        }
+        dataSource = UICollectionViewDiffableDataSource<Section, Item>(collectionView: collectionView) { collectionView, indexPath, item in
+            collectionView.dequeueConfiguredReusableCell(using: registration, for: indexPath, item: item)
+        }
+        let header = UICollectionView.SupplementaryRegistration<UICollectionViewListCell>(
+            elementKind: UICollectionView.elementKindSectionHeader
+        ) { [weak self] view, _, indexPath in
+            var content = UIListContentConfiguration.header()
+            content.text = switch self?.dataSource.sectionIdentifier(for: indexPath.section) {
+            case .contact: "Contact Card"
+            case .verification: "Verification"
+            default: nil
+            }
+            view.contentConfiguration = content
+        }
+        let footer = UICollectionView.SupplementaryRegistration<UICollectionViewListCell>(
+            elementKind: UICollectionView.elementKindSectionFooter
+        ) { [weak self] view, _, indexPath in
+            guard let self else { return }
+            var content = UIListContentConfiguration.footer()
+            let type: AccountType? = if case .loaded(let current, _) = phase { current } else { nil }
+            content.text = dataSource.sectionIdentifier(for: indexPath.section).flatMap { Self.footer($0, type: type) }
+            view.contentConfiguration = content
+        }
+        dataSource.supplementaryViewProvider = { collectionView, kind, indexPath in
+            kind == UICollectionView.elementKindSectionHeader
+                ? collectionView.dequeueConfiguredReusableSupplementary(using: header, for: indexPath)
+                : collectionView.dequeueConfiguredReusableSupplementary(using: footer, for: indexPath)
+        }
+    }
+
+    private func applySnapshot() {
+        guard dataSource != nil else { return }
+        var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
+        snapshot.appendSections([.type])
+        switch phase {
+        case .loading:
+            // The kit's timing (#1770): nothing for its delay, the bones,
+            // "taking longer" past 10 s.
+            switch loadingGate.loading() {
+            case .bones: snapshot.appendItems([.loading], toSection: .type)
+            case .takingLonger: snapshot.appendItems([.takingLonger], toSection: .type)
+            case .nothing: break
+            }
+        case .failed:
+            snapshot.appendItems([.failed], toSection: .type)
+        case .loaded(let type, _):
+            let types = type == .bot ? [AccountType.bot] : AccountType.choices
+            snapshot.appendItems(types.map(Item.type), toSection: .type)
+            if type == .business {
+                snapshot.appendSections([.contact])
+                snapshot.appendItems(ContactField.allCases.map(Item.contact), toSection: .contact)
+            }
+            // A bot is the platform's; it has no badge to ask for.
+            if verifier != nil, type != .bot {
+                snapshot.appendSections([.verification])
+                snapshot.appendItems([.verification], toSection: .verification)
+            }
+            snapshot.reconfigureItems(snapshot.itemIdentifiers)
+        }
+        snapshot.reloadSections(snapshot.sectionIdentifiers)
+        if case .loading = phase { return dataSource.apply(snapshot, animatingDifferences: false) }
+        // The answer waits out the bones' minimum (#1770).
+        loadingGate.landed { [weak self] in self?.dataSource.apply(snapshot, animatingDifferences: false) }
+    }
+
+    /// The type's loading on the kit's timing (#1770). Injectable so a test
+    /// steps it.
+    package var skeletonClock: LoadingClock = .system
+    private lazy var loadingGate: ListSkeletonGate = {
+        let gate = ListSkeletonGate(clock: skeletonClock)
+        gate.onChange = { [weak self] in self?.applySnapshot() }
+        return gate
+    }()
+
+    // MARK: - Changes
+
+    private func save(_ type: AccountType, contact: BusinessContact?) {
+        guard !isSaving else { return }
+        isSaving = true
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await manager.setAccountType(type, contact: contact)
+                phase = .loaded(type, type == .business ? contact : nil)
+                Haptics.play(.tick)
+            } catch {
+                let message: String = switch error as? AccountTypeError {
+                case .invalidContact: "Check your contact card: the category is required, and the email and phone must be valid."
+                default: "Couldn't change your account type. Try again."
+                }
+                let alert = UIAlertController(title: nil, message: message, preferredStyle: .alert)
+                alert.addAction(UIAlertAction(title: "OK", style: .default))
+                present(alert, animated: true)
+            }
+            isSaving = false
+        }
+    }
+
+    private func choose(_ type: AccountType) {
+        guard case .loaded(let current, _) = phase, current != type, current != .bot else { return }
+        switch (current, type) {
+        case (_, .business):
+            // A business needs its category before it can be one.
+            ask(.category, current: "") { [weak self] category in
+                self?.save(.business, contact: BusinessContact(category: category))
+            }
+        case (.business, _):
+            let sheet = UIAlertController(
+                title: "Switch to \(type.title)?",
+                message: "Your contact card will be removed from your profile.",
+                preferredStyle: .actionSheet
+            )
+            sheet.addAction(UIAlertAction(title: "Switch", style: .destructive) { [weak self] _ in
+                self?.save(type, contact: nil)
+            })
+            sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+            if let popover = sheet.popoverPresentationController {
+                popover.sourceView = view
+                popover.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.midY, width: 0, height: 0)
+                popover.permittedArrowDirections = []
+            }
+            present(sheet, animated: true)
+        default:
+            save(type, contact: nil)
+        }
+    }
+
+    private func edit(_ field: ContactField) {
+        guard case .loaded(.business, let contact) = phase, var card = contact else { return }
+        let current = switch field {
+        case .category: card.category
+        case .email: card.email
+        case .phone: card.phone
+        }
+        ask(field, current: current) { [weak self] value in
+            switch field {
+            case .category: card.category = value
+            case .email: card.email = value
+            case .phone: card.phone = value
+            }
+            self?.save(.business, contact: card)
+        }
+    }
+
+    private func openVerification() {
+        switch verification {
+        case .failed:
+            loadVerification()
+        case .loaded(let status) where status.canRequest:
+            guard let verifier else { return }
+            let form = VerificationRequestViewController(manager: verifier) { [weak self] in
+                self?.loadVerification()
+            }
+            navigationController?.pushViewController(form, animated: true)
+        default:
+            break
+        }
+    }
+
+    /// A one-field alert. The category can't be left empty.
+    private func ask(_ field: ContactField, current: String, then: @escaping (String) -> Void) {
+        let alert = UIAlertController(title: field.title, message: nil, preferredStyle: .alert)
+        alert.addTextField { text in
+            text.text = current
+            text.placeholder = field.placeholder
+            text.keyboardType = switch field {
+            case .email: .emailAddress
+            case .phone: .phonePad
+            case .category: .default
+            }
+            text.autocapitalizationType = field == .category ? .words : .none
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Save", style: .default) { [weak alert] _ in
+            let value = (alert?.textFields?.first?.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if field == .category, !BusinessContact(category: value).isValid { return }
+            then(value)
+        })
+        present(alert, animated: true)
+    }
+}
+
+extension AccountTypeViewController: UICollectionViewDelegate {
+    package func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
+        switch dataSource.itemIdentifier(for: indexPath) {
+        case .type(let type): type != .bot
+        case .contact, .failed, .takingLonger: true
+        case .verification:
+            switch verification {
+            case .failed: true
+            case .loaded(let status): status.canRequest
+            case .loading: false
+            }
+        default: false
+        }
+    }
+
+    package func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        collectionView.deselectItem(at: indexPath, animated: true)
+        switch dataSource.itemIdentifier(for: indexPath) {
+        case .type(let type): choose(type)
+        case .contact(let field): edit(field)
+        case .verification: openVerification()
+        case .failed: load()
+        case .takingLonger:
+            loadingGate.retry()
+            load()
+        default: break
+        }
+    }
+}
+
+// MARK: - How it is left (#1144)
+
+extension AccountTypeViewController: StackScreen {
+    package var leaving: ScreenLeaving { .nativeBack }
+}

@@ -4,6 +4,7 @@ import CoreNetworking
 import Foundation
 import Testing
 @testable import Profile
+@testable import ProfileSettings
 
 /// #794: a Settings failed row ("Couldn't load … Tap to try again.") says
 /// "You’re offline" when that is why the read failed. The view models used

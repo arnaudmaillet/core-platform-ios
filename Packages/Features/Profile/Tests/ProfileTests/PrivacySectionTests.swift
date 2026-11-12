@@ -1,5 +1,6 @@
 import Testing
 @testable import Profile
+@testable import ProfileSettings
 
 /// Settings → Privacy → Private Account (#388): the switch shows what the
 /// server holds, never what was merely asked for.

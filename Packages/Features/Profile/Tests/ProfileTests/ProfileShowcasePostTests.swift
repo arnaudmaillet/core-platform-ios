@@ -5,6 +5,7 @@ import Foundation
 import PostGrid
 import Testing
 @testable import Profile
+@testable import ProfileSettings
 
 /// A channel's showcase on a profile (#2216): a TEXT tile carrying its card,
 /// kept by the profile's disk tier.

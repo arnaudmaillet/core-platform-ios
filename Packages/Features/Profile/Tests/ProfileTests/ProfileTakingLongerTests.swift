@@ -9,6 +9,7 @@ import Testing
 import UIKit
 @testable import Feed
 @testable import Profile
+@testable import ProfileSettings
 
 /// A profile whose posts never come (#1770): after 10 s the gallery says
 /// "Taking longer than usual" in place of its bones, and Try Again asks for

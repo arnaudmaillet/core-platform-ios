@@ -6,6 +6,7 @@ import ProfileInterface
 import Testing
 import UIKit
 @testable import Profile
+@testable import ProfileSettings
 
 /// Where a pushed profile's selector ends up, and what else is in the bar
 /// with it.

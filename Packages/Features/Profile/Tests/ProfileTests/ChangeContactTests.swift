@@ -6,6 +6,7 @@ import CoreNetworkingMocks
 import Foundation
 import Testing
 @testable import Profile
+@testable import ProfileSettings
 
 /// Settings → Account → Email / Phone (#393, backend #651), end to end over
 /// the mock: a code to the new address, the change behind a step-up, and the

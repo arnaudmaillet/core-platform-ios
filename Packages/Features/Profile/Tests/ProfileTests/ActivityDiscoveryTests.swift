@@ -6,6 +6,7 @@ import CoreNetworkingMocks
 import Foundation
 import Testing
 @testable import Profile
+@testable import ProfileSettings
 
 /// Settings → Privacy → Activity and Discovery (#406, #412; backend #726,
 /// #727), end to end over the mock BFF.

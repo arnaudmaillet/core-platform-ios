@@ -2,6 +2,7 @@ import Foundation
 import Testing
 import UIKit
 @testable import Profile
+@testable import ProfileSettings
 
 /// A teen is told plainly, before linking, what their supervisor will see,
 /// and can re-read it on the supervisor's page (#1116).

@@ -2,6 +2,7 @@ import CoreModels
 import Foundation
 import Testing
 @testable import Profile
+@testable import ProfileSettings
 
 struct ProfileDisplayModelTests {
     private func profile(

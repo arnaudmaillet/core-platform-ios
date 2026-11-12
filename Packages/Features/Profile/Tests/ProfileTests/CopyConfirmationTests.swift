@@ -3,6 +3,7 @@ import DesignSystem
 import Testing
 import UIKit
 @testable import Profile
+@testable import ProfileSettings
 
 /// A copy has no evidence on screen, so it says so (#803): the backup codes'
 /// Copy used to be a vibration alone.

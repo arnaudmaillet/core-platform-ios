@@ -5,6 +5,7 @@ import FeedInterface
 import HeroPage
 import MediaCore
 import PostGrid
+import ProfileSettings
 import UIKit
 
 /// The profile's pager: its pages (Posts, and on the viewer's own Saved and

@@ -6,6 +6,7 @@ import CoreNetworkingMocks
 import Foundation
 import Testing
 @testable import Profile
+@testable import ProfileSettings
 
 /// Account Status → a restriction's reasons and appeal (#390, DSA Art. 17/20),
 /// and Safety → Your Reports (#399, DSA Art. 16(5)).

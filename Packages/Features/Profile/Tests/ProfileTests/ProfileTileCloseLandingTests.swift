@@ -8,6 +8,7 @@ import Testing
 import UIKit
 @testable import Feed
 @testable import Profile
+@testable import ProfileSettings
 
 /// **A card-shaped close onto a TILE lands as that tile (#888).**
 ///

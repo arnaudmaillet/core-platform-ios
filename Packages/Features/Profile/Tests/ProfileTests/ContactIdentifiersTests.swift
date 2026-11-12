@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import Profile
+@testable import ProfileSettings
 
 /// The contract's normalization and hashing for Find Friends from Contacts
 /// (#412, backend #806): emails lower-cased and trimmed, phones in E.164,

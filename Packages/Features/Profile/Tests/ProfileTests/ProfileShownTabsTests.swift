@@ -3,6 +3,7 @@ import Foundation
 import PostGrid
 import Testing
 @testable import Profile
+@testable import ProfileSettings
 
 /// Which tabs a profile shows (#742, #1422): a tab only for a source with
 /// something in it — Posts included, but for the viewer's own.

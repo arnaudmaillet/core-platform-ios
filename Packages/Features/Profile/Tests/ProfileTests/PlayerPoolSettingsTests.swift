@@ -3,6 +3,7 @@ import Foundation
 import Testing
 import UIKit
 @testable import Profile
+@testable import ProfileSettings
 
 /// Settings' player pool (#702): three segments named Less / Normal / More,
 /// never a number, and a footer that says what it trades.

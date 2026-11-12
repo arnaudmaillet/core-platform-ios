@@ -3,6 +3,7 @@ import Foundation
 import Testing
 import UIKit
 @testable import Profile
+@testable import ProfileSettings
 
 /// A settings switch while it saves (#1775, the owner 2026-10-28): where the
 /// tap put it, waiting with the loader beside it, the other switches still

@@ -6,6 +6,7 @@ import MediaCore
 import Testing
 import UIKit
 @testable import Profile
+@testable import ProfileSettings
 
 /// **A FAILED FIRST LOAD HAS A WAY OUT (#797).** A profile that never loaded
 /// said "Pull to retry" — but the pull lives on the gallery its failure hides,

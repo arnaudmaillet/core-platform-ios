@@ -6,6 +6,7 @@ import CoreNetworkingMocks
 import Foundation
 import Testing
 @testable import Profile
+@testable import ProfileSettings
 
 /// Account Type → Verification (#415, backend #668), end to end over the mock.
 @MainActor

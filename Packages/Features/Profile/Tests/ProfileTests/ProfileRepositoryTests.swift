@@ -6,6 +6,7 @@ import CoreNetworkingMocks
 import Foundation
 import Testing
 @testable import Profile
+@testable import ProfileSettings
 
 private struct AuthenticatedSessionStub: AuthSessionProviding {
     var accountID = AccountID(MockAuthService.accountID)

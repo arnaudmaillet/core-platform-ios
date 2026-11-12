@@ -7,6 +7,7 @@ import CoreStorage
 import Foundation
 import Testing
 @testable import Profile
+@testable import ProfileSettings
 
 /// A supervised teen's time in the app, reported in batches and kept until
 /// the server takes it (#417, backend #670 part 2).

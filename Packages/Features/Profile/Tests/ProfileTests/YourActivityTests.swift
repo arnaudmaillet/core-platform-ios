@@ -3,6 +3,7 @@ import Foundation
 import Testing
 import UIKit
 @testable import Profile
+@testable import ProfileSettings
 
 /// Settings → Your Activity (#489).
 @MainActor

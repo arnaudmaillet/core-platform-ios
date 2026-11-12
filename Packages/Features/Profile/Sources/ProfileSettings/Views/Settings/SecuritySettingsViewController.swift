@@ -1,0 +1,611 @@
+import CoreNetworking
+import DesignSystem
+import UIKit
+
+/// Settings → Security and Login: the Security Checkup, Two-Step Sign-In
+/// with its backup codes (#383) — there is no password to change any more
+/// (#840) — where the account
+/// is signed in and the two ways out — one other device, or every device at
+/// once (#384) — and App Lock (#418).
+///
+/// Passkeys (#551) sit beside two-step sign-in once the server says it has
+/// them: a fleet without a relying party answers UNAVAILABLE, and the row
+/// stays away rather than lead to a screen that cannot work.
+package final class SecuritySettingsViewController: UIViewController {
+    private enum Section: Hashable {
+        case checkup, signIn, apps, sessions, global, appLock, comingSoon
+    }
+
+    package enum Item: Hashable {
+        case checkup
+        case twoStep
+        case passkeys
+        /// Apps and Websites (#485).
+        case authorizedApps
+        case requireLock
+        case lockDelay
+        case session(AccountSession)
+        /// A session-shaped bone while the list loads (charter P8).
+        case skeleton(Int)
+        case failed
+        /// The sessions ran past 10 s (#1770): a row a tap retries.
+        case takingLonger
+        case logOutEverywhere
+        case planned(String)
+    }
+
+    private static let planned = ["New sign-in alerts"]
+
+    private let viewModel: SecuritySettingsViewModel
+    private let onSignedOutEverywhere: () -> Void
+    private let authenticator: any DeviceAuthenticating
+    private let makeCheckup: (() -> UIViewController)?
+    private let makeTwoStep: (() -> UIViewController)?
+    private let makePasskeys: (() -> UIViewController)?
+    /// Whether the server has passkeys (not UNAVAILABLE): asked once the
+    /// screen loads; the row appears when it says yes.
+    private let passkeysAvailable: (() async -> Bool)?
+    private var showsPasskeys = false
+    private let makeAuthorizedApps: (() -> UIViewController)?
+    private var collectionView: UICollectionView!
+    private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
+    /// Whether the sessions section last drew bones: the swap away from them
+    /// cross-fades (P10), every other redraw is plain.
+    private var isShowingSkeleton = false
+    /// The sessions whose log out is on its way (#1775): they wear the busy
+    /// accessory until the row leaves, or comes back with the error.
+    private var revoking: Set<AccountSession.ID> = []
+    /// Log Out of All Devices on its way.
+    private var isLoggingOutEverywhere = false
+
+    private func reconfigure(_ item: Item) {
+        var snapshot = dataSource.snapshot()
+        guard snapshot.indexOfItem(item) != nil else { return }
+        snapshot.reconfigureItems([item])
+        dataSource.apply(snapshot, animatingDifferences: false)
+    }
+
+    package init(
+        viewModel: SecuritySettingsViewModel,
+        onSignedOutEverywhere: @escaping () -> Void,
+        authenticator: any DeviceAuthenticating = DeviceAuthenticator(),
+        makeCheckup: (() -> UIViewController)? = nil,
+        makeTwoStep: (() -> UIViewController)? = nil,
+        makePasskeys: (() -> UIViewController)? = nil,
+        passkeysAvailable: (() async -> Bool)? = nil,
+        makeAuthorizedApps: (() -> UIViewController)? = nil
+    ) {
+        self.makePasskeys = makePasskeys
+        self.passkeysAvailable = passkeysAvailable
+        self.viewModel = viewModel
+        self.makeAuthorizedApps = makeAuthorizedApps
+        self.makeTwoStep = makeTwoStep
+        self.onSignedOutEverywhere = onSignedOutEverywhere
+        self.authenticator = authenticator
+        self.makeCheckup = makeCheckup
+        super.init(nibName: nil, bundle: nil)
+        title = SettingsSection.security.title
+        hidesBottomBarWhenPushed = true
+    }
+
+    @available(*, unavailable)
+    package required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    package override func viewDidLoad() {
+        super.viewDidLoad()
+        navigationItem.largeTitleDisplayMode = .never
+        configureCollectionView()
+        configureDataSource()
+        viewModel.onChange = { [weak self] in self?.applySnapshot() }
+        // A refresh that fails keeps the list; the failure is a toast, not a
+        // list replaced by an error row.
+        viewModel.onRefreshFailed = { [weak self] in
+            guard let self else { return }
+            Feedback.failure("Couldn't refresh your sessions", from: self)
+        }
+        applySnapshot()
+        Task { await viewModel.load() }
+        if makePasskeys != nil, let passkeysAvailable {
+            Task { [weak self] in
+                let available = await passkeysAvailable()
+                guard let self, available else { return }
+                showsPasskeys = true
+                applySnapshot()
+            }
+        }
+    }
+
+    /// Coming back (from two-step sign-in or the checkup) re-reads the
+    /// sessions. The list on screen
+    /// stays until the new one arrives, so nothing flashes.
+    package override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        if hasAppeared { Task { await viewModel.load() } }
+        hasAppeared = true
+    }
+
+    private var hasAppeared = false
+
+    // MARK: - Setup
+
+    private func configureCollectionView() {
+        var config = UICollectionLayoutListConfiguration(appearance: .insetGrouped)
+        config.headerMode = .supplementary
+        config.footerMode = .supplementary
+        config.trailingSwipeActionsConfigurationProvider = { [weak self] indexPath in
+            self?.swipeActions(at: indexPath)
+        }
+        collectionView = UICollectionView(
+            frame: view.bounds,
+            collectionViewLayout: UICollectionViewCompositionalLayout.list(using: config)
+        )
+        collectionView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        collectionView.prefersSoftTopEdge()
+        collectionView.delegate = self
+        view.addSubview(collectionView)
+    }
+
+    private func configureDataSource() {
+        let registration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { [weak self] cell, _, item in
+            Self.configure(cell, for: item, failure: self?.viewModel.failure, busy: self?.isBusy(item) ?? false)
+            self?.configureOwnRow(cell, for: item)
+        }
+        let skeletonRegistration = UICollectionView.CellRegistration<SettingsSkeletonRowCell, Int> { cell, _, index in
+            cell.configure(redacting: Self.sessionPlaceholder(index))
+        }
+        dataSource = UICollectionViewDiffableDataSource<Section, Item>(collectionView: collectionView) { collectionView, indexPath, item in
+            if case .skeleton(let index) = item {
+                return collectionView.dequeueConfiguredReusableCell(using: skeletonRegistration, for: indexPath, item: index)
+            }
+            return collectionView.dequeueConfiguredReusableCell(using: registration, for: indexPath, item: item)
+        }
+        let header = UICollectionView.SupplementaryRegistration<UICollectionViewListCell>(
+            elementKind: UICollectionView.elementKindSectionHeader
+        ) { [weak self] view, _, indexPath in
+            var content = UIListContentConfiguration.header()
+            content.text = self?.dataSource.sectionIdentifier(for: indexPath.section).flatMap(Self.headerText)
+            view.contentConfiguration = content
+        }
+        let footer = UICollectionView.SupplementaryRegistration<UICollectionViewListCell>(
+            elementKind: UICollectionView.elementKindSectionFooter
+        ) { [weak self] view, _, indexPath in
+            var content = UIListContentConfiguration.footer()
+            content.text = self?.dataSource.sectionIdentifier(for: indexPath.section).flatMap(Self.footerText)
+            view.contentConfiguration = content
+        }
+        dataSource.supplementaryViewProvider = { collectionView, kind, indexPath in
+            kind == UICollectionView.elementKindSectionHeader
+                ? collectionView.dequeueConfiguredReusableSupplementary(using: header, for: indexPath)
+                : collectionView.dequeueConfiguredReusableSupplementary(using: footer, for: indexPath)
+        }
+    }
+
+    private static func headerText(_ section: Section) -> String? {
+        switch section {
+        case .checkup: nil
+        case .signIn: nil
+        case .apps: nil
+        case .sessions: "Where You're Logged In"
+        case .global: nil
+        case .appLock: "App Lock"
+        case .comingSoon: "Coming Soon"
+        }
+    }
+
+    private static func footerText(_ section: Section) -> String? {
+        switch section {
+        case .checkup: nil
+        case .signIn: nil
+        case .apps: "Apps and websites you signed in to with your account."
+        case .sessions: "Tap another device to log it out."
+        case .global: "Ends every session, including this one. You'll need to log in again."
+        case .appLock: "Applies to this iPhone. When it's on, opening the app asks for Face ID or your passcode, and the app is hidden in the app switcher."
+        case .comingSoon: "These need a server update and aren't available yet."
+        }
+    }
+
+    // MARK: - Snapshot
+
+    private func applySnapshot() {
+        var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
+        if makeCheckup != nil {
+            snapshot.appendSections([.checkup])
+            snapshot.appendItems([.checkup], toSection: .checkup)
+        }
+        let signIn: [Item] = (makeTwoStep != nil ? [.twoStep] : []) + (showsPasskeys ? [.passkeys] : [])
+        if !signIn.isEmpty {
+            snapshot.appendSections([.signIn])
+            snapshot.appendItems(signIn, toSection: .signIn)
+        }
+        if makeAuthorizedApps != nil {
+            snapshot.appendSections([.apps])
+            snapshot.appendItems([.authorizedApps], toSection: .apps)
+        }
+        snapshot.appendSections([.sessions, .global, .appLock, .comingSoon])
+        // The kit's timing (#1770): nothing for its delay, the bones,
+        // "taking longer" past 10 s.
+        let shown: ListSkeletonGate.Shown = viewModel.phase == .loading ? loadingGate.loading() : .nothing
+        let sessionItems = Self.sessionItems(for: viewModel.phase, shown: shown)
+        snapshot.appendItems(sessionItems, toSection: .sessions)
+        snapshot.appendItems([.logOutEverywhere], toSection: .global)
+        snapshot.appendItems(AppLockPreference.isOn ? [.requireLock, .lockDelay] : [.requireLock], toSection: .appLock)
+        snapshot.appendItems(Self.planned.map(Item.planned), toSection: .comingSoon)
+
+        guard viewModel.phase != .loading else {
+            isShowingSkeleton = shown == .bones
+            return dataSource.apply(snapshot, animatingDifferences: view.window != nil)
+        }
+        // The answer waits out the bones' minimum (#1770).
+        loadingGate.landed { [weak self] in
+            guard let self else { return }
+            let wasShowingSkeleton = isShowingSkeleton
+            isShowingSkeleton = false
+            if wasShowingSkeleton {
+                collectionView.crossfadeSkeleton { [dataSource, snapshot] in
+                    dataSource?.apply(snapshot, animatingDifferences: false)
+                }
+            } else {
+                dataSource.apply(snapshot, animatingDifferences: view.window != nil)
+            }
+        }
+    }
+
+    /// The sessions' loading on the kit's timing (#1770). Injectable so a
+    /// test steps it.
+    package var skeletonClock: LoadingClock = .system
+    private lazy var loadingGate: ListSkeletonGate = {
+        let gate = ListSkeletonGate(clock: skeletonClock)
+        gate.onChange = { [weak self] in self?.applySnapshot() }
+        return gate
+    }()
+
+    /// The sessions section's rows: bones the shape of a session while the
+    /// list loads — never a spinner (P8) — the retry row after a failed first
+    /// load, the sessions otherwise.
+    /// `shown`: what the gate lets a loading section show (#1770).
+    package static func sessionItems(
+        for phase: SecuritySettingsViewModel.Phase, shown: ListSkeletonGate.Shown = .bones
+    ) -> [Item] {
+        switch phase {
+        case .loading:
+            switch shown {
+            case .bones: [.skeleton(0), .skeleton(1)]
+            case .takingLonger: [.takingLonger]
+            case .nothing: []
+            }
+        case .failed: [.failed]
+        case .loaded(let sessions): sessions.map(Item.session)
+        }
+    }
+
+    /// A session row with sample words; only the bones' widths come from them.
+    private static func sessionPlaceholder(_ index: Int) -> UIListContentConfiguration {
+        var content = UIListContentConfiguration.subtitleCell()
+        content.text = index.isMultiple(of: 2) ? "iPhone" : "Web browser"
+        content.secondaryText = index.isMultiple(of: 2) ? "iOS 27.0 · This device" : "Signed in 3 days ago"
+        content.image = UIImage(systemName: "iphone")
+        return content
+    }
+
+    // MARK: - Rows
+
+    private static let relativeFormatter: RelativeDateTimeFormatter = {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .full
+        return formatter
+    }()
+
+    /// "iOS 27.0 · This device", "Web browser · Signed in 3 days ago".
+    package static func sessionSubtitle(_ session: AccountSession, now: Date = Date()) -> String {
+        var parts: [String] = []
+        if let detail = session.device.detail { parts.append(detail) }
+        if session.isCurrent {
+            parts.append("This device")
+        } else if let signedInAt = session.signedInAt {
+            parts.append("Signed in \(relativeFormatter.localizedString(for: signedInAt, relativeTo: now))")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private static func symbol(for kind: SessionDevice.Kind) -> String {
+        switch kind {
+        case .iPhone: "iphone"
+        case .iPad: "ipad"
+        case .mac: "laptopcomputer"
+        case .windows: "pc"
+        case .android: "candybarphone"
+        case .unknown: "questionmark.circle"
+        }
+    }
+
+    /// The sessions' failed row: "You’re offline…" when that is why the
+    /// read failed (#794), else the row's own words.
+    package static func failedSessionsText(_ failure: NetworkFailure?) -> String {
+        FailureCopy.row(for: failure, fallback: "Couldn't load your sessions. Tap to try again.")
+    }
+
+    /// Whether `item`'s action is on its way (#1775).
+    private func isBusy(_ item: Item) -> Bool {
+        switch item {
+        case .session(let session): revoking.contains(session.id)
+        case .logOutEverywhere: isLoggingOutEverywhere
+        default: false
+        }
+    }
+
+    private static func configure(_ cell: UICollectionViewListCell, for item: Item, failure: NetworkFailure?, busy: Bool) {
+        cell.accessories = []
+        cell.contentView.subviews.filter { $0.tag == lockControlTag }.forEach { $0.removeFromSuperview() }
+        switch item {
+        case .checkup, .requireLock, .lockDelay:
+            break
+        case .twoStep:
+            var content = UIListContentConfiguration.cell()
+            content.text = "Two-Step Sign-In"
+            content.image = UIImage(systemName: "lock.shield")
+            content.imageProperties.tintColor = .label
+            cell.contentConfiguration = content
+            cell.accessories = [.disclosureIndicator()]
+        case .passkeys:
+            var content = UIListContentConfiguration.cell()
+            content.text = PasskeysViewController.title
+            content.image = UIImage(systemName: "person.badge.key")
+            content.imageProperties.tintColor = .label
+            cell.contentConfiguration = content
+            cell.accessories = [.disclosureIndicator()]
+        case .authorizedApps:
+            var content = UIListContentConfiguration.cell()
+            content.text = AuthorizedAppsViewController.title
+            content.image = UIImage(systemName: "app.connected.to.app.below.fill")
+            content.imageProperties.tintColor = .label
+            cell.contentConfiguration = content
+            cell.accessories = [.disclosureIndicator()]
+        case .session(let session):
+            var content = UIListContentConfiguration.subtitleCell()
+            content.text = session.device.title
+            content.secondaryText = sessionSubtitle(session)
+            content.secondaryTextProperties.color = session.isCurrent ? .systemGreen : .secondaryLabel
+            content.image = UIImage(systemName: symbol(for: session.device.kind))
+            content.imageProperties.tintColor = .label
+            cell.contentConfiguration = content
+            if busy { cell.accessories = [.busy()] }
+        case .skeleton:
+            // Drawn by `SettingsSkeletonRowCell`.
+            break
+        case .failed:
+            var content = UIListContentConfiguration.cell()
+            content.text = failedSessionsText(failure)
+            content.textProperties.color = .secondaryLabel
+            cell.contentConfiguration = content
+        case .takingLonger:
+            var content = UIListContentConfiguration.cell()
+            content.text = TakingLongerCopy.row
+            content.textProperties.color = .secondaryLabel
+            cell.contentConfiguration = content
+        case .logOutEverywhere:
+            var content = UIListContentConfiguration.cell()
+            content.text = "Log Out of All Devices"
+            content.textProperties.color = busy ? .secondaryLabel : .systemRed
+            cell.contentConfiguration = content
+            if busy { cell.accessories = [.busy()] }
+        case .planned(let title):
+            var content = UIListContentConfiguration.cell()
+            content.text = title
+            content.textProperties.color = .secondaryLabel
+            cell.contentConfiguration = content
+        }
+    }
+
+    // MARK: - App Lock and checkup rows
+
+    private static let lockControlTag = 0x10C4
+
+    /// The rows that need the screen (the authenticator, the lock switch).
+    private func configureOwnRow(_ cell: UICollectionViewListCell, for item: Item) {
+        switch item {
+        case .checkup:
+            var content = UIListContentConfiguration.cell()
+            content.text = "Security Checkup"
+            content.image = UIImage(systemName: "checkmark.shield")
+            content.imageProperties.tintColor = .label
+            cell.contentConfiguration = content
+            cell.accessories = [.disclosureIndicator()]
+        case .requireLock:
+            let method = authenticator.availableMethod()
+            var content = UIListContentConfiguration.subtitleCell()
+            content.text = "Require \(method ?? "Face ID")"
+            content.secondaryText = method == nil ? "Set up Face ID or a passcode in iOS Settings first." : nil
+            content.secondaryTextProperties.color = .secondaryLabel
+            content.image = UIImage(systemName: "lock")
+            content.imageProperties.tintColor = .label
+            cell.contentConfiguration = content
+            let toggle = UISwitch()
+            toggle.isOn = AppLockPreference.isOn
+            toggle.isEnabled = method != nil || AppLockPreference.isOn
+            toggle.addAction(UIAction { [weak self] action in
+                guard let toggle = action.sender as? UISwitch else { return }
+                self?.setAppLock(toggle.isOn, toggle: toggle)
+            }, for: .valueChanged)
+            cell.accessories = [.customView(configuration: .init(customView: toggle, placement: .trailing(displayed: .always)))]
+        case .lockDelay:
+            cell.contentConfiguration = nil
+            let options = AppLockPreference.Delay.allCases
+            let control = UISegmentedControl(items: options.map(\.title))
+            control.selectedSegmentIndex = options.firstIndex(of: AppLockPreference.delay) ?? 0
+            control.accessibilityLabel = "Lock after"
+            control.addAction(UIAction { action in
+                guard let control = action.sender as? UISegmentedControl else { return }
+                AppLockPreference.delay = options[control.selectedSegmentIndex]
+            }, for: .valueChanged)
+            control.tag = Self.lockControlTag
+            control.translatesAutoresizingMaskIntoConstraints = false
+            cell.contentView.addSubview(control)
+            let margins = cell.contentView.layoutMarginsGuide
+            NSLayoutConstraint.activate([
+                control.leadingAnchor.constraint(equalTo: margins.leadingAnchor),
+                control.trailingAnchor.constraint(equalTo: margins.trailingAnchor),
+                control.topAnchor.constraint(equalTo: cell.contentView.topAnchor, constant: 10),
+                control.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -10)
+            ])
+        default:
+            break
+        }
+    }
+
+    /// Turning App Lock on or off asks for Face ID / the passcode first, so
+    /// someone holding an unlocked phone can't switch it off.
+    private func setAppLock(_ isOn: Bool, toggle: UISwitch) {
+        Task { [weak self] in
+            guard let self else { return }
+            let confirmed = await authenticator.authenticate(
+                reason: isOn ? "Turn on App Lock" : "Turn off App Lock"
+            )
+            if confirmed {
+                AppLockPreference.isOn = isOn
+            } else {
+                toggle.setOn(!isOn, animated: true)
+            }
+            applySnapshot()
+        }
+    }
+
+    // MARK: - Actions
+
+    private func swipeActions(at indexPath: IndexPath) -> UISwipeActionsConfiguration? {
+        guard case .session(let session) = dataSource.itemIdentifier(for: indexPath), !session.isCurrent else { return nil }
+        let action = UIContextualAction(style: .destructive, title: "Log Out") { [weak self] _, _, done in
+            self?.revoke(session)
+            done(true)
+        }
+        return UISwipeActionsConfiguration(actions: [action])
+    }
+
+    private func confirmRevoke(_ session: AccountSession) {
+        let sheet = UIAlertController(
+            title: "Log out of \(session.device.title)?",
+            message: "That device will need to log in again.",
+            preferredStyle: .actionSheet
+        )
+        sheet.addAction(UIAlertAction(title: "Log Out", style: .destructive) { [weak self] _ in
+            self?.revoke(session)
+        })
+        sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        presentSheet(sheet)
+    }
+
+    /// The row says so while the device is logged out (#1775), then leaves,
+    /// or comes back as it was, with the error.
+    private func revoke(_ session: AccountSession) {
+        guard !revoking.contains(session.id) else { return }
+        revoking.insert(session.id)
+        reconfigure(.session(session))
+        Task { [weak self] in
+            guard let self else { return }
+            defer {
+                revoking.remove(session.id)
+                reconfigure(.session(session))
+            }
+            do {
+                try await viewModel.revoke(session)
+            } catch {
+                presentInfo("Couldn't log out \(session.device.title). Try again.")
+            }
+        }
+    }
+
+    private func confirmLogOutEverywhere() {
+        let sheet = UIAlertController(
+            title: "Log out of all devices?",
+            message: "Every session ends, including this one.",
+            preferredStyle: .actionSheet
+        )
+        sheet.addAction(UIAlertAction(title: "Log Out of All Devices", style: .destructive) { [weak self] _ in
+            self?.logOutEverywhere()
+        })
+        sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        presentSheet(sheet)
+    }
+
+    private func logOutEverywhere() {
+        guard !isLoggingOutEverywhere else { return }
+        isLoggingOutEverywhere = true
+        reconfigure(.logOutEverywhere)
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await viewModel.revokeAll()
+                onSignedOutEverywhere()
+            } catch {
+                isLoggingOutEverywhere = false
+                reconfigure(.logOutEverywhere)
+                presentInfo("Couldn't log out of all devices. Try again.")
+            }
+        }
+    }
+
+    private func presentSheet(_ sheet: UIAlertController) {
+        if let popover = sheet.popoverPresentationController {
+            popover.sourceView = view
+            popover.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.maxY - 60, width: 0, height: 0)
+            popover.permittedArrowDirections = []
+        }
+        present(sheet, animated: true)
+    }
+
+    private func presentInfo(_ message: String) {
+        let alert = UIAlertController(title: nil, message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        present(alert, animated: true)
+    }
+}
+
+// MARK: - Selection
+
+extension SecuritySettingsViewController: UICollectionViewDelegate {
+    package func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
+        switch dataSource.itemIdentifier(for: indexPath) {
+        case .session(let session): !session.isCurrent
+        case .failed, .takingLonger, .logOutEverywhere, .checkup, .twoStep, .passkeys, .authorizedApps: true
+        case .skeleton, .planned, .requireLock, .lockDelay, nil: false
+        }
+    }
+
+    package func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        collectionView.deselectItem(at: indexPath, animated: true)
+        switch dataSource.itemIdentifier(for: indexPath) {
+        case .session(let session) where !session.isCurrent:
+            confirmRevoke(session)
+        case .failed:
+            Task { await viewModel.load() }
+        case .takingLonger:
+            loadingGate.retry()
+            Task { await viewModel.load() }
+        case .logOutEverywhere:
+            confirmLogOutEverywhere()
+        case .checkup:
+            if let checkup = makeCheckup?() {
+                navigationController?.pushViewController(checkup, animated: true)
+            }
+        case .twoStep:
+            if let screen = makeTwoStep?() {
+                navigationController?.pushViewController(screen, animated: true)
+            }
+        case .passkeys:
+            if let screen = makePasskeys?() {
+                navigationController?.pushViewController(screen, animated: true)
+            }
+        case .authorizedApps:
+            if let screen = makeAuthorizedApps?() {
+                navigationController?.pushViewController(screen, animated: true)
+            }
+        default:
+            break
+        }
+    }
+}
+
+// MARK: - How it is left (#1144)
+
+extension SecuritySettingsViewController: StackScreen {
+    package var leaving: ScreenLeaving { .nativeBack }
+}

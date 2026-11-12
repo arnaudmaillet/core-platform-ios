@@ -2,6 +2,7 @@ import Foundation
 import Testing
 import UIKit
 @testable import Profile
+@testable import ProfileSettings
 
 /// **SETTINGS WEARS A LARGE TITLE, AND NOTHING IT PUSHES DOES (#1906).**
 ///
@@ -18,7 +19,7 @@ struct SettingsLargeTitleTests {
             .deletingLastPathComponent() // ProfileTests
             .deletingLastPathComponent() // Tests
             .deletingLastPathComponent() // Profile
-            .appendingPathComponent("Sources/Profile/Views/Settings")
+            .appendingPathComponent("Sources/ProfileSettings/Views/Settings")
     }
 
     @Test func settingsStatesALargeTitle() {

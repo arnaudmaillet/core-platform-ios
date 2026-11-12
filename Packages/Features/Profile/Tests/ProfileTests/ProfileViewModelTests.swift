@@ -5,6 +5,7 @@ import Foundation
 import PostGrid
 import Testing
 @testable import Profile
+@testable import ProfileSettings
 
 @MainActor
 private final class SpyRouter: Router {

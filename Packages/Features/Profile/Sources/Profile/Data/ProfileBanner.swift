@@ -2,6 +2,7 @@ import CoreContracts
 import CoreNetworking
 import CoreStorage
 import Foundation
+import ProfileSettings
 
 /// The gem-shop items a profile can wear (#947), as Edit Profile sees them:
 /// whether the account owns one, and buying it with gems. The shell answers

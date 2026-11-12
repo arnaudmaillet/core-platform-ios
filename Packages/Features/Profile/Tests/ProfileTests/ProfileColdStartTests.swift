@@ -8,6 +8,7 @@ import PostGrid
 import Synchronization
 import Testing
 @testable import Profile
+@testable import ProfileSettings
 
 // The viewer's own profile and the profiles they visited open on their last
 // content at a cold start, from the LocalStore (#893).

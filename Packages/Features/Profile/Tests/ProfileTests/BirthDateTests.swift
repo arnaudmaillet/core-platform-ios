@@ -7,6 +7,7 @@ import CoreStorage
 import Foundation
 import Testing
 @testable import Profile
+@testable import ProfileSettings
 
 /// Settings → Account → Date of Birth (#394, backend #652).
 @MainActor

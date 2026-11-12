@@ -7,6 +7,7 @@ import Foundation
 import PostGrid
 import Testing
 @testable import Profile
+@testable import ProfileSettings
 
 /// Deleting a post of one's own, and Recently Deleted (#408, backend #663),
 /// end to end over the mock BFF.

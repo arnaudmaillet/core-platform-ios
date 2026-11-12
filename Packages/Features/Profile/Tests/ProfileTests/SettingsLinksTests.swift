@@ -2,6 +2,7 @@ import Foundation
 import UIKit
 import Testing
 @testable import Profile
+@testable import ProfileSettings
 
 /// Help and Support / Legal and About (#391): every page App Review and the
 /// DSA ask about has a row, and a page that isn't published says so.
