@@ -96,7 +96,7 @@ struct ComposerContractTests {
         #expect(!bar.debugFieldHoldBegins, "a comment's field records")
         #expect(bar.debugPlaceholder != CommentsInputBar.speakOrWritePlaceholder)
         #expect(bar.debugTextView.accessibilityCustomActions == nil, "VoiceOver offers a voice")
-        #expect(bar.debugAttachmentButtons.isEmpty)
+        #expect(bar.debugAttachmentButtons.isEmpty && bar.debugAttachmentColumn == nil)
         let buttons = Self.descendants(of: bar).compactMap { $0 as? UIButton }
         #expect(!buttons.contains { $0.accessibilityLabel == "Record voice comment" }, "a voice that doesn't work")
         let field = try #require(SnapActionColumnLayoutTests.fieldView(in: bar))
@@ -170,13 +170,16 @@ struct ComposerContractTests {
 
     // MARK: - The attachments, any number
 
-    /// A list of ANY length — none, one, the conversation's two, more — lays
-    /// out between the field and the own bubble, one `sm` apart, the own
-    /// bubble's size, on the field's line; a draft hides them all and the
-    /// field takes their room, the own bubble never moving. On a post's
-    /// composer (with its column) as on a conversation's.
+    /// A list of ANY length — none, one, the conversation's two, more — is
+    /// ONE glass capsule between the field and the own bubble (#2344): the
+    /// glyphs in the list's order, each a row-high square, side by side; the
+    /// field ends `sm` short of the capsule, the capsule `sm` short of the
+    /// own bubble. A draft folds the capsule into the own bubble — the
+    /// column's anchor alone — and the field takes its room, the own bubble
+    /// never moving. On a post's composer (with its column) as on a
+    /// conversation's.
     @Test(arguments: [ComposerConfiguration.Column.post, .none])
-    func anAttachmentListOfAnyLengthStandsBeforeTheBubbleAndHidesWithADraft(column: ComposerConfiguration.Column) throws {
+    func anAttachmentListOfAnyLengthIsOneCapsuleThatFoldsWithADraft(column: ComposerConfiguration.Column) throws {
         for count in 0...4 {
             let contract = ComposerConfiguration(attachments: (0..<count).map(Self.source), column: column)
             let (bar, host, window) = hostedBar(contract)
@@ -189,43 +192,54 @@ struct ComposerContractTests {
             let side = CommentsInputBar.Metrics.controlSize
             var leading = field.frame.maxX + Spacing.sm
             for button in buttons {
-                #expect(!button.isHidden && button.isAccessibilityElement)
-                #expect(abs(button.frame.width - side) < 0.5 && abs(button.frame.height - side) < 0.5)
-                #expect(abs(button.frame.minX - leading) < 0.5, "\(count) of \(column): \(button.frame) vs \(leading)")
-                #expect(abs(button.frame.maxY - field.frame.maxY) < 0.5, "off the field's line")
-                leading = button.frame.maxX + Spacing.sm
+                let frame = button.convert(button.bounds, to: bar)
+                #expect(button.isAccessibilityElement)
+                #expect(abs(frame.width - side) < 0.5 && abs(frame.height - side) < 0.5)
+                #expect(abs(frame.minX - leading) < 0.5, "\(count) of \(column): \(frame) vs \(leading)")
+                #expect(abs(frame.maxY - field.frame.maxY) < 0.5, "off the field's line")
+                leading = frame.maxX
             }
+            if count > 0 { leading += Spacing.sm }
             #expect(abs(bubble.minX - leading) < 0.5, "\(count) of \(column): the own bubble \(bubble) vs \(leading)")
             #expect(bar.debugShowsAttachments == (count > 0))
+            if count == 0 {
+                #expect(bar.debugAttachmentColumn == nil, "a glass column with nothing to hold")
+                continue
+            }
+            let glass = try #require(bar.debugAttachmentColumn)
+            #expect(glass.debugShapes.count == 2, "\(count): not one capsule and the anchor")
 
             let fieldAtRest = field.frame.maxX
+            let room = CommentsInputBar.attachmentCapsuleWidth(count: count) + Spacing.sm
             bar.draftText = "Hello"
             SnapActionColumnLayoutTests.relayout(host, bar)
             #expect(!bar.debugShowsAttachments, "\(count): shown beside a draft")
+            #expect(glass.debugShapes.count == 1, "\(count): the capsule did not fold into the own bubble")
             #expect(buttons.allSatisfy { !$0.isAccessibilityElement })
-            #expect(abs(field.frame.maxX - (fieldAtRest + CGFloat(count) * Self.step)) < 0.5,
-                    "\(count): the field did not take their room")
+            #expect(abs(field.frame.maxX - (fieldAtRest + room)) < 0.5, "\(count): the field did not take their room")
             #expect(abs(bar.debugRowActionButton.frame.minX - bubble.minX) < 0.5, "\(count): the own bubble moved")
 
             bar.draftText = ""
             SnapActionColumnLayoutTests.relayout(host, bar)
-            #expect(bar.debugShowsAttachments == (count > 0), "\(count): an emptied field did not give them back")
+            #expect(bar.debugShowsAttachments, "\(count): an emptied field did not give them back")
+            #expect(glass.debugShapes.count == 2)
             #expect(abs(field.frame.maxX - fieldAtRest) < 0.5)
         }
     }
 
-    /// A host's new list — an entry added — rebuilds the row in place; the
-    /// composer names no kind of media, it draws what the list says.
-    @Test func aNewEntryIsOneMoreBubble() {
+    /// A host's new list — an entry added — rebuilds the capsule in place;
+    /// the composer names no kind of media, it draws what the list says.
+    @Test func aNewEntryIsOneMoreGlyphInTheCapsule() {
         let bar = CommentsInputBar()
         bar.configuration.attachments = [Self.source(0)]
         let first = bar.debugAttachmentButtons.first
         bar.configuration.attachments = [Self.source(0), Self.source(1)]
         #expect(bar.debugAttachmentButtons.count == 2)
-        #expect(bar.debugAttachmentButtons.first !== first, "an entry added rebuilds the row")
+        #expect(bar.debugAttachmentButtons.first !== first, "an entry added rebuilds the capsule")
         #expect(bar.debugAttachmentButtons.map(\.accessibilityLabel) == ["Source 0", "Source 1"])
         bar.configuration.attachments = []
         #expect(bar.debugAttachmentButtons.isEmpty)
+        #expect(bar.debugAttachmentColumn == nil)
     }
 
     // MARK: - Voice, where a host declares it
