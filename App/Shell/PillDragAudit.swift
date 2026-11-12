@@ -116,11 +116,13 @@ final class PillDragAudit {
 
     /// The bar the viewer can actually touch.
     ///
-    /// The accessory first, because that is where every root screen's selector
-    /// lives now; then the top view controller's own view, which is where a
-    /// pushed screen with `hidesBottomBarWhenPushed` keeps its own. A bar with
-    /// no window, or one behind a presented screen, is not something a finger
-    /// can reach and is not what this reports.
+    /// The accessory first, where the profile's selector lives; then the
+    /// navigation bar, where the paged tab roots wear theirs right of the
+    /// bell (For You, and Messages since #2337); then the top view
+    /// controller's own view, which is where a pushed screen with
+    /// `hidesBottomBarWhenPushed` keeps its own. A bar with no window, or one
+    /// behind a presented screen, is not something a finger can reach and is
+    /// not what this reports.
     private func visibleBar() -> PagedTabBar? {
         if let accessory = tabBarController.bottomAccessory?.contentView,
            let bar = firstBar(in: accessory) {
@@ -128,6 +130,10 @@ final class PillDragAudit {
         }
         var candidate = tabBarController.selectedViewController
         if let nav = candidate as? UINavigationController {
+            if nav.presentedViewController == nil, !nav.isNavigationBarHidden,
+               let bar = firstBar(in: nav.navigationBar) {
+                return bar
+            }
             candidate = nav.presentedViewController ?? nav.topViewController
         }
         return candidate?.view.flatMap(firstBar)

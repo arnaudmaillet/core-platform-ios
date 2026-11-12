@@ -367,7 +367,8 @@ struct ChannelsTests {
     }
 
     /// The bar names no section when the list scrolls (#2328): after the
-    /// bell, nothing, on Requests with join requests waiting as on Chats.
+    /// bell, the selector alone (#2337), on Requests with join requests
+    /// waiting as on Chats.
     @Test func theBarNamesNoSectionWhenScrolled() async throws {
         let (requests, catalog) = await requestsWithJoinRequests()
         let chats = ConversationListViewController(viewModel: ConversationListViewModel(catalog: catalog))
@@ -379,7 +380,8 @@ struct ChannelsTests {
 
         func onlyTheBell(_ moment: String) {
             let leading = screen.navigationItem.leftBarButtonItems ?? []
-            #expect(leading.count == 1 && leading.first === bell, "\(moment): \(leading)")
+            #expect(leading.count == 3 && leading.first === bell, "\(moment): \(leading)")
+            #expect(leading.last?.identifier == MessagesInboxViewController.selectorItemID, "\(moment): \(leading)")
         }
 
         screen.setCategory(.requests, animated: false)

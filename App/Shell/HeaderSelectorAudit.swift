@@ -48,9 +48,22 @@ final class HeaderSelectorAudit {
     /// view — where this audit could never have found it anyway. It is in the
     /// bottom accessory now, which is somewhere the audit looks.
     ///
-    /// `.forYou` is NOT: since #312 For You is one page with no tabs, so a
-    /// selector there would be the bug.
-    private let mustHaveSelector: Set<AppTab> = [.messages, .profile]
+    /// `.forYou` IS TOO, since its Feed | Shots sector (2026-10-25): the note
+    /// here said a selector there would be the bug, which was true from #312
+    /// to the sector and has not been since.
+    private let mustHaveSelector: Set<AppTab> = [.forYou, .messages, .profile]
+
+    /// Where each surface's selector belongs (#2337, the owner 2026-11-12).
+    /// The paged TAB ROOTS wear theirs in the navigation bar, right of the
+    /// bell (`BarSelectorItem`): For You's Feed | Shots since 2026-10-25,
+    /// Messages' Chats | Requests | Suggestions since #2337 — it hung in the
+    /// bottom accessory from PR #154 until then. The profile keeps the
+    /// accessory: its tabs are sections of one page under a hero header.
+    private let expectedHost: [AppTab: SelectorHost] = [
+        .forYou: .navigationBar,
+        .messages: .navigationBar,
+        .profile: .bottomAccessory,
+    ]
 
     func run(tabs: [AppTab]) async {
         print("[header-audit] begin: \(tabs.count) surfaces")
@@ -315,6 +328,27 @@ final class HeaderSelectorAudit {
             }
         }
 
+        // 1b. In the host it belongs in (#2337) — and, on a paged tab root,
+        // RIGHT AFTER THE BELL: `[bell][selector]`, the separator between
+        // them being a space (no view, no glyph, no word).
+        if let tab = AppTab(rawValue: surface), let expected = expectedHost[tab], let located {
+            if located.host != expected {
+                finding.problems.append("selector in the \(located.host.rawValue), "
+                    + "expected in the \(expected.rawValue)")
+            } else if expected == .navigationBar, nav.viewControllers.count == 1 {
+                let shown = (item?.leftBarButtonItems ?? [])
+                    .filter { $0.customView != nil || $0.image != nil || $0.title != nil }
+                let bellFirst = shown.first?.identifier == BarItems.SharedID.notificationsBell
+                let selectorSecond = shown.count >= 2 && shown[1].customView.map {
+                    selector === $0 || selector.isDescendant(of: $0)
+                } == true
+                if !(bellFirst && selectorSecond) {
+                    finding.problems.append("not [bell][selector]: leading=["
+                        + shown.map { $0.identifier ?? "?" }.joined(separator: ", ") + "]")
+                }
+            }
+        }
+
         // 2. A BAR ITEM'S custom view has to state a width.
         //
         // ⚠️ Only a bar item. An accessory host pins the strip with constraints
@@ -432,9 +466,10 @@ final class HeaderSelectorAudit {
         }
         // ⚠️ THE `inHost=` FLAG IS GONE WITH THE CLASS IT LOOKED FOR. It asked
         // whether the strip was inside `LeadingSelectorHost`, which no longer
-        // exists — every selector is in an accessory or a toolbar now, so the
-        // answer was NO everywhere and read as a finding. The CHAIN is still
-        // printed, and it is what actually says where a strip ended up.
+        // exists — the paged tab roots' strips are bar items again (#2337,
+        // `BarSelectorItem`, no wrapper view), the rest in an accessory or a
+        // toolbar. The CHAIN is still printed, and it is what actually says
+        // where a strip ended up.
         print(String(format: "[header-audit] %@: HOSTING intrinsic=%.0f "
                      + "hostFrame=%.0fx%.0f chain=%@",
                      surface,

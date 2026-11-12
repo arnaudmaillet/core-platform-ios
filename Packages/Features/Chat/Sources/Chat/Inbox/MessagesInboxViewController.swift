@@ -3,8 +3,8 @@ import CoreNavigation
 import DesignSystem
 import UIKit
 
-/// The Messages tab's root: one navigation bar carrying the tab capsule as its
-/// title, and a set of horizontally paged surfaces beneath it.
+/// The Messages tab's root: one navigation bar carrying the tab capsule right
+/// of the bell, and a set of horizontally paged surfaces beneath it.
 ///
 /// The container owns exactly three things — the pager, the tab capsule, and
 /// the navigation bar's contents — and drives all of them from one signal, the
@@ -12,41 +12,49 @@ import UIKit
 /// about how a page renders; every surface arrives as an `InboxSurface` and is
 /// otherwise opaque.
 ///
-/// **The capsule WAS the title, and is not any more.** It sat in
-/// `navigationItem.titleView`; it is in a `UITabAccessory` at the foot of the
-/// screen now, and the title slot carries the word "Messages". Either way this
-/// screen reserves no safe area of its own — the navigation bar accounts for
-/// its own height, UIKit accounts for the accessory's, and each page's list
-/// insets itself through the standard safe area. Nothing floats over the
-/// content, so there is no header geometry to maintain here.
+/// **The capsule is in the bar, right of the bell, as on For You (#2337, the
+/// owner 2026-11-12).** It sat in the title slot in August, in a
+/// `UITabAccessory` at the foot of the screen from PR #154 (September) on; it
+/// leads the bar now, `[bell][Chats | Requests | Suggestions]`, the paged tab
+/// roots' one rule (`BarSelectorItem`). The foot of the screen is the tab bar
+/// alone. This screen reserves no safe area of its own — the navigation bar
+/// accounts for its own height and each page's list insets itself through the
+/// standard safe area. Nothing floats over the content, so there is no header
+/// geometry to maintain here.
 ///
 /// **Badges are a fact about the session.** Nothing here retires one: not
 /// paging between tabs, not pushing a thread, not leaving for another root tab.
 /// A cold launch builds new view models and with them new watermarks, and that
 /// is the only reset there is — see `InboxTabWatermark`.
 ///
-/// **The bar is written once and never again.** The tab's name in the centre
-/// and the search field stacked under it — the selector moved to the accessory and
-/// compose went with the leading group. Both belong to the inbox as a whole
-/// rather than to any page, which was always the point: a page publishing its
-/// own word up there would re-measure the bar on every tab change. What a page
-/// contributes rides its own tab: a badge, and the menu its long press offers.
-/// The one exception is search, which takes the title slot for its field —
-/// a `titleView` outranks a `title`, so the name hides and returns by itself.
-/// The shell adds an item of its own through `HeaderAccessoryHosting` — the
-/// notifications bell leading — which is the app's rather than the inbox's,
-/// and so pages with nothing either. No balance trails it (#2336, the owner
-/// 2026-11-12): the likes balance shows where likes are spent or earned, and
-/// the inbox has no heart, no spend and no claim.
+/// **The bar belongs to the inbox, not to a page.** The bell and the selector
+/// leading, the search field stacked under the bar: they belong to the inbox
+/// as a whole rather than to any page, which was always the point — a page
+/// publishing its own word up there would re-measure the bar on every tab
+/// change. What a page contributes rides its own tab: a badge, and the menu
+/// its long press offers. The shell adds an item of its own through
+/// `HeaderAccessoryHosting` — the notifications bell leading — which is the
+/// app's rather than the inbox's, and so pages with nothing either. No
+/// balance trails it (#2336, the owner 2026-11-12): the likes balance shows
+/// where likes are spent or earned, and the inbox has no heart, no spend and
+/// no claim.
 final class MessagesInboxViewController: UIViewController, MessagesInboxCategorySelecting,
     HeaderAccessoryHosting {
     /// The inbox's surfaces, in paging order.
     private let surfaces: [any InboxSurface]
-    /// The shared glass tab capsule, hosted in the navigation bar's title slot.
+    /// The shared glass tab capsule, in the navigation bar right of the bell.
     /// It takes titles and reports an index — the category is this container's
     /// vocabulary, not the bar's, so every call site maps one to the other
     /// through `surfaces`.
     private let categoryBar: PagedTabBar
+    /// The capsule's bar item and its width rule (#2337): For You's recipe —
+    /// `.navigationTitle`, `.platter`, `BarItems.container` under a stable
+    /// identifier — with the room it may take, 15pt or 13pt, and a scroll
+    /// past that. Never a `•••`.
+    private let selector: BarSelectorItem
+    /// The selector item's identifier, the same across every re-mint and
+    /// every launch (#2337).
+    static let selectorItemID = "messages.inbox.selector"
 
     /// Built in `viewDidLoad`, once the surfaces are children — reading a
     /// child's `view` before containment would load it outside its parent.
@@ -93,6 +101,7 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         categoryBar = PagedTabBar(
             titles: surfaces.map(\.category.title), style: .navigationTitle
         )
+        selector = BarSelectorItem(strip: categoryBar, id: Self.selectorItemID)
         initialIndex = surfaces.firstIndex { $0.category == initialCategory } ?? 0
         super.init(nibName: nil, bundle: nil)
         // One colour for every unread mark (#1169, #2062: solid, never a
@@ -176,25 +185,16 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
 
         for surface in surfaces { surface.didMove(toParent: self) }
 
-        // ⚠️ **The selector has the leading group to ITSELF; compose rides
-        // trailing.**
-        //
-        // Two leading items collapse on a narrow bar and one survives — the same
-        // rule the profile hit, where moving its switcher trailing is what finally
-        // hosted its selector. Measured here: with compose leading, 402pt hosts and
-        // 375pt collapses the whole group into a `•••`; with compose trailing, both
-        // host. Width is not the trigger, so a narrower selector does not help.
-        // ⚠️ **THE STRIP IS NOT IN THIS BAR ANY MORE.** It lives at the foot of
-        // the screen in a `UITabAccessory`, above the tab bar. Everything above
-        // — the compose-item ordering, the width ceiling, the "install after
-        // the search affordance" rule — was arithmetic against a navigation
-        // bar that sweeps a group it cannot fit into a `•••`. An accessory has
-        // no item groups and no overflow control, so the whole calculation is
-        // gone rather than restated.
-        selectorAccessory = SelectorAccessory(strip: categoryBar)
+        // ⚠️ **THE STRIP IS BACK IN THIS BAR (#2337), AND NO BAND AT THE
+        // FOOT.** No `SelectorAccessory`, nothing installed on appear or
+        // removed on disappear, no minimize to arm or reconcile: the strip is
+        // a bar item, which UIKit keeps per navigation item, so it cannot
+        // float over a pushed thread or another tab. The width arithmetic the
+        // accessory made unnecessary is back with it — the bar sweeps a group
+        // it cannot fit into a `•••` — and lives in `BarSelectorItem`.
 
         // NO `additionalSafeAreaInsets`: the pages inset under the header
-        // through the standard safe area, and UIKit owns the band at the foot.
+        // through the standard safe area.
 
         // Wired like any system control: the bar carries the chosen segment as
         // its value and announces it, rather than handing back a closure.
@@ -223,11 +223,11 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
             categoryBar.setProgress(progress)
         }
         pagerView.onSettled = { [weak self] index in self?.didSettle(on: index) }
-        // The band's minimize rides whichever page is in front. The pager is
-        // what knows, and it is what says so — see `onActiveScrollViewChanged`.
+        // The stacked field collapses into the bar as the page in front
+        // scrolls. The pager is what knows which page that is, and it is what
+        // says so. No `.bottom` scroller: the tab bar never collapses here,
+        // as on For You (#758) — there is no band to dock (#2337).
         pagerView.onActiveScrollViewChanged = { [weak self] scroller in
-            self?.setContentScrollView(scroller, for: .bottom)
-            // The stacked field collapses into the bar as this list scrolls.
             self?.setContentScrollView(scroller, for: .top)
         }
 
@@ -240,33 +240,16 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         categoryBar.setProgress(CGFloat(pagerView.activeIndex))
     }
 
-    /// Fires at the START of a pop — including the interactive one, before any
-    /// frame is drawn — so what the transition reveals is already in agreement:
-    /// the page shown and the lens over it.
-    override func viewWillDisappear(_ animated: Bool) {
-        super.viewWillDisappear(animated)
-        // ⚠️ ABOVE ANY OTHER GUARD, and covering a push as well as a tab
-        // switch: the accessory is shell-lifetime state, and this is the only
-        // moment that reliably precedes something else owning the band.
-        selectorAccessory?.remove(from: tabBarController, alongside: transitionCoordinator)
+    /// The bar's width is known once the screen is laid out in it: the
+    /// selector re-fits to the room the bell leaves (#2337).
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        refitSelector()
     }
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        // ⚠️ **AS EARLY AS THE TRANSITION ALLOWS, AND `viewDidAppear` IS NOT
-        // EARLY.** Measured on a tab switch, headless: `viewWillAppear` at
-        // +36ms, `viewDidAppear` at +947ms — nine hundred milliseconds of empty
-        // band under a screen already fully on display. The call below is
-        // idempotent with the one in `viewDidAppear`, which stays as the
-        // backstop for the paths the policy declines (a scrub that has not
-        // committed, a flight that owns the chrome).
-        installBottomChromeWhenAppearing(hasActiveFlight: false,
-                                         handsOver: tabBarController?.bottomAccessory != nil) { [weak self] in
-            guard let self else { return }
-            selectorAccessory?.install(into: tabBarController, owner: self, minimizesOnScroll: true,
-                                       alongside: transitionCoordinator)
-        }
-
+        refitSelector()
         pagerView?.reassertActivePage()
         if let surface = activeSurface { apply(surface.chrome, from: surface) }
         // Coming BACK to the inbox — a tab switch, a popped thread — wakes the
@@ -280,10 +263,6 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     }
 
     override func viewDidAppear(_ animated: Bool) {
-        // ⚠️ THE MINIMIZE NEEDS A SCROLLER NAMED, or arming it does nothing
-        // here and gives every other tab a collapsing bar for free.
-        selectorAccessory?.install(into: tabBarController, owner: self, minimizesOnScroll: true,
-                                   alongside: transitionCoordinator)
         super.viewDidAppear(animated)
         // A tab root always shows the bar (#769) — search mode hides it on
         // purpose.
@@ -445,12 +424,6 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     /// What the field says, while it exists. Tests.
     var searchPlaceholderShown: String? { searchController?.searchBar.placeholder }
 
-    /// The selector's item, kept so the bar can be put back exactly as it was.
-    /// ⚠️ INSTALLED ON APPEAR, REMOVED ON DISAPPEAR, and that bracket is the
-    /// whole reason it is safe. `bottomAccessory` is a property of the TAB BAR
-    /// CONTROLLER with no per-tab scope: a band left up floats over whatever is
-    /// pushed on top of this screen and over whichever tab is chosen next.
-    private var selectorAccessory: SelectorAccessory?
     /// From the search's `willPresent` to its `willDismiss`.
     private var isSearching = false
 
@@ -466,9 +439,11 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     }
 
     /// The shell's items: the notifications bell at the head of the leading
-    /// group. The trailing slot is the protocol's, and the shell hands
-    /// nothing into it since #2336 (no balance in Messages); it reserves no
-    /// room while empty.
+    /// group, the selector right after it. The trailing slot is the
+    /// protocol's, and the shell hands nothing into it since #2336 (no
+    /// balance in Messages); it reserves no room while empty, and an item
+    /// that did come would be charged to the selector's room
+    /// (`selectorBudget`).
     private var leadingAccessoryItem: UIBarButtonItem?
     private var trailingAccessoryItem: UIBarButtonItem?
 
@@ -487,34 +462,66 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         applyRestingBar()
     }
 
-    /// `[ bell ]————————————————————————————————`
-    /// `[ search people and chats            ]`
+    /// `[ bell ][ Chats 43 | Requests 6 | Suggestions ]———————`
+    /// `[ search people and chats                       ]`
     ///
     /// What the shell hands in: the bell leading, nothing trailing (#2336: no
-    /// balance in Messages), so the header's one other control is the search.
-    /// No section is named after the bell any more (#2328): one list per tab
-    /// (#2292), and the join requests on Requests, the last section with a
-    /// name, wear no header now. The search is not among the items: it is
-    /// stacked under the bar (`searchController`), at rest and open alike.
+    /// balance in Messages). The selector follows the bell in a platter of
+    /// its own (#2337), as For You's Feed | Shots does; the search is not
+    /// among the items: it is stacked under the bar (`searchController`), at
+    /// rest and open alike. No section is named after the bell any more
+    /// (#2328).
     ///
     /// ⚠️ NEVER `searchBarPlacementBarButtonItem` IN THE NAVIGATION BAR: iOS 26
     /// throws ("only supported in UIToolbar") — iOS 27 accepts it, which is
     /// how it shipped in #1689's first push and crashed CI's iOS 26 hosts.
     private func applyRestingBar() {
         setOwnTrailingBarItems([trailingAccessoryItem].compactMap { $0 }, animated: false)
-        // The leading group is the contract's: the bell alone. A back chevron
-        // (none on the tab root) would keep its place before it.
+        // A back chevron (none on the tab root) would keep its place before
+        // the group.
         navigationItem.leftItemsSupplementBackButton = true
-        let leading = [leadingAccessoryItem].compactMap { $0 }
+        selector.fit(selectorBudget)
+        applyLeadingGroup()
+    }
+
+    /// `[bell][selector]`, or the selector alone without a bell.
+    private func applyLeadingGroup() {
+        let leading = selector.leadingGroup(after: leadingAccessoryItem)
         // An identical group is not handed back: re-setting the same items
         // rebuilds their glass.
         guard !(navigationItem.leftBarButtonItems ?? []).elementsEqual(leading, by: ===) else { return }
         navigationItem.setLeftBarButtonItems(leading, animated: false)
     }
 
+    /// Re-fits the selector to the room it has — a new bar width, a count
+    /// that widened a segment — and writes the group again only when the item
+    /// had to be re-minted (the bar freezes an item's width when it is made).
+    private func refitSelector() {
+        guard isViewLoaded, selector.fit(selectorBudget) else { return }
+        applyLeadingGroup()
+    }
+
+    /// The room the bar leaves the selector: the bell before it, whatever
+    /// trails (nothing today, #2336). Nothing can come into the trailing
+    /// corner on this screen (no editing, no batch action, no Cancel of its
+    /// own — the search's Cancel is in the stacked field, under the bar).
+    private var selectorBudget: BarSelectorBudget {
+        let navigationBarWidth = navigationController?.navigationBar.bounds.width ?? 0
+        let barWidth = navigationBarWidth > 1 ? navigationBarWidth : (view.window?.bounds.width ?? view.bounds.width)
+        return BarSelectorBudget(
+            barWidth: barWidth,
+            leadingWidths: leadingAccessoryItem.map { [BarSelectorBudget.width(of: $0)] } ?? [],
+            trailingWidths: [trailingAccessoryItem].compactMap { $0 }.map(BarSelectorBudget.width(of:))
+        )
+    }
+
     #if DEBUG
     /// The pager coming to rest on `index`, as a swipe that ended there.
     func debugSettle(on index: Int) { didSettle(on: index) }
+    /// The selector in the bar (#2337). Tests.
+    var debugSelector: PagedTabBar { categoryBar }
+    /// The page in front. Tests.
+    var debugActiveIndex: Int { pagerView?.activeIndex ?? initialIndex }
     /// The pages, in order (#2215). Tests.
     var debugCategories: [MessagesCategory] { surfaces.map(\.category) }
     #endif
@@ -578,11 +585,8 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     /// Applies one surface's published chrome: the count on its tab.
     ///
     /// It lands on the SEGMENT that published it, so it works whether or not
-    /// that page is the one on screen — and it does not touch the navigation
-    /// bar. The bar is written once, in `viewDidLoad`, and never again: its two
-    /// glyphs belong to the inbox rather than to any page, which is what keeps
-    /// the capsule between them one width instead of four. A page that wants to
-    /// offer something offers it on its own tab.
+    /// that page is the one on screen. A page that wants to offer something
+    /// offers it on its own tab.
     private func apply(_ chrome: InboxSurfaceChrome, from surface: any InboxSurface) {
         guard let index = surfaces.firstIndex(where: { $0.category == surface.category }) else { return }
         setBadge(chrome.badgeCount, at: index)
@@ -592,20 +596,15 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
 
     /// Stamps a count on a segment and re-settles the navigation bar around it.
     ///
-    /// ⚠️ A badge changes the capsule's WIDTH, and a navigation bar caches the
-    /// size of its title view — the capsule's own `invalidateIntrinsicContentSize`
-    /// is not enough, and frame and content drift apart the moment a count
-    /// appears or clears (`ForYouViewController.applyBadges` documents the
-    /// measured symptom). This has no equivalent in the floating arrangement
-    /// this screen used to wear, where the bar's width was the screen's and
-    /// nothing had to be told about it.
+    /// ⚠️ A badge changes the capsule's WIDTH, and the bar freezes an item's
+    /// width when the item is made — the capsule's own
+    /// `invalidateIntrinsicContentSize` is not enough, and frame and content
+    /// drift apart the moment a count appears or clears. So the selector is
+    /// re-fitted, and its item re-minted under the same identifier when the
+    /// width moved (`BarSelectorItem`).
     private func setBadge(_ count: Int, at index: Int) {
         categoryBar.setBadge(count, at: index)
-        // ⚠️ TOLD, NOT FORCED. The paragraph above records what the forcing was
-        // for — a navigation bar caches its title view's size, so a badge that
-        // changed the capsule's width left the frame and the content
-        // disagreeing. An accessory sizes by constraint.
-        selectorAccessory?.contentWidthDidChange()
+        refitSelector()
     }
 
 }
@@ -618,18 +617,12 @@ extension MessagesInboxViewController: UISearchResultsUpdating, UISearchControll
     }
 
     /// Searching is a mode, not a place: the tab bar is a way OUT of it that
-    /// would take the query with it, and the results deserve the height.
-    ///
-    /// ⚠️ **AND THE ACCESSORY GOES WITH IT — IT DOES NOT FOLLOW ON ITS OWN.**
-    /// The tab bar is hidden here with no transition of this screen, so
-    /// `viewWillDisappear` never runs and the bracket that takes the band down
-    /// never fires: left up, UIKit re-lays it out at the foot of the tab bar
-    /// controller's view — over the results (`.regular`'s documented
-    /// behaviour).
+    /// would take the query with it, and the results deserve the height. The
+    /// selector goes with the bar (`hidesNavigationBarDuringPresentation`,
+    /// unchanged): no band at the foot to take down any more (#2337).
     func willPresentSearchController(_ searchController: UISearchController) {
         isSearching = true
         searchResults?.applyQuery("")
-        selectorAccessory?.remove(from: tabBarController)
         tabBarController?.setTabBarHidden(true, animated: true)
     }
 
@@ -639,12 +632,10 @@ extension MessagesInboxViewController: UISearchResultsUpdating, UISearchControll
         searchController.showsSearchResultsController = true
     }
 
-    /// The band comes back with the bar it left with. `minimizesOnScroll` is
-    /// re-armed for the same reason it is armed on appearing.
+    /// The tab bar comes back as search closes.
     func willDismissSearchController(_ searchController: UISearchController) {
         isSearching = false
         tabBarController?.setTabBarHidden(false, animated: true)
-        selectorAccessory?.install(into: tabBarController, owner: self, minimizesOnScroll: true)
     }
 
     /// Submitting is the clearest signal that a query mattered.

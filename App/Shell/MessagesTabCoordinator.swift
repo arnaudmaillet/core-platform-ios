@@ -73,12 +73,13 @@ final class MessagesTabCoordinator: TabCoordinator, GlyphTab {
             self?.setUnread(total > 0)
         }
         navigationController.viewControllers = [inbox]
-        // The header reads `[bell] …`, the search stacked under the bar — no
-        // balance (#2336). The bell reaches the bar THROUGH the inbox rather
-        // than onto its `navigationItem`, because the inbox rewrites its own
-        // bar whenever search opens and closes — an item written from out here
-        // would not survive the first search. The trailing accessory is left
-        // empty.
+        // The header reads `[bell][Chats | Requests | Suggestions] …` (the
+        // inbox's own selector right of the bell, #2337), the search stacked
+        // under the bar — no balance (#2336). The bell reaches the bar THROUGH
+        // the inbox rather than onto its `navigationItem`, because the inbox
+        // composes its own leading group (the selector after the bell) — an
+        // item written from out here would not survive its first write. The
+        // trailing accessory is left empty.
         (inbox as? any HeaderAccessoryHosting)?
             .setLeadingAccessoryItem(notificationsBell.makeItem())
         // Loaded now, not on first appearance. The inbox's own reload happens

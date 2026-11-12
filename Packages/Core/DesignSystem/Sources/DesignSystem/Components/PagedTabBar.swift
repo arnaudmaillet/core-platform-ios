@@ -592,6 +592,79 @@ public final class PagedTabBar: UIControl {
         }
     }
 
+    /// The titles' size: the style's own ramp, or the 13pt step down a crowded
+    /// navigation bar takes (#2337).
+    ///
+    /// The rule for a selector in the bar (the owner, 2026-11-12): **15pt if
+    /// it fits, otherwise 13pt** — the size the inbox's three titles wore in
+    /// the bar in August — and past that the strip scrolls. The HOST decides,
+    /// because only the host knows the room (`BarSelectorItem`); the bar only
+    /// measures (`preferredWidth(at:)`) and wears what it is told.
+    public enum TitleSize: Sendable {
+        /// The style's ramp (`Style.titleTextStyle`): 15pt in a bar.
+        case regular
+        /// `.footnote`, 13pt, capped there.
+        case compact
+    }
+
+    /// Defaults to `.regular`, so a host that never sets it is unchanged.
+    ///
+    /// ⚠️ The segments RE-PIN their widths to the new font, and a hugging bar
+    /// re-states its size in the same breath — the order `setBadge` documents.
+    public var titleSize: TitleSize = .regular {
+        didSet {
+            guard titleSize != oldValue else { return }
+            let font = titleFont(for: titleSize)
+            for segment in segments {
+                segment.setTitleFont(textStyle: font.textStyle, maximumPointSize: font.maximumPointSize)
+            }
+            pillLens.titlesChanged()
+            setNeedsLayout()
+            layoutIfNeeded()
+            invalidateIntrinsicContentSize()
+            resolveSegmentsThenApplyProgress()
+        }
+    }
+
+    /// The type ramp a title size stands for, on this bar's style.
+    private func titleFont(for size: TitleSize) -> (textStyle: UIFont.TextStyle, maximumPointSize: CGFloat) {
+        switch size {
+        case .regular: (style.titleTextStyle, style.maximumTitlePointSize)
+        case .compact: (.footnote, min(style.maximumTitlePointSize, Self.compactTitlePointSize))
+        }
+    }
+
+    /// The compact titles' size: `.footnote`'s default, and its cap.
+    public nonisolated static let compactTitlePointSize: CGFloat = 13
+
+    /// The width this bar would ask for with its titles at `size` — what a
+    /// hugging bar states as its intrinsic width, measured without switching
+    /// (so a host can ask "does 15pt fit?" while the bar wears 13pt). The
+    /// same arithmetic as `fittedWidth(for:)`, in this view's space (a
+    /// platter's ring left out), the badges included.
+    public func preferredWidth(at size: TitleSize) -> CGFloat {
+        let font = titleFont(for: size)
+        let widths = segments.map { $0.width(textStyle: font.textStyle, maximumPointSize: font.maximumPointSize) }
+        let total = switch style.segmentDistribution {
+        case .fillEqually: (widths.max() ?? 0) * CGFloat(segments.count)
+        default: widths.reduce(0, +)
+        }
+        let spacing = Metrics.interSegmentSpacing * CGFloat(max(0, segments.count - 1))
+        return ceil(total + spacing) - overhangX * 2
+    }
+
+    /// The most a HUGGING bar asks for (#2337): past it, the strip scrolls
+    /// under the capsule rather than claiming room the bar's other items need
+    /// — a navigation bar that cannot fit a group sweeps it into a `•••`.
+    /// Nil asks for the whole fitted width. Set by `BarSelectorItem`, which
+    /// never lets it fall below one bubble.
+    public var widthCeiling: CGFloat? {
+        didSet {
+            guard widthCeiling != oldValue else { return }
+            invalidateIntrinsicContentSize()
+        }
+    }
+
     /// Whether the bar is currently taking its width from its host rather than
     /// stating one — true for a floating bar always, and for a hugging bar that
     /// has been told to fill.
@@ -1141,7 +1214,7 @@ public final class PagedTabBar: UIControl {
             return CGSize(width: UIView.noIntrinsicMetric, height: style.height)
         }
         return CGSize(
-            width: fittedWidth(for: activeDistribution),
+            width: min(fittedWidth(for: activeDistribution), widthCeiling ?? .greatestFiniteMagnitude),
             height: effectiveCapsuleHeight + style.topMargin + style.bottomMargin
         )
     }
@@ -2137,6 +2210,8 @@ public final class PagedTabBar: UIControl {
     #endif
 
     private func buildSegments() {
+        // The ramp the bar is wearing (`titleSize`), so a retitle keeps it.
+        let font = titleFont(for: titleSize)
         segments = titles.enumerated().map { index, title in
             let segment = SegmentView(
                 title: title,
@@ -2147,8 +2222,8 @@ public final class PagedTabBar: UIControl {
                 selectedWeight: style.selectedTitleWeight,
                 plainColour: style.unselectedTitleColour,
                 widthPriority: style.segmentWidthPriority,
-                textStyle: style.titleTextStyle,
-                maximumPointSize: style.maximumTitlePointSize,
+                textStyle: font.textStyle,
+                maximumPointSize: font.maximumPointSize,
                 maximumBadgePointSize: style.maximumBadgePointSize,
                 badgeHeight: style.badgeHeight,
                 badgeSpacing: style.badgeSpacing,
@@ -2494,9 +2569,9 @@ private final class SegmentView: UIButton {
     /// The titles' type ramp, handed down by the host's style — see
     /// `Style.titleTextStyle` for why a title slot runs smaller than a
     /// floating bar.
-    private let textStyle: UIFont.TextStyle
+    private var textStyle: UIFont.TextStyle
     /// Where Dynamic Type stops growing the titles; also from the style.
-    private let maximumPointSize: CGFloat
+    private var maximumPointSize: CGFloat
     private var pinnedWidthConstraint: NSLayoutConstraint!
 
     /// The width this segment has just asked for on its own account — its
@@ -2755,6 +2830,26 @@ private final class SegmentView: UIButton {
     /// width stated here: "All 11" was pinned to 41pt, needed 51, and the title
     /// compressed to a bare "…" beside an intact badge.
     private func updatePinnedWidth() {
+        pinnedWidth = width(textStyle: textStyle, maximumPointSize: maximumPointSize)
+        pinnedWidthConstraint.constant = pinnedWidth + slackShare
+    }
+
+    /// Re-fonts both titles — the bar's `titleSize` (#2337) — and re-pins
+    /// the width to the new one.
+    func setTitleFont(textStyle: UIFont.TextStyle, maximumPointSize: CGFloat) {
+        guard textStyle != self.textStyle || maximumPointSize != self.maximumPointSize else { return }
+        self.textStyle = textStyle
+        self.maximumPointSize = maximumPointSize
+        for (label, weight) in [(plainLabel, UIFont.Weight.regular), (boldLabel, selectedWeight)] {
+            label.font = .preferredFont(forTextStyle: textStyle, weight: weight, maximumPointSize: maximumPointSize)
+        }
+        updatePinnedWidth()
+    }
+
+    /// The width this segment asks for with its title in the given ramp —
+    /// `updatePinnedWidth`'s arithmetic, without pinning anything, so the bar
+    /// can measure a size it is not wearing (`PagedTabBar.preferredWidth(at:)`).
+    func width(textStyle: UIFont.TextStyle, maximumPointSize: CGFloat) -> CGFloat {
         let bold = UIFont.preferredFont(forTextStyle: textStyle, weight: selectedWeight, maximumPointSize: maximumPointSize)
         var width = ceil((title as NSString).size(withAttributes: [.font: bold]).width) + titlePadding
         if !badge.isHidden {
@@ -2767,8 +2862,7 @@ private final class SegmentView: UIButton {
         // at any radius — its own corner rounding (height / 2) exceeds half its
         // width and the shape degenerates. Below the floor the title simply
         // sits in more air.
-        pinnedWidth = max(diskFloor, width)
-        pinnedWidthConstraint.constant = pinnedWidth + slackShare
+        return max(diskFloor, width)
     }
 }
 

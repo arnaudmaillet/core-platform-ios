@@ -33,7 +33,7 @@ Measured on iOS 27 (iPhone 18 Pro simulator, 2026-10-24):
 - **Person pill** (`SnapAuthorIdentityView`, `PersonBarItem`): avatar, name, handle, follow badge. It blurs one author into the next itself; the owner accepted this as an exception (2026-10-24).
 - **Wallet badge** (`WalletBadgeButton`): `BarItems.SharedID.walletBalance` everywhere. It is re-minted when its width changes, because the bar freezes an item's width when the item is made.
 - **Gems balance** (country shop).
-- **Selector strips** (`PagedTabBar` through `SelectorToolbarItem`, `IconSelectorBar`, `IconActionBar`).
+- **Selector strips** (`PagedTabBar` through `SelectorToolbarItem`, or `BarSelectorItem` in a paged tab root's leading group right of the bell — For You, Messages (#2337) — which fits it to the room the bar leaves, 15pt or 13pt, never a `•••`; `IconSelectorBar`, `IconActionBar`).
 - **Search fields.** Inbox and relationships move to `UISearchController` (owner, 2026-10-24).
 - **Segmented controls** (wallet stakes, activity).
 - **Toasts** (`NavigationBarToasts`).

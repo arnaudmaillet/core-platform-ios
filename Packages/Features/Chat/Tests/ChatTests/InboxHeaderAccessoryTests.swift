@@ -6,10 +6,11 @@ import UIKit
 /// **The inbox header's injected items — the shell's bell, and no balance.**
 ///
 /// Items the shell injects are held by the screen and composed into its bar:
-/// `[bell] …`, the search stacked under the bar. The balance left Messages
-/// (#2336, the owner 2026-11-12): no heart, no spend, no claim here. These
-/// inboxes have no search composed, so no field (`InboxSystemSearchTests`
-/// pins the one with search).
+/// `[bell][selector] …`, the search stacked under the bar. The balance left
+/// Messages (#2336, the owner 2026-11-12): no heart, no spend, no claim here.
+/// These inboxes have no search composed, so no field
+/// (`InboxSystemSearchTests` pins the one with search); the selector in the
+/// bar is `InboxSelectorInBarTests`' subject (#2337).
 @MainActor
 struct InboxHeaderAccessoryTests {
     /// The thinnest surface the container accepts: one page, no data.
@@ -65,20 +66,24 @@ struct InboxHeaderAccessoryTests {
         return item
     }
 
-    /// With nothing injected and no search composed, the bar is empty: no
-    /// search field that would open nothing.
-    @Test func withoutSearchTheBarIsEmpty() {
+    /// With nothing injected and no search composed, the bar holds the
+    /// selector alone (#2337): no search field that would open nothing, no
+    /// separator before a bell that is not there.
+    @Test func withoutSearchTheBarHoldsTheSelectorAlone() throws {
         let screen = inbox()
         screen.loadViewIfNeeded()
 
         #expect(screen.navigationItem.rightBarButtonItems?.isEmpty ?? true)
         #expect(screen.navigationItem.searchController == nil)
-        #expect(screen.navigationItem.leftBarButtonItems?.isEmpty ?? true)
+        let leading = try #require(screen.navigationItem.leftBarButtonItems)
+        #expect(leading.count == 1)
+        #expect(leading.first?.identifier == MessagesInboxViewController.selectorItemID)
     }
 
-    /// ⚠️ THE BELL LEADS, AND NOTHING TRAILS (#2336): the shell hands the
-    /// inbox its bell alone — `MessagesTabCoordinator` builds no balance — and
-    /// the bar reserves no slot for one: its trailing group is empty.
+    /// ⚠️ THE BELL LEADS, THE SELECTOR FOLLOWS, AND NOTHING TRAILS (#2336,
+    /// #2337): the shell hands the inbox its bell alone —
+    /// `MessagesTabCoordinator` builds no balance — the selector comes right
+    /// after it, and the bar reserves no trailing slot: that group is empty.
     @Test func theShellsBellLeadsAndNothingTrails() throws {
         let screen = inbox()
         let bell = item("Bell")
@@ -88,7 +93,8 @@ struct InboxHeaderAccessoryTests {
         screen.loadViewIfNeeded()
 
         let leading = try #require(screen.navigationItem.leftBarButtonItems)
-        #expect(leading.count == 1 && leading.first === bell)
+        #expect(leading.count == 3 && leading.first === bell)
+        #expect(leading.last?.identifier == MessagesInboxViewController.selectorItemID)
         #expect(screen.navigationItem.rightBarButtonItems?.isEmpty ?? true,
                 "the inbox's trailing group holds an item the shell no longer hands it")
     }
