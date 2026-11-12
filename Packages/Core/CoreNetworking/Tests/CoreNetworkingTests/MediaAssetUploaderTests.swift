@@ -3,7 +3,6 @@ import CoreContracts
 import CoreNetworking
 import CoreNetworkingMocks
 import Foundation
-import MediaCore
 import SwiftProtobuf
 import Testing
 

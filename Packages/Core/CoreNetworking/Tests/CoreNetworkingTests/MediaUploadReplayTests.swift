@@ -3,7 +3,6 @@ import CoreContracts
 import CoreNetworking
 import CoreNetworkingMocks
 import Foundation
-import MediaCore
 import Testing
 
 /// ⚠️ **A LOST ANSWER IS NOT A LOST WRITE (#795).** media.v1 can reserve the
