@@ -174,6 +174,16 @@ public enum ZoomTransitionGeometry {
         return limit * offset / (limit + abs(offset))
     }
 
+    /// The offset `rubberBand` maps to `banded` — what a re-grab reads back
+    /// from a card it catches (#2362). Banded values at or past the limit
+    /// have no preimage; they are held just inside it.
+    static func inverseRubberBand(_ banded: CGFloat, limit: CGFloat) -> CGFloat {
+        guard limit > 0 else { return 0 }
+        let held = min(abs(banded), limit * 0.98)
+        let unbanded = limit * held / (limit - held)
+        return banded < 0 ? -unbanded : unbanded
+    }
+
     /// The release contract: a drag completes when it passed the progress
     /// threshold, or was released as a flick above the velocity threshold
     /// (in the dismiss direction) — otherwise it cancels and springs back.

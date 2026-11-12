@@ -240,6 +240,18 @@ public struct ZoomDismissState: Sendable {
     /// False means "this is where the card IS": take the position immediately.
     /// True is the release, where the card is genuinely springing somewhere and
     /// its follower should spring with it.
+    ///
+    /// ⚠️ FALSE AFTER TRUE IS A CATCH (#2362): a grab during a cancel's spring
+    /// takes the card where it is, and the follower is told that pose as a
+    /// held state. Whatever its own release animation still has in flight
+    /// must be dropped then, not left running: a UIView animation is not
+    /// cancelled by writing its property, and an additive one keeps adding
+    /// what it had left onto the caught pose — the follower parting from the
+    /// card for the rest of the spring.
+    ///
+    /// `progress` is the grab's eased shrink (0 at the page, 1 at the floor
+    /// of a held card) while the finger is down, and the outcome (0 or 1) on
+    /// the release.
     public let isSettling: Bool
 
     public init(progress: CGFloat, card: CGRect, cornerRadius: CGFloat, isSettling: Bool) {
