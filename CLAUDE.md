@@ -56,12 +56,13 @@ from fighting over `develop` and over CI.
   red `develop` run blocks the queue**: the session whose change broke it pushes
   a fix first, ahead of everything else.
 - Where each job runs:
-  - `build app` (Debug + Release) on GitHub's `macos-latest`, **Xcode 26**:
-    the guard against Swift only Xcode 27 accepts.
+  - `build app` (Debug + Release) and `compile tests (Xcode 26)` on GitHub's
+    `macos-latest`, **Xcode 26**: the guard against Swift only Xcode 27
+    accepts, for the app and for every selected package's tests.
   - the test lanes (and `hero-uitests.yml`) on a **self-hosted Mac, Xcode
-    27**, one job at a time. Each lane keeps its DerivedData and package
-    checkouts there between runs, so a lane can be green on an incremental
-    build.
+    27**, one job at a time. Every package builds from scratch there:
+    DerivedData lives in the job's temporary directory and is deleted after
+    the package's tests, so no lane is green on a stale module.
   - If that Mac is off, the lanes wait in the queue and the required
     `build-test` check never arrives. Setting the repository variable
     `MACOS_RUNNER=github` sends them back to `macos-latest` with Xcode 26.

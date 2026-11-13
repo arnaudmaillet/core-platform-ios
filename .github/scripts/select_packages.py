@@ -63,6 +63,18 @@ DEFAULT_LANE_MINUTES = 5.0
 ALWAYS = ("Packages/Tools/RepoGuards",)
 LANE_MINUTES["RepoGuards"] = 1.0
 
+# Lanes split across jobs (#2370): Feed runs ~2,600 tests, about 10 of its 17
+# minutes in execution, and ends most wide runs. `test_shard.py` balances its
+# suites; the last shard skips what the others took, so no test is lost.
+SHARDS = {"Packages/Features/Feed": 2}
+
+# Lanes this short share a job (#2370): every job pays ~2.6 min of fixed cost
+# (checkout, Xcode, mirrors, package graph, a simulator boot), more than a
+# small lane's own build and tests. They run one after another in one job,
+# in batches of about this many minutes.
+SMALL_LANE_MINUTES = 5.6
+BATCH_MINUTES = 12.0
+
 DEP_RE = re.compile(r'\.package\(\s*path:\s*"([^"]+)"')
 NAME_RE = re.compile(r'name:\s*"([^"]+)"')
 
@@ -141,14 +153,69 @@ def closure(pkgs, touched):
     return affected
 
 
+def lane(meta, d, **extra):
+    """One matrix entry. `lanes` is what the job runs, one after another:
+    `dir name scheme shard` each, `-` for an empty field."""
+    entry = {"label": meta["name"], "name": meta["name"], "dir": d,
+             "scheme": "", "avsbdl": "", "shard": ""}
+    entry.update(extra)
+    return entry
+
+
+def with_lanes(entry):
+    def field(value):
+        return value or "-"
+    entry["lanes"] = " ".join(
+        f"{e['dir']} {e['name']} {field(e['scheme'])} {field(e['shard'])}"
+        for e in entry.pop("_batch", [entry])
+    )
+    return entry
+
+
+def batched(small):
+    """Small lanes packed into jobs of about `BATCH_MINUTES` each.
+
+    First fit, longest first: each lane joins the first job it still fits in,
+    so a one-minute lane (RepoGuards, on every run) rides along with others
+    instead of paying a job's fixed cost alone.
+    """
+    jobs, loads = [], []
+    for e in sorted(small, key=lambda e: -LANE_MINUTES.get(e["label"], DEFAULT_LANE_MINUTES)):
+        cost = LANE_MINUTES.get(e["label"], DEFAULT_LANE_MINUTES)
+        for index, load in enumerate(loads):
+            if load + cost <= BATCH_MINUTES:
+                jobs[index].append(e)
+                loads[index] += cost
+                break
+        else:
+            jobs.append([e])
+            loads.append(cost)
+    out = []
+    for group in jobs:
+        if len(group) == 1:
+            out.append(group[0])
+            continue
+        label = "small: " + ", ".join(e["label"] for e in group)
+        out.append({"label": label, "name": group[0]["name"], "dir": group[0]["dir"],
+                    "scheme": "", "avsbdl": "", "shard": "", "_batch": group,
+                    "_minutes": sum(LANE_MINUTES.get(e["label"], DEFAULT_LANE_MINUTES) for e in group)})
+    return out
+
+
 def entries(pkgs, dirs):
     out = []
     for d in sorted(dirs):
         meta = pkgs[d]
         if not meta["has_tests"]:
             continue
-        out.append({"label": meta["name"], "name": meta["name"],
-                    "dir": d, "scheme": "", "avsbdl": ""})
+        count = SHARDS.get(d, 1)
+        if count > 1:
+            for index in range(1, count + 1):
+                out.append(lane(meta, d, label=f"{meta['name']} ({index}/{count})",
+                                shard=f"{index}/{count}",
+                                _minutes=LANE_MINUTES.get(meta["name"], DEFAULT_LANE_MINUTES) / count + 2.6))
+            continue
+        out.append(lane(meta, d))
     # MediaPlayback's AVSampleBufferDisplayLayer backing is the process default
     # and layerClass resolves once per process, so the lane above only ever
     # covers the new path. This second lane forwards AVSBDL_RENDER=0 for the
@@ -158,10 +225,19 @@ def entries(pkgs, dirs):
     if mp in dirs and pkgs[mp]["has_tests"]:
         out.append({"label": "MediaPlayback (legacy AVPlayerLayer)",
                     "name": "MediaPlayback", "dir": mp,
-                    "scheme": "MediaPlayback", "avsbdl": "0"})
+                    "scheme": "MediaPlayback", "avsbdl": "0", "shard": ""})
+    # The legacy-backing lane keeps a job of its own (its environment differs).
+    small = [e for e in out if not e.get("shard") and not e["avsbdl"]
+             and LANE_MINUTES.get(e["label"], DEFAULT_LANE_MINUTES) <= SMALL_LANE_MINUTES]
+    out = [e for e in out if e not in small] + batched(small)
+
+    def minutes(e):
+        return e.get("_minutes", LANE_MINUTES.get(e["label"], DEFAULT_LANE_MINUTES))
     # Longest first (stable, so ties keep their directory order).
-    out.sort(key=lambda e: -LANE_MINUTES.get(e["label"], DEFAULT_LANE_MINUTES))
-    return out
+    out.sort(key=lambda e: -minutes(e))
+    for e in out:
+        e.pop("_minutes", None)
+    return [with_lanes(e) for e in out]
 
 
 def docs_only(files):

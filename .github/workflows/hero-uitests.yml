@@ -21,10 +21,7 @@ jobs:
     runs-on: ${{ vars.MACOS_RUNNER == 'github' && 'macos-latest' || fromJSON('["self-hosted", "macOS", "ARM64", "xcode"]') }}
     timeout-minutes: 60
     env:
-      # Outside the checkout, so the self-hosted Mac keeps its packages and
-      # DerivedData from one run to the next. Empty on a GitHub runner.
-      SPM: ${{ github.workspace }}/../.ci-state/hero-uitests/spm
-      DERIVED: ${{ github.workspace }}/../.ci-state/hero-uitests/DerivedData
+      SPM: ${{ github.workspace }}/.spm
     steps:
       - uses: actions/checkout@v4
 
@@ -63,7 +60,7 @@ jobs:
           xcodebuild test -project core-platform-ios.xcodeproj \
             -scheme core-platform-ios \
             -destination "id=${{ steps.sim.outputs.id }}" \
-            -clonedSourcePackagesDirPath "$SPM" -derivedDataPath "$DERIVED" \
+            -clonedSourcePackagesDirPath "$SPM" -derivedDataPath "$RUNNER_TEMP/DerivedData" \
             -skipMacroValidation \
             CODE_SIGNING_ALLOWED=NO \
             -resultBundlePath hero-uitests.xcresult \
