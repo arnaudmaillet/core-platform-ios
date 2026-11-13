@@ -14,10 +14,10 @@ import UIKit
 /// and readable property of the private layers — the native lens's real
 /// parameters, read rather than guessed.
 @MainActor
-enum LensLab {
-    static var isRequested: Bool { ProcessInfo.processInfo.arguments.contains("-lens-lab") }
+public enum LensLab {
+    public static var isRequested: Bool { ProcessInfo.processInfo.arguments.contains("-lens-lab") }
 
-    static func makeRoot() -> UIViewController { LensLabTabBarController() }
+    public static func makeRoot() -> UIViewController { LensLabTabBarController() }
 }
 
 @MainActor
@@ -26,7 +26,7 @@ private final class LensLabTabBarController: UITabBarController {
     private var dumpLink: CADisplayLink?
     private var dumped = Set<String>()
 
-    override func viewDidLoad() {
+    public override func viewDidLoad() {
         super.viewDidLoad()
         // A black page is a dark-mode page: the bars follow it, as in the app.
         if UserDefaults.standard.string(forKey: "lens-lab-bg") == "black" { overrideUserInterfaceStyle = .dark }
@@ -40,7 +40,7 @@ private final class LensLabTabBarController: UITabBarController {
         selectedIndex = 2
     }
 
-    override func viewDidAppear(_ animated: Bool) {
+    public override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         guard accessory == nil else { return }
         let bar = PagedTabBar(titles: ["Chats", "Requests", "Suggestions"], style: .navigationTitle)
@@ -85,14 +85,14 @@ private final class LensLabTabBarController: UITabBarController {
 
 @MainActor
 private final class LensLabPage: UIViewController {
-    override func loadView() {
+    public override func loadView() {
         let mode = UserDefaults.standard.string(forKey: "lens-lab-bg") ?? "white"
         view = LensLabBackground(mode: mode)
     }
 
     /// A native `UISegmentedControl` with our selector's segments, on the page,
     /// so its lens can be held and compared with ours (owner, 2026-10-26).
-    override func viewDidLoad() {
+    public override func viewDidLoad() {
         super.viewDidLoad()
         let native = UISegmentedControl(items: ["Chats", "Requests", "Suggestions"])
         native.selectedSegmentIndex = 0
@@ -127,7 +127,7 @@ private final class LensLabPage: UIViewController {
 private final class LensLabBackground: UIView {
     private let mode: String
 
-    init(mode: String) {
+    public init(mode: String) {
         self.mode = mode
         super.init(frame: .zero)
         switch mode {
@@ -138,9 +138,9 @@ private final class LensLabBackground: UIView {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    override func draw(_ rect: CGRect) {
+    public override func draw(_ rect: CGRect) {
         guard let context = UIGraphicsGetCurrentContext() else { return }
         switch mode {
         case "stripes":
@@ -178,8 +178,8 @@ private final class LensLabBackground: UIView {
 
 /// Prints a view/layer tree with its filters and readable private properties.
 @MainActor
-enum LensDumper {
-    static func dumpView(_ view: UIView, depth: Int, maxDepth: Int = 12) {
+public enum LensDumper {
+    public static func dumpView(_ view: UIView, depth: Int, maxDepth: Int = 12) {
         let pad = String(repeating: "  ", count: depth)
         let frame = view.convert(view.bounds, to: nil)
         print("[lenslab] \(pad)V \(type(of: view)) frame=\(fmt(frame)) alpha=\(view.alpha) hidden=\(view.isHidden) bg=\(view.backgroundColor.map { "\($0)" } ?? "-")")
@@ -193,7 +193,7 @@ enum LensDumper {
         }
     }
 
-    static func dumpLayer(_ layer: CALayer, depth: Int, pad: String, descend: Bool) {
+    public static func dumpLayer(_ layer: CALayer, depth: Int, pad: String, descend: Bool) {
         var line = "[lenslab] \(pad)L \(type(of: layer)) frame=\(fmt(layer.frame)) opacity=\(layer.opacity)"
         if layer.cornerRadius > 0 { line += " r=\(layer.cornerRadius)" }
         if let compositing = layer.compositingFilter { line += " compositing=\(describe(compositing))" }
@@ -216,7 +216,7 @@ enum LensDumper {
     }
 
     /// A CAFilter's name and every input it declares.
-    static func describe(_ filter: Any) -> String {
+    public static func describe(_ filter: Any) -> String {
         guard let object = filter as? NSObject else { return "\(filter)" }
         var parts: [String] = []
         if object.responds(to: NSSelectorFromString("name")), let name = object.value(forKey: "name") { parts.append("name=\(name)") }
@@ -244,7 +244,7 @@ enum LensDumper {
     }
 
     /// Readable declared properties of the object's class (not its NSObject/CALayer basics).
-    static func properties(of object: NSObject) -> [(String, String)] {
+    public static func properties(of object: NSObject) -> [(String, String)] {
         var out: [(String, String)] = []
         var cls: AnyClass? = object_getClass(object)
         let stop: Set<String> = ["CALayer", "NSObject", "UIView", "UIResponder"]
@@ -265,13 +265,13 @@ enum LensDumper {
         return out
     }
 
-    static func short(_ value: Any?) -> String {
+    public static func short(_ value: Any?) -> String {
         guard let value else { return "nil" }
         let text = "\(value)".replacingOccurrences(of: "\n", with: " ")
         return text.count > 600 ? String(text.prefix(600)) + "…" : text
     }
 
-    static func fmt(_ rect: CGRect) -> String {
+    public static func fmt(_ rect: CGRect) -> String {
         String(format: "(%.1f,%.1f %.1fx%.1f)", rect.minX, rect.minY, rect.width, rect.height)
     }
 }

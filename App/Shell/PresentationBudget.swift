@@ -1,4 +1,5 @@
 import Darwin
+import DebugTools
 import MachO
 import ObjectiveC
 import UIKit

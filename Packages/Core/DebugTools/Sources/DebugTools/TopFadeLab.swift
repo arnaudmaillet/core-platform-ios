@@ -16,10 +16,10 @@ import UIKit
 ///   read closer to text, whose strokes are lower in frequency).
 /// - `-top-fade-trace` prints the edge-effect views' frames as well.
 @MainActor
-enum TopFadeLab {
-    static var isRequested: Bool { ProcessInfo.processInfo.arguments.contains("-top-fade-lab") }
+public enum TopFadeLab {
+    public static var isRequested: Bool { ProcessInfo.processInfo.arguments.contains("-top-fade-lab") }
 
-    static func makeRoot() -> UIViewController {
+    public static func makeRoot() -> UIViewController {
         let lab = TopFadeLabViewController(header: UserDefaults.standard.string(forKey: "top-fade-lab-header") ?? "inline")
         let navigation = UINavigationController(rootViewController: lab)
         if ProcessInfo.processInfo.arguments.contains("-top-fade-lab-dark") {
@@ -40,15 +40,15 @@ private final class TopFadeLabViewController: UIViewController {
         return stored > 0 ? stored : 2
     }()
 
-    init(header: String) {
+    public init(header: String) {
         self.header = header
         super.init(nibName: nil, bundle: nil)
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    public required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    override func viewDidLoad() {
+    public override func viewDidLoad() {
         super.viewDidLoad()
         title = "Followers"
         view.backgroundColor = .systemBackground
@@ -84,7 +84,7 @@ private final class TopFadeLabViewController: UIViewController {
         scrollView.applyTopEdge(for: .titled)
     }
 
-    override func viewDidAppear(_ animated: Bool) {
+    public override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         // `-top-fade-lab-scroll <pt>`: how far past its rest the list sits
         // (UIKit shows the effect only once content has scrolled under the

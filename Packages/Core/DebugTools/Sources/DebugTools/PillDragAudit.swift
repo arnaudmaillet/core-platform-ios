@@ -23,10 +23,10 @@ import UIKit
 /// aiming at "the selected tab" by name would be aiming at the wrong rectangle
 /// the moment the pages are mid-flight. The bar reports the rectangle it drew.
 @MainActor
-final class PillDragAudit {
-    private(set) static var shared: PillDragAudit?
+public final class PillDragAudit {
+    public private(set) static var shared: PillDragAudit?
 
-    static func installIfRequested(tabBarController: UITabBarController) {
+    public static func installIfRequested(tabBarController: UITabBarController) {
         guard ProcessInfo.processInfo.arguments.contains("-pill-drag-probe"),
               shared == nil
         else { return }

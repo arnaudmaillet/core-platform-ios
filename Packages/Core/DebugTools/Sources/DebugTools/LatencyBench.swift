@@ -11,10 +11,10 @@ import UIKit
 /// The shell is the app's (a `UITabBarController` with the UITab API, two
 /// tabs, a navigation stack each), so the tab and the push pay the same
 /// chrome; the screens are empty.
-enum LatencyBench {
-    static var isRequested: Bool { ProcessInfo.processInfo.arguments.contains("-latency-bench") }
+public enum LatencyBench {
+    public static var isRequested: Bool { ProcessInfo.processInfo.arguments.contains("-latency-bench") }
 
-    static func makeRoot() -> UIViewController {
+    public static func makeRoot() -> UIViewController {
         let tabs = UITabBarController()
         tabs.tabs = [
             UITab(title: "Bench", image: UIImage(systemName: "stopwatch"), identifier: "bench") { _ in
@@ -30,16 +30,16 @@ enum LatencyBench {
 
 /// One empty screen with the bench's buttons; every screen it opens is
 /// another of these, so each can open the next and close itself.
-final class LatencyBenchViewController: UIViewController {
-    init(title: String) {
+public final class LatencyBenchViewController: UIViewController {
+    public init(title: String) {
         super.init(nibName: nil, bundle: nil)
         self.title = title
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    override func viewDidLoad() {
+    public override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
         let stack = UIStackView(arrangedSubviews: [

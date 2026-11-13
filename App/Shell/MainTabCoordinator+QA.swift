@@ -3,6 +3,7 @@ import AuthInterface
 import ChatInterface
 import CoreModels
 import CoreNavigation
+import DebugTools
 import FeedInterface
 import MediaPlayback
 import NotificationsInterface

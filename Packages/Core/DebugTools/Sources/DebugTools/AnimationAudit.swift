@@ -15,10 +15,10 @@ import UIKit
 /// Documents (read it with `xcrun simctl get_app_container <udid>
 /// cn.wynn.core-platform-ios data`).
 @MainActor
-enum AnimationAudit {
+public enum AnimationAudit {
     private static var timer: Timer?
 
-    static func startIfRequested() {
+    public static func startIfRequested() {
         guard ProcessInfo.processInfo.arguments.contains("-animation-audit"), timer == nil else { return }
         let timer = Timer(timeInterval: 5, repeats: true) { _ in
             MainActor.assumeIsolated { report() }

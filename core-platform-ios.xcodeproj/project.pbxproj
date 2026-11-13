@@ -34,6 +34,7 @@
 		5F00000000000000000020B1 /* MapsInterface in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000020C1 /* MapsInterface */; };
 		5F00000000000000000020B2 /* Maps in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000020C2 /* Maps */; };
 		5F00000000000000000030B1 /* EmoteKit in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000030C1 /* EmoteKit */; };
+		5F00000000000000000D7002 /* DebugTools in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000D7003 /* DebugTools */; };
 		5F00000000000000000040B1 /* CacheKit in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000040C1 /* CacheKit */; };
 		5F00000000000000000050B1 /* LocalStore in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000050C1 /* LocalStore */; };
 		5F00000000000000000060B1 /* EntityStore in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000060C1 /* EntityStore */; };
@@ -114,6 +115,7 @@
 				5F00000000000000000020B1 /* MapsInterface in Frameworks */,
 				5F00000000000000000020B2 /* Maps in Frameworks */,
 				5F00000000000000000030B1 /* EmoteKit in Frameworks */,
+				5F00000000000000000D7002 /* DebugTools in Frameworks */,
 				5F00000000000000000040B1 /* CacheKit in Frameworks */,
 				5F00000000000000000050B1 /* LocalStore in Frameworks */,
 				5F00000000000000000060B1 /* EntityStore in Frameworks */,
@@ -189,6 +191,7 @@
 				5F00000000000000000020C1 /* MapsInterface */,
 				5F00000000000000000020C2 /* Maps */,
 				5F00000000000000000030C1 /* EmoteKit */,
+				5F00000000000000000D7003 /* DebugTools */,
 				5F00000000000000000040C1 /* CacheKit */,
 				5F00000000000000000050C1 /* LocalStore */,
 				5F00000000000000000060C1 /* EntityStore */,
@@ -274,6 +277,7 @@
 				5F00000000000000000020A1 /* XCLocalSwiftPackageReference "Packages/FeatureInterfaces/MapsInterface" */,
 				5F00000000000000000020A2 /* XCLocalSwiftPackageReference "Packages/Features/Maps" */,
 				5F00000000000000000030A1 /* XCLocalSwiftPackageReference "Packages/Core/EmoteKit" */,
+				5F00000000000000000D7001 /* XCLocalSwiftPackageReference "Packages/Core/DebugTools" */,
 				5F00000000000000000040A1 /* XCLocalSwiftPackageReference "Packages/Core/CacheKit" */,
 				5F00000000000000000050A1 /* XCLocalSwiftPackageReference "Packages/Core/LocalStore" */,
 				5F00000000000000000060A1 /* XCLocalSwiftPackageReference "Packages/Core/EntityStore" */,
@@ -700,6 +704,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/Features/Maps;
 		};
+		5F00000000000000000D7001 /* XCLocalSwiftPackageReference "Packages/Core/DebugTools" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/Core/DebugTools;
+		};
 		5F00000000000000000030A1 /* XCLocalSwiftPackageReference "Packages/Core/EmoteKit" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/Core/EmoteKit;
@@ -826,6 +834,10 @@
 		5F00000000000000000020C2 /* Maps */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = Maps;
+		};
+		5F00000000000000000D7003 /* DebugTools */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = DebugTools;
 		};
 		5F00000000000000000030C1 /* EmoteKit */ = {
 			isa = XCSwiftPackageProductDependency;
