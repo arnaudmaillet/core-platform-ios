@@ -578,7 +578,13 @@ struct VoiceComposerTests {
         strip.setTime(0, remaining: nil)
         strip.layoutIfNeeded()
         #expect(strip.debugSpringCount == 0, "playing back sprang the row")
-        #expect(strip.debugChipFrame == chip, "the chip moved: \(strip.debugChipFrame) vs \(chip)")
+        // Within a hundredth of a point: Auto Layout's arithmetic differs in
+        // the last bits from one pass to the next (11.333…332 vs …336), a
+        // difference no screen draws.
+        let moved = strip.debugChipFrame
+        let still = [moved.minX - chip.minX, moved.minY - chip.minY, moved.width - chip.width, moved.height - chip.height]
+            .allSatisfy { abs($0) < 0.01 }
+        #expect(still, "the chip moved: \(moved) vs \(chip)")
         strip.apply(.recording, animated: true)
         #expect(strip.debugSpringCount == 1, "a change of parts no longer springs")
     }
