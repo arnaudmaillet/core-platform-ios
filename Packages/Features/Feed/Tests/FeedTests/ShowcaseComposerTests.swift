@@ -6,6 +6,7 @@ import PostGrid
 import Testing
 import UIKit
 @testable import Feed
+@testable import ThreadKit
 
 /// A channel's "Share as a Post" opens the Text Post screen with its card
 /// attached (#2216, part 3): the full card above the composer, removable —

@@ -4,6 +4,7 @@ import MediaCore
 import Testing
 import UIKit
 @testable import Feed
+@testable import ThreadKit
 
 /// THE COMMENT STREAM WITHOUT THE TEXT PAGE'S CHROME (`threadChrome: false`) —
 /// a media post's panel and the pushed comments screen: one section whatever

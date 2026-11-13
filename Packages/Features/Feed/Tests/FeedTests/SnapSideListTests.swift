@@ -10,6 +10,7 @@ import DesignSystem
 import Testing
 import UIKit
 @testable import Feed
+@testable import ThreadKit
 
 /// The side list (#1425), on every vertical feed since #1473.
 @MainActor

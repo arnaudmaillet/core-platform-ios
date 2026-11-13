@@ -1,5 +1,4 @@
 import DesignSystem
-import FeedInterface
 import UIKit
 import VoiceKitUI
 
@@ -7,7 +6,7 @@ import VoiceKitUI
 /// component, `VoiceView`, moved to VoiceKitUI so every surface that draws a
 /// voice post reaches it (#2205). The thread keeps its name for it, and its
 /// look: full size, indented to the text column.
-typealias ThreadVoiceView = VoiceView
+public typealias ThreadVoiceView = VoiceView
 
 extension VoiceView {
     /// The thread's voice: the neutral panel at full size (#2241), from the
@@ -17,7 +16,7 @@ extension VoiceView {
     /// it. The conversation draws no bubble round a voice message: its panel
     /// is the bubble, and wears the media message's corner
     /// (`ThreadMediaView.cornerRadius`, the media tiles' token).
-    static func thread() -> VoiceView {
+    public static func thread() -> VoiceView {
         VoiceView(
             size: .full, leadingInset: CommentRowView.avatarSize + CommentRowView.avatarGap,
             maxPanelWidth: VoiceView.conversationMaxWidth
@@ -27,7 +26,7 @@ extension VoiceView {
 
 extension VoiceView.State.Delivery {
     /// A message's delivery, as the bubble shows it.
-    init(_ delivery: ConversationThreadDelivery) {
+    public init(_ delivery: ConversationThreadDelivery) {
         switch delivery {
         case .sent: self = .sent
         case .sending: self = .sending

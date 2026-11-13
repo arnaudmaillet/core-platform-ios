@@ -7,6 +7,7 @@ import FeedInterface
 import MediaCore
 import MediaPlayback
 import PostGrid
+import ThreadKit
 import UIKit
 
 /// The For You tab root: ONE page (2026-09-29) — Discover's list, led by two

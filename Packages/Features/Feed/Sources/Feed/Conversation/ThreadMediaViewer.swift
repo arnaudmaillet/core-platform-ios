@@ -2,6 +2,7 @@ import AVKit
 import DesignSystem
 import FeedInterface
 import MediaCore
+import ThreadKit
 import UIKit
 
 /// A message's photo, full screen (#681): the picture whole on black, pinch

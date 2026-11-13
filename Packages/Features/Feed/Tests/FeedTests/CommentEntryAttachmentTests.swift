@@ -6,6 +6,7 @@ import CoreNetworkingMocks
 import Foundation
 import Testing
 @testable import Feed
+@testable import ThreadKit
 
 private struct SignedInSession: AuthSessionProviding {
     func currentState() async -> AuthState { .authenticated(AccountID(MockAuthService.accountID)) }

@@ -1,5 +1,4 @@
 import DesignSystem
-import FeedInterface
 import MediaCore
 import UIKit
 
@@ -14,18 +13,18 @@ import UIKit
 ///   one says so, and a tap sends it again (`onTap` with `.failed`).
 /// - A tap otherwise opens it full screen (the host's `onTap`).
 @MainActor
-final class ThreadMediaView: UIView {
-    static let maxWidth: CGFloat = 240
+public final class ThreadMediaView: UIView {
+    public static let maxWidth: CGFloat = 240
     /// The media tiles' corner (`Surface.mediaCornerRadius`) — a voice
     /// message's panel wears it too (#2329).
-    static let cornerRadius: CGFloat = Surface.mediaCornerRadius
+    public static let cornerRadius: CGFloat = Surface.mediaCornerRadius
     /// The narrowest and widest shapes drawn.
-    static let ratioRange: ClosedRange<CGFloat> = 0.75...(4.0 / 3.0)
+    public static let ratioRange: ClosedRange<CGFloat> = 0.75...(4.0 / 3.0)
 
     /// Tapped: open it, or — failed — send it again. The host reads
     /// `delivery` to tell which.
-    var onTap: (() -> Void)?
-    private(set) var delivery: ConversationThreadDelivery = .sent
+    public var onTap: (() -> Void)?
+    public private(set) var delivery: ConversationThreadDelivery = .sent
 
     private let frameView = UIView()
     private let imageView = UIImageView()
@@ -42,7 +41,7 @@ final class ThreadMediaView: UIView {
     /// a flat fill for good before, a `try?` swallowing the failure.
     private lazy var cover = CoverSlot(view: imageView, size: .full)
 
-    init() {
+    public init() {
         super.init(frame: .zero)
         frameView.layer.cornerRadius = Self.cornerRadius
         frameView.layer.cornerCurve = .continuous
@@ -133,10 +132,10 @@ final class ThreadMediaView: UIView {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     /// Draws `media` (nil hides the view) in its `delivery` state.
-    func configure(_ media: ConversationThreadMedia?, delivery: ConversationThreadDelivery, pipeline: ImagePipeline?) {
+    public func configure(_ media: ConversationThreadMedia?, delivery: ConversationThreadDelivery, pipeline: ImagePipeline?) {
         self.delivery = delivery
         guard let media else {
             isHidden = true
@@ -177,14 +176,14 @@ final class ThreadMediaView: UIView {
     }
 
     /// The picture shown now, for the full-screen viewer's first frame.
-    var image: UIImage? { imageView.image }
+    public var image: UIImage? { imageView.image }
 
-    static func clampedRatio(_ ratio: CGFloat?) -> CGFloat {
+    public static func clampedRatio(_ ratio: CGFloat?) -> CGFloat {
         guard let ratio, ratio.isFinite, ratio > 0 else { return 1 }
         return min(max(ratio, ratioRange.lowerBound), ratioRange.upperBound)
     }
 
-    static func durationText(_ seconds: TimeInterval) -> String {
+    public static func durationText(_ seconds: TimeInterval) -> String {
         let total = Int(seconds.rounded())
         return String(format: "%d:%02d", total / 60, total % 60)
     }
@@ -199,11 +198,11 @@ final class ThreadMediaView: UIView {
     @objc private func tapped() { onTap?() }
 
     #if DEBUG
-    var debugFrameSize: CGSize { frameView.bounds.size }
+    public var debugFrameSize: CGSize { frameView.bounds.size }
     /// The video's disc (the owner's play knocked out of it, #2276).
-    var debugPlayBadgeImage: UIImage? { playBadge.image }
-    var debugIsSpinning: Bool { !spinner.isHidden && spinner.isAnimating }
-    var debugShowsFailure: Bool { !failedStack.isHidden }
-    var debugShowsPlay: Bool { !playBadge.isHidden }
+    public var debugPlayBadgeImage: UIImage? { playBadge.image }
+    public var debugIsSpinning: Bool { !spinner.isHidden && spinner.isAnimating }
+    public var debugShowsFailure: Bool { !failedStack.isHidden }
+    public var debugShowsPlay: Bool { !playBadge.isHidden }
     #endif
 }

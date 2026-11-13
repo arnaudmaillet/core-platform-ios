@@ -32,6 +32,8 @@ let package = Package(
         .package(path: "../../Core/ShareSheet"),
         // The place page is a hero page, the profile's container (#1656).
         .package(path: "../../Core/HeroPage"),
+        // The thread rows and the conversation's row values (#2380).
+        .package(path: "../../Core/ThreadKit"),
         // A like batch's `first_tap_at` is a `Google_Protobuf_Timestamp` (#676).
         .package(url: "https://github.com/apple/swift-protobuf.git", from: "1.28.0")
     ],
@@ -39,6 +41,7 @@ let package = Package(
         .target(
             name: "Feed",
             dependencies: [
+                "ThreadKit",
                 "FeedInterface",
                 "AuthInterface",
                 "ProfileInterface",
@@ -74,6 +77,7 @@ let package = Package(
         .testTarget(
             name: "FeedTests",
             dependencies: [
+                "ThreadKit",
                 "Feed",
                 "DesignSystem",
                 .product(name: "VoiceKitUI", package: "VoiceKit"),

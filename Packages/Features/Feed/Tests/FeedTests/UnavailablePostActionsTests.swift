@@ -10,6 +10,7 @@ import MediaCore
 import Testing
 import UIKit
 @testable import Feed
+@testable import ThreadKit
 
 private struct Unreachable: ImageFetching {
     func fetchImageData(for url: URL) async throws -> Data { throw URLError(.notConnectedToInternet) }

@@ -2,6 +2,7 @@ import CoreModels
 import Foundation
 import Testing
 @testable import Feed
+@testable import ThreadKit
 
 private final class PopularFeedProvider: FeedProviding, @unchecked Sendable {
     func cachedFirstPage() async -> [FeedEntry]? { nil }

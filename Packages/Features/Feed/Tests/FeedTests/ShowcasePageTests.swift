@@ -5,6 +5,7 @@ import PostGrid
 import Testing
 import UIKit
 @testable import Feed
+@testable import ThreadKit
 
 /// A channel showcase's text page (#2216): the author's words, then the full
 /// embed card; no comments — no comment rows, no input row — its like and

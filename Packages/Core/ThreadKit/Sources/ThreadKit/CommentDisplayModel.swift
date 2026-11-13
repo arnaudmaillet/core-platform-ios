@@ -62,11 +62,11 @@ public struct CommentDisplayModel: Equatable, Sendable, Identifiable {
     /// The viewer's voice comment on its way, or failed (#2309): the row
     /// draws a spinner, or the red mark (a tap sends it again), where its
     /// time goes. Nil for every comment the server holds.
-    var delivery: CommentRowView.Delivery?
+    public var delivery: CommentRowView.Delivery?
 
     /// This row as the viewer's comment still on its way (`.sending`) or
     /// failed (`.failed`): no time yet — the row's delivery stands there.
-    func awaiting(_ delivery: CommentRowView.Delivery) -> CommentDisplayModel {
+    public func awaiting(_ delivery: CommentRowView.Delivery) -> CommentDisplayModel {
         var model = self
         model.delivery = delivery
         model.metaText = ""
@@ -99,7 +99,7 @@ public struct CommentDisplayModel: Equatable, Sendable, Identifiable {
     /// A row that is not a comment: a conversation's message, drawn in the
     /// comment grammar. `metaText` is whatever the header
     /// shows beside the name — a clock time there, under the day pills.
-    init(
+    public init(
         id: String,
         authorID: ProfileID,
         authorName: String,

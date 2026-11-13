@@ -5,6 +5,7 @@ import UIKit
 import VoiceKit
 import VoiceKitUI
 @testable import Feed
+@testable import ThreadKit
 
 /// A voice post's text page (#2207): the caption row is the shared voice
 /// component, full size, the caption's words under it; it plays by tap,

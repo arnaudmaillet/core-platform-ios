@@ -14,7 +14,7 @@ import UIKit
 /// Both play on the view that CARRIES the row on screen (a cell's content
 /// view), never on the cell: the layout owns the cell's own attributes, and an
 /// effect that fought them would be undone mid-flight.
-enum ThreadRowEffect: Equatable, Sendable {
+public enum ThreadRowEffect: Equatable, Sendable {
     case fadeUp
     case bounceIn
 
@@ -23,7 +23,7 @@ enum ThreadRowEffect: Equatable, Sendable {
     ///
     /// ⚠️ `fadeUp` is the message rise as it was before #920, to the point:
     /// 24pt below, invisible.
-    @MainActor var appearStart: (transform: CGAffineTransform, alpha: CGFloat) {
+    @MainActor public var appearStart: (transform: CGAffineTransform, alpha: CGFloat) {
         switch self {
         case .fadeUp:
             return (CGAffineTransform(translationX: 0, y: Self.riseDistance), 0)
@@ -35,7 +35,7 @@ enum ThreadRowEffect: Equatable, Sendable {
     }
 
     /// Where a departure ends.
-    @MainActor var disappearEnd: (transform: CGAffineTransform, alpha: CGFloat) {
+    @MainActor public var disappearEnd: (transform: CGAffineTransform, alpha: CGFloat) {
         switch self {
         case .fadeUp:
             return (CGAffineTransform(translationX: 0, y: Self.riseDistance), 0)
@@ -48,14 +48,14 @@ enum ThreadRowEffect: Equatable, Sendable {
     /// How long the arrival takes to land — what a host waits on before it
     /// lets something else replace the row (`ConversationThreadViewController`
     /// holds a fast delivery back until the rise has landed).
-    var appearDuration: TimeInterval {
+    public var appearDuration: TimeInterval {
         switch self {
         case .fadeUp: 0.45
         case .bounceIn: 0.55
         }
     }
 
-    var disappearDuration: TimeInterval {
+    public var disappearDuration: TimeInterval {
         switch self {
         case .fadeUp: 0.25
         case .bounceIn: 0.2
@@ -70,9 +70,9 @@ enum ThreadRowEffect: Equatable, Sendable {
         }
     }
 
-    static let riseDistance: CGFloat = 24
-    static let bounceStartScale: CGFloat = 0.6
-    static let bounceEndScale: CGFloat = 0.85
+    public static let riseDistance: CGFloat = 24
+    public static let bounceStartScale: CGFloat = 0.6
+    public static let bounceEndScale: CGFloat = 0.85
 
     /// Puts `view` at the arrival's start and springs it home.
     ///
@@ -80,7 +80,7 @@ enum ThreadRowEffect: Equatable, Sendable {
     /// PRESENTATION layer, where a reused view is still at rest — the start set
     /// in this same turn is not there yet, and the animation would run
     /// end → end, invisibly.
-    @MainActor func playAppear(on view: UIView, completion: (() -> Void)? = nil) {
+    @MainActor public func playAppear(on view: UIView, completion: (() -> Void)? = nil) {
         let start = appearStart
         view.layer.removeAllAnimations()
         view.transform = start.transform
@@ -100,7 +100,7 @@ enum ThreadRowEffect: Equatable, Sendable {
     /// Takes `view` away. It is left at the departure's end — invisible — for
     /// the host to remove the row in `completion`; a reused cell puts it back
     /// (`prepareForReuse`).
-    @MainActor func playDisappear(on view: UIView, completion: (() -> Void)? = nil) {
+    @MainActor public func playDisappear(on view: UIView, completion: (() -> Void)? = nil) {
         let end = disappearEnd
         UIView.animate(
             withDuration: disappearDuration, delay: 0,

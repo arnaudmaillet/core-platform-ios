@@ -1,6 +1,7 @@
 import CoreModels
 import DesignSystem
 import Foundation
+import ThreadKit
 
 /// One subtitle cue: a semantic comment reduced to what the subtitle zone
 /// renders.

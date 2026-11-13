@@ -6,6 +6,7 @@ import PostGrid
 import Testing
 import UIKit
 @testable import Feed
+@testable import ThreadKit
 
 /// A TEXT POST'S AUTHOR WEARS THE RELATION MARK (#2300, the owner's rule of
 /// 2026-11-02: one mark, the same on every avatar that carries one). A media
@@ -202,7 +203,7 @@ struct TextPostAuthorMarkTests {
             .deletingLastPathComponent() // Packages
         var handDrawn: [String] = []
         var sources: [String: String] = [:]
-        for folder in ["Features/Feed/Sources", "Core/PostGrid/Sources"] {
+        for folder in ["Features/Feed/Sources", "Core/PostGrid/Sources", "Core/ThreadKit/Sources"] {
             let enumerator = FileManager.default.enumerator(
                 at: packages.appendingPathComponent(folder), includingPropertiesForKeys: nil
             )

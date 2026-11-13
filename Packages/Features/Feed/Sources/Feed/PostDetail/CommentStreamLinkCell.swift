@@ -1,4 +1,5 @@
 import DesignSystem
+import ThreadKit
 import UIKit
 
 /// A row of the comments panel that leads further into it (#2298):

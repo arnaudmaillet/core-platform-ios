@@ -2,6 +2,7 @@ import CoreModels
 import Foundation
 import Testing
 @testable import Feed
+@testable import ThreadKit
 
 private func entry(_ id: String, _ body: String) -> CommentEntry {
     CommentEntry(
