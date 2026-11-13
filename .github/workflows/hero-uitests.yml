@@ -16,23 +16,30 @@ on:
 
 jobs:
   hero-uitests:
-    runs-on: macos-latest
+    # The self-hosted Mac (Xcode 27), like ci.yml's test lanes; the repository
+    # variable MACOS_RUNNER=github sends it back to macos-latest (Xcode 26).
+    runs-on: ${{ vars.MACOS_RUNNER == 'github' && 'macos-latest' || fromJSON('["self-hosted", "macOS", "ARM64", "xcode"]') }}
     timeout-minutes: 60
+    env:
+      SPM: ${{ github.workspace }}/.spm
     steps:
       - uses: actions/checkout@v4
 
       # Same nondeterministic-runner dance as ci.yml: pick the newest Xcode 26.
       - name: Select Xcode 26
+        if: ${{ runner.environment == 'github-hosted' }}
         run: |
           XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
           if [ -z "$XC" ]; then echo "no Xcode 26.x on this runner"; exit 1; fi
           sudo xcode-select -s "$XC/Contents/Developer"
-          xcodebuild -version
+
+      - name: Toolchain
+        run: xcodebuild -version
 
       - name: Resolve packages
         run: |
           xcodebuild -resolvePackageDependencies -project core-platform-ios.xcodeproj \
-            -scheme core-platform-ios -clonedSourcePackagesDirPath .spm
+            -scheme core-platform-ios -clonedSourcePackagesDirPath "$SPM"
 
       - name: Pick simulator
         id: sim
@@ -53,7 +60,8 @@ jobs:
           xcodebuild test -project core-platform-ios.xcodeproj \
             -scheme core-platform-ios \
             -destination "id=${{ steps.sim.outputs.id }}" \
-            -clonedSourcePackagesDirPath .spm -skipMacroValidation \
+            -clonedSourcePackagesDirPath "$SPM" -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            -skipMacroValidation \
             CODE_SIGNING_ALLOWED=NO \
             -resultBundlePath hero-uitests.xcresult \
             "$ONLY"

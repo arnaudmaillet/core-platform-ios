@@ -50,8 +50,9 @@ env:
 jobs:
   # ── Which packages have tests ────────────────────────────────────────────
   # Ubuntu, not macOS: this is a `find` over the working tree, and macOS
-  # runners are the scarce resource (5 concurrent on the free plan for public
-  # repos). Emits the matrix the test job fans out over.
+  # runners are the scarce resource (5 concurrent GitHub-hosted on the free
+  # plan for public repos; one self-hosted Mac for the test lanes). Emits the
+  # matrix the test job fans out over.
   discover:
     name: discover packages
     runs-on: ubuntu-latest
@@ -233,20 +234,37 @@ jobs:
   # not sharing DerivedData, is the fix: a shared tree would put every module
   # on every target's search path and hide exactly the missing-dependency bug
   # this CI exists to catch (PR #127).
+  #
+  # ⚠️ THE LANES RUN ON A SELF-HOSTED MAC, XCODE 27; `build app` AND
+  # `compile tests` STAY ON GITHUB, XCODE 26. Xcode 26 can reject Swift that
+  # 27 accepts, so it still compiles the app (Debug and Release) and every
+  # selected package's tests. The lanes moved to free the five GitHub macOS
+  # slots: one Mac runs ONE job at a time, so a run's jobs queue there one
+  # after another (`max-parallel` is moot on it).
+  #
+  # Nothing persists between runs on that Mac: a package's DerivedData is
+  # ~3 GB, the Mac has little disk, and a tree kept across runs can keep a lane
+  # green on a module that no longer exists. Each package builds in the job's
+  # temporary directory, deleted as soon as its tests have run.
+  #
+  # Mac off, asleep or busy for good: set the repository variable
+  # MACOS_RUNNER=github (Settings → Secrets and variables → Actions →
+  # Variables) and the lanes go back to macos-latest with Xcode 26, unchanged.
   test:
     name: test ${{ matrix.pkg.label }}
     needs: discover
     # A change that cannot reach any package (app sources, docs) selects no
     # lanes. Guard on the count rather than handing GitHub an empty matrix.
     if: ${{ needs.discover.outputs.count != '0' }}
-    runs-on: macos-latest
+    runs-on: ${{ vars.MACOS_RUNNER == 'github' && 'macos-latest' || fromJSON('["self-hosted", "macOS", "ARM64", "xcode"]') }}
     timeout-minutes: 45
     strategy:
       fail-fast: false      # one red package must not hide the others
-      # The free plan allows 5 concurrent macOS jobs across the account.
-      # A pull request takes 4 (the app build is the fifth). The develop
-      # backstop takes 2, so a pull request queued after it still finds
-      # slots; it is the run nobody is waiting on.
+      # Only matters on GitHub (MACOS_RUNNER=github): the free plan allows 5
+      # concurrent macOS jobs across the account. A pull request takes 4 (the
+      # app build is the fifth). The develop backstop takes 2, so a pull
+      # request queued after it still finds slots; it is the run nobody is
+      # waiting on.
       max-parallel: ${{ github.event_name == 'push' && 2 || 4 }}
       matrix:
         # Longest lane first (select_packages.py), so the last slot to free
@@ -256,6 +274,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Select Xcode 26
+        if: ${{ runner.environment == 'github-hosted' }}
         run: |
           XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
           if [ -z "$XC" ]; then
@@ -266,8 +285,18 @@ jobs:
           echo "Selecting $XC"
           sudo xcode-select -s "$XC/Contents/Developer"
 
-      # Restore only: `build app` saves these (see there).
+      # The self-hosted Mac uses the Xcode its owner selected: no `sudo`
+      # there, it would wait on a password.
+      - name: This Mac's Xcode, and disk
+        if: ${{ runner.environment == 'self-hosted' }}
+        run: |
+          xcodebuild -version
+          df -h "$RUNNER_TEMP" | awk 'NR==2 {print "Free disk: " $4}'
+
+      # Restore only: `build app` saves these (see there). The self-hosted Mac
+      # keeps its own mirrors in that same directory between runs.
       - name: Restore Swift package mirrors
+        if: ${{ runner.environment == 'github-hosted' }}
         uses: actions/cache/restore@v4
         with:
           path: ~/Library/Caches/org.swift.swiftpm/repositories
@@ -278,8 +307,10 @@ jobs:
       # shard` per package, `-` for an empty field (select_packages.py). A
       # long lane is one shard of a package (#2370: Feed in two); short ones
       # share a job, paying its fixed cost — checkout, Xcode, mirrors, a
-      # simulator boot — once. Each package keeps its own DerivedData (the
-      # default, per package), so no module leaks onto another's search path.
+      # simulator boot — once. Each package gets its own DerivedData, in the
+      # job's temporary directory, so no module leaks onto another's search
+      # path; it is deleted once the package's tests have run (see the header
+      # of this job).
       - name: Test ${{ matrix.pkg.label }}
         env:
           # Empty for every lane but the legacy-backing one. VideoRenderFlags
@@ -298,6 +329,7 @@ jobs:
             [ "$PINNED" = "-" ] && PINNED=""
             [ "$SHARD" = "-" ] && SHARD=""
             echo "::group::$NAME${SHARD:+ ($SHARD)}"
+            DERIVED="$RUNNER_TEMP/DerivedData/$NAME${SHARD:+-${SHARD%/*}}"
             if ! (
               cd "$GITHUB_WORKSPACE/$DIR"
 
@@ -369,16 +401,99 @@ jobs:
               # No sysdiagnose on a red test: it added ~1m40s to every failing
               # lane (run 36904429986) and nothing ever downloads it.
               xcodebuild test -scheme "$SCHEME" -destination "id=$DEST_ID" \
-                -clonedSourcePackagesDirPath "$SPM" -skipMacroValidation "$NO_INDEX" \
+                -clonedSourcePackagesDirPath "$SPM" -derivedDataPath "$DERIVED" \
+                -skipMacroValidation "$NO_INDEX" \
                 -collect-test-diagnostics never "${FILTER[@]}"
             ); then
               FAILED+=("$NAME${SHARD:+ ($SHARD)}")
               echo "::error::$NAME${SHARD:+ ($SHARD)} failed"
             fi
+            rm -rf "$DERIVED"
             echo "::endgroup::"
           done
           if [ ${#FAILED[@]} -ne 0 ]; then
             echo "::error::Failed in this job: ${FAILED[*]}"
+            exit 1
+          fi
+
+  # ── The lanes' tests, compiled by Xcode 26 ───────────────────────────────
+  # The lanes test with the self-hosted Mac's Xcode 27, and `build app` never
+  # compiles a test file, so without this job a test only Xcode 27 accepts
+  # would go green here and break the first run on the MACOS_RUNNER=github
+  # fallback. It compiles (`build-for-testing`, nothing runs) every package
+  # the lanes selected, on GitHub's Xcode 26, in ONE job.
+  #
+  # ONE DerivedData for every package, unlike the lanes: this job only asks
+  # whether Xcode 26 accepts the Swift, so the shared graph (SwiftProtobuf,
+  # Connect, CoreModels, DesignSystem) compiles once. The missing-dependency
+  # check (#127) stays with the lanes, which build each package alone.
+  #
+  # Skipped with MACOS_RUNNER=github: the lanes are Xcode 26 themselves then.
+  compile-tests:
+    name: compile tests (Xcode 26)
+    needs: discover
+    if: ${{ needs.discover.outputs.count != '0' && vars.MACOS_RUNNER != 'github' }}
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode 26
+        run: |
+          XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$XC" ]; then
+            echo "No Xcode 26.x found on this runner" >&2
+            ls -d /Applications/Xcode_*.app 2>/dev/null >&2 || true
+            exit 1
+          fi
+          echo "Selecting $XC"
+          sudo xcode-select -s "$XC/Contents/Developer"
+          xcodebuild -version
+
+      # Restore only: `build app` saves these (see there).
+      - name: Restore Swift package mirrors
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/Library/Caches/org.swift.swiftpm/repositories
+          key: spm-mirrors-${{ hashFiles('**/Package.resolved') }}
+          restore-keys: spm-mirrors-
+
+      # One build per package directory: Feed's two shards and MediaPlayback's
+      # legacy lane compile the same tests as their siblings.
+      - name: Compile the selected packages' tests
+        env:
+          MATRIX: ${{ needs.discover.outputs.matrix }}
+        run: |
+          set -o pipefail
+          SPM="$GITHUB_WORKSPACE/.spm"
+          DERIVED="$RUNNER_TEMP/DerivedData"
+          DIRS=$(jq -r '.[].lanes' <<< "$MATRIX" \
+            | tr ' ' '\n' | paste - - - - | awk '{print $1 " " $2}' | sort -u)
+          FAILED=()
+          while read -r DIR NAME; do
+            echo "::group::$NAME"
+            if ! (
+              cd "$GITHUB_WORKSPACE/$DIR"
+              xcodebuild -resolvePackageDependencies -scheme "$NAME" -clonedSourcePackagesDirPath "$SPM"
+              # Same scheme choice as the lanes: "<name>-Package" carries the
+              # test action of a multi-product package.
+              SCHEME="$NAME"
+              if xcodebuild -list -clonedSourcePackagesDirPath "$SPM" 2>/dev/null \
+                   | grep -qE "^[[:space:]]+${NAME}-Package$"; then
+                SCHEME="${NAME}-Package"
+              fi
+              xcodebuild build-for-testing -scheme "$SCHEME" \
+                -destination "generic/platform=iOS Simulator" \
+                -clonedSourcePackagesDirPath "$SPM" -derivedDataPath "$DERIVED" \
+                -skipMacroValidation CODE_SIGNING_ALLOWED=NO ARCHS=arm64 "$NO_INDEX"
+            ); then
+              FAILED+=("$NAME")
+              echo "::error::$NAME's tests do not compile with Xcode 26"
+            fi
+            echo "::endgroup::"
+          done <<< "$DIRS"
+          if [ ${#FAILED[@]} -ne 0 ]; then
+            echo "::error::Xcode 26 rejects the tests of: ${FAILED[*]}"
             exit 1
           fi
 
@@ -388,7 +503,7 @@ jobs:
   # gated on anything.
   build-test:
     name: build-test
-    needs: [discover, build-app, test]
+    needs: [discover, build-app, test, compile-tests]
     # !cancelled(), not always(): with always() a cancelled run would still
     # report a red required check instead of no check at all.
     if: ${{ !cancelled() }}
@@ -400,6 +515,7 @@ jobs:
           echo "discover:  ${{ needs.discover.result }}"
           echo "build-app: ${{ needs.build-app.result }}"
           echo "test:      ${{ needs.test.result }}"   # aggregate of every lane
+          echo "compile-tests: ${{ needs.compile-tests.result }}"
           FAILED=()
           [ "${{ needs.discover.result }}"  = "success" ] || FAILED+=("discover")
           # "skipped" is a pass ONLY when discover said so (documentation-only
@@ -414,6 +530,12 @@ jobs:
           case "${{ needs.test.result }}" in
             success|skipped) ;;
             *) FAILED+=("test") ;;
+          esac
+          # Skipped with the lanes (no package reached), or because the lanes
+          # ran on Xcode 26 themselves (MACOS_RUNNER=github).
+          case "${{ needs.compile-tests.result }}" in
+            success|skipped) ;;
+            *) FAILED+=("compile-tests") ;;
           esac
           if [ ${#FAILED[@]} -ne 0 ]; then
             echo "::error::Failed: ${FAILED[*]} — open the job list above for the failing lane"
