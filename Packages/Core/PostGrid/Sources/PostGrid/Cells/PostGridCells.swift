@@ -272,138 +272,11 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// means.
     public var onMediaHoldChanged: ((Bool) -> Void)?
 
-    // MARK: - Autoplay surface
+    // MARK: - The autoplay surface: the video render view a row hosts — state here, behaviour in `PostGridListRowCell+Autoplay.swift`
+    public var loadedVideoRenderView: VideoRenderView?
 
-    /// The surface an autoplaying row renders into, built on first use so a
-    /// timeline of stills never allocates a player layer it will not use.
-    ///
-    /// Placed INSIDE the preview box, unlike the tile's, which fills the whole
-    /// cell. That is the row's shape talking: the media is one part of a card,
-    /// so the video has to be clipped to the part — and putting it in the box
-    /// also means it inherits the box's rounding and, for free, the alpha that
-    /// `setHeroMediaConcealed` applies while a twin is in the air. A sibling
-    /// surface would have needed concealing separately, and would have been
-    /// the thing left visible over a flight.
-    ///
-    /// ⚠️ For a collection it answers PER PAGE, once a budget has bought the row
-    /// a second surface. Until then `pageSurfaces` holds at most the watched
-    /// page and this behaves exactly as the single-surface version every
-    /// existing caller was written against.
-    public func makeVideoRenderViewIfNeeded() -> VideoRenderView {
-        // ⚠️ GATED ON A GRANTED BUDGET, and this is not an optimisation.
-        //
-        // Minting per page regardless meant a row with no allowance still ended
-        // up holding two surfaces — and the coordinator reads exactly that
-        // ("more than one surface") to decide it may release a loan instead of
-        // stopping it. So a row nobody had given anything to would leave the
-        // previous clip's player bound, untracked and unreclaimable. With the
-        // gate, a budget of zero is the old single-surface behaviour, exactly.
-        if showsCarousel, clipBudget > 0, let carousel, carousel.currentPageVideoURL != nil {
-            let page = carousel.currentPage
-            if let existing = pageSurfaces[page] {
-                loadedVideoRenderView = existing
-                install(existing)
-                return existing
-            }
-            // The row's first surface belongs to the first clip page that asks
-            // for one: minting a second here would leave the original hanging
-            // with a live player and no page to draw it on.
-            if let inherited = loadedVideoRenderView,
-               !pageSurfaces.values.contains(where: { $0 === inherited }) {
-                pageSurfaces[page] = inherited
-                install(inherited)
-                return inherited
-            }
-            let view = VideoRenderView()
-            #if DEBUG
-            view.debugLabel = "row-p\(page)"
-            #endif
-            view.isHidden = true
-            view.isUserInteractionEnabled = false
-            pageSurfaces[page] = view
-            loadedVideoRenderView = view
-            install(view)
-            return view
-        }
-        if let loadedVideoRenderView {
-            // ⚠️ RE-INSTALLED, not just returned.
-            //
-            // On a collection the surface is evicted from its page on every
-            // page change — it has to be, or a clip keeps drawing on the page
-            // the viewer scrolled away from, which is still on screen peeking.
-            // Returning the view without putting it back somewhere meant the
-            // SECOND visit to a clip played into a view with no superview: the
-            // coordinator reported a clean start, the pool decoded, and the
-            // card showed a still. Autoplay worked exactly once per row.
-            //
-            // `install` no-ops when the surface is already where it belongs, so
-            // the single-attachment path is untouched — re-pinning it would
-            // reset `isReadyForDisplay` for ~170ms on every reconcile.
-            install(loadedVideoRenderView)
-            return loadedVideoRenderView
-        }
-        let view = VideoRenderView()
-        #if DEBUG
-        view.debugLabel = "row"
-        #endif
-        view.isHidden = true
-        view.isUserInteractionEnabled = false
-        install(view)
-        loadedVideoRenderView = view
-        return view
-    }
 
-    /// Puts the playback surface where the media the viewer is looking at
-    /// actually is: pinned to the preview box for a single attachment, and
-    /// re-parented onto the current PAGE for a collection.
-    ///
-    /// ⚠️ The two use different layout systems on purpose, and that is why this
-    /// exists rather than a branch at each call site. The box is laid out by
-    /// constraints; the carousel places its pages by FRAME on every width
-    /// change, and a surface pinned by constraints inside one of them would
-    /// fight the page it is sitting in. `removeFromSuperview` first, because
-    /// that is what drops the constraints the previous home left on it.
-    private func install(_ view: VideoRenderView) {
-        if showsCarousel, let carousel {
-            // ⚠️ ONLY onto a page that carries a clip.
-            //
-            // This hosted on whatever page was current, which is fine while the
-            // viewer is looking at the video and catastrophic one page over: any
-            // caller asking for the surface — and the flight staging is one —
-            // moved it onto the PHOTOGRAPH being read and drew the clip over it.
-            // On screen the card swapped to the video at the instant of the tap,
-            // and the flight then carried what it found.
-            //
-            // A still page is left alone. The surface stays where it belongs,
-            // paused, and comes back when the viewer does.
-            guard carousel.currentPageVideoURL != nil else { return }
-            guard !carousel.hostsSurfaceOnCurrentPage(view) else { return }
-            view.removeFromSuperview()
-            view.translatesAutoresizingMaskIntoConstraints = true
-            carousel.host(view)
-            return
-        }
-        guard view.superview !== mediaView else { return }
-        view.removeFromSuperview()
-        view.translatesAutoresizingMaskIntoConstraints = false
-        view.pin(to: mediaView)
-        // ⚠️ BEHIND EVERY OTHER SUBVIEW OF THE PREVIEW, and it takes a second
-        // line to say so because `pin(to:)` begins with `addSubview` — which
-        // puts the view at the FRONT. The preview's own subviews are its
-        // furniture (the counters, the date, the page indicator), so a surface
-        // left where it lands covers all of it: measured as "the counters and
-        // the date disappear on single-video cards".
-        //
-        // The clip is CONTENT and the furniture is chrome, so the order is not
-        // a detail of this one call — it is the same rule the cover obeys,
-        // stated where the only view that can break it is inserted.
-        mediaView.sendSubviewToBack(view)
-    }
-
-    public private(set) var loadedVideoRenderView: VideoRenderView?
-
-    // MARK: - Retained clips
-
+    // MARK: - Retained clips: the surfaces a row keeps, prewarms, adopts and donates — state here, behaviour in `PostGridListRowCell+RetainedClips.swift`
     /// A surface per clip page this row is keeping warm, keyed by page.
     ///
     /// ⚠️ THE ROW'S BUDGET IS WHAT IS LEFT OVER, not the pool's whole capacity.
@@ -415,236 +288,14 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// budget `maxConcurrent` exists to divide. `retainClips(budget:)` is told
     /// how much is spare; when the answer is nothing, this holds one entry and
     /// the row behaves as it always did.
-    private var pageSurfaces: [Int: VideoRenderView] = [:]
-
+    var pageSurfaces: [Int: VideoRenderView] = [:]
     /// How many EXTRA clips this row has been allowed to keep. Zero until a
     /// coordinator says otherwise, which is what makes the retention opt-in
     /// rather than something a row helps itself to.
-    private var clipBudget = 0
-
-    /// The surface belonging to the page the viewer is actually looking at.
-    ///
-    /// ⚠️ ASKED OF THE CAROUSEL, NEVER REMEMBERED — and that is the whole of a
-    /// reported defect.
-    ///
-    /// `loadedVideoRenderView` is re-pointed when someone asks the cell for a
-    /// surface, which happens in the coordinator's START pass. Anything running
-    /// BEFORE that — the pause pass, in particular — reads the page the viewer
-    /// has just left. Pausing "everything except the watched one" then spared
-    /// the clip being left and paused the one arriving, so a card's carousel
-    /// ended up with two clips playing at once.
-    ///
-    /// A still page has no watched clip, which is the honest answer: nothing on
-    /// it should be advancing.
-    public var watchedClipSurface: VideoRenderView? {
-        guard showsCarousel, let carousel else { return loadedVideoRenderView }
-        return pageSurfaces[carousel.currentPage]
-    }
-
-    public var retainedPlaybackSurfaces: [VideoRenderView] {
-        var surfaces = Array(pageSurfaces.values)
-        if let loadedVideoRenderView,
-           !surfaces.contains(where: { $0 === loadedVideoRenderView }) {
-            surfaces.append(loadedVideoRenderView)
-        }
-        return surfaces
-    }
-
-    @discardableResult
-    public func retainClips(budget: Int) -> [VideoRenderView] {
-        clipBudget = budget
-        guard showsCarousel, let carousel else { return [] }
-        // One policy, in one place: the same window the post page uses. The
-        // budget is the EXTRA allowance, so the watched clip is added back — a
-        // row granted nothing still keeps the one it is playing.
-        let keep = Set(CarouselRetentionWindow.pagesToRetain(
-            videoPages: carousel.videoPageIndices,
-            currentPage: carousel.currentPage,
-            capacity: budget + 1
-        ))
-        var dropped: [VideoRenderView] = []
-        for (page, view) in pageSurfaces where !keep.contains(page) {
-            guard view !== loadedVideoRenderView else { continue }
-            carousel.evictSurface(onPage: page)
-            view.removeFromSuperview()
-            pageSurfaces[page] = nil
-            dropped.append(view)
-        }
-        // Re-hung every time, and idempotent: a page whose surface is still its
-        // own but whose carousel was re-laid out has to be put back.
-        for (page, view) in pageSurfaces {
-            view.translatesAutoresizingMaskIntoConstraints = true
-            carousel.host(view, onPage: page)
-        }
-        return dropped
-    }
-
-    /// The clips this row would like brought to their first frame, each with a
-    /// surface ready to receive one.
-    ///
-    /// The surface carries THAT page's cover as its poster: hosted without one
-    /// it is a black rectangle over the photograph until the stream fills,
-    /// which is a worse fault than the delay the warming is there to remove.
-    public func clipsToPrewarm() -> [(url: URL, surface: VideoRenderView)] {
-        guard showsCarousel, clipBudget > 0, let carousel else { return [] }
-        let pages = CarouselRetentionWindow.pagesToPrewarm(
-            videoPages: carousel.videoPageIndices,
-            currentPage: carousel.currentPage,
-            budget: clipBudget
-        )
-        return pages.compactMap { page in
-            guard let url = carousel.videoURL(onPage: page) else { return nil }
-            let view: VideoRenderView
-            if let existing = pageSurfaces[page] {
-                view = existing
-            } else {
-                view = VideoRenderView()
-                #if DEBUG
-                view.debugLabel = "row-warm-p\(page)"
-                #endif
-                view.isUserInteractionEnabled = false
-                pageSurfaces[page] = view
-            }
-            view.setPoster(carousel.cover(onPage: page))
-            view.isHidden = false
-            view.translatesAutoresizingMaskIntoConstraints = true
-            carousel.host(view, onPage: page)
-            return (url, view)
-        }
-    }
-
-    /// Gives up every clip surface but the watched one — for reuse, and for the
-    /// end of this row's playback.
-    @discardableResult
-    public func releaseRetainedClips() -> [VideoRenderView] {
-        var dropped: [VideoRenderView] = []
-        for (page, view) in pageSurfaces where view !== loadedVideoRenderView {
-            carousel?.evictSurface(onPage: page)
-            view.removeFromSuperview()
-            pageSurfaces[page] = nil
-            dropped.append(view)
-        }
-        return dropped
-    }
-
-    /// For a collection: only while the surface hangs in the page being looked
-    /// at. A paused clip one page over is rendering, and is not what the viewer
-    /// is looking at.
-    public var isRenderingCurrentMedia: Bool {
-        guard let view = loadedVideoRenderView else { return false }
-        guard showsCarousel, let carousel else { return true }
-        return carousel.hostsSurfaceOnCurrentPage(view)
-    }
-
-    /// Whether the surface could actually put pixels on screen: on the page
-    /// being looked at, visible, and not sitting at zero alpha behind a flight.
-    public var isSurfaceDrawable: Bool {
-        guard let view = loadedVideoRenderView else { return false }
-        return !view.isHidden && view.alpha > 0 && isRenderingCurrentMedia
-    }
-
-    /// ⚠️ The CONVERSE fault: a clip drawing on a page that has none.
-    ///
-    /// The audit's first invariant only asked whether a clip's page was showing
-    /// its clip. It could not see the opposite — a surface hosted on a
-    /// PHOTOGRAPH — and that is the shape the flight defect took: the card swapped
-    /// to the video at the moment of the tap, on a page that carries no video at
-    /// all. Both directions are the same requirement stated once: what is on a
-    /// page is what that page is.
-    /// The surface, for a host that needs to ask the pool about it.
-    public var playbackSurface: VideoRenderView? { loadedVideoRenderView }
-
-    public var drawsVideoOnAStillPage: Bool {
-        guard let view = loadedVideoRenderView, !view.isHidden, view.alpha > 0,
-              showsCarousel, let carousel
-        else { return false }
-        return carousel.currentPageVideoURL == nil
-            && carousel.hostsSurfaceOnCurrentPage(view)
-    }
-
-    public func adoptVideoRenderView(_ view: VideoRenderView) {
-        if let existing = loadedVideoRenderView, existing !== view {
-            existing.detachForReplacement()
-            existing.removeFromSuperview()
-        }
-        view.transform = .identity
-        view.isHidden = false
-        // ⚠️ THE ADOPTED VIEW IS THIS PAGE'S SURFACE FROM HERE ON.
-        //
-        // Without this the page map still names the surface the landing just
-        // replaced, and the live one — the view actually carrying the adopted
-        // player — is in no map at all. Nothing can pause what it cannot name,
-        // so that player ran on for as long as the row lived: returning to its
-        // page found playback seconds ahead of where it was left, and the
-        // picture raced to reach it.
-        //
-        // Reported precisely: "in the post it pauses properly, in the card the
-        // video catches up as if it had kept going". It had. The post's card
-        // view took this same line when its own landing was fixed; the row
-        // never got it, and that asymmetry is exactly what was observed.
-        if showsCarousel, let carousel, carousel.currentPageVideoURL != nil {
-            pageSurfaces[carousel.currentPage] = view
-        }
-        install(view)
-        loadedVideoRenderView = view
-    }
-
-    public func donateVideoRenderView() -> VideoRenderView? {
-        guard let view = loadedVideoRenderView else { return nil }
-        loadedVideoRenderView = nil
-        // Told, not inferred. Removing the view from its superview leaves a
-        // carousel page still believing it holds one — its reference is weak
-        // and the flight card retains the view — and a page that believes that
-        // refuses to take it back.
-        carousel?.evictHostedSurface()
-        view.removeFromSuperview()
-        return view
-    }
-
-    /// Reveals the surface once a player has been attached. The cover stays
-    /// underneath as the poster, so the first frame replaces it rather than
-    /// flashing black.
-    public func beginVideoPreview() {
-        let view = makeVideoRenderViewIfNeeded()
-        // `renderedCover`, not `mediaView.image`: on a collection the box's own
-        // image view is empty — the pages hold the pictures — so the poster
-        // would have been nil and the surface would have shown black until the
-        // first frame decoded.
-        view.setPoster(renderedCover)
-        view.revealOnFirstFrame()
-    }
-
-    /// Back to a still row. Faded rather than switched off, so a sweep that
-    /// stops several rows at once does not snap their covers back in one frame.
-    public func endVideoPreview() {
-        loadedVideoRenderView?.hideCrossFading()
-    }
-
-    /// Puts a cover on immediately, without waiting for the async load already
-    /// in flight — the same race the tile closes, for the same reason: the
-    /// autoplay gate must not pass on a cover the row is not actually showing.
-    public func applyCover(_ image: UIImage) {
-        cover.apply(image)
-    }
-
-    /// The frame a return player was parked on (#895) REPLACES the thumbnail
-    /// on a single-media row, as it does on a tile (#1069): a close whose
-    /// player went lands on the picture the viewer left, not on an older
-    /// one. A thumbnail still loading is dropped, or it would land over the
-    /// frame. A collection keeps `applyCover`'s rule: its pages hold the
-    /// pictures, and the box behind them has none to replace.
-    public func showReturnStill(_ image: UIImage) {
-        guard !showsCarousel else {
-            applyCover(image)
-            return
-        }
-        cover.showParked(image)
-    }
-
+    var clipBudget = 0
     /// Fired when the cover lands from an async load, so the autoplay gate is
     /// re-run for a row that arrived faceless.
     public var onCoverLoaded: (() -> Void)?
-
     /// Called when the collection view recycles this row, so the coordinator
     /// takes its player back before the cell is bound to another post.
     public var onReuse: (() -> Void)?
@@ -691,213 +342,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         return layoutAttributes
     }
 
-    private func resolveMediaHeight(atWidth width: CGFloat) {
-        if mediaPageCount > 1 {
-            mediaHeight.constant = Self.collectionMediaHeight(
-                forCardWidth: width, pageCount: mediaPageCount
-            )
-            return
-        }
-        mediaHeight.constant = Self.mediaHeight(
-            forCardWidth: width, aspectRatio: mediaAspectRatio
-        )
-    }
-
-    /// The ellipsis and the affordance, written INTO the caption so they sit at
-    /// the end of the truncated text rather than under it.
-    ///
-    /// A label cannot do this for itself: `.byTruncatingTail` puts its ellipsis
-    /// at the very end of the last line and leaves nowhere to put anything
-    /// after it. So the text is shortened here, by hand, to the longest
-    /// word-boundary prefix that still leaves room for "… Show more" on the
-    /// last line — which is what makes the affordance read as part of the
-    /// sentence it interrupts.
-    private func composeCaption(atWidth width: CGFloat) {
-        let font = captionLabel.font ?? .appFont(forTextStyle: .body)
-        let available = width - Self.captionInset * 2
-        // A card of a FIXED height (`fixedCaptionLines`) offers no "Show more":
-        // the label cuts its own tail with an ellipsis, and the whole card
-        // opens the post.
-        guard !isCaptionExpanded, fixedCaptionLines == nil, !fullCaption.isEmpty, available > 0 else {
-            showMoreRange = nil
-            captionLabel.attributedText = Self.plain(fullCaption, font: font)
-            return
-        }
-        // Measured in LINES, from the font's own metrics — never a hardcoded
-        // height, or a Dynamic Type step silently changes which captions are
-        // considered long.
-        let whole = Self.plain(fullCaption, font: font)
-        guard Self.lineCount(whole, width: available) > Self.captionLineLimit else {
-            showMoreRange = nil
-            captionLabel.attributedText = whole
-            return
-        }
-        let composed = Self.truncated(
-            fullCaption, font: font, width: available, capLines: Self.captionLineLimit
-        )
-        captionLabel.attributedText = composed.text
-        showMoreRange = composed.showMore
-    }
-
-    private static let showMoreTitle = "Show more"
-    private static let ellipsis = "\u{2026} "
-
-    /// The caption in the card's register, its emotes marked (`EmoteText`):
-    /// a `:code:` is already the one glyph it draws as, so every measurement
-    /// below sees the final line.
-    private static func plain(_ text: String, font: UIFont?) -> NSAttributedString {
-        let caption = NSMutableAttributedString(attributedString: EmoteText.attributedString(text, attributes: attributes(font: font)))
-        // `@handle`s and `#tag`s (#524), before anything is measured.
-        caption.applyTextEntityStyle(.link)
-        return caption
-    }
-
-    private static func attributes(font: UIFont?) -> [NSAttributedString.Key: Any] {
-        [
-            .font: font ?? UIFont.appFont(forTextStyle: .body),
-            .foregroundColor: UIColor.label
-        ]
-    }
-
-    /// How many lines `text` occupies at `width`, counted as LINE FRAGMENTS.
-    ///
-    /// Not `height / font.lineHeight`, which is what this did first and is
-    /// wrong in a way that hides: `boundingRect` returns the laid-out height
-    /// including leading, which for four lines of body text measured 88pt
-    /// against a 20.5pt line height — 4.29, not 4. Rounding rescues small
-    /// counts and drifts into over-reporting as they grow, so the error only
-    /// appears at large Dynamic Type sizes or long captions.
-    private static func lineCount(_ text: NSAttributedString, width: CGFloat) -> Int {
-        guard text.length > 0 else { return 0 }
-        let storage = NSTextStorage(attributedString: text)
-        let manager = NSLayoutManager()
-        let container = NSTextContainer(
-            size: CGSize(width: width, height: .greatestFiniteMagnitude)
-        )
-        container.lineFragmentPadding = 0
-        storage.addLayoutManager(manager)
-        manager.addTextContainer(container)
-        manager.ensureLayout(for: container)
-
-        var count = 0
-        var index = 0
-        while index < manager.numberOfGlyphs {
-            var effective = NSRange()
-            _ = manager.lineFragmentRect(forGlyphAt: index, effectiveRange: &effective)
-            count += 1
-            index = NSMaxRange(effective)
-        }
-        return count
-    }
-
-    /// The longest word-boundary prefix of `text` whose last line still has
-    /// room for "… Show more" AFTER it, plus the range that affordance
-    /// occupies.
-    ///
-    /// Two steps, because the property wanted is not monotone and a single
-    /// search cannot find it:
-    ///
-    /// 1. binary search for the longest prefix that fills at most `capLines` on
-    ///    its own — this part IS monotone;
-    /// 2. walk back a word at a time until the affordance fits on the same line
-    ///    the prefix ends on.
-    ///
-    /// Searching in one step on "does the composition fit in `capLines`"
-    /// instead — which is what this did first — maximises the wrong thing: a
-    /// prefix filling three lines with the affordance wrapped alone onto a
-    /// fourth satisfies it perfectly, and puts the affordance back on its own
-    /// line, which is exactly what it exists to avoid. Caught by a test that
-    /// counted the prefix's lines rather than the composition's.
-    ///
-    /// Word boundaries rather than characters: a caption cut mid-word reads as
-    /// a rendering fault rather than as an interruption, and there are far
-    /// fewer of them to search.
-    private static func truncated(
-        _ text: String, font: UIFont, width: CGFloat, capLines: Int
-    ) -> (text: NSAttributedString, showMore: NSRange) {
-        // Cut from the MARKED caption, so a `:code:` is one glyph that a word
-        // boundary can never split, and the emotes a prefix keeps stay marked.
-        let whole = plain(text, font: font)
-        let ns = whole.string as NSString
-        var boundaries: [Int] = []
-        ns.enumerateSubstrings(in: NSRange(location: 0, length: ns.length),
-                               options: [.byWords, .substringNotRequired]) { _, range, _, _ in
-            boundaries.append(range.location + range.length)
-        }
-        if boundaries.isEmpty { boundaries = [ns.length] }
-
-        func prefix(upTo end: Int) -> NSAttributedString {
-            let head = ns.substring(to: min(end, ns.length))
-            let trimmed = head.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty, let range = head.range(of: trimmed) else { return NSAttributedString() }
-            return whole.attributedSubstring(from: NSRange(range, in: head))
-        }
-        func compose(_ prefix: NSAttributedString) -> NSAttributedString {
-            let composed = NSMutableAttributedString(attributedString: prefix)
-            composed.append(NSAttributedString(string: ellipsis, attributes: attributes(font: font)))
-            composed.append(NSAttributedString(string: showMoreTitle, attributes: [
-                .font: font,
-                .foregroundColor: UIColor.tintColor
-            ]))
-            return composed
-        }
-
-        // 1. The longest prefix that fills at most `capLines` by itself.
-        var low = 0
-        var high = boundaries.count - 1
-        var fullest = 0
-        while low <= high {
-            let mid = (low + high) / 2
-            let candidate = prefix(upTo: boundaries[mid])
-            if lineCount(candidate, width: width) <= capLines {
-                fullest = mid
-                low = mid + 1
-            } else {
-                high = mid - 1
-            }
-        }
-
-        // 2. Back off until the affordance shares the prefix's last line.
-        var index = fullest
-        while index >= 0 {
-            let body = prefix(upTo: boundaries[index])
-            let composed = compose(body)
-            let bodyLines = lineCount(body, width: width)
-            let composedLines = lineCount(composed, width: width)
-            if composedLines == bodyLines, composedLines <= capLines {
-                return (composed, showMoreRange(in: composed))
-            }
-            index -= 1
-        }
-        // Nothing fits beside it — a first word wider than the row. Show the
-        // affordance alone rather than nothing at all.
-        let composed = compose(prefix(upTo: boundaries[0]))
-        return (composed, showMoreRange(in: composed))
-    }
-
-    private static func showMoreRange(in composed: NSAttributedString) -> NSRange {
-        NSRange(
-            location: composed.length - (showMoreTitle as NSString).length,
-            length: (showMoreTitle as NSString).length
-        )
-    }
-
-    /// ⚠️ NOTHING IS FADED IN AT THE LANDING, and the deletion of the thing
-    /// that used to be here is worth recording.
-    ///
-    /// The closing metric line was brought in over 0.22s once the card was
-    /// alone, on the reasoning that the PAGE never had one — true of the
-    /// reveal's push, and irrelevant to the leg this actually ran on. A
-    /// dismissal's window carries `RevealDismissCardView`, which is a whole row
-    /// including that line, so by the time this fired the viewer had been
-    /// looking at the metric line for the length of the flight. Dropping it to
-    /// zero and bringing it back is a blink of something already on screen —
-    /// reported exactly that way.
-    ///
-    /// It is the same argument the band already won: the window shows a header
-    /// identical to the row's, so the swap at the landing is the identity.
-    /// Every part of this row now arrives that way.
-
+    // MARK: - The caption: measured at the layout's width, truncated with its Show more — state here, behaviour in `PostGridListRowCell+Caption.swift`
     /// Fired when the viewer taps the media of a COLLECTION row.
     ///
     /// A row with one photograph needs nothing here — the collection view's own
@@ -905,7 +350,6 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// the content path swallows that selection, so the host has to be told
     /// separately. See `MediaCarouselView.onTapped`.
     public var onMediaTapped: (() -> Void)?
-
     /// Fired when the viewer taps the COMMENT COUNT, on either card shape.
     ///
     /// ⚠️ A different destination from the row's own tap, not a shortcut to it.
@@ -919,574 +363,15 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// photograph, and an affordance that comes and goes with that is not one.
     public var onCommentsTapped: (() -> Void)?
 
-    #if DEBUG
-    /// Presses the comment count the row is ACTUALLY wearing.
-    ///
-    /// The point of asking the row rather than naming a chip: a card shows the
-    /// overlay pair over its media and the closing line's pair when it has
-    /// none, and wiring only one of the two is a defect that no test naming the
-    /// other would ever see.
-    public func debugTapCommentsChip() -> Bool {
-        Self.debugPress(commentsAction)
-    }
-
-    /// Presses the like chip — a stake of the tap amount, when wired.
-    public func debugTapLikesChip() -> Bool {
-        Self.debugPress(likesAction)
-    }
-
-    /// Presses `action` as a finger would, reporting whether it is a control
-    /// that is shown — "did nothing" and "is not a control" differ.
-    private static func debugPress(_ action: AppControl) -> Bool {
-        guard !action.isHidden, action.isUserInteractionEnabled, action.superviewChainIsVisible,
-              action.acceptsTaps else { return false }
-        action.debugTap()
-        return true
-    }
-    #endif
-
-    /// Moves this row's carousel, e.g. to follow the page an opened post is on.
-    /// Ignored by a row with no collection.
-    public func setMediaPage(_ page: Int, animated: Bool = true) {
-        guard let carousel, !carousel.isHidden else { return }
-        carousel.setPage(page, animated: animated)
-    }
-
-    /// Which page of this row's carousel is showing, or nil for a row with no
-    /// collection. A hero flight departs from this page, so whatever opens the
-    /// post has to land on it.
-    public var currentMediaPage: Int? {
-        guard let carousel, !carousel.isHidden else { return nil }
-        return carousel.currentPage
-    }
-
-    /// Whether this row's carousel can still travel `delta` pages — the cell's
-    /// twin of `MediaCarouselView.hasTravel(towardsPageDelta:)`, for a host that
-    /// holds cells rather than carousels.
-    ///
-    /// ⚠️ A row with no collection answers `false`, not nil, and the difference
-    /// matters at the only kind of call site there is: a gesture gate. `false`
-    /// reads as "nothing here wants this drag", which is the truth for a text
-    /// row and for a single photograph — an optional would make every caller
-    /// invent that answer for itself, and the first one to invent `true` would
-    /// hand the drag to a carousel that does not exist.
-    public func mediaHasTravel(towardsPageDelta delta: Int) -> Bool {
-        guard let carousel, !carousel.isHidden else { return false }
-        return carousel.hasTravel(towardsPageDelta: delta)
-    }
-
-    #if DEBUG
-    /// Scrolls this row's carousel, or false if it has none.
-    @discardableResult
-    public func debugScrollCarousel(toPage index: Int, animated: Bool = true) -> Bool {
-        guard let carousel, !carousel.isHidden else { return false }
-        return carousel.debugScroll(toPage: index, animated: animated)
-    }
-
-    /// Presses "Show more". Returns false when there was nothing to reveal,
-    /// which is the answer a harness must not mistake for success.
-    ///
-    /// The simulator injects no touches, so this is the only way this control
-    /// is reachable in an automated run.
-    @discardableResult
-    public func debugTapShowMore() -> Bool {
-        guard showMoreRange != nil else { return false }
-        revealTapped()
-        return true
-    }
-
-    /// The caption as drawn: its line cap, how it ends a cut line, its text,
-    /// and where it and the closing line sit in this cell's space — what a
-    /// FIXED-height card (`fixedCaptionLines`) is pinned by.
-    public var debugCaptionLineLimit: Int { captionLabel.numberOfLines }
-    public var debugCaptionLineBreakMode: NSLineBreakMode { captionLabel.lineBreakMode }
-    public var debugCaptionText: String? { captionLabel.attributedText?.string ?? captionLabel.text }
-    public var debugShowsMoreAffordance: Bool { showMoreRange != nil }
-    public var debugCaptionFrame: CGRect { captionLabel.convert(captionLabel.bounds, to: self) }
-    public var debugClosingLineFrame: CGRect {
-        metaRow.isHidden ? .null : metaRow.convert(metaRow.bounds, to: self)
-    }
-    #endif
-
-    /// Hides ONLY the preview while its twin is in the air.
-    ///
-    /// A row is a card of which the media is one part, and the flight carries
-    /// that part (`mediaHeroRect`) — so that part is exactly what must
-    /// disappear. Hiding the whole cell instead, which is what a tile needs,
-    /// took the caption, the author line and the metrics with it: they were
-    /// missing for the length of the flight and snapped back at its last
-    /// frame, because nothing in the air was standing in for them.
-    ///
-    /// The invariant, in one line: CONCEAL EXACTLY WHAT THE FLIGHT
-    /// REPRODUCES. A tile is its media, so the tile hides whole; a row is not,
-    /// so it does not. A text row never flies at all — it pushes natively.
-    ///
-    /// Alpha, not `isHidden`, and that is load-bearing: `mediaHeroRect`
-    /// reports nil for a hidden preview, so hiding it would make the row
-    /// unable to answer where its own media is — which is the rect the
-    /// DISMISSAL flies home to.
-    ///
-    /// The metadata pills go with it, and they get there for free: they are
-    /// subviews OF the preview, so the one alpha carries them. That is why they
-    /// were built inside it rather than over it in the card — a chip left
-    /// floating on an empty rounded box for the length of a flight is the same
-    /// defect as a caption that vanishes, on a smaller scale, and the way not
-    /// to have it is to have no second channel to keep in step.
-    public func setHeroMediaConcealed(_ concealed: Bool) {
-        // A COLLECTION conceals one PAGE, not the preview.
-        //
-        // The rule is the same one this method's note states — conceal exactly
-        // what the flight reproduces — read one level further in: a flight from
-        // a collection carries the current page, so the box, the neighbour's
-        // peek and the chips all stay. Hiding the box took the peek and the
-        // chips with it and brought the whole strip back in one frame at the
-        // landing, which is the pop this rule exists to prevent, rebuilt inside
-        // the preview it was written for.
-        // ⚠️ REMEMBERED, because a flight outlives a configure.
-        //
-        // A row can be re-dequeued and reconfigured while its twin is in the
-        // air, and `prepareForReuse` resets the furniture to visible. The
-        // concealment was applied to the instance that flew, so the fresh one
-        // came back with its play badge lit in the MIDDLE of a dismissal —
-        // on single-media rows only, because a collection's badge is hidden
-        // outright by `post.isCollection` and so has nothing to reveal.
-        // ⚠️ Only a flight ENDING earns the settle. `prepareForReuse` comes
-        // through here too, and animating there would flutter the chips of
-        // every row a scroll recycles — a cost paid continuously for an effect
-        // that belongs to one moment.
-        let wasConcealed = isHeroMediaConcealed
-        isHeroMediaConcealed = concealed
-        // ⚠️ THE FURNITURE GOES IN BOTH SHAPES, and that is the unification.
-        //
-        // A single attachment hid its chips for free — they are subviews of the
-        // preview, and the preview went to alpha 0. A collection conceals only
-        // the PAGE, so its counters, date and indicator stayed lit through the
-        // whole flight while the single-media version's vanished. Same gesture,
-        // two behaviours, which is exactly the doubt raised about whether this
-        // was ever really unified. It was not.
-        //
-        // What the flight carries is the media. What it does not carry is the
-        // furniture — so the furniture goes, in both.
-        for view in furnitureViews { view.alpha = concealed ? 0 : 1 }
-        if let carousel, !carousel.isHidden {
-            carousel.setCurrentPageConcealed(concealed)
-        } else {
-            mediaView.alpha = concealed ? 0 : 1
-        }
-        if wasConcealed, !concealed { animateFurnitureIn() }
-    }
-
-    /// Everything the preview wears that the flight does not reproduce.
-    private var furnitureViews: [UIView] {
-        // Nothing, since the counters and the page indicator moved to the
-        // closing line under the preview: the flight carries the media and
-        // the card around it stays, line included.
-        []
-    }
-
+    // MARK: - The hero flight: what hides while a twin is in the air, and the furniture's return — state here, behaviour in `PostGridListRowCell+Hero.swift`
     /// Whether a flight is currently standing in for this row's media.
     /// Readable so a caller can assert the END STATE of a transition rather
     /// than the calls that were supposed to produce it. A row whose media is
     /// still standing in for a flight that ended is the shipped defect this
     /// answers — and it is invisible to every test that only counts hides.
-    public private(set) var isHeroMediaConcealed = false
+    public var isHeroMediaConcealed = false
 
-    /// Brings the chips, the date and the badge back with a settle rather than
-    /// a switch.
-    ///
-    /// ⚠️ The MEDIA is deliberately not animated. The flight has just handed the
-    /// picture over; fading THAT in would show the hand-off instead of hiding
-    /// it. What pops is the furniture — counters, date, badge — which the flight
-    /// never carried and which therefore arrives from nothing on the landing
-    /// frame.
-    private func animateFurnitureIn() {
-        // ⚠️ NOT ALL AT ONCE, AND NOT AS ONE PIECE.
-        //
-        // Four chips arriving on the same frame with the same curve read as a
-        // single sheet being switched on — the eye sees one event, not four
-        // objects. A few hundredths of a second between them is enough for it
-        // to read as things settling into a row.
-        //
-        // And each capsule's CONTENTS lag its shape by a couple of points. A
-        // label transformed with its capsule is one object sliding; a label that
-        // arrives a moment after the shape it sits in makes the shape read as a
-        // container the text drops into. It is a small dishonesty about physics
-        // and it is what makes the row feel alive rather than assembled.
-        // ⚠️ FADE AND SCALE, NO TRANSLATION.
-        //
-        // A chip that slides in comes FROM somewhere, and there is nowhere for
-        // it to have come from — it was always at that spot, merely invisible.
-        // Growing into place says the true thing: this was here, and it is
-        // arriving. The spring is deliberately shallow; a pronounced bounce on
-        // four small capsules reads as a toy.
-        for (index, view) in furnitureViews.enumerated() where !view.isHidden {
-            let contents = (view as? PostMetaPillView)?.contentRow
-            view.alpha = 0
-            view.transform = CGAffineTransform(scaleX: 0.88, y: 0.88)
-            contents?.alpha = 0
-            contents?.transform = CGAffineTransform(scaleX: 0.9, y: 0.9)
-            let step = 0.04 * Double(index)
-            UIView.animate(
-                withDuration: 0.36, delay: step,
-                usingSpringWithDamping: 0.78, initialSpringVelocity: 0.3,
-                options: [.allowUserInteraction, .beginFromCurrentState]
-            ) {
-                view.alpha = 1
-                view.transform = .identity
-            }
-            // The contents run the same curve a beat later, so the capsule
-            // reads as a container the text grows into rather than as one solid
-            // thing changing size.
-            UIView.animate(
-                withDuration: 0.36, delay: step + 0.06,
-                usingSpringWithDamping: 0.78, initialSpringVelocity: 0.3,
-                options: [.allowUserInteraction, .beginFromCurrentState]
-            ) {
-                contents?.alpha = 1
-                contents?.transform = .identity
-            }
-        }
-    }
-
-    /// Hides whatever THIS row's flight is carrying, for as long as it is in
-    /// the air — and the routing lives here because only the row knows.
-    ///
-    /// A media row flies its preview and keeps the rest: caption, counters and
-    /// author stay put, because none of them left. A TEXT row has no preview,
-    /// and what a reveal carries away is the card itself — so the card is what
-    /// goes.
-    ///
-    /// Without this a dragged window and the row it came from show the same
-    /// post twice, side by side, which is not a hero picking a card up; it is a
-    /// copy being made. The grid keeps the row's SLOT either way, so nothing
-    /// reflows underneath while the viewer is holding it.
-    /// ⚠️ CONCEALING CHOOSES A CHANNEL; RESTORING PUTS BACK BOTH.
-    ///
-    /// The routing reads `mediaView.isHidden` — which post this row is bound to
-    /// RIGHT NOW — and a flight outlives that answer. Conceal a text row (the
-    /// whole card goes to alpha 0), let the row be reconfigured with a post
-    /// that HAS media, and the restore took the other branch: it cleared a
-    /// media concealment that was never set and left the card at alpha 0. An
-    /// invisible card that still holds its slot is a hole in the feed, one card
-    /// tall, and it survives every later pass because nothing else looks at
-    /// that channel.
-    ///
-    /// Asymmetric on purpose: hiding the wrong thing shows the post twice mid
-    /// flight, so the conceal has to be exact. Putting back something that was
-    /// never taken costs nothing.
-    /// What the transition is carrying away from this row, which is the only
-    /// thing that decides what has to be hidden underneath it.
-    ///
-    /// ⚠️ NOT THE ROW'S OWN KIND, which is what this used to infer it from. A
-    /// hero flight lifts the MEDIA out of a media row, so the media is what
-    /// goes and the card's words stay. A reveal's window carries the WHOLE
-    /// CARD, whatever the row happens to contain — so a close that starts on a
-    /// text post and lands on a media row hid only that row's picture and left
-    /// its author line, caption and metrics on screen under a window that was
-    /// drawing them too. Filmed.
-    public enum HeroCarry {
-        /// The flight took the picture; the card around it stays.
-        case media
-        /// The window took the whole card.
-        case card
-    }
-
-    public func setHeroConcealed(_ concealed: Bool, carrying carry: HeroCarry = .media) {
-        guard concealed else {
-            card.alpha = 1
-            setHeroMediaConcealed(false)
-            return
-        }
-        // A row with no media has nothing smaller to hide than itself, so both
-        // carries agree there — which is why inferring from the kind looked
-        // right for as long as only text rows opened windows.
-        if carry == .card || mediaView.isHidden {
-            card.alpha = 0
-        } else {
-            setHeroMediaConcealed(true)
-        }
-    }
-
-
-    /// The card's own rounding and fill, so a flight impersonating this row
-    /// is its twin rather than an approximation of it. Restating either as a
-    /// literal in the flight card is how the two drift.
-    /// The platform's own radius for a grouped content card.
-    ///
-    /// There is no named constant to read: iOS 26's `UICornerRadius` offers
-    /// only `.fixed(_)` and `.containerConcentric(minimum:)`, and a card at the
-    /// root of a scroll view has no rounded container to be concentric with. So
-    /// the default is taken from what UIKit DRAWS — an `.insetGrouped` list
-    /// section, which is the system's own version of this shape.
-    ///
-    /// Measured off one, on two independent sections, by fitting the corner
-    /// profile `dx = R - sqrt(2·R·dy - dy²)`: **24.8pt (rms 0.28)** and
-    /// **25.3pt (rms 0.16)**. The pipeline is calibrated against known radii and
-    /// runs a couple of percent low, which puts the true value at 25–26.
-    ///
-    /// ❌ Two bespoke values were tried against the system context menu first
-    /// and both are recorded here so they are not re-derived: **32**, the
-    /// menu's own radius, which makes the two curves identical and therefore
-    /// makes the band between them swell through the turn (20.0pt on the
-    /// straights, 22.8pt at 45°); and **48**, the menu's radius plus the 16pt
-    /// margin it sits at, which does hold the band flat (15.5–16.3pt at every
-    /// angle) and is simply too round for a card. Matching a transient overlay
-    /// was the wrong target — the card is on screen all the time, and it should
-    /// look like the platform.
-    public static let cardCornerRadius: CGFloat = Surface.cardCornerRadius
-
-    /// How far every child of a card is held off its edges: the caption, the
-    /// author band, the closing metric line, and the media preview, which is
-    /// the point — text and image share one pair of vertical lines rather than
-    /// each having its own.
-    ///
-    /// ## It is not only a margin
-    ///
-    /// It is the card's ONE free number, and it sets four things at once:
-    ///
-    /// * the reading padding of a card,
-    /// * where the preview's edges fall (on the caption's),
-    /// * **the preview's radius** — it chose 14 (`cardCornerRadius -
-    ///   contentInset`) while the rows were cards; the radius is its own
-    ///   constant now (`mediaCornerRadius`, #2290),
-    /// * the reading padding of the post's own PAGE — `captionInset` is shared
-    ///   with `PostCaptionRowView` structurally, because a reveal has to land
-    ///   the window's caption on the card's.
-    ///
-    /// The third is the one that is easy to miss and the reason this value
-    /// cannot be argued to. A card at 26 with a 16pt padding gives a 10pt
-    /// preview: correct by the concentric rule and a 2.6× drop in roundness
-    /// between the container and the thing inside it, which reads as a hard
-    /// rectangle in a soft card.
-    ///
-    /// **12**, chosen off three builds side by side:
-    ///
-    /// ```
-    ///   padding   preview   drop     page prose
-    ///   16        10        2.6x     16   the loosest, and the widest gap
-    ///   12        14        1.9x     12   ← here
-    ///   10        16        1.6x     10
-    ///    8        18        1.4x      8   ❌ measured cramped, page worse
-    /// ```
-    ///
-    /// ❌ 8 is recorded rather than merely rejected: geometrically it is the
-    /// most homogeneous of the four, and it is still wrong. It was tried whole —
-    /// one number governing every curve in the card (26 → 18 → 10, a constant
-    /// band at all three levels, chips landing within half a point of their own
-    /// capsule) — and the arithmetic being perfect did not save it. The card
-    /// reads cramped, and because the page shares this number, a full column of
-    /// prose ended up 8pt from the screen's edge.
-    public static let contentInset: CGFloat = 12
-
-    /// The gap between two chips of the preview's bottom row. Smaller than the
-    /// inset that holds the row off the preview's edges: chips in one row belong
-    /// together more closely than the row belongs to the frame.
-    public static let chipGap: CGFloat = 6
-
-    /// The closing line's glyphs, named once so a test can ask the runtime
-    /// whether each one exists.
-    ///
-    /// ⚠️ A NAME THAT DOES NOT RESOLVE IS AN EMPTY BUTTON, NOT AN ERROR — see
-    /// `IconActionBarTests.everyGlyphThisBarIsGivenResolves`. Comments and
-    /// repost are the app-wide `PostActionSymbol`s, so the card and the post
-    /// screen's toolbar cannot drift apart.
-    public enum ActionSymbol {
-        public static let comments = PostActionSymbol.comments
-        public static let like = AppSymbol.like.rawValue
-        public static let repost = PostActionSymbol.repost
-        public static let save = SaveStar.outlineGlyph
-        public static let saved = SaveStar.glyph
-    }
-
-    /// How far the preview's own furniture — the metadata pills, the play badge
-    /// — is held off its edges. `contentInset` again, and that is the point.
-    ///
-    /// ## Why furniture may be a capsule, and the preview may not
-    ///
-    /// The concentric rule — a child's radius is its parent's less the inset
-    /// between them — is about CORNERS. It exists because two curves turning
-    /// together at a corner have a band between them, and unless the radii
-    /// differ by exactly the inset that band swells through the turn. Along a
-    /// STRAIGHT edge there is no such constraint: the band is the inset, at
-    /// every point, whatever shape the child is.
-    ///
-    /// So the question for a chip resting on the preview is not what radius the
-    /// arithmetic gives it (a rectangle, at any padding worth using) but whether
-    /// it is anywhere near the preview's corners at all. Held off both edges by
-    /// the preview's own radius or more, it is not: a rounded rect's corner arc
-    /// occupies a box of exactly its radius. The chip rests on flat edge, has no
-    /// competing curve to hold a band with, and is free to be the capsule a chip
-    /// should be.
-    ///
-    /// ❌ 8 was the first value, and it is what put the chips INSIDE the corner
-    /// boxes — where a capsule's ~10.5 sat within half a point of the preview's
-    /// own radius, which is the equal-radii case: measured, an 8pt band on the
-    /// straights opening to 11.5 at 45°. Concentric would have fixed it at
-    /// radius 2 and cost the chips their shape. Moving them off the corner costs
-    /// nothing and dissolves the question.
-    ///
-    /// The clearance is therefore a FLOOR, not a preference: whatever the
-    /// row's padding is, furniture on the preview has to start outside the
-    /// preview's corner arcs — round the preview more and its corners reach
-    /// further in.
-    ///
-    /// `CardShapeSystemTests` asserts it, because it is what the capsule is
-    /// standing on.
-    public static var mediaFurnitureInset: CGFloat {
-        max(contentInset, mediaCornerRadius)
-    }
-
-    /// How far the media preview is held off the card's edge — named because
-    /// the preview's own radius is derived from it, and the two must move
-    /// together or the curves stop being parallel.
-    public static var mediaInset: CGFloat { contentInset }
-    /// The card's tone — `Surface.card`, so a card is lighter than the page
-    /// it lies on and raised by that alone (see `Surface`).
-    public static let cardFillColor: UIColor = Surface.card
-    /// The caption's inset, which is the preview's, which is the card's — see
-    /// `contentInset`. Public because the post's own page reproduces this exact
-    /// register so a reveal's window lands its caption on the card's own.
-    public static var captionInset: CGFloat { contentInset }
-    public static var captionTopInset: CGFloat { contentInset }
-    /// The closing metric line's placement, shared with the flight card that
-    /// stands in for a text row.
-    public static let metaBottomInset: CGFloat = 14
-    /// NOT an inset — the gap between two counters inside the line, which is a
-    /// question about reading a row of numbers rather than about where the card
-    /// ends. It does not follow `contentInset`.
-    public static let metaSpacing: CGFloat = 14
-    /// The closing line's column: where its first ink starts and its last
-    /// ink ends, from the card's edges — one plain action's padding INSIDE
-    /// the caption's (`captionInset` + `PostCardPillView.plainInsets`, 20).
-    ///
-    /// ⚠️ NOT THE CAPTION'S COLUMN, on purpose (2026-09-30, evening). #329
-    /// hung the ends so the ink sat exactly on the caption's inset, 12pt
-    /// from the card's edge — typographically tidy, and the row read as
-    /// pressed against the card's sides ("add a bit of horizontal space on
-    /// the container of the action buttons"). Two ways to buy the air were
-    /// weighed:
-    ///
-    /// * **wider gaps between the groups** — there is no gap to widen: the
-    ///   spacer already takes all the slack between save/repost and
-    ///   comments/likes, so it is the ENDS that are tight;
-    /// * **an inset line** — here. Inset by exactly one action's padding,
-    ///   the outer actions' BOXES (the press wash's capsule) now stand on the
-    ///   caption's column rather than 8pt past it, 4pt from the card's edge:
-    ///   at rest the ink breathes, and a press lights a capsule that stays
-    ///   inside the text's margin instead of spilling towards the corner.
-    ///
-    /// **20**, chosen off three builds side by side (16 / 18 / 20). 16 still
-    /// read as the ends pressed out to the card; at 20 the line is plainly
-    /// its own inset row, and its last count ends where the band's "..."
-    /// glyph ends above it — the card's trailing ink on one column, top and
-    /// bottom.
-    ///
-    /// The whole line moves as one container — the date and the page
-    /// indicator lead it on this column too — so the line reads as a unit
-    /// under the caption, not as a row whose ends disagree.
-    ///
-    /// ⚠️ A CARD'S COLUMN ONLY (#2289). A list's row has no side to press
-    /// against: its line stands on the caption's column instead, as does its
-    /// "..." — see `closingLineInset(for:)`.
-    public static var actionLineInset: CGFloat {
-        captionInset + PostCardPillView.plainInsets.leading
-    }
-    // MARK: - The card's shape system
-    //
-    // Every radius on a card, in one place, because four radii chosen
-    // separately is how a card stops looking like one object.
-    //
-    // ```
-    //   card      26        the container, and the platform's own answer
-    //   preview   14        concentric: 26 - 12, corners ON the card's corners
-    //   chips     capsule   clear of the preview's corners, so unconstrained
-    //   avatar    circle    a portrait, exempt — see below
-    // ```
-    //
-    // Two rules produce all of it, and the second is the one that is usually
-    // missing:
-    //
-    // 1. **A child whose corners sit at its parent's is concentric with it** —
-    //    radius = parent's less the inset. The preview.
-    // 2. **A child clear of its parent's corners has no radius obligation at
-    //    all** — it meets only straight edge. The chips.
-    //
-    // An avatar is neither: it is a picture of a person, and every surface in
-    // this app draws one as a circle. A circle near a rounded corner has never
-    // read as a disagreement, because it is not perceived as a container — it
-    // is perceived as a face. Rounding it to 10 for consistency's sake would
-    // make the card MORE uniform and less legible, which is the trade a shape
-    // system exists to avoid making by accident.
-    //
-    // ❌ Making the chips concentric was tried and is the reason this note
-    // exists: at 8pt in from the preview's edges the arithmetic gave 2, and a
-    // chip at radius 2 is a rectangle. The choice looked like "correct shape or
-    // correct radius" until the third option turned up — move the chip off the
-    // corner, where neither answer is required.
-    // MARK: - The preview's height
-
-    /// The widest a preview may be drawn: 16:9. A floor on HEIGHT, and it is
-    /// what stops a 21:9 clip from becoming a slit with a subject in it.
-    public static let widestMediaAspect: CGFloat = 16.0 / 9.0
-    /// The tallest a preview may be drawn: 4:5, the portrait cap Instagram
-    /// settled on and the same one the mock corpus already seeds.
-    ///
-    /// It is the number that decides how much of a screen one card may take.
-    /// Measured on this device (402pt wide, 348pt of preview): 4:5 is 435pt of
-    /// preview and about 63% of the screen with the band, caption and padding
-    /// on top. Uncapped, a 9:16 post would be 619 and **84%** — one post, one
-    /// screen, which is what this exists to prevent.
-    public static let tallestMediaAspect: CGFloat = 5.0 / 4.0
-
-    /// How tall the preview is for a post of a given shape, in a card of a
-    /// given width.
-    ///
-    /// A pure function of the two, deliberately: the height has to come from
-    /// the MODEL and never from the image once it lands. `MediaAttachment`
-    /// already states the rule — heights are computed from `aspectRatio`, never
-    /// by sizing views — because a height that changes when the file arrives
-    /// reflows everything below it in a list the viewer is already scrolling.
-    ///
-    /// ⚠️ `aspectRatio` is 1 for a SQUARE post and 1 for a post the backend
-    /// never stamped with dimensions; `GalleryPost` says so in as many words.
-    /// So an unmeasured post lands here as a square — 348pt rather than the
-    /// 180pt letterbox rows used to draw. That is the fail-open direction and
-    /// it is the right one for a height (a square is a plausible photo; a slit
-    /// is not), but it is a real behaviour change for any surface whose
-    /// payload omits width and height.
-    public static func mediaHeight(forCardWidth cardWidth: CGFloat, aspectRatio: Double) -> CGFloat {
-        let mediaWidth = cardWidth - contentInset * 2
-        guard mediaWidth > 0 else { return 0 }
-        let ratio = aspectRatio > 0 ? CGFloat(aspectRatio) : 1
-        let natural = mediaWidth / ratio
-        let shortest = mediaWidth / widestMediaAspect
-        let tallest = mediaWidth * tallestMediaAspect
-        return (min(max(natural, shortest), tallest)).rounded()
-    }
-
-    /// How tall the preview is for a COLLECTION of `pageCount` in a card of a
-    /// given width: one item of the carousel's strip
-    /// (`MediaCarouselView.cardHeight`), whatever the post's own shape.
-    ///
-    /// ⚠️ NOT `mediaHeight(forCardWidth:aspectRatio:)`. A collection's box
-    /// holds a strip of 3:4 items, two and a bit across, so its height is an
-    /// item's — about half what the post's shape across the whole box gave
-    /// (2026-10-02, asked for: collections were the tallest cards on the
-    /// screen).
-    public static func collectionMediaHeight(forCardWidth cardWidth: CGFloat, pageCount: Int) -> CGFloat {
-        MediaCarouselView.cardHeight(
-            forBoxWidth: cardWidth - contentInset * 2, pageCount: pageCount
-        )
-    }
-
-    /// How many lines of caption a card previews before it offers the rest.
-    ///
-    /// A card is a PREVIEW and the post is where the text is read, so the cap
-    /// is set where a long caption still reads as a paragraph rather than as a
-    /// wall — four lines. Only the card truncates: `PostCaptionRowView`, which
-    /// wears the same face on the post's own page, deliberately does not.
-    public static let captionLineLimit = 4
-
+    // MARK: - The card's shape and the preview's height, measured without a cell — state here, behaviour in `PostGridListRowCell+Sizing.swift`
     /// The caption's cap on a card of a FIXED height — nil on every card the
     /// list sizes to its content (the default).
     ///
@@ -1498,159 +383,13 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// stands at the card's foot whatever the caption's length, a one-line
     /// caption leaving its air above the line rather than under it.
     public private(set) var fixedCaptionLines: Int?
-
-    /// How tall a card `width` wide stands in a lane of fixed-height cards:
-    /// the taller of a TEXT card whose caption is held to `captionLines` and
-    /// fills them — author band, caption, closing line (with the like, repost
-    /// and save on it) — and, with voice posts drawn, a VOICE card — the
-    /// band, the compact voice panel in the caption's place, the closing line
-    /// (#2274). Each is measured on a real card, the way
-    /// `RevealDismissCardView` measures. What a lane of such cards is sized
-    /// to. Cached per width, line count, text size and voice.
-    ///
-    /// ⚠️ THE VOICE PANEL IS NEVER SQUEEZED (#2274). Measured on a text card
-    /// alone, a lane was two caption lines tall (about 39 pt) where the
-    /// compact panel is 44 pt: the card held its height and the panel gave
-    /// way, its play glyph on its bottom edge (the owner's recording). The
-    /// words under a voice give way in a fixed card instead (they go: the
-    /// voice stands alone, `configure`), never the panel.
-    public static func fixedTextCardHeight(
-        width: CGFloat, captionLines: Int, showsVoice: Bool = VoicePostDisplay.areDrawn
-    ) -> CGFloat {
-        guard width > 0 else { return 0 }
-        // The app's text size, not the iPhone's: above the ceiling they differ
-        // (#482), and a card measured at the iPhone's size came out taller
-        // than the one drawn.
-        let size = TextSizeCeiling.current ?? UIApplication.shared.preferredContentSizeCategory
-        let key = "\(width)|\(captionLines)|\(size.rawValue)|\(showsVoice)"
-        if let cached = fixedHeights[key] { return cached }
-        // Words enough to fill any cap at any width, and a name and handle on
-        // the band, as every text card in a lane wears.
-        var post = GalleryPost(
-            id: PostID("fixed-height-probe"), kind: .text, isRepost: false, thumbnailURL: nil,
-            caption: String(repeating: "Measured words fill every line of the card. ", count: 12),
-            publishedAtMS: 0, authorID: ProfileID("probe"), authorName: "Name", authorHandle: "handle",
-            reactionCount: 1, commentCount: 1
-        )
-        var height = measuredFixedHeight(of: post, width: width, captionLines: captionLines, category: size, showsVoice: false)
-        if showsVoice {
-            // The same post speaking: its compact panel in the caption's place.
-            post.voice = PostVoice(
-                assetID: "fixed-height-probe-voice", url: nil, duration: 59, waveform: VoiceView.genericLevels
-            )
-            let voiced = measuredFixedHeight(of: post, width: width, captionLines: captionLines, category: size, showsVoice: true)
-            height = max(height, voiced)
-        }
-        fixedHeights[key] = height
-        return height
-    }
-
-    /// `post`'s card at `width`, its caption held to `captionLines`, wired as
-    /// a lane wires it, measured.
-    private static func measuredFixedHeight(
-        of post: GalleryPost, width: CGFloat, captionLines: Int, category: UIContentSizeCategory, showsVoice: Bool
-    ) -> CGFloat {
-        let card = PostGridListRowCell(frame: CGRect(x: 0, y: 0, width: width, height: 200))
-        card.traitOverrides.preferredContentSizeCategory = category
-        card.configure(
-            with: post, imagePipeline: measuringPipeline, captionLines: captionLines,
-            showsVoice: showsVoice, showsEmbed: false
-        )
-        card.showAuthorMenuControlAsScenery()
-        card.showRowActionsAsScenery(repost: true, bookmark: true, saved: false)
-        card.showStakeAsScenery(viewerStake: 0)
-        let attributes = UICollectionViewLayoutAttributes(forCellWith: IndexPath(item: 0, section: 0))
-        attributes.frame = CGRect(x: 0, y: 0, width: width, height: 200)
-        let fitted = card.preferredLayoutAttributesFitting(attributes).frame.height
-        // The probe's voice lets go of the hub it was bound to.
-        card.applyVoice(nil, for: nil)
-        return fitted
-    }
-
-    private static var fixedHeights: [String: CGFloat] = [:]
-    /// The measuring card's pipeline: its probe names no picture, so nothing
-    /// is ever fetched through it.
-    private static let measuringPipeline = ImagePipeline(fetcher: PlaceholderImageFetcher())
-
-    /// The gap between the caption and whatever follows it — the closing
-    /// line, the media preview — and between the preview and the line. The
-    /// same step as the gap above the caption (`authorFollowGap`), so the
-    /// words sit in equal air.
-    public static let captionFollowGap: CGFloat = 16
-    /// The author band's measurements, restated as this cell's own names only
-    /// so call sites read naturally — the values live with the view that draws
-    /// them, because the reveal's prop draws the same band.
-    public static var authorAvatarDiameter: CGFloat { PostAuthorBandView.avatarDiameter }
-    public static var authorFollowGap: CGFloat { PostAuthorBandView.captionGap }
-
     /// Fired when the viewer asks for the rest of a truncated caption. The HOST
     /// owns the answer, not this cell: a cell is recycled and the expansion has
     /// to survive that, so the set of expanded posts lives in
     /// `CaptionExpansion` and comes back through `configure`.
     public var onRevealFullCaption: (() -> Void)?
-    /// Fired when the viewer taps the band's identity. The HOST navigates —
-    /// a cell cannot reach a navigation controller and should not try.
-    public var onAuthorTapped: (() -> Void)? {
-        get { authorBand.onAuthorTapped }
-        set { authorBand.onAuthorTapped = newValue }
-    }
 
-    /// Fired when the viewer HOLDS the band's identity (#2145, role 1): the
-    /// profile, pushed. Nil: no hold.
-    public var onAuthorHeld: (() -> Void)? {
-        get { authorBand.onAuthorHeld }
-        set { authorBand.onAuthorHeld = newValue }
-    }
-
-    /// Fired when the band's face shows the "+" and it is tapped (#2300):
-    /// the HOST follows — the cell cannot see the follow.
-    public var onAuthorFollowTapped: (() -> Void)? {
-        get { authorBand.onFollowTapped }
-        set { authorBand.onFollowTapped = newValue }
-    }
-
-    /// Whether a long press at `point` (in the cell) is the band's author's
-    /// hold (#2145): the card's lift leaves it to the profile.
-    public func holdIsAuthors(at point: CGPoint) -> Bool {
-        authorBand.takesHold(at: convert(point, to: authorBand))
-    }
-
-    /// The relation mark the band's face wears (#2300).
-    public var authorRelationMark: PersonPill.Badge { authorBand.relationMark }
-
-    /// Draws the author's relation mark on the band's face (#2300): what the
-    /// host's binding answers for the post's author. A bare band draws none.
-    public func setAuthorRelationMark(_ mark: PersonPill.Badge, animated: Bool) {
-        authorBand.setRelationMark(mark, animated: animated)
-    }
-
-    /// The rows the band's "..." offers, asked for when it is pressed. Nil
-    /// hides the control — see `PostAuthorBandView.menuActions`.
-    public var authorMenuActions: (() -> [PostCardMenuAction])? {
-        get { authorBand.menuActions }
-        set { authorBand.menuActions = newValue }
-    }
-
-    /// What a popover-shaped sheet raised from the menu should point at.
-    public var authorMenuAnchor: UIView { authorBand.menuAnchor }
-
-    /// Asks `authorMenuActions` again whether the "..." has rows: the
-    /// provider's answer can change after the row was configured.
-    public func refreshAuthorMenu() {
-        authorBand.refreshMenuVisibility()
-    }
-
-    #if DEBUG
-    /// Whether the band's "..." is drawn.
-    public var debugShowsAuthorMenu: Bool { authorBand.debugShowsMenu }
-    /// The band face's badge (#2300). Tests.
-    public var debugAuthorBadge: RelationBadgeView { authorBand.debugBadge }
-    /// A tap on the band's identity, as a finger's would land (#2145). Tests.
-    public func debugTapAuthor() { authorBand.debugOpening.debugTap() }
-    /// A hold on the band's identity, recognised. Tests.
-    public func debugHoldAuthor() { authorBand.debugOpening.debugHold() }
-    #endif
-
+    // MARK: - The author band, the row's actions, the stake and the counts — state here, behaviour in `PostGridListRowCell+Actions.swift`
     /// The closing row's repost control. Nil HIDES it — visibility tracks the
     /// answer, not the presence of a provider, the same rule the "..." follows.
     public var onRepostTapped: (() -> Void)? {
@@ -1659,7 +398,6 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
             syncClosingLine()
         }
     }
-
     /// The closing row's save control. Nil hides it.
     public var onBookmarkTapped: (() -> Void)? {
         didSet {
@@ -1667,7 +405,6 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
             syncClosingLine()
         }
     }
-
     /// The like chip's STAKE — a tap spends the default amount through this,
     /// a menu pick spends its amount. Nil leaves the chip a counter.
     ///
@@ -1679,203 +416,20 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     public var onStake: ((Int) -> Void)? {
         didSet { applyStakeWiring() }
     }
-
-    /// The amount a plain tap on the like chip stakes. Set with `onStake`.
-    public var stakeTapAmount = WalletStore.Policy.defaultStakeAmount
-
     /// The menu a held like chip raises (`StakeMenu`), built when raised.
     public var stakeMenu: (() -> UIMenu?)? {
         didSet { likesAction.menuProvider = stakeMenu }
     }
-
-    /// What the VIEWER has staked on this post: the heart turns the points'
-    /// red once there is any.
-    ///
-    /// ⚠️ **THE COUNT STAYS THE POST'S.** Adding the viewer's stake to it was
-    /// the first version, and it put two numbers on one post: the card said
-    /// 301 while the post page it opens — and the flight card between them —
-    /// said 271, because the feed shows the viewer's stake on its own anchor
-    /// (the rail's red count) rather than inside the likes. The card follows
-    /// the feed instead: the receipt is the red heart and a "+N" rising off
-    /// the chip, the rail's own receipt.
-    ///
-    /// Since #896 the post's count is the app's live one, where the stake is
-    /// counted once (`PostCardStaking`, `WalletStakeLikes`): the card, its
-    /// flight card, the post page and the feed draw one number.
-    public func setViewerStake(_ total: Int) {
-        guard total != viewerStake else { return }
-        viewerStake = total
-        applyReactionCount(animated: true)
-    }
-
-    /// The stake landed: "+N" rises off the chip in the points' red and the
-    /// heart pops — the rail's confirmation, on a card.
-    public func playStakeConfirmation(amount: Int) {
-        floatReceipt("+\(amount)", color: LikesSymbol.tint, rising: true)
-        StakeReceipt.pop(likesAction.imageView ?? likesAction)
-    }
-
-    /// An undo's receipt: "−N" sinking, in grey — an undo is not a payout.
-    public func playStakeRefund(amount: Int) {
-        floatReceipt("−\(amount)", color: .secondaryLabel, rising: false)
-    }
-
-    /// A number floating off the like chip, then dissolving. Drawn in the
-    /// cell's content view rather than in the chip, which clips to its
-    /// capsule. Pure theatre over state the wallet already changed, so it can
-    /// be dropped (hidden chip, mid-reuse) without anything going wrong.
-    private func floatReceipt(_ text: String, color: UIColor, rising: Bool) {
-        guard !likesAction.isHidden, likesAction.window != nil else { return }
-        StakeReceipt.float(text, color: color, rising: rising, from: likesAction, in: contentView)
-    }
-
-    /// The wallet refused (balance, or the post's cap): the chip shakes its
-    /// head. Additive, so it composes with the press still springing back.
-    public func playStakeDenied() {
-        StakeReceipt.shake(likesAction)
-    }
-
-    private var baseReactionCount: Int64?
-    private var viewerStake = 0
+    /// The amount a plain tap on the like chip stakes. Set with `onStake`.
+    public var stakeTapAmount = WalletStore.Policy.defaultStakeAmount
+    var baseReactionCount: Int64?
+    var viewerStake = 0
     /// What `configure` drew — `postLikeCount`, `showLikeCount`.
-    private var configuredReactionCount: Int64?
-
-    public var postLikeCount: Int64? { configuredReactionCount }
-
-    public func showLikeCount(_ count: Int64) {
-        guard baseReactionCount != nil, baseReactionCount != count else { return }
-        baseReactionCount = count
-        applyReactionCount(animated: true)
-    }
-
-    #if DEBUG
-    /// The like count the card draws — nil while it draws none.
-    public var debugReactionCount: Int64? { baseReactionCount }
-    #endif
-
-    private func applyStakeWiring() {
-        let stakes = onStake != nil
-        likesKeepsGlyph = stakes
-        // A counter until the host stakes through it: with no stake the
-        // touch is the card's, and opens the post.
-        likesAction.isUserInteractionEnabled = stakes
-        likesAction.holdFreezesScrolling = stakes
-        likesAction.accessibilityLabel = stakes ? "Like, stakes \(StakeMenu.likes(stakeTapAmount))" : "Likes"
-        applyReactionCount(animated: false)
-        // A count-less post's heart may have just appeared at the line's end,
-        // and the end hangs by what is there.
-        syncClosingLine()
-    }
-
-    /// The post's own count, and the heart inked by whether the viewer has a
-    /// stake on it.
-    /// Takes `post`'s counters and nothing else — for a refresh whose only
-    /// news is a number. A `configure` (or a collection view's reconfigure)
-    /// re-dresses the whole card, media included, and re-measures it; a count
-    /// is a capsule's text.
-    public func updateCounts(from post: GalleryPost) {
-        baseReactionCount = post.reactionCount
-        applyReactionCount(animated: true)
-        applyCommentCount(showsShowcase ? nil : post.commentCount, animated: true)
-    }
-
-    /// The likes: the post's count, and the heart turned to the points' red
-    /// glyph once the viewer has a stake — a symbol replace and the state
-    /// tint, the count rolling (#934). Animated only for news on the post the
-    /// row is already showing, never for a row bound to a new one.
-    private func applyReactionCount(animated: Bool) {
-        let staked = viewerStake > 0
-        let content = AppIconButton.Content(
-            symbol: staked ? LikesSymbol.glyph : ActionSymbol.like,
-            count: baseReactionCount.map { Int(clamping: $0) }
-        )
-        let animates = animated && actionsAnimate && likesAction.window != nil && !likesAction.isHidden
-        likesAction.setContent(content, animated: animates)
-        likesAction.setSelected(staked, animated: animates)
-        likesAction.isHidden = baseReactionCount == nil && !likesKeepsGlyph
-    }
-
-    /// The comment count, the same way; none hides the action.
-    private func applyCommentCount(_ count: Int64?, animated: Bool) {
-        let animates = animated && actionsAnimate && commentsAction.window != nil && !commentsAction.isHidden
-        commentsAction.setContent(
-            .init(symbol: ActionSymbol.comments, count: count.map { Int(clamping: $0) }), animated: animates
-        )
-        commentsAction.isHidden = count == nil
-    }
-
+    var configuredReactionCount: Int64?
     /// Whether this post is saved. Set by the host from whatever owns the pile;
     /// the control never decides for itself.
     public var isBookmarked: Bool = false {
         didSet { applyBookmarkGlyph() }
-    }
-
-    private func applyBookmarkGlyph() {
-        let animates = actionsAnimate && bookmarkAction.window != nil && !bookmarkAction.isHidden
-        bookmarkAction.setContent(.symbol(isBookmarked ? ActionSymbol.saved : ActionSymbol.save), animated: animates)
-        bookmarkAction.setSelected(isBookmarked, animated: animates)
-        bookmarkAction.accessibilityLabel = isBookmarked ? "Saved" : "Save"
-    }
-
-    /// Draws the band's "..." without wiring it — for a transition's stand-in
-    /// card, which must look like the row it stands in for. See
-    /// `PostAuthorBandView.showMenuControlAsScenery`.
-    public func showAuthorMenuControlAsScenery() {
-        authorBand.showMenuControlAsScenery()
-    }
-
-    /// Draws the band's repost and save controls without wiring them, for the
-    /// same reason and with the same care as the "..." above: a stand-in must
-    /// show what the ROW shows, and both ways of being wrong end the transition
-    /// with a control appearing or disappearing in the last frame.
-    ///
-    /// The capability existed on the band and nothing in the app called it, so
-    /// every text dismissal flew a card whose header was missing its trailing
-    /// pill — the one visible difference between the window and the row it
-    /// lands on.
-    public func showRowActionsAsScenery(repost: Bool, bookmark: Bool, saved: Bool) {
-        repostAction.isHidden = !repost
-        bookmarkAction.isHidden = !bookmark
-        isBookmarked = saved
-        syncClosingLine()
-    }
-
-    /// Draws the like as a STAKING row draws it, without wiring it: the heart
-    /// kept when the post has no count yet, and red when the viewer has
-    /// staked. For a stand-in, on the same terms as `showRowActionsAsScenery`
-    /// — the landing frame swaps the stand-in for the row, and a heart
-    /// changing colour in it is the pop.
-    public func showStakeAsScenery(viewerStake: Int) {
-        likesKeepsGlyph = true
-        setViewerStake(viewerStake)
-        applyReactionCount(animated: false)
-        syncClosingLine()
-    }
-
-    /// What the row's date is CURRENTLY reading, so a stand-in can show the
-    /// same string rather than working one out for itself.
-    ///
-    /// ⚠️ THE ROW'S ANSWER, NOT THE TRUTH. A compact age is a function of the
-    /// clock, and the row computed its own when it was configured — minutes
-    /// ago, on a post the viewer has been reading. A stand-in that recomputed
-    /// it flew "2m" home onto a row that still says "now", which is a word
-    /// changing at the end of a transition whose whole purpose is that nothing
-    /// changes. Whichever is stale, they must agree.
-    public var renderedAgeText: String? { authorBand.model?.age }
-
-    /// The band this row is drawing — the date included — so a reveal's prop
-    /// can be configured from the row's own reading rather than from a second
-    /// look at the post.
-    public var authorBandModel: PostAuthorBandView.Model? {
-        // A collapsed band draws nothing, and a prop copying it would draw a
-        // "..." over a card that has none — see `PostAuthorBandView.isCollapsed`.
-        authorBand.isCollapsed ? nil : authorBand.model
-    }
-
-    /// What the row's closing line is actually drawing, so a test can compare
-    /// a stand-in against a row rather than against a literal.
-    public var visibleRowActions: (repost: Bool, bookmark: Bool, saved: Bool) {
-        (!repostAction.isHidden, !bookmarkAction.isHidden, isBookmarked)
     }
 
     /// Makes this cell show `text` as its age.
@@ -1889,7 +443,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// for tests.
     var authorBandShowsPicture: Bool { authorBand.isShowingPicture }
 
-    private let card = UIView()
+    let card = UIView()
     /// The author band — shown only where the row's post actually carries an
     /// identity.
     ///
@@ -1901,7 +455,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     ///
     /// The VIEW is shared with the reveal's transition prop — see
     /// `PostAuthorBandView` for why that matters.
-    private let authorBand = PostAuthorBandView()
+    let authorBand = PostAuthorBandView()
     /// The band's trailing end: on the caption's column on a card, hung out
     /// by the "..."'s air on a row (#2289) — see `bandTrailingInset`.
     private var bandTrailing: NSLayoutConstraint!
@@ -1909,72 +463,72 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     private var bandAuthorID: ProfileID?
     /// The caption hangs off the band — at the band's gap when the band draws
     /// something, and flush when it has collapsed to nothing.
-    private var captionFollowsBand: NSLayoutConstraint!
+    var captionFollowsBand: NSLayoutConstraint!
     /// A voice post's caption (#2208, behind `-voice-posts`): the shared
     /// voice component where the caption starts — full on a list card, compact
     /// on a shelf's fixed card — the caption's words under it on full size.
     /// Pinned to the caption's insets, the neutral panel spans the card's
     /// content width whatever the voice's length (#2241): a short voice no
     /// longer leaves the card bare.
-    private let voiceCaption = VoicePostCaptionView()
+    let voiceCaption = VoicePostCaptionView()
     /// The voice hangs off the band as the caption does; the caption then
     /// hangs off the voice.
-    private var voiceFollowsBand: NSLayoutConstraint!
-    private var captionFollowsVoice: NSLayoutConstraint!
+    var voiceFollowsBand: NSLayoutConstraint!
+    var captionFollowsVoice: NSLayoutConstraint!
     /// A showcase's card (#2216, behind `-channels`): the shared embed card
     /// under the author's words — full on the list's card, compact and alone
     /// on a shelf's fixed card. Its action button takes its own tap; the rest
     /// of it is the card's, which opens the post.
-    private let embedCard = PostEmbedView()
+    let embedCard = PostEmbedView()
     /// Whether the card shows a showcase's embed: it then draws no comment
     /// count (#2216).
-    private var showsShowcase = false
+    var showsShowcase = false
     /// The card hangs off the caption; while it shows, the closing line (or
     /// the card's foot) hangs off the card instead of the caption.
-    private var embedFollowsCaption: NSLayoutConstraint!
-    private var metaFollowsEmbed: NSLayoutConstraint!
-    private var metaStandsUnderEmbed: NSLayoutConstraint!
-    private var embedClosesCard: NSLayoutConstraint!
+    var embedFollowsCaption: NSLayoutConstraint!
+    var metaFollowsEmbed: NSLayoutConstraint!
+    var metaStandsUnderEmbed: NSLayoutConstraint!
+    var embedClosesCard: NSLayoutConstraint!
     /// Emoji and `:code:` emotes animate in the caption (`plain` marks them).
-    private let captionLabel = EmoteLabel()
-    private var isCaptionExpanded = false
+    let captionLabel = EmoteLabel()
+    var isCaptionExpanded = false
     /// The caption as the post carries it. The label shows a SHORTENED version
     /// while truncated, so the label's own text is not a copy of this and
     /// cannot be used in its place.
-    private var fullCaption = ""
+    var fullCaption = ""
     /// The closing metric line.
-    private var metaRow: UIStackView!
+    var metaRow: UIStackView!
     /// Where "Show more" sits inside the label's current attributed text, or
     /// nil when the caption fits and there is no affordance at all.
     ///
     /// It is the tap target: a range, not a view, because the affordance is a
     /// run of glyphs inside the caption's own layout now — see
     /// `captionTapped`.
-    private var showMoreRange: NSRange?
-    private let mediaView = UIImageView()
+    var showMoreRange: NSRange?
+    let mediaView = UIImageView()
     private static let metaFont = UIFont.appFont(forTextStyle: .footnote)
     /// The closing line's counters — the card's PRIMARY actions, ranked by
     /// carrying a count and holding the line's end rather than by a darker
     /// ink: glyph and count in the line's one ink (`PostCardPillView.ink`).
     /// The app's one button since #934 (`PostCardAction`).
-    private let likesAction: AppIconButton = {
+    let likesAction: AppIconButton = {
         // Staked, the button's own filled heart in the Points pink — no
         // `LikesHeartView` laid over it (#1186): that overlay showed the like
         // twice and left a mark during the hero flight home, and the hearts
         // are solid since #1178.
         PostCardAction.make(symbol: ActionSymbol.like, label: "Likes", selectedTint: LikesSymbol.tint)
     }()
-    private let commentsAction = PostCardAction.make(symbol: ActionSymbol.comments, label: "Comments")
+    let commentsAction = PostCardAction.make(symbol: ActionSymbol.comments, label: "Comments")
     /// Whether the likes keep their heart with no count: a staking card's
     /// like is a door even before the post has a number.
-    private var likesKeepsGlyph = false
+    var likesKeepsGlyph = false
     /// The post the row is bound to.
     private var boundPostID: PostID?
     /// Whether the actions animate a change: off from `configure` until the
     /// next turn of the run loop, so the host's first answers for a newly
     /// bound post (its stake, its saved state, set right after `configure`)
     /// land as they are; a change after that is news and moves (#934).
-    private var actionsAnimate = false
+    var actionsAnimate = false
 
     /// The closing row's date — drawn only when the band above is BARE, so a
     /// profile's own cards still say when. On a card with an identity the
@@ -1983,10 +537,10 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// The closing row's two SECONDARY actions, each its own plain control,
     /// leading the line: `[save][repost][pages] ······ [comments][likes]`. One
     /// control per verb, so a hidden one closes its own slot.
-    private let repostAction = PostCardAction.make(symbol: ActionSymbol.repost, label: "Repost")
+    let repostAction = PostCardAction.make(symbol: ActionSymbol.repost, label: "Repost")
     /// Saved, the star is the full-screen post's gold — the reference, the
     /// owner's call (#1182, #1188): one gold in both appearances.
-    private let bookmarkAction = PostCardAction.make(symbol: ActionSymbol.save, label: "Save", selectedTint: SaveStar.tint)
+    let bookmarkAction = PostCardAction.make(symbol: ActionSymbol.save, label: "Save", selectedTint: SaveStar.tint)
 
     /// The preview wears ONE piece of furniture, the page indicator: what the
     /// viewer can press about a post lives in the closing row under the
@@ -1995,7 +549,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// same row as the other two and hides itself for a single-media post.
     private let pageIndicator = MediaPageIndicatorView()
     /// Built on first use: most posts have one piece of media.
-    private var carousel: MediaCarouselView?
+    var carousel: MediaCarouselView?
 
     /// The carousel, for a test that needs to ask where a page put something.
     var debugCarousel: MediaCarouselView? { carousel }
@@ -2023,14 +577,14 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// The preview's height, which is the post's OWN aspect ratio clamped —
     /// see `mediaHeight(forCardWidth:aspectRatio:)`. Held so a width change can
     /// re-resolve it.
-    private lazy var mediaHeight: NSLayoutConstraint =
+    lazy var mediaHeight: NSLayoutConstraint =
         mediaView.heightAnchor.constraint(equalToConstant: 0)
     /// The aspect the current post declares, kept because the height depends on
     /// a width this cell does not know until it is measured.
-    private var mediaAspectRatio: Double = 1
+    var mediaAspectRatio: Double = 1
     /// How many pages the current post's media has — more than one, and the
     /// height is the carousel's (`collectionMediaHeight`), not the aspect's.
-    private var mediaPageCount = 1
+    var mediaPageCount = 1
 
     private var metaFollowsCaption: NSLayoutConstraint!
     /// A FIXED-height card's version of `metaFollowsCaption`: the line at least
@@ -2285,7 +839,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// configure, a control wired or unwired, scenery drawn — because a line
     /// with nothing on it is not drawn and not paid for: the caption or the
     /// preview closes the card instead.
-    private func syncClosingLine() {
+    func syncClosingLine() {
         let hasMedia = !mediaView.isHidden
         let isEmpty = metaRow.arrangedSubviews.allSatisfy { $0.isHidden || $0 === lineSpacer }
         metaRow.isHidden = isEmpty
@@ -2480,149 +1034,6 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         voiceFollowsBand.constant = captionFollowsBand.constant
     }
 
-    // MARK: - A voice post's caption (#2208)
-
-    /// Between the voice and the caption's words under it.
-    public static let voiceCaptionGap: CGFloat = Spacing.sm
-
-    /// The size a card gives a voice post's caption (#2208), nil for a post
-    /// that does not speak or with the switch off: full on the list's card,
-    /// compact on a card of a FIXED height (`captionLines` — a shelf's).
-    /// Pure.
-    public static func voiceSize(
-        for post: GalleryPost, captionLines: Int?, showsVoice: Bool
-    ) -> VoicePostDisplay.Size? {
-        guard showsVoice, post.kind == .text, post.voice != nil else { return nil }
-        return captionLines == nil ? .full : .compact
-    }
-
-    /// Whether the voice's drags are its own (#2275): on the list's card,
-    /// yes; on a card of a FIXED height (`captionLines` — a horizontal
-    /// shelf's), no — a drag on its panel scrolls the shelf, a tap seeks.
-    /// Pure.
-    public static func voiceDragsAreOwn(captionLines: Int?) -> Bool {
-        captionLines == nil
-    }
-
-    private func buildVoiceCaption() {
-        voiceCaption.translatesAutoresizingMaskIntoConstraints = false
-        card.addSubview(voiceCaption)
-        // Nothing in it, it stands zero tall: what it holds outranks this.
-        let empty = voiceCaption.heightAnchor.constraint(equalToConstant: 0)
-        empty.priority = .defaultLow - 1
-        voiceFollowsBand = voiceCaption.topAnchor.constraint(
-            equalTo: authorBand.bottomAnchor, constant: Self.authorFollowGap
-        )
-        captionFollowsVoice = captionLabel.topAnchor.constraint(
-            equalTo: voiceCaption.bottomAnchor, constant: Self.voiceCaptionGap
-        )
-        NSLayoutConstraint.activate([
-            voiceCaption.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: Self.captionInset),
-            voiceCaption.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -Self.captionInset),
-            voiceFollowsBand, empty,
-        ])
-    }
-
-    /// Shows `post`'s voice at `size`, or none: the caption then hangs off
-    /// the voice (flush under a voice alone), or off the band as before.
-    private func applyVoice(_ size: VoicePostDisplay.Size?, for post: GalleryPost?) {
-        guard let size, let post, let voice = post.voice else {
-            voiceCaption.clear()
-            captionFollowsVoice.isActive = false
-            captionFollowsBand.isActive = true
-            return
-        }
-        voiceCaption.show(
-            postID: post.id.rawValue, url: voice.url, duration: voice.duration, levels: voice.waveform,
-            author: post.authorName, size: size, dragsAreOwn: Self.voiceDragsAreOwn(captionLines: fixedCaptionLines)
-        )
-        captionFollowsBand.isActive = false
-        captionFollowsVoice.constant = fullCaption.isEmpty ? 0 : Self.voiceCaptionGap
-        captionFollowsVoice.isActive = true
-    }
-
-    /// How far the voice pushes the caption down, measured — zero without one.
-    private var voiceBlockHeight: CGFloat {
-        guard !voiceCaption.isHidden else { return 0 }
-        let height = voiceCaption.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).height
-        return ceil(height) + captionFollowsVoice.constant
-    }
-
-    /// The card left the screen (a list's `didEndDisplaying`): a voice it
-    /// plays stops where it is, unless the post's page shows it (#2208).
-    public func voiceDidEndDisplaying() {
-        voiceCaption.leftScreen()
-    }
-
-    // MARK: - A showcase's card (#2216)
-
-    /// Between the author's words and the card under them.
-    public static let embedCaptionGap: CGFloat = Spacing.sm
-
-    /// The size a card gives a showcase's embed (#2216), nil for a post with
-    /// none or with the switch off: full on the list's card, the words above
-    /// it; compact on a card of a FIXED height (`captionLines` — a shelf's),
-    /// the card alone. Pure.
-    public static func embedSize(
-        for post: GalleryPost, captionLines: Int?, showsEmbed: Bool
-    ) -> PostEmbeds.Size? {
-        guard post.kind == .text, PostEmbeds.shown(post.embed, drawn: showsEmbed) != nil else { return nil }
-        return captionLines == nil ? .full : .compact
-    }
-
-    /// Built once the closing line exists: the card's foot hangs it.
-    private func buildEmbedCard() {
-        embedCard.translatesAutoresizingMaskIntoConstraints = false
-        card.addSubview(embedCard)
-        embedFollowsCaption = embedCard.topAnchor.constraint(
-            equalTo: captionLabel.bottomAnchor, constant: Self.embedCaptionGap
-        )
-        metaFollowsEmbed = metaRow.topAnchor.constraint(
-            equalTo: embedCard.bottomAnchor, constant: Self.captionFollowGap
-        )
-        // ⚠️ SOFT on a fixed card (a shelf's): the lane's height is measured
-        // for its words (`fixedTextCardHeight`), and a compact card can be a
-        // few points taller than two lines — it leans into the gap above the
-        // line rather than break the card's own constraints.
-        metaStandsUnderEmbed = metaRow.topAnchor.constraint(
-            greaterThanOrEqualTo: embedCard.bottomAnchor, constant: Spacing.xs
-        )
-        metaStandsUnderEmbed.priority = .defaultHigh
-        embedClosesCard = embedCard.bottomAnchor.constraint(
-            equalTo: card.bottomAnchor, constant: -Self.contentInset
-        )
-        NSLayoutConstraint.activate([
-            embedCard.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: Self.captionInset),
-            embedCard.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -Self.captionInset),
-            embedFollowsCaption,
-        ])
-    }
-
-    /// Shows `post`'s embed at `size`, or none. The caller decides the words
-    /// first (`fullCaption`): flush under no words, a gap under some.
-    private func applyEmbed(_ size: PostEmbeds.Size?, for post: GalleryPost?, imagePipeline: ImagePipeline?) {
-        guard let size, let embed = post?.embed else {
-            embedCard.clear()
-            return
-        }
-        embedCard.show(embed, size: size, pipeline: imagePipeline)
-        embedFollowsCaption.constant = fullCaption.isEmpty ? 0 : Self.embedCaptionGap
-    }
-
-    #if DEBUG
-    /// The showcase's card under the card's words, nil for none (#2216).
-    public var debugEmbedCard: PostEmbedView? { embedCard.isHidden ? nil : embedCard }
-    /// Whether the comment count shows (#2216: a showcase draws none).
-    public var debugShowsCommentCount: Bool { !commentsAction.isHidden }
-    #endif
-
-    #if DEBUG
-    /// The voice the card draws in its caption's place, nil for none.
-    public var debugVoiceCaption: VoicePostCaptionView? { voiceCaption.isHidden ? nil : voiceCaption }
-    /// The voice part, shown or not — for a test to put its own hub in.
-    public var debugVoicePart: VoicePostCaptionView { voiceCaption }
-    #endif
-
     @available(*, unavailable)
     public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
@@ -2711,23 +1122,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         authorBand.alpha = 1
     }
 
-    // MARK: - The dress: a list's row, or a shelf's card (#2243, #2290)
-
-    /// What this cell is drawn as.
-    ///
-    /// ⚠️ TWO DRESSES, ONE CELL — and not the A/B #2290 removed. The post
-    /// lists draw every text post as a ROW (no ground, no corner, no edge, a
-    /// hairline between posts and a wash under a press); a horizontal
-    /// shelf's text card (`PostShelfSection`) is this same cell dressed as a
-    /// CARD, and the window's stand-in (`RevealDismissCardView`) builds one
-    /// too. The list's page sets `.row`; everything else keeps the card.
-    public enum Dress: Equatable, Sendable {
-        /// A shelf's card: the card's tone, its corner and its edge.
-        case card
-        /// A post list's row (#2243): the page shows through.
-        case row
-    }
-
+    // MARK: - The dress: a list's row, or a shelf's card — state here, behaviour in `PostGridListRowCell+Dress.swift`
     /// How this cell draws — set by its host (`ForYouGridPage` sets `.row`
     /// on its lists' rows).
     ///
@@ -2747,7 +1142,6 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
             hangLineEnds()
         }
     }
-
     /// The hairlines this row draws above and below it — the page decides
     /// from the row's neighbours (`ListSeparators`). Drawn only on a row.
     public var rowSeparators: RowSeparators = .none {
@@ -2756,49 +1150,14 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
             setNeedsLayout()
         }
     }
-
-    /// The hairline sits mid-gap between two rows, outside the row's bounds:
-    /// half the rows' spacing below its foot (and above its head).
-    public static var separatorOffset: CGFloat { PostGridListLayout.rowSpacing / 2 }
-
     /// What a collection's box and gutter show: the card's tone, or the page
     /// through a row.
-    private var rowGround: UIColor { dress == .row ? .clear : Self.cardFillColor }
-
-    private let topRule = UIView()
-    private let bottomRule = UIView()
+    var rowGround: UIColor { dress == .row ? .clear : Self.cardFillColor }
+    let topRule = UIView()
+    let bottomRule = UIView()
     /// A row's press: the `.label` wash `AppControl` lays under a card
     /// action, here under the whole row — a row has no card to give way.
-    private let pressWash = UIView()
-
-    private func buildRowChrome() {
-        for rule in [topRule, bottomRule] {
-            rule.backgroundColor = .separator
-            rule.isUserInteractionEnabled = false
-            rule.isHidden = true
-            addSubview(rule)
-        }
-        pressWash.backgroundColor = .label
-        pressWash.alpha = 0
-        pressWash.isUserInteractionEnabled = false
-        insertSubview(pressWash, at: 0)
-    }
-
-    /// The dress for the current traits: a card's tone, corner and edge, or
-    /// none of them on a row.
-    private func applyDress() {
-        let row = dress == .row
-        card.backgroundColor = row ? .clear : Self.cardFillColor
-        card.layer.cornerRadius = row ? .zero : Self.cardCornerRadius
-        card.layer.borderWidth = row ? .zero : Surface.hairline(for: traitCollection)
-        card.layer.borderColor = Surface.cardEdge.resolvedColor(with: traitCollection).cgColor
-        if showsCarousel {
-            mediaView.backgroundColor = rowGround
-            carousel?.backgroundColor = rowGround
-        }
-        if !row { pressWash.alpha = 0 }
-        setNeedsLayout()
-    }
+    let pressWash = UIView()
 
     override public func layoutSubviews() {
         super.layoutSubviews()
@@ -2848,109 +1207,9 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         (card.backgroundColor, card.layer.cornerRadius, card.layer.borderWidth)
     }
 
-    // MARK: - Select Text (#1498 §4)
-
+    // MARK: - Select Text — state here, behaviour in `PostGridListRowCell+SelectText.swift`
     /// The caption made selectable in place, while a selection is up.
-    private var captionSelection: SelectableTextOverlay?
-
-    /// Whether Select Text can act here: a caption is drawn, and it can show
-    /// whole — a card of a fixed height (`fixedCaptionLines`) cuts its own
-    /// tail, so a selection there would select words nobody sees.
-    public var canSelectCaption: Bool {
-        !fullCaption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && fixedCaptionLines == nil && !captionLabel.isHidden
-    }
-
-    /// Selects the whole caption with the system's handles and edit menu
-    /// (`SelectableTextOverlay`, as comments and messages do). A truncated
-    /// caption is revealed first, so the selection is the caption itself,
-    /// never its "… Show more".
-    public func beginCaptionSelection() {
-        guard canSelectCaption else { return }
-        if !isCaptionExpanded, showMoreRange != nil {
-            revealTapped()
-            layoutIfNeeded()
-        }
-        let overlay = captionSelection ?? SelectableTextOverlay(label: captionLabel, host: card)
-        captionSelection = overlay
-        overlay.begin()
-    }
-
-    public func endCaptionSelection() {
-        captionSelection?.end()
-    }
-
-    public var isSelectingCaption: Bool { captionSelection?.isActive ?? false }
-
-    /// Whether a touch on `view` belongs to the selection in progress.
-    public func captionSelectionContains(_ view: UIView?) -> Bool {
-        captionSelection?.contains(view) ?? false
-    }
-
-    private func revealTapped() {
-        guard !isCaptionExpanded else { return }
-        isCaptionExpanded = true
-        captionLabel.numberOfLines = 0
-        showMoreRange = nil
-        captionLabel.attributedText = Self.plain(fullCaption, font: captionLabel.font)
-        onRevealFullCaption?()
-    }
-
-    @objc private func captionTapped() {
-        revealTapped()
-    }
-
-    /// ⚠️ The recognizer must REFUSE every touch that is not on the affordance,
-    /// not merely ignore it.
-    ///
-    /// A gesture recognizer on the label consumes taps on the label whether or
-    /// not its action does anything, so a recognizer that simply returned early
-    /// for a miss would make the caption — the largest thing on the card —
-    /// stop opening the post. Refusing at `shouldBegin` leaves the touch to the
-    /// collection view's own selection.
-    public override func gestureRecognizerShouldBegin(_ gesture: UIGestureRecognizer) -> Bool {
-        guard let range = showMoreRange, !isCaptionExpanded else { return false }
-        return Self.characterIndex(
-            at: gesture.location(in: captionLabel), in: captionLabel
-        ).map { NSLocationInRange($0, range) } ?? false
-    }
-
-    /// Which character of the label's text is under `point`, laid out exactly
-    /// as the label lays it out.
-    ///
-    /// TextKit rather than arithmetic on line heights: the affordance is the
-    /// tail of a wrapped line, so its position depends on where the line broke,
-    /// which only a real layout knows. The container is configured to match the
-    /// label — zero padding, the label's line-break mode and line cap — because
-    /// a container that differs in any of those breaks the text somewhere else
-    /// and hit-tests a different string.
-    ///
-    /// Returns nil when the point is outside the laid-out glyphs, so a tap in
-    /// the empty tail of the last line is a miss rather than the nearest
-    /// character.
-    private static func characterIndex(at point: CGPoint, in label: UILabel) -> Int? {
-        guard let attributed = label.attributedText, attributed.length > 0 else { return nil }
-        let storage = NSTextStorage(attributedString: attributed)
-        let manager = NSLayoutManager()
-        let container = NSTextContainer(size: label.bounds.size)
-        container.lineFragmentPadding = 0
-        container.lineBreakMode = label.lineBreakMode
-        container.maximumNumberOfLines = label.numberOfLines
-        storage.addLayoutManager(manager)
-        manager.addTextContainer(container)
-        manager.ensureLayout(for: container)
-
-        let index = manager.glyphIndex(for: point, in: container, fractionOfDistanceThroughGlyph: nil)
-        // `glyphIndex(for:)` clamps to the nearest glyph, so a point past the
-        // end of a line answers with that line's last character. Rejecting a
-        // point outside the glyph's own rect is what turns that clamp back into
-        // a miss.
-        let glyphRect = manager.boundingRect(
-            forGlyphRange: NSRange(location: index, length: 1), in: container
-        )
-        guard glyphRect.contains(point) else { return nil }
-        return manager.characterIndexForGlyph(at: index)
-    }
+    var captionSelection: SelectableTextOverlay?
 
     /// - Parameter showsAuthorIdentity: false on a surface where the author is
     ///   the screen itself — a profile's own posts — so the band wears only
@@ -3078,762 +1337,3 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
 }
 
 extension PostGridListRowCell: GridPlaybackCell {}
-
-/// The low, light gradient behind a tile's count (#1509): clear at its top,
-/// `PostGridTileCell.countGradientOpacity` black at the tile's bottom edge.
-/// Public so the tile's flight twin (`PostGridFlightCard`) wears it too.
-public final class PostTileCountGradientView: UIView {
-    override public class var layerClass: AnyClass { CAGradientLayer.self }
-
-    /// Where it sits on a tile of `bounds`: along the bottom edge.
-    public static func frame(in bounds: CGRect) -> CGRect {
-        let height = min(PostGridTileCell.countGradientMaxHeight, bounds.height * PostGridTileCell.countGradientHeightFraction)
-        return CGRect(x: bounds.minX, y: bounds.maxY - height, width: bounds.width, height: height)
-    }
-
-    override public init(frame: CGRect) {
-        super.init(frame: frame)
-        guard let gradient = layer as? CAGradientLayer else { return }
-        gradient.colors = [
-            UIColor.black.withAlphaComponent(0).cgColor,
-            UIColor.black.withAlphaComponent(PostGridTileCell.countGradientOpacity).cgColor,
-        ]
-        gradient.startPoint = CGPoint(x: 0.5, y: 0)
-        gradient.endPoint = CGPoint(x: 0.5, y: 1)
-    }
-
-    @available(*, unavailable)
-    public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-}
-
-// MARK: - Media tile
-
-/// One square of the Media grid: photo thumbnail, or video poster + badge,
-/// with the likes count resting bottom-trailing — caption2 over a soft
-/// shadow and a LOW, LIGHT gradient (#1509: the count read on no picture at
-/// all on a bright one), so the preview stays the star.
-///
-/// ⚠️ A NARROW TILE TAKES THE COMPACT REGISTER ON ITS OWN (#1509, the
-/// owner's choice): below `compactWidth` — the snap feed's side list — the
-/// count is smaller and tucked closer to the corner, so "♥ 812" fits whole.
-/// No per-screen flag: the For You, profile and place grids are wider and
-/// keep their size.
-public final class PostGridTileCell: UICollectionViewCell {
-    public static let reuseID = "PostGridTileCell"
-
-    /// Below this width, the compact counter (#1509).
-    public static let compactWidth: CGFloat = 90
-    /// The compact counter's face.
-    static let compactMetaFont = UIFont.systemFont(ofSize: 10, weight: .semibold)
-    /// The gradient behind the count: how much of the tile's height it
-    /// covers, and how dark it ends at the bottom edge.
-    static let countGradientHeightFraction: CGFloat = 0.35
-    static let countGradientMaxHeight: CGFloat = 64
-    static let countGradientOpacity: CGFloat = 0.35
-
-    /// The mosaic's rounding, and the default: it is paired with that layout's
-    /// 1.5pt hairline gutter, where anything softer would leave visible pinches
-    /// where four bricks meet.
-    public static let mosaicCornerRadius: CGFloat = 10
-
-    /// The brick's rounding, settable because the two grids that share this
-    /// cell space their tiles differently — see
-    /// `ChaoticSliceLayout.harmonisedGutter`. Gap and curve are one decision,
-    /// so a surface that widens the gap sets this to match.
-    public var cornerRadius: CGFloat = PostGridTileCell.mosaicCornerRadius {
-        didSet { contentView.layer.cornerRadius = cornerRadius }
-    }
-
-    /// The floor a brick draws its cover on: a dark stage for video, whose
-    /// poster may be unrenderable (or plain black in the simulator), and the
-    /// system fill for everything else.
-    ///
-    /// Static because a stand-in needs the SAME answer with no cell to ask —
-    /// see `PostGridTileStandInView`, where this is the view's own fill and the
-    /// tile it holds is what fades over it. Two spellings of one colour would
-    /// make the empty beat of a dismissal a different shade from the brick it
-    /// lands on.
-    /// The tile's ground: the media ground under a picture (#1771) — the
-    /// bone's own grey, so a tile reads the same loading, missing or failed —
-    /// and the card's for words.
-    ///
-    /// ⚠️ THE CARD'S TONE ON THE PLAIN PAGE (#2243): a tile of words — a
-    /// chunk's, a shelf's text media card, a History square — is one grey
-    /// step down from the white page the post lists lie on, where a white
-    /// card would have no edge (`Surface.cardOnPlainPage`). The same answer
-    /// for a tile and for every copy of it (a flight's card, a close's
-    /// stand-in, a window's floor).
-    public static func fillColor(for post: GalleryPost) -> UIColor {
-        post.kind == .text ? Surface.cardOnPlainPage : Surface.mediaGround
-    }
-
-    /// The image the brick is currently showing — see `PostGridListRowCell`'s
-    /// note for why a hero reads this rather than the image pipeline.
-    public var renderedCover: UIImage? { media.renderedCover }
-
-    /// A tile IS its media, edge to edge, so the whole cell is the rect
-    /// visibility is measured against.
-    public var videoMediaRect: CGRect { bounds }
-
-    /// A tile IS its media: if a surface exists it is showing the only thing
-    /// this cell has.
-    public var isRenderingCurrentMedia: Bool { loadedVideoRenderView != nil }
-
-    /// The surface an autoplaying tile renders into, built on first use so a
-    /// grid of stills never allocates a player layer it will not use.
-    ///
-    /// Not a `lazy var`: the coordinator needs to ask whether a cell *could* be
-    /// playing (`loadedVideoRenderView`) without the question itself allocating
-    /// the layer, which is exactly what touching a lazy var would do.
-    public func makeVideoRenderViewIfNeeded() -> VideoRenderView {
-        // Above the still, below the badge and counters, so the furniture keeps
-        // reading over moving video exactly as it does over a poster.
-        media.makeVideoRenderViewIfNeeded()
-    }
-
-    /// The video surface if one was ever built, else nil — never allocates.
-    public var loadedVideoRenderView: VideoRenderView? { media.video }
-
-    /// Installs a flight card's live surface as this tile's own, at landing.
-    ///
-    /// The view arrives already rendering, so the tile has nothing to wait for
-    /// — the alternative is starting a fresh layer that is blank for ~100ms
-    /// just as the card is removed, which is the flash at the end of a
-    /// dismissal.
-    public func adoptVideoRenderView(_ view: VideoRenderView) {
-        media.adopt(view)
-    }
-
-    /// Gives up the live surface so a hero flight can fly the *same* layer.
-    ///
-    /// Mirroring — attaching the player to a second `AVPlayerLayer` — cannot be
-    /// seamless, because a freshly attached layer has no decoded frame and
-    /// reports `isReadyForDisplay == false` for ~100ms. Measured. Moving the
-    /// view that is already rendering has no such window: same layer, same
-    /// player, same frame, just a different superview.
-    ///
-    /// The cell drops its reference; a later play builds a fresh surface.
-    public func donateVideoRenderView() -> VideoRenderView? {
-        media.donate()
-    }
-
-    /// Called when the collection view recycles this cell, so whoever loaned it
-    /// a player takes it back. Mirrors `MapAnnotationView.onReuse`: a recycled
-    /// cell that kept its player would render another post's video.
-    public var onReuse: (() -> Void)?
-
-    private let imageView = UIImageView()
-    private static let metaFont = UIFont.postGridSystemFont(
-        matching: .appFont(forTextStyle: .caption2), weight: .semibold
-    )
-    /// ⚠️ ONE NUMBER, and it is the LIKES (product call, 2026-09-30).
-    ///
-    /// A brick is small and read at a glance, in a mosaic of a dozen others;
-    /// two numbers on it are two things to compare across every tile at once.
-    /// It used to be reach — views, an `eye.fill` — on the reading that a
-    /// tile is a way in and "how many got here" says whether to be one more.
-    /// The app no longer shows views anywhere a post is drawn, so the tile
-    /// carries the number every card and the feed carry: the heart, filled —
-    /// the glyph a count over a picture wears (the cards' outline heart is a
-    /// control; this is a read-out). The flight card mirrors it
-    /// (`PostGridFlightCard`), in every gallery: For You's chunks and mosaic,
-    /// a profile's Media, a place's grid.
-    private let likes = PostMetricLabel(
-        symbol: LikesSymbol.glyph, font: metaFont, color: .white, shadowed: true
-    )
-    /// The count's corner margins, regular and compact.
-    private var likesTrailing: NSLayoutConstraint?
-    private var likesBottom: NSLayoutConstraint?
-    /// Behind the count: transparent at its top, `countGradientOpacity`
-    /// black at the tile's bottom edge (#1509). Shown with the count.
-    private let countGradient = PostTileCountGradientView()
-    /// Whether the counter wears the compact register now.
-    public private(set) var isCompact = false
-    /// The cover and the live surface over it (#1088): the cover's arrival
-    /// on the loading ladder — a reconfigure cancelling the load in flight
-    /// (#781), a parked frame outranking a late thumbnail — and the surface's
-    /// plumbing shared with every other hero source. Readable inside the
-    /// package so a test can ask what is in flight.
-    /// A stand-in's moving picture (#1294): over the cover, under the words —
-    /// a twin's, never a loan, so it bypasses `media`.
-    func installStandInLiveMedia(_ view: UIView) {
-        view.frame = contentView.bounds
-        view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        contentView.insertSubview(view, aboveSubview: imageView)
-    }
-
-    private(set) lazy var media: MediaSurface = {
-        let media = MediaSurface(cover: imageView, in: contentView, coverSize: .full)
-        media.debugLabel = "tile"
-        media.onCoverLoaded = { [weak self] in self?.onCoverLoaded?() }
-        media.onCoverFailed = { [weak self] in self?.onCoverFailed?() }
-        return media
-    }()
-
-    override public init(frame: CGRect) {
-        super.init(frame: frame)
-        contentView.backgroundColor = Surface.mediaGround
-        contentView.clipsToBounds = true
-        // Soft bricks, not hard edges. `cornerRadius` re-applies this whenever
-        // a host wants the softer pairing; the curve stays continuous either
-        // way, which is what keeps a widened radius from reading as a stadium.
-        contentView.layer.cornerRadius = cornerRadius
-        contentView.layer.cornerCurve = .continuous
-
-        imageView.contentMode = .scaleAspectFill
-        imageView.pin(to: contentView)
-
-        // ⚠️ THE COUNT CLOSES THE ROW, as it does on both of a card's
-        // placements.
-        //
-        // A tile carries no date, so only half of the card's arrangement has
-        // anything to say here — but that half is the half that matters: the
-        // numbers gather at the trailing edge on every surface, and a mosaic of
-        // bricks whose counters sat on the other side would be the one place
-        // the eye had to look somewhere else for them.
-        // Under the count, over the picture: added first so the count
-        // (constrained next) sits above it.
-        countGradient.isUserInteractionEnabled = false
-        contentView.addSubview(countGradient)
-        contentView.addSubview(likes)
-        likes.translatesAutoresizingMaskIntoConstraints = false
-        let trailing = likes.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -8)
-        let bottom = likes.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -7)
-        likesTrailing = trailing
-        likesBottom = bottom
-        NSLayoutConstraint.activate([
-            trailing, bottom,
-            likes.leadingAnchor.constraint(greaterThanOrEqualTo: contentView.leadingAnchor, constant: 4),
-        ])
-    }
-
-    @available(*, unavailable)
-    public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    // MARK: - The ribbon
-
-    /// A mark across the top edge (`TileRibbonView`) — on the CELL, not its
-    /// content view, which clips: the chip straddles the edge. Built on first
-    /// use; most tiles never wear one.
-    private var ribbon: TileRibbonView?
-
-    /// Wears `title` (and `symbolName`) as a chip across the tile's top
-    /// edge, or none for nil — the sound sheet's "Original" (#1280).
-    public func setRibbon(_ title: String?, symbolName: String? = nil) {
-        guard let title else {
-            ribbon?.isHidden = true
-            return
-        }
-        let chip = ribbon ?? makeRibbon()
-        chip.set(title: title, symbolName: symbolName)
-        chip.isHidden = false
-    }
-
-    private func makeRibbon() -> TileRibbonView {
-        let chip = TileRibbonView()
-        chip.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(chip)
-        NSLayoutConstraint.activate([
-            chip.centerYAnchor.constraint(equalTo: topAnchor),
-            chip.centerXAnchor.constraint(equalTo: centerXAnchor),
-            chip.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor, constant: -8),
-        ])
-        ribbon = chip
-        return chip
-    }
-
-    #if DEBUG
-    /// The chip's frame in the cell, nil when it wears none.
-    public var debugRibbonFrame: CGRect? {
-        guard let ribbon, !ribbon.isHidden else { return nil }
-        layoutIfNeeded()
-        return ribbon.frame
-    }
-    #endif
-
-    override public func prepareForReuse() {
-        super.prepareForReuse()
-        // The mark was this post's; the next host says whether it wants one.
-        ribbon?.isHidden = true
-        // A recycled cell must come back VISIBLE. A hero flight hides the tile
-        // it is flying from, and that hide lives on the cell — so a cell
-        // recycled while hidden carries the invisibility to whatever post it is
-        // next bound to, and nothing on the reuse path would ever put it back.
-        // One tile lost per flight whose cell got recycled before its unhide,
-        // which is what made the gallery thin out over repeated round trips.
-        isHidden = false
-        alpha = 1
-        // Hand the player back BEFORE anything else: a recycled cell that kept
-        // its loan would show the previous post's video under the new post's
-        // still. The coordinator clears its own bookkeeping in response.
-        onReuse?()
-        onReuse = nil
-        onCoverLoaded = nil
-        onCoverFailed = nil
-        endVideoPreview()
-        media.reset()
-        // The viewer's stake was the last post's; the next host reads its own.
-        setViewerStake(0)
-        // The words were this post's; the next host says whether it wants
-        // any (`configure(…showsInfo:)`).
-        showsInfo = false
-        infoPost = nil
-        infoReferenceSize = nil
-        infoDecidedSize = nil
-        removeInfoOverlay()
-        if voiceMarkIsBuilt {
-            voiceMark.clear()
-            accessibilityLabel = nil
-        }
-        if embedMarkIsBuilt {
-            embedMark.clear()
-            accessibilityLabel = nil
-        }
-    }
-
-    // MARK: - A showcase's mark (#2216)
-
-    /// A showcase's tile (behind `-channels`): its text face, the embed's
-    /// mark — the channel's photo with its glyph, its name — in the middle,
-    /// the caption gone. Not interactive: a tap is the tile's, it opens the
-    /// post; a hold is the tile's preview.
-    private lazy var embedMark: PostEmbedView = {
-        let mark = PostEmbedView()
-        mark.translatesAutoresizingMaskIntoConstraints = false
-        contentView.addSubview(mark)
-        NSLayoutConstraint.activate([
-            mark.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
-            mark.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
-            mark.widthAnchor.constraint(lessThanOrEqualTo: contentView.widthAnchor, constant: -16),
-        ])
-        return mark
-    }()
-
-    /// Whether the mark was ever built: most tiles never wear one.
-    private var embedMarkIsBuilt = false
-
-    /// The size a tile gives a showcase's embed: the mark, for a text post
-    /// with one and the switch on; nil otherwise. Pure.
-    public static func embedSize(for post: GalleryPost, showsEmbed: Bool) -> PostEmbeds.Size? {
-        post.kind == .text && PostEmbeds.shown(post.embed, drawn: showsEmbed) != nil ? .mark : nil
-    }
-
-    private func applyEmbedMark(_ size: PostEmbeds.Size?, for post: GalleryPost, imagePipeline: ImagePipeline) {
-        guard let size, let embed = post.embed else {
-            if embedMarkIsBuilt { embedMark.clear() }
-            return
-        }
-        embedMarkIsBuilt = true
-        embedMark.show(embed, size: size, pipeline: imagePipeline)
-        // A mark takes no touch — `PostEmbedView` says so for `.mark` — and
-        // the tile reads as one element: "Channel Harbour notes, 12.4K
-        // subscribers".
-        accessibilityLabel = embed.channel.map(ChannelEmbedCopy.accessibilityLabel)
-    }
-
-    /// Whether the tile's words give way to a mark — a voice's or a
-    /// showcase's — in their place.
-    private var wearsCaptionMark: Bool {
-        (voiceMarkIsBuilt && !voiceMark.isHidden) || (embedMarkIsBuilt && !embedMark.isHidden)
-    }
-
-    #if DEBUG
-    /// The showcase's mark the tile wears in its words' place, nil for none.
-    public var debugEmbedMark: PostEmbedView? { embedMarkIsBuilt && !embedMark.isHidden ? embedMark : nil }
-    #endif
-
-    // MARK: - A voice post's mark (#2208)
-
-    /// A voice post's tile (behind `-voice-posts`): its text face, the mark —
-    /// a mic, a still waveform, the length — in the middle, the caption gone.
-    /// Not interactive: a tap is the tile's, it opens the post.
-    private lazy var voiceMark: VoicePostCaptionView = {
-        let mark = VoicePostCaptionView()
-        mark.isUserInteractionEnabled = false
-        mark.translatesAutoresizingMaskIntoConstraints = false
-        contentView.addSubview(mark)
-        NSLayoutConstraint.activate([
-            mark.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
-            mark.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
-            mark.widthAnchor.constraint(lessThanOrEqualTo: contentView.widthAnchor, constant: -8),
-        ])
-        return mark
-    }()
-
-    /// The size a tile gives a voice post's caption: the mark, for a text
-    /// post that speaks with the switch on; nil otherwise. Pure.
-    public static func voiceSize(for post: GalleryPost, showsVoice: Bool) -> VoicePostDisplay.Size? {
-        showsVoice && post.kind == .text && post.voice != nil ? .mark : nil
-    }
-
-    private func applyVoiceMark(_ size: VoicePostDisplay.Size?, for post: GalleryPost) {
-        guard let size, let voice = post.voice else {
-            // Only a tile that wore a mark built it, and only that one says so.
-            if voiceMarkIsBuilt { voiceMark.clear() }
-            return
-        }
-        voiceMarkIsBuilt = true
-        voiceMark.show(
-            postID: post.id.rawValue, url: voice.url, duration: voice.duration, levels: voice.waveform,
-            author: post.authorName, size: size
-        )
-        accessibilityLabel = voiceMark.accessibilityDescription
-    }
-
-    /// Whether the mark was ever built: most tiles never wear one, and a
-    /// lazy view touched on every configure would be built for each.
-    private var voiceMarkIsBuilt = false
-
-    #if DEBUG
-    /// The mark the tile wears in its words' place, nil for none.
-    public var debugVoiceMark: VoicePostCaptionView? { voiceMarkIsBuilt && !voiceMark.isHidden ? voiceMark : nil }
-    #endif
-
-    override public func layoutSubviews() {
-        super.layoutSubviews()
-        // The variant follows the tile's size — a cell configured before the
-        // collection view sized it decides here, once it has a size.
-        refreshInfoOverlay()
-        infoOverlay?.frame = contentView.bounds
-        applyCounterRegister()
-        countGradient.frame = PostTileCountGradientView.frame(in: contentView.bounds)
-        countGradient.isHidden = likes.isHidden
-    }
-
-    /// The compact register below `compactWidth`, the regular one above
-    /// (#1509): its face and its corner margins.
-    private func applyCounterRegister() {
-        let compact = bounds.width > 0 && bounds.width < Self.compactWidth
-        guard compact != isCompact else { return }
-        isCompact = compact
-        likes.setFont(compact ? Self.compactMetaFont : Self.metaFont)
-        likes.glyphSpacing = compact ? 2 : 4
-        likesTrailing?.constant = compact ? -4 : -8
-        likesBottom?.constant = compact ? -4 : -7
-    }
-
-    /// Puts a cover on the tile immediately, without waiting for the async load
-    /// that is already in flight to come back.
-    ///
-    /// Closes a race the autoplay gate would otherwise lose: `configure` asks
-    /// the cache once, and if the image lands *after* that (from the prefetch)
-    /// the cache has it while this cell is still showing nothing. A gate that
-    /// consulted the cache would pass, and the tile would start playing with a
-    /// blank face anyway — which is the exact failure the gate exists to
-    /// prevent.
-    public func applyCover(_ image: UIImage) {
-        media.applyCover(image)
-    }
-
-    public func showReturnStill(_ image: UIImage) {
-        media.showReturnStill(image)
-    }
-
-    /// A tile on a page that is black in either appearance (the snap feed's
-    /// side list, #1772): its picture's ground and its bone are the on-dark
-    /// media ground — the tile's own bone, never a host's second one over it.
-    public var groundsOnDark = false
-
-    /// Whether the cover's own bone shows now.
-    public var showsCoverBone: Bool { media.coverSlot.showsBone }
-
-    /// Fired when the cover lands from an async load.
-    ///
-    /// Autoplay is gated on the cover being present, and the gate is evaluated
-    /// by a reconcile that normally only runs on scroll. Without this, a tile
-    /// whose cover arrives while the grid is sitting still would fail the gate
-    /// once and never be asked again — it would simply never play.
-    public var onCoverLoaded: (() -> Void)?
-    /// The cover could not be loaded: a host's waiting skeleton stills
-    /// (#1553).
-    public var onCoverFailed: (() -> Void)?
-
-    /// Reveals the video surface once a player has been attached. The still
-    /// stays underneath as the poster, so the first frame replaces it rather
-    /// than flashing black.
-    public func beginVideoPreview() {
-        // The cover keeps the tile until there is video to replace it with.
-        // Unhiding here put an empty surface over the cover for the whole
-        // decode start-up — measured at ~1.2s on a cold tile — which is a tile
-        // going dark at rest, before any transition is involved.
-        media.beginPreview()
-        #if DEBUG
-        // Whether the tile had a cover AT THE MOMENT playback started. Holding
-        // the surface back is only worth anything if there is something behind
-        // it; a nil here means the tile is black no matter what the renderer
-        // does, and the fix belongs in the cover pipeline rather than here.
-        if ProcessInfo.processInfo.arguments.contains("-avsbdl-log") {
-            print(String(format: "[avsbdl] %.3f tile beginVideoPreview cover=%@",
-                         CACurrentMediaTime(), media.renderedCover == nil ? "NIL" : "present"))
-        }
-        #endif
-    }
-
-    /// Back to a still tile.
-    public func endVideoPreview() {
-        // Faded, not switched off. This runs for every tile `beginHandoff`
-        // stops as a flight leaves, and a binary hide snaps each of their
-        // covers back in a single frame — several thumbnails popping at once,
-        // on the grid, at exactly the moment the viewer is watching the flight.
-        media.endPreview()
-    }
-
-    #if DEBUG
-    /// The count the tile shows, as drawn — nil while it is hidden.
-    public var debugCounterText: String? {
-        if let like = infoOverlay?.likeReadout { return like.debugCountText }
-        return likes.isHidden ? nil : likes.debugText
-    }
-    /// Whether the count's heart is the points' red (`setViewerStake`).
-    public var debugIsStaked: Bool { viewerStaked }
-    /// The author-and-caption foot the tile wears — nil while it wears none.
-    public var debugInfoOverlay: PostCardCaptionOverlay? { infoOverlay }
-    /// Whether the tile's own likes readout (bottom-right) is drawn.
-    public var debugShowsCornerLikes: Bool { !likes.isHidden }
-    /// Whether the gradient behind the count is drawn (#1509).
-    public var debugShowsCountGradient: Bool { !countGradient.isHidden && countGradient.frame.height > 0 }
-    #endif
-
-    /// Takes `post`'s counter and nothing else — see the list row's.
-    public func updateCounts(from post: GalleryPost) {
-        likes.set(post.reactionCount)
-        infoOverlay?.setLikeCount(post.reactionCount)
-        applyCornerLikes()
-    }
-
-    /// What `configure` drew — `postLikeCount`.
-    private var configuredLikeCount: Int64?
-
-    public var postLikeCount: Int64? {
-        configuredLikeCount
-    }
-
-    public func showLikeCount(_ count: Int64) {
-        guard var post = infoPost, let shown = post.reactionCount, shown != count else { return }
-        // Kept on the post too: the words' overlay is rebuilt from it when
-        // the tile changes size.
-        post.reactionCount = count
-        infoPost = post
-        likes.set(count)
-        infoOverlay?.setLikeCount(count)
-        // ⚠️ `set` shows the readout again (#1186): a like landing on a tile
-        // whose words carry the heart drew a SECOND heart in the corner.
-        applyCornerLikes()
-    }
-
-    // MARK: - The viewer's like
-
-    /// Whether the viewer has staked on the post the tile shows.
-    private var viewerStaked = false
-
-    /// What the viewer has staked on the post: the count's heart turns the
-    /// points' red once there is any — a READOUT still, never a control
-    /// (For You's tiles, through `PostCardStaking.bindReadout`). The count
-    /// stays the post's. The flight card draws the same heart
-    /// (`PostGridFlightCard`'s `viewerStake`), so a landing never recolours.
-    public func setViewerStake(_ total: Int) {
-        // The words' heart too, whatever the corner's state: it is drawn
-        // with the total, and a variant built later reads it from here.
-        setInfoViewerStake(total)
-        let staked = total > 0
-        guard staked != viewerStaked else { return }
-        viewerStaked = staked
-        likes.setGlyph(
-            systemName: LikesSymbol.glyph, color: staked ? LikesSymbol.tint : .white
-        )
-    }
-
-    // MARK: - Author and caption
-
-    /// Whether the tile wears its post's author and the start of its caption
-    /// over the picture, when it is large enough for them (`PostTileInfo`) —
-    /// the Following card's foot, its heart closing the author line. Set by a
-    /// host at `configure` — For You's chunks and its Discover gallery do;
-    /// off, the tile is the picture and its likes, as on every other grid.
-    public private(set) var showsInfo = false
-    /// The post the words are drawn from.
-    private var infoPost: GalleryPost?
-    private var infoImagePipeline: ImagePipeline?
-    /// The size the variant is decided and the words wrapped at, for a COPY
-    /// that travels with a window (`PostGridTileStandInView`) — see
-    /// `PostCardCaptionOverlay` for why a copy never re-lays out. Nil: the
-    /// tile's own size, as any cell.
-    private var infoReferenceSize: CGSize?
-    /// What the viewer has staked on the post, for the overlay's heart.
-    private var infoViewerStake = 0
-    private var infoOverlay: PostCardCaptionOverlay?
-    /// The variant the tile wears now.
-    public private(set) var infoVariant: PostTileInfo.Variant = .none
-    /// The size `infoVariant` was decided at — nil until the next decision.
-    private var infoDecidedSize: CGSize?
-
-    /// The words a tile of `restingSize` wears, built and laid out at that
-    /// size — what a flight carries as the tile's resting furniture
-    /// (`PostGridFlightCard.installRestingOverlay`), so the card takes off
-    /// wearing exactly what the tile wore and the flight fades it. Nil when a
-    /// tile of that size wears none.
-    public static func makeInfoOverlay(
-        for post: GalleryPost, restingSize: CGSize, imagePipeline: ImagePipeline?, viewerStake: Int = 0,
-        showsVoice: Bool = VoicePostDisplay.areDrawn, showsEmbed: Bool = PostEmbeds.areDrawn
-    ) -> PostCardCaptionOverlay? {
-        let variant = PostTileInfo.variant(for: restingSize)
-        guard variant != .none else { return nil }
-        let overlay = makeInfoOverlay(
-            for: post, variant: variant, referenceSize: restingSize,
-            imagePipeline: imagePipeline, viewerStake: viewerStake,
-            voiceAlone: voiceSize(for: post, showsVoice: showsVoice) != nil
-                || embedSize(for: post, showsEmbed: showsEmbed) != nil
-        )
-        overlay.frame = CGRect(origin: .zero, size: restingSize)
-        UIView.performWithoutAnimation { overlay.layoutIfNeeded() }
-        return overlay
-    }
-
-    /// The one recipe, for the tile and every copy of it.
-    ///
-    /// The heart is ALWAYS there (a tile always shows its likes), a readout
-    /// like the corner's it replaces. The text shadow is drawn into the glyphs: a screen of tiles is
-    /// a dozen overlays at once, and a layer shadow on each label would be an
-    /// offscreen pass apiece (`PostCardCaptionOverlay.TextShadow`).
-    private static func makeInfoOverlay(
-        for post: GalleryPost, variant: PostTileInfo.Variant, referenceSize: CGSize?,
-        imagePipeline: ImagePipeline?, viewerStake: Int, voiceAlone: Bool
-    ) -> PostCardCaptionOverlay {
-        PostCardCaptionOverlay(
-            // A voice post's tile wears its mark, alone, in the words' place
-            // (#2208): the author line stays, the caption goes.
-            post: post, placement: .onMedia, captionLines: voiceAlone ? 0 : variant.captionLines,
-            referenceSize: referenceSize, imagePipeline: imagePipeline, viewerStake: viewerStake,
-            textShadow: .inline
-        )
-    }
-
-    /// Builds, swaps or drops the overlay to match the tile's size — only
-    /// when the VARIANT changes, so a layout pass at the same size costs one
-    /// comparison and the words are laid out once per tile.
-    private func refreshInfoOverlay() {
-        let size = infoReferenceSize ?? contentView.bounds.size
-        // Decided once per size: a layout pass at the size already decided
-        // (every pass but a resize) asks nothing of the rule or the fonts.
-        guard size != infoDecidedSize else { return }
-        infoDecidedSize = size
-        let variant: PostTileInfo.Variant = showsInfo && infoPost != nil && size.width > 0 && size.height > 0
-            ? PostTileInfo.variant(for: size)
-            : .none
-        guard variant != infoVariant else { return }
-        removeInfoOverlay()
-        infoVariant = variant
-        if variant != .none, let infoPost {
-            let overlay = Self.makeInfoOverlay(
-                for: infoPost, variant: variant, referenceSize: infoReferenceSize,
-                imagePipeline: infoImagePipeline, viewerStake: infoViewerStake,
-                voiceAlone: wearsCaptionMark
-            )
-            overlay.frame = contentView.bounds
-            // Above the picture and any video surface (both sit just above
-            // the image view), below the corner readout it replaces.
-            contentView.insertSubview(overlay, belowSubview: likes)
-            infoOverlay = overlay
-        }
-        applyCornerLikes()
-    }
-
-    /// The corner count, unless the words carry the heart: then it closes
-    /// the author line, as on a Following card, and two hearts on one tile
-    /// would be one too many.
-    private func applyCornerLikes() {
-        likes.isHidden = infoOverlay != nil
-        countGradient.isHidden = likes.isHidden
-    }
-
-    private func removeInfoOverlay() {
-        infoOverlay?.removeFromSuperview()
-        infoOverlay = nil
-        infoVariant = .none
-        applyCornerLikes()
-    }
-
-    private func setInfoViewerStake(_ total: Int) {
-        infoViewerStake = total
-        infoOverlay?.setViewerStake(total)
-    }
-
-    /// - Parameter showsInfo: see `showsInfo`.
-    /// - Parameter infoReferenceSize: for a copy that rides a window — see
-    ///   `infoReferenceSize`. Nil for a cell.
-    public func configure(
-        with post: GalleryPost, imagePipeline: ImagePipeline,
-        showsInfo: Bool = false, infoReferenceSize: CGSize? = nil,
-        showsVoice: Bool = VoicePostDisplay.areDrawn, showsEmbed: Bool = PostEmbeds.areDrawn
-    ) {
-        // A showcase's tile: its text face, the card's mark in the words'
-        // place (#2216). It outranks a voice, as on the list's card.
-        let embedSize = Self.embedSize(for: post, showsEmbed: showsEmbed)
-        // A voice post's tile: its text face, its mark in the words' place (#2208).
-        let voiceSize: VoicePostDisplay.Size? = embedSize == nil ? Self.voiceSize(for: post, showsVoice: showsVoice) : nil
-        applyVoiceMark(voiceSize, for: post)
-        applyEmbedMark(embedSize, for: post, imagePipeline: imagePipeline)
-        // The media ground under a picture, the card under words (#1771) —
-        // on a dark page, the on-dark ground and bone (`groundsOnDark`).
-        contentView.backgroundColor = groundsOnDark && post.kind != .text
-            ? Surface.mediaGroundOnDark : Self.fillColor(for: post)
-        media.coverSlot.bone?.fill = groundsOnDark ? Surface.mediaGroundOnDark : Surface.mediaGround
-
-        likes.set(post.reactionCount)
-        configuredLikeCount = post.reactionCount
-
-        // The words: a new post is a new overlay, whatever the variant.
-        removeInfoOverlay()
-        self.showsInfo = showsInfo
-        infoPost = post
-        infoImagePipeline = imagePipeline
-        self.infoReferenceSize = infoReferenceSize
-        infoDecidedSize = nil
-        refreshInfoOverlay()
-
-        // ⚠️ A new post's cover cancels the previous load: a reconfigure
-        // without a reuse otherwise left it racing the new one, and an old
-        // cover could land over the right one (#781). A cover that lands after
-        // the tile started playing becomes the surface's poster — the
-        // difference between a cold flight showing the thumbnail and showing
-        // nothing — and is announced, for the autoplay gate.
-        //
-        // At the tile's DRAWN size (#1505, as #1086 did for avatars): a grid
-        // tile a third of the screen wide is a 512 px decode, not 1200 px.
-        // The cell is laid out by the time it is configured; a copy that is
-        // not yet keeps the full picture.
-        let scale = traitCollection.displayScale > 0 ? traitCollection.displayScale : 3
-        media.coverSize = Self.coverBucket(forDrawnSize: bounds.size, scale: scale)
-        media.loadCover(post.thumbnailURL, pipeline: imagePipeline, item: post.id)
-    }
-
-    /// How much a tile's cover may be enlarged to stay in a smaller bucket: a
-    /// 3:4 tile a third of a 402 pt screen wide is 528 px tall at @3x, a few
-    /// percent over 512 — invisible at tile size, where the next bucket is a
-    /// 1200 px decode, five times the memory.
-    static let coverUpscaleSlack: CGFloat = 1.15
-
-    /// The bucket a tile's cover is decoded at, from the size it is drawn at
-    /// (#1505): `.px512` for a grid tile, the full picture for a tile larger
-    /// than that (a slice's lead, a card) or one not laid out yet. Never a
-    /// "small" bucket, which is the avatars' namespace. The grid's lookahead
-    /// asks the same, so the tile finds its prefetch in memory.
-    public static func coverBucket(forDrawnSize size: CGSize, scale: CGFloat) -> ImageBucket {
-        guard size.width > 0, size.height > 0 else { return .full }
-        let pixels = max(size.width, size.height) * max(scale, 1) / coverUpscaleSlack
-        return max(.px256, ImageBucket(fittingPixels: pixels))
-    }
-
-    /// What a grid's lookahead asks for a tile's cover at `indexPath`: the
-    /// bucket the tile will decode it at, from the layout's size for it.
-    @MainActor
-    public static func coverRequest(_ url: URL, at indexPath: IndexPath, in collectionView: UICollectionView) -> ImageRequest {
-        guard let drawn = collectionView.layoutAttributesForItem(at: indexPath)?.size else { return ImageRequest(url: url) }
-        let scale = collectionView.traitCollection.displayScale > 0 ? collectionView.traitCollection.displayScale : 3
-        return ImageRequest(url: url, size: coverBucket(forDrawnSize: drawn, scale: scale))
-    }
-}
-
-extension PostGridTileCell: GridPlaybackCell {}
-
-extension PostGridTileCell: PostCardLikeReadout {}
