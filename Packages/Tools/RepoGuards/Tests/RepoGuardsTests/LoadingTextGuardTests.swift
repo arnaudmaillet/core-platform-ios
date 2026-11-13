@@ -7,8 +7,7 @@ import Testing
 /// sentence saying it is loading. Accessibility labels may still say so —
 /// VoiceOver has no bones to see.
 ///
-/// CI only runs this in DesignSystem's lane: adding a loading state anywhere,
-/// run DesignSystem's tests too.
+/// A repository guard (`RepoGuards`, #2371): every pull request runs it.
 struct LoadingTextGuardTests {
     static let literals = ["\"Loading…\"", "\"Loading...\"", "\"Checking…\"", "\"Measuring…\"", "Checking your account…"]
 

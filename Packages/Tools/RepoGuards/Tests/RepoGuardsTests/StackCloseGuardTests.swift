@@ -13,8 +13,7 @@ import Testing
 /// It scans every source file under `App/` and `Packages/` (tests and
 /// comments excluded). A file may keep a raw call only with a reason below.
 ///
-/// CI only runs this in CoreNavigation's lane, which a change elsewhere does
-/// not select: adding a close anywhere, run CoreNavigation's tests too.
+/// A repository guard (`RepoGuards`, #2371): every pull request runs it.
 struct StackCloseGuardTests {
     /// File name → why its raw call stays.
     static let allowed: [String: String] = [

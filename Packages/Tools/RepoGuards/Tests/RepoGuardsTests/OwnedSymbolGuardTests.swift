@@ -7,8 +7,7 @@ import Testing
 /// gem, the comment and repost marks. Spelled, it draws the system's glyph
 /// beside the app's, or nothing at all.
 ///
-/// CI only runs this in DesignSystem's lane: touching icons anywhere, run
-/// DesignSystem's tests too.
+/// A repository guard (`RepoGuards`, #2371): every pull request runs it.
 struct OwnedSymbolGuardTests {
     /// File name → why it may still spell one.
     static let allowed: [String: String] = [

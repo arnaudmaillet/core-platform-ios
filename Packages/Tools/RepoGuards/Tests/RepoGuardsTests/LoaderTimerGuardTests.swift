@@ -10,8 +10,7 @@ import Testing
 /// for an `asyncAfter(`, a `Timer` or a `DispatchWorkItem` whose next lines
 /// start a loader. A file may keep one only with a reason on the list below.
 ///
-/// CI only runs this in DesignSystem's lane: adding a loader anywhere, run
-/// DesignSystem's tests too.
+/// A repository guard (`RepoGuards`, #2371): every pull request runs it.
 struct LoaderTimerGuardTests {
     /// File name → why its timer stays.
     static let allowed: [String: String] = [

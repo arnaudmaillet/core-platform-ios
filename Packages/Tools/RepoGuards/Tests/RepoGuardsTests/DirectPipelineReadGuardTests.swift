@@ -12,8 +12,7 @@ import Testing
 /// Each file that reads it says why below; a new one uses the slot
 /// (`CoverSlot`, `AvatarView`, `ImageContentView`), or argues its case.
 ///
-/// ⚠️ A REPO-WIDE GUARD IN MEDIACORE'S LANE: touching a picture load
-/// anywhere, run MediaCore's tests.
+/// A repository guard (`RepoGuards`, #2371): every pull request runs it.
 struct DirectPipelineReadGuardTests {
     /// File name → why it reads the pipeline directly.
     static let allowed: [String: String] = [

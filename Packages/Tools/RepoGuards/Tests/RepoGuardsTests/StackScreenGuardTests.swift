@@ -11,8 +11,7 @@ import Testing
 /// the reason it is never pushed. A new screen fails here until it says one
 /// or the other, and the failure lists it.
 ///
-/// CI only runs this in CoreNavigation's lane, which a change elsewhere does
-/// not select: adding a screen anywhere, run CoreNavigation's tests too.
+/// A repository guard (`RepoGuards`, #2371): every pull request runs it.
 struct StackScreenGuardTests {
     /// Class name → why it is never pushed.
     static let neverPushed: [String: String] = [
@@ -103,8 +102,18 @@ struct StackScreenGuardTests {
     /// Whether `text` makes `name` a `StackScreen`, in its declaration or an
     /// extension.
     static func declaresContract(_ name: String, in text: String) -> Bool {
-        let pattern = #"(?:extension|class)\s+"# + name + #"\b[^{]*:\s*[^{]*\bStackScreen\b"#
-        return text.range(of: pattern, options: .regularExpression) != nil
+        contractHolders(in: text).contains(name)
+    }
+
+    /// Every type a class or an extension declares `StackScreen` for, in one
+    /// pass. Asking per screen ran a `[^{]*` pattern over the whole repository
+    /// once per screen: four minutes of this lane (#2371).
+    static func contractHolders(in text: String) -> Set<String> {
+        let pattern = try! NSRegularExpression(pattern: #"(?:extension|class)\s+(\w+)\b[^{]*:\s*[^{]*\bStackScreen\b"#)
+        let range = NSRange(text.startIndex..., in: text)
+        return Set(pattern.matches(in: text, range: range).compactMap { match in
+            Range(match.range(at: 1), in: text).map { String(text[$0]) }
+        })
     }
 
     private static var root: URL {
@@ -156,11 +165,12 @@ struct StackScreenGuardTests {
         let text = Self.sources()
         let screens = Self.screens(in: text)
         #expect(screens.count > 100, "found \(screens.count) screens: the scan is broken")
+        let holders = Self.contractHolders(in: text)
         var memo: [String: Bool] = [:]
         func states(_ name: String) -> Bool {
             if let known = memo[name] { return known }
             memo[name] = false
-            let answer = Self.declaresContract(name, in: text) || screens[name].map(states) == true
+            let answer = holders.contains(name) || screens[name].map(states) == true
             memo[name] = answer
             return answer
         }

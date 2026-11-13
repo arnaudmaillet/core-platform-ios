@@ -10,8 +10,7 @@ import Testing
 /// The scan reads each animation's own lines (the call and the nine after
 /// it, comments left out) for a skeleton, a bone or a redaction.
 ///
-/// CI only runs this in DesignSystem's lane: adding a skeleton anywhere, run
-/// DesignSystem's tests too.
+/// A repository guard (`RepoGuards`, #2371): every pull request runs it.
 struct SkeletonCrossfadeGuardTests {
     /// Files allowed to animate a skeleton by hand, and why.
     static let allowed: [String: String] = [

@@ -13,8 +13,7 @@ import Testing
 /// A match must be on the list below, with its reason. A new one uses
 /// `AvatarView` (or `PersonListCell.avatar`), or argues its case here.
 ///
-/// ⚠️ A REPO-WIDE GUARD IN MEDIACORE'S LANE. A pull request's CI runs only the
-/// lanes its diff selects: touching an avatar anywhere, run MediaCore's tests.
+/// A repository guard (`RepoGuards`, #2371): every pull request runs it.
 struct HandMadeAvatarGuardTests {
     /// File name → why it may build an avatar's parts itself.
     static let allowed: [String: String] = [
