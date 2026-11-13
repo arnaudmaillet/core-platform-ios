@@ -8,6 +8,7 @@ let package = Package(
         .library(name: "Profile", targets: ["Profile"])
     ],
     dependencies: [
+        .package(path: "../../Kit/LaunchArguments"),
         .package(path: "../../FeatureInterfaces/ProfileInterface"),
         .package(path: "../../FeatureInterfaces/AuthInterface"),
         .package(path: "../../FeatureInterfaces/FeedInterface"),
@@ -123,6 +124,7 @@ let package = Package(
         .testTarget(
             name: "ProfileTests",
             dependencies: [
+                "LaunchArguments",
                 "Profile",
                 "ProfileSettings",
                 "Feed",

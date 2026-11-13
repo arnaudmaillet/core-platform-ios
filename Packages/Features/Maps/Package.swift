@@ -8,6 +8,7 @@ let package = Package(
         .library(name: "Maps", targets: ["Maps"])
     ],
     dependencies: [
+        .package(path: "../../Kit/LaunchArguments"),
         .package(path: "../../FeatureInterfaces/MapsInterface"),
         .package(path: "../../FeatureInterfaces/FeedInterface"),
         .package(path: "../../Kit/CoreContracts"),
@@ -30,6 +31,7 @@ let package = Package(
         .target(
             name: "Maps",
             dependencies: [
+                "LaunchArguments",
                 "MapsInterface",
                 "FeedInterface",
                 "CoreContracts",
@@ -66,6 +68,7 @@ let package = Package(
         .testTarget(
             name: "MapsTests",
             dependencies: [
+                "LaunchArguments",
                 "Maps",
                 "MapsInterface",
                 // `AppRoute` / `PlaceLink`: a place's share link opens it (#985).

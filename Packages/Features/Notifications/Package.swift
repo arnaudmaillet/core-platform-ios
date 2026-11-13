@@ -8,6 +8,7 @@ let package = Package(
         .library(name: "Notifications", targets: ["Notifications"])
     ],
     dependencies: [
+        .package(path: "../../Kit/LaunchArguments"),
         .package(path: "../../FeatureInterfaces/NotificationsInterface"),
         .package(path: "../../FeatureInterfaces/AuthInterface"),
         .package(path: "../../Kit/CoreContracts"),
@@ -24,6 +25,7 @@ let package = Package(
         .target(
             name: "Notifications",
             dependencies: [
+                "LaunchArguments",
                 "NotificationsInterface",
                 "AuthInterface",
                 "CoreContracts",

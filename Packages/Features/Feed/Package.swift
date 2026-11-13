@@ -8,6 +8,7 @@ let package = Package(
         .library(name: "Feed", targets: ["Feed"])
     ],
     dependencies: [
+        .package(path: "../../Kit/LaunchArguments"),
         .package(path: "../../FeatureInterfaces/FeedInterface"),
         .package(path: "../../FeatureInterfaces/AuthInterface"),
         .package(path: "../../FeatureInterfaces/ProfileInterface"),
@@ -41,6 +42,7 @@ let package = Package(
         .target(
             name: "Feed",
             dependencies: [
+                "LaunchArguments",
                 "ThreadKit",
                 "FeedInterface",
                 "AuthInterface",

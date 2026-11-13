@@ -3,6 +3,7 @@ import CoreContracts
 import CoreModels
 import CoreNetworking
 import Foundation
+import LaunchArguments
 
 /// Fakes of timeline.v1 / post.v1 / profile.v1 over one shared dataset,
 /// honoring the contracts' semantics: the timeline returns bare

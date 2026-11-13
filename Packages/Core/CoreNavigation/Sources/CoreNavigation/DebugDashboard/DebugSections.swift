@@ -1,6 +1,7 @@
 // ⚠️ THE WHOLE FILE: DEBUG only — the debug dashboard (#2131).
 #if DEBUG
 import DesignSystem
+import LaunchArguments
 import OSLog
 import UIKit
 

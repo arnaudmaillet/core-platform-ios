@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import DesignSystem
+@testable import LaunchArguments
 
 /// The DEBUG switches of #2132: the launch argument wins, the persisted
 /// switch stands in for it, reset clears every one.

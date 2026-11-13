@@ -8,13 +8,14 @@ let package = Package(
         .library(name: "CoreNavigation", targets: ["CoreNavigation"])
     ],
     dependencies: [
+        .package(path: "../../Kit/LaunchArguments"),
         .package(path: "../../Kit/CoreModels"),
         // `MotionPreference`: the hero motion policy and the drawer honour the
         // app-level Reduce Motion alongside the iOS setting (#468).
         .package(path: "../DesignSystem")
     ],
     targets: [
-        .target(name: "CoreNavigation", dependencies: ["CoreModels", "DesignSystem"]),
+        .target(name: "CoreNavigation", dependencies: ["LaunchArguments", "CoreModels", "DesignSystem"]),
         .testTarget(name: "CoreNavigationTests", dependencies: ["CoreNavigation"])
     ]
 )

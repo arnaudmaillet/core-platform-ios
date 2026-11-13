@@ -3,6 +3,7 @@ import CoreNetworking
 import CoreStorage
 import DesignSystem
 import Foundation
+import LaunchArguments
 
 /// The inbox's global search: one query answered across every category at once,
 /// plus the wider directory.
