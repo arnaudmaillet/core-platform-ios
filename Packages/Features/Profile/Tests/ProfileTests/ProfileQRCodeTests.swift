@@ -3,6 +3,7 @@ import CoreModels
 import Testing
 import UIKit
 @testable import Profile
+@testable import ProfileSettings
 
 /// Decodes a QR out of an image the way a camera would.
 ///

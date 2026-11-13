@@ -7,6 +7,7 @@ import PostGrid
 import Testing
 import UIKit
 @testable import Profile
+@testable import ProfileSettings
 
 /// A profile's Channels tab (#2232, behind `-channels`): shown only with a
 /// channel the viewer may see, after Posts; someone else's private channels

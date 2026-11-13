@@ -3,6 +3,7 @@ import AuthInterface
 import ChatInterface
 import CoreModels
 import CoreNavigation
+import DebugTools
 import FeedInterface
 import MediaPlayback
 import NotificationsInterface
@@ -128,6 +129,20 @@ extension MainTabCoordinator {
                     }
                 }
             }
+            // `-toast-demo toggle` (#2338): the bell toggled slowly — "Notifications
+            // on" first, then "Notifications muted" with Undo, every 2.5 s, twelve
+            // times: each change grows or shrinks the capsule on its spring,
+            // and the first one opens with the pop.
+            for shot in 0..<12 where mode == "toggle" {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.5 + Double(shot) * 2.5) { [weak self] in
+                    guard let top = self?.debugToastSource() else { return }
+                    if shot.isMultiple(of: 2) {
+                        Feedback.success("Notifications on", symbol: "bell.fill", from: top)
+                    } else {
+                        Feedback.undoable("Notifications muted", symbol: "bell.slash.fill", from: top, commit: {}, undo: {})
+                    }
+                }
+            }
             // `-toast-demo long` (#1449): a failure whose message is cut,
             // with Retry — a tap on its body opens the whole message. Fired
             // again every 5 s for 20 s: a toast lasts 4 s.
@@ -145,7 +160,7 @@ extension MainTabCoordinator {
                     self?.debugToastAfterPop()
                 }
             }
-            for round in 0..<200 where !["kinds", "undo", "condition", "long", "pop", "spam"].contains(mode) {
+            for round in 0..<200 where !["kinds", "undo", "condition", "long", "pop", "spam", "toggle"].contains(mode) {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2.5 + Double(round) * 3) { [weak self] in
                     guard let top = self?.debugToastSource() else { return }
                     Feedback.success("Saved to your profile", from: top)

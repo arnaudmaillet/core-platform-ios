@@ -31,9 +31,39 @@ final class AccessoryCollapseUITests: XCTestCase {
     /// mock viewer holds posts alone: no band, `env=no-accessory`, which is
     /// the rule working, not the band failing. The leg comes back the day the
     /// mock seeds a second source for the viewer.
-    private static let accessorySurfaces: [(name: String, tab: Int)] = [
-        ("Messages", 2),
-    ]
+    ///
+    /// ⚠️ NOR MESSAGES ANY MORE (#2337, the owner 2026-11-12): its Chats /
+    /// Requests / Suggestions selector moved into the navigation bar, right
+    /// of the bell, as on For You — `testMessagesPutsUpNoBand` pins that the
+    /// foot is the tab bar alone. Empty until the profile leg comes back.
+    private static let accessorySurfaces: [(name: String, tab: Int)] = []
+
+    /// The Messages tab, by index into `AppTab.allCases`.
+    private static let messagesTab = 2
+
+    /// **Messages has no band (#2337).** Its selector is in the navigation
+    /// bar, so the probe reads `no-accessory` on the inbox — at rest and after
+    /// a scroll down, which is when a minimized band would have docked.
+    func testMessagesPutsUpNoBand() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-mock-auto-login", "-accessory-collapse-probe",
+                               "-select-tab", String(Self.messagesTab)]
+        app.launch()
+        resetTrace()
+        defer { app.terminate() }
+
+        let resting = probe(in: app, timeout: 25) { $0.surface == "MessagesInboxViewController" }
+        guard let resting else {
+            return XCTFail("never reached the inbox — last probe \(lastSeen(in: app) ?? "none")\(traceText)")
+        }
+        XCTAssertEqual(resting.environment, "no-accessory", "Messages put a band up\(traceText)")
+
+        swipe(app, from: 0.75, to: 0.25)
+        // Nothing to wait FOR: this waits out the window in which a band
+        // would have shown up.
+        let band = probe(in: app, timeout: 3) { $0.environment != "no-accessory" }
+        XCTAssertNil(band, "a band came up on the inbox after a scroll\(traceText)")
+    }
 
     override func setUp() { continueAfterFailure = false }
 
@@ -72,7 +102,9 @@ final class AccessoryCollapseUITests: XCTestCase {
     private var expandReport: [String] = []
     private var sizingReport: [String] = []
 
-    func testEveryAccessorySelectorRidesTheScroll() {
+    func testEveryAccessorySelectorRidesTheScroll() throws {
+        try XCTSkipIf(Self.accessorySurfaces.isEmpty,
+                      "no tab root hangs its selector in the accessory with the mock viewer (#1154, #2337)")
         expandReport = []
         sizingReport = []
         // ACTIVITIES, not `print`s: test-process stdout does not survive into
@@ -155,6 +187,8 @@ final class AccessoryCollapseUITests: XCTestCase {
         let namedTheVisibleOne: Bool
         /// Each segment's width, in order — "41/89/98" reads at a glance.
         let segments: String
+        /// The top screen's class name.
+        let surface: String
 
         init?(_ identifier: String) {
             guard identifier.hasPrefix("accessory;") else { return nil }
@@ -169,6 +203,7 @@ final class AccessoryCollapseUITests: XCTestCase {
             hasNamedScroller = fields["named"] == "1"
             namedTheVisibleOne = fields["onscreen"] == "1"
             segments = fields["segments"] ?? "?"
+            surface = fields["surface"] ?? "?"
         }
     }
 

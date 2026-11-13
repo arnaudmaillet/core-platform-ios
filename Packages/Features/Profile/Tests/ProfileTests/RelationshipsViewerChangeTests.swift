@@ -8,6 +8,7 @@ import Foundation
 import Synchronization
 import Testing
 @testable import Profile
+@testable import ProfileSettings
 
 /// The relationships lists' row states are the VIEWER's: whom they follow,
 /// whom they asked, who refused them. A viewer change (another account, a

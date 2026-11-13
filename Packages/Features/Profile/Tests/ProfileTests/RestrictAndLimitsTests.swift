@@ -6,6 +6,7 @@ import CoreNetworkingMocks
 import Foundation
 import Testing
 @testable import Profile
+@testable import ProfileSettings
 
 /// Restrict, temporary limits and sound reuse (#416; backend #724, #735,
 /// #736), end to end over the mock BFF.

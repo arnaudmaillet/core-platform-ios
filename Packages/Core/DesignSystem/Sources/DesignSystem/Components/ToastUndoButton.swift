@@ -156,30 +156,47 @@ final class ToastCloseButton: UIButton {
 /// the system's glass bubbles (the owner, 2026-11-06). Inside the toast's
 /// glass a layer's mask is not drawn, and a render of the label comes out in
 /// the glass's vibrant ink (white): the words are drawn for the change.
+///
+/// ⚠️ IN A CHANGE THE CLIP FOLLOWS THE CAPSULE, AS IN THE UNFOLD (#2338): the
+/// words keep their whole width — never truncated ("Notifica", 2026-11-06) —
+/// but the clip that shows them is the room the capsule leaves them, and it
+/// opens with the capsule's spring. Held at the words' whole width by a
+/// REQUIRED constraint, it outranked the spring (`.required - 1`): a change
+/// that grew the capsule was laid out at its final width from its first
+/// frame (filmed on the bell's toggle).
 @MainActor
 final class ToastWords: UIView {
     let label: UILabel
     private let clip = UIView()
-    /// At rest the clip is the words' width.
+    /// At rest the clip is the words' width…
     private let matches: NSLayoutConstraint
+    /// …and inside the slot.
+    private var fits: [NSLayoutConstraint] = []
     /// The words' picture while they blur (`blur(appearing:…)`).
     private weak var stand: UIImageView?
-    /// During a change: the words at their whole width, and the clip's own.
+    /// During a change: the words at their whole width, and the clip the
+    /// slot's (`holdWhole`).
     private var held: NSLayoutConstraint?
-    private var opening: NSLayoutConstraint?
+    private var follows: NSLayoutConstraint?
+    /// How far the clip reaches past each end of the slot in a change, into
+    /// the gap beside it: the blur's halo is not cut at the words' ends, and
+    /// the words never pass over the mark.
+    let bleed: CGFloat
 
-    init(label: UILabel) {
+    init(label: UILabel, bleed: CGFloat = 0) {
         self.label = label
+        self.bleed = bleed
         matches = clip.widthAnchor.constraint(equalTo: label.widthAnchor)
         super.init(frame: .zero)
         clip.clipsToBounds = true
         // Just under required: at rest these win over the words' compression
-        // resistance, and the words truncate at the slot's ends; during a
-        // change the words hold their whole width and the capsule clips them.
+        // resistance, and the words truncate at the slot's ends; a change
+        // lets them go (`holdWhole`).
         let fitsLeading = clip.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor)
         let fitsTrailing = clip.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor)
         fitsLeading.priority = .required - 1
         fitsTrailing.priority = .required - 1
+        fits = [fitsLeading, fitsTrailing]
         clip.constrain(in: self) { slot in
             clip.centerXAnchor.constraint(equalTo: slot.centerXAnchor)
             clip.topAnchor.constraint(equalTo: slot.topAnchor)
@@ -193,6 +210,10 @@ final class ToastWords: UIView {
             label.bottomAnchor.constraint(equalTo: clip.bottomAnchor)
         }
         matches.isActive = true
+        // Never less than nothing: a capsule narrower than the mark and the
+        // action lets the row overflow its trailing end rather than turn the
+        // slot inside out.
+        widthAnchor.constraint(greaterThanOrEqualToConstant: 0).isActive = true
         setContentHuggingPriority(.defaultLow, for: .horizontal)
         setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
     }
@@ -200,21 +221,35 @@ final class ToastWords: UIView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    /// Holds the words at their whole width — laid out now — and the clip
-    /// at `width`: shut (0) to open, or as it is to close.
-    private func hold(clipAt width: CGFloat) {
+    /// Held whole for a change: the words at their laid-out width — never
+    /// truncated by the capsule's narrower start — and the clip the slot's
+    /// (and `bleed` past either end), below required: the capsule's spring
+    /// sets the slot, and the clip opens with it (#2338). Nothing here is
+    /// required at the words' whole width.
+    func holdWhole() {
         settle()
         let held = label.widthAnchor.constraint(equalToConstant: label.bounds.width)
-        let opening = clip.widthAnchor.constraint(equalToConstant: width)
+        let follows = clip.widthAnchor.constraint(equalTo: widthAnchor, constant: 2 * bleed)
+        follows.priority = .defaultHigh
         matches.isActive = false
-        NSLayoutConstraint.activate([held, opening])
+        NSLayoutConstraint.deactivate(fits)
+        NSLayoutConstraint.activate([held, follows])
         self.held = held
-        self.opening = opening
+        self.follows = follows
     }
 
-    /// Held whole for a change: the words at their laid-out width, never
-    /// truncated by the capsule's narrower start.
-    func holdWhole() { hold(clipAt: label.bounds.width) }
+    #if DEBUG
+    /// The clip's width now, and whether any constraint holds it at the
+    /// words' width as a requirement (#2338). Tests.
+    var debugClipWidth: CGFloat { clip.bounds.width }
+    var debugClipRequiredAtWords: Bool {
+        (matches.isActive && matches.priority == .required)
+            || clip.constraints.contains { constraint in
+                constraint.isActive && constraint.priority == .required
+                    && constraint.firstAttribute == .width && constraint.secondItem == nil
+            }
+    }
+    #endif
 
     /// The words drawn as a picture in their own ink, resolved here — a
     /// render of the label would take the glass's vibrant ink for white
@@ -259,9 +294,12 @@ final class ToastWords: UIView {
         let scale = max(1, window?.screen.scale ?? traitCollection.displayScale)
         let pad = peak / scale * 3
         guard let image = picture(scale: scale, pad: pad) else { return false }
-        let standFrame = label.convert(label.bounds, to: self).insetBy(dx: -pad, dy: -pad)
+        // Held for a change, the picture stands in the clip: the capsule's
+        // spring reveals it as it opens, as it would the words (#2338).
+        let host = isOpening ? clip : self
+        let standFrame = label.convert(label.bounds, to: host).insetBy(dx: -pad, dy: -pad)
         let standIn = ToastBlur.stand(
-            image, scale: scale, frame: standFrame, in: self, appearing: appearing,
+            image, scale: scale, frame: standFrame, in: host, appearing: appearing,
             peak: peak, delay: delay, duration: duration, opacity: opacity
         ) { [weak self] finished in
             // A newer blur took over: it owns the words now.
@@ -282,15 +320,16 @@ final class ToastWords: UIView {
         return true
     }
 
-    /// Whether a change holds the words now (opening or closing).
-    var isOpening: Bool { opening != nil }
+    /// Whether a change holds the words now.
+    var isOpening: Bool { held != nil }
 
-    /// Back at rest: the clip the words' width again.
+    /// Back at rest: the clip the words' width again, inside the slot.
     func settle() {
         held?.isActive = false
-        opening?.isActive = false
+        follows?.isActive = false
         held = nil
-        opening = nil
+        follows = nil
         matches.isActive = true
+        NSLayoutConstraint.activate(fits)
     }
 }

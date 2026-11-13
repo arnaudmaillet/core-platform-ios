@@ -1,0 +1,166 @@
+import Foundation
+import Testing
+
+/// THE BAR CONTRACT'S GUARD (#1679, `dev/BAR_CONTRACT.md`): no new screen
+/// may build a bar item the old way. Scans the app and every package for the
+/// shapes the contract retires, against a baseline of what is still to be
+/// converted — a file may only go DOWN.
+///
+/// - A custom-view item (`UIBarButtonItem(customView:`) is made only by
+///   `BarItems` (`stretched`, `container`): an icon is `BarItems.icon`, a
+///   wide word `BarItems.stretched`, a complex container
+///   `BarItems.container` — all with an identifier.
+/// - `hidesSharedBackground = true` (a button drawing a glass of its own in
+///   the bar) is the old wide pattern (R5).
+/// - `SnapNavControls.make…` builds icon `UIButton`s for bars (R1).
+/// - `morphNavigationBar(` cross-dissolves a bar by hand (R3).
+/// - A bar kept by `BarItemStore` (#2331) is handed its items only through
+///   the store, which keeps what stays and skips an unchanged list.
+///
+/// ⚠️ A FAILURE HERE IS EITHER A NEW VIOLATION — build the item through
+/// `BarItems` — OR A FILE THAT GOT BETTER: lower its count below (or remove
+/// it) in the same change, so the baseline keeps shrinking to nothing.
+struct BarContractGuardTests {
+    /// Files still holding custom-view items made by hand, and how many.
+    static let customViewDebt: [String: Int] = [:]
+
+    /// Files whose bar buttons still draw their own glass.
+    static let ownGlassDebt: [String: Int] = [:]
+
+    /// Files still building icon buttons for bars through `SnapNavControls`.
+    static let iconButtonDebt: [String: Int] = [:]
+
+    /// Files still cross-dissolving a bar by hand.
+    /// None: the inbox and relationships searches moved to
+    /// `UISearchController`, and the dissolve helper is deleted (#1679).
+    static let barMorphDebt: [String: Int] = [:]
+
+    /// The only screens that hang a selector in the tab bar's accessory
+    /// (#2337, the owner 2026-11-12). The paged TAB ROOTS wear theirs in the
+    /// navigation bar, right of the bell (`BarSelectorItem`; For You's
+    /// Feed | Shots, Messages' Chats | Requests | Suggestions), so the
+    /// accessory is the profile's alone — its tabs are sections of one page
+    /// under a hero header, and its bar's centre carries the @handle on
+    /// scroll — plus the DEBUG lens bench. Not a debt to pay down: a new
+    /// screen putting its selector in the band fails here.
+    static let selectorAccessoryHosts: [String: Int] = [
+        "Packages/Core/HeroPage/Sources/HeroPage/HeroPageSelector.swift": 1,
+        "Packages/Core/DebugTools/Sources/DebugTools/LensLab.swift": 1,
+    ]
+
+    /// Hosts whose bars are kept by identifier (`BarItemStore`, #2331): an
+    /// item that stays keeps its instance, a state change is made in place,
+    /// and the bar is handed a group only when its list changes. A host
+    /// converted joins this list; a direct write here would hand the bar
+    /// items behind the store's back.
+    static let keptBarHosts: Set<String> = [
+        "Packages/Features/Profile/Sources/Profile/Views/ProfileCardViewController.swift",
+        "Packages/Features/Notifications/Sources/Notifications/Views/NotificationsViewController+Mute.swift",
+    ]
+
+    /// Where custom-view items are MADE: the contract's own factory.
+    static let factory = "Packages/Core/DesignSystem/Sources/DesignSystem/Components/BarItems.swift"
+
+    @Test func noNewCustomViewBarItem() throws {
+        try expectWithinDebt(#"UIBarButtonItem\(customView:"#, debt: Self.customViewDebt, exempt: [Self.factory])
+    }
+
+    @Test func noNewBarButtonDrawingItsOwnGlass() throws {
+        // The factory's `container(…, ownBackground:)` is the one place it is
+        // set — for a control that draws its own capsule (R6).
+        try expectWithinDebt(#"hidesSharedBackground\s*=\s*true"#, debt: Self.ownGlassDebt, exempt: [Self.factory])
+    }
+
+    @Test func noNewIconButtonForABar() throws {
+        try expectWithinDebt(#"SnapNavControls\.make"#, debt: Self.iconButtonDebt)
+    }
+
+    @Test func noNewHandMadeBarMorph() throws {
+        try expectWithinDebt(#"morphNavigationBar\("#, debt: Self.barMorphDebt)
+    }
+
+    /// The paged tab roots' selector is in the navigation bar (#2337): no
+    /// new `SelectorAccessory` outside the profile's hero page.
+    @Test func theSelectorAccessoryStaysTheProfiles() throws {
+        try expectWithinDebt(#"SelectorAccessory\(strip:"#, debt: Self.selectorAccessoryHosts)
+    }
+
+    @Test func aKeptBarIsHandedItsItemsOnlyThroughItsStore() throws {
+        let write = try Regex(
+            #"set(ToolbarItems|LeftBarButtonItems|RightBarButtonItems|OwnTrailingBarItems)\(|\b(toolbarItems|leftBarButtonItems|rightBarButtonItems)\s*=(?!=)"#
+        )
+        var problems: [String] = []
+        for path in Self.keptBarHosts.sorted() {
+            let url = Self.root.appendingPathComponent(path)
+            let text = try String(contentsOf: url, encoding: .utf8)
+            // The store may be declared in the host's main file (an
+            // extension can't hold stored properties); what this file must
+            // do is hand its bar over through one.
+            #expect(text.range(of: #"Store\.apply\("#, options: .regularExpression) != nil,
+                    "\(path) no longer hands its bar over through a BarItemStore")
+            let code = text.split(separator: "\n").filter {
+                !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//")
+            }
+            for line in code where line.contains(write) {
+                problems.append("\(path): \(line.trimmingCharacters(in: .whitespaces)) — apply it through the store")
+            }
+        }
+        #expect(problems.isEmpty, "\(problems.joined(separator: "\n"))")
+    }
+
+    // MARK: - The scan
+
+    /// The repository's root.
+    private static var root: URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent() // DesignSystemTests
+            .deletingLastPathComponent() // Tests
+            .deletingLastPathComponent() // DesignSystem
+            .deletingLastPathComponent() // Core
+            .deletingLastPathComponent() // Packages
+            .deletingLastPathComponent() // repository root
+            .resolvingSymlinksInPath()
+    }
+
+    private func expectWithinDebt(_ pattern: String, debt: [String: Int], exempt: Set<String> = []) throws {
+        let regex = try Regex(pattern)
+        let found = try Self.counts(of: regex).filter { !exempt.contains($0.key) }
+        var problems: [String] = []
+        for (path, count) in found.sorted(by: { $0.key < $1.key }) {
+            let allowed = debt[path] ?? 0
+            if count > allowed {
+                problems.append("\(path): \(count) (allowed \(allowed)) — build the item through BarItems")
+            } else if count < allowed {
+                problems.append("\(path): \(count), baseline \(allowed) — lower the baseline")
+            }
+        }
+        for (path, allowed) in debt where found[path] == nil {
+            problems.append("\(path): 0, baseline \(allowed) — remove it from the baseline")
+        }
+        #expect(problems.isEmpty, "\(problems.joined(separator: "\n"))")
+    }
+
+    /// Every Swift source under `App/` and `Packages/` (tests left out), by
+    /// repository-relative path, with how often `regex` occurs in it.
+    private static func counts(of regex: Regex<AnyRegexOutput>) throws -> [String: Int] {
+        let root = Self.root
+        var result: [String: Int] = [:]
+        for folder in ["App", "Packages"] {
+            let base = root.appendingPathComponent(folder)
+            guard let enumerator = FileManager.default.enumerator(at: base, includingPropertiesForKeys: nil) else {
+                continue
+            }
+            for case let url as URL in enumerator where url.pathExtension == "swift" {
+                let path = url.resolvingSymlinksInPath().path
+                guard !path.contains("/Tests/"), !path.contains("/.build/") else { continue }
+                let text = try String(contentsOf: url, encoding: .utf8)
+                let count = text.matches(of: regex).count
+                guard count > 0 else { continue }
+                guard path.hasPrefix(root.path + "/") else { continue }
+                let relative = String(path.dropFirst(root.path.count + 1))
+                result[relative] = count
+            }
+        }
+        return result
+    }
+}

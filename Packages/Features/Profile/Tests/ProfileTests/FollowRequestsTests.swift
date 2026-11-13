@@ -6,6 +6,7 @@ import CoreNetworkingMocks
 import Foundation
 import Testing
 @testable import Profile
+@testable import ProfileSettings
 
 /// Follow requests for private profiles (#396, backend #655), end to end over
 /// the mock BFF: the requester's Follow → Requested → withdraw, and the

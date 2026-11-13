@@ -15,7 +15,7 @@ import UIKit
 /// # What it is, and what it borrows
 ///
 /// A `ForYouGridPage` in its `.grid` style over For You's own corpus — the
-/// media-only state (`ForYouViewModel.Snapshot.media`), the same posts the
+/// media-only state (`ForYouSnapshot.media`), the same posts the
 /// tab's chunks draw from — driven by `ForYouViewController`, which forwards
 /// each snapshot, the paging spinner and the refresh while this screen is on
 /// the stack. One view model, so the gallery and the list page the same
@@ -95,7 +95,7 @@ final class DiscoverGalleryViewController: UIViewController {
     /// see `GridFeedContinuation`.
     /// The vertical feed's own list (#1343): For You's, so the gallery and
     /// the section open alike. Nil keeps the gallery's own window.
-    var ownFeed: ForYouOwnFeed?
+    var ownFeed: (any OwnFeedPaging)?
 
     func postIDs(after id: PostID) async -> [PostID]? {
         await feedContinuation.postIDs(after: id)
@@ -143,7 +143,7 @@ final class DiscoverGalleryViewController: UIViewController {
 
     // MARK: - Content, from the host
 
-    func render(_ state: ForYouViewModel.PageState) {
+    func render(_ state: ForYouPageState) {
         loadViewIfNeeded()
         page.render(state)
         feedContinuation.answered()
@@ -245,7 +245,7 @@ final class DiscoverGalleryViewController: UIViewController {
         // One opening at a time — checked BEFORE the handoff begins, which a
         // refused second tap would otherwise leave open on another tile.
         guard posts.indices.contains(index), let openPost,
-              navigationController.map({ FeedFeatureBuilder.canOpen(from: self, on: $0) }) ?? true
+              navigationController.map({ PostOpening.canOpen(from: self, on: $0) }) ?? true
         else { return }
         let tapped = posts[index]
         // ⚠️ ITS OWN LIST (#1343, the owner 2026-10-17): the tapped post, then

@@ -2,6 +2,7 @@ import CoreModels
 import Testing
 import UIKit
 @testable import Profile
+@testable import ProfileSettings
 
 /// The relationships search touches the tab bar only where the screen owns it
 /// (#782).

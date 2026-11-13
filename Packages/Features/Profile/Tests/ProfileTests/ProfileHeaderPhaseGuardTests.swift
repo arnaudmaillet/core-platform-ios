@@ -13,7 +13,8 @@ struct ProfileHeaderPhaseGuardTests {
             .deletingLastPathComponent() // ProfileTests
             .deletingLastPathComponent() // Tests
             .deletingLastPathComponent() // Profile
-            .appendingPathComponent("Sources/Profile")
+            // Both targets: the profile's screens and ProfileSettings (#2382).
+            .appendingPathComponent("Sources")
     }
 
     static func drivesTheHeaderByHand(_ text: String) -> Bool {

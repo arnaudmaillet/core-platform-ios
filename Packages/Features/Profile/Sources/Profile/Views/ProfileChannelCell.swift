@@ -2,6 +2,7 @@ import CoreModels
 import DesignSystem
 import MediaCore
 import PostGrid
+import ProfileSettings
 import UIKit
 
 /// A profile's Channels row's words (#2232), each in one place.

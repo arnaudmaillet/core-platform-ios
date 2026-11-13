@@ -13,16 +13,21 @@ import UIKit
 /// - **Position** (2D, free): `card.center` is set directly on every pan
 ///   event — horizontal 1:1, vertical and back-drag through a rubber-band
 ///   curve — so the card floats under the finger with zero lag.
-/// - **Morph** (progress-driven): the card's size and radius interpolate
-///   toward the rect it will land on, and dim and presenter depth are pure
-///   functions of `translation.x / width`. The 0.95 detach dip fires as a
-///   real spring at `.began` — instant, independent of drag distance.
+/// - **Morph** (progress-driven): the card's size and radius, the dim, the
+///   presenter's depth, the destination and UIKit's percent are all pure
+///   functions of ONE eased shrink (`grabEase`) of `translation / span`.
+///   Nothing happens at `.began`: the card is the page, at its size, until
+///   the finger travels (#2362 removed the 0.95 detach dip).
 ///
 /// Because the drag phase sets *model* values with no animation in flight,
 /// release simply springs from the card's exact current 2D coordinate to
 /// `poseAtSource` (commit: the same clip-morph home the button dismiss flies)
 /// or `poseAsPage` (cancel), seeding the spring with the gesture's release
 /// velocity so the card is visibly "caught".
+///
+/// A cancel keeps the transition interactive until its spring has settled,
+/// and a grab during that spring catches the card where it is
+/// (`catchSettlingCard`, #2362) — the same transition, carried on.
 ///
 /// The grab is armed per AXIS (`ZoomDismissAxis`): rightward, downward, or
 /// both, chosen by the owner at attach time. The axis is picked per gesture
@@ -75,41 +80,69 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
     /// reads the same function, there is nothing left to correct when the spring
     /// takes over.
     private var stagedLanding: CGRect = .zero
-    /// When the detach dip is due to have landed.
+
+    // ⚠️ NO DETACH DIP (#2362, the owner 2026-11-12). The grab used to spring
+    // the card to 0.95 in 0.18 s at `.began`, before the finger had travelled,
+    // and then had to hand the scale channel back to the drag mid-spring
+    // (a deadline, a "yield" on the first travel, the presented bounds adopted
+    // as the model). Instagram's Explore post has no such dip, and ours was
+    // the zoom out at every grab and the jump at every grab / let go / grab
+    // again. With it went all of that hand-over: the scale channel is set
+    // directly on every event, from the first.
+
+    /// A cancel's spring is carrying the card home and the transition is still
+    /// interactive: a grab now catches the card (`catchSettlingCard`).
+    private(set) var isCancelSettling = false
+    /// Bumped by every release and every catch, so a settle watch that belongs
+    /// to a release a re-grab has since caught tears nothing down.
+    private var releaseGeneration = 0
+    /// What the current grab continues from — `.none` for a grab from rest.
+    private var grabCatch = ZoomGrabCatch.none
+    /// The re-grab pan's own translation at its `.began`, which is where the
+    /// caught pose stands: the drag continues from there without the pan's
+    /// slop as a step.
+    private var catchPanTranslation: CGPoint = .zero
+    /// The pan a re-grab arrives on. It lives on the release's touch shield,
+    /// which covers the feed (and its own pan) for the whole release.
+    private weak var regrabPan: UIPanGestureRecognizer?
+    /// The last percent told to UIKit, which holds it there through a
+    /// cancel's spring.
+    private var reportedPercent: CGFloat = 0
+    /// What UIKit was holding at a catch, minus what the caught shrink would
+    /// report — owed the same way the shrink's own gap is
+    /// (`ZoomGrabCatch.weight`), so the bars' alongside animations (the
+    /// footer's fade) do not step at a catch either.
+    private var catchPercentOffset: CGFloat = 0
+
+    /// How far the held card has shrunk for a drag progress: 0 at the page,
+    /// 1 at `minimumGrabScale` — the ONE curve every channel of the drag reads
+    /// (size, corners, dim, presenter depth, destination, UIKit's percent).
     ///
-    /// A deadline rather than a flag, because the dip no longer *blocks* the
-    /// scale channel — it shares it. Every pan event inside the window
-    /// re-targets the dip at the live curve over the time the dip has left, so
-    /// the animation converges to zero duration exactly as the window closes
-    /// and the handoff to direct sets is continuous by construction.
-    private var detachDeadline: CFTimeInterval = 0
-    private var isDetachSettling: Bool { CACurrentMediaTime() < detachDeadline && !hasYieldedDip }
+    /// Eased (#2362): `progress ^ grabShrinkExponent`, flat at the start so a
+    /// grab first just carries the page, 0.25 at half the span (a scale of
+    /// 0.9), the floor only at the full span.
+    nonisolated static func grabEase(at progress: CGFloat) -> CGFloat {
+        let clamped = min(max(progress, 0), 1)
+        return pow(clamped, ZoomFlight.grabShrinkExponent)
+    }
 
-    /// Set the moment the finger travels, and never unset for the rest of the
-    /// grab — see the hand-over in `updateDrag`.
-    private var hasYieldedDip = false
-    /// The last translation seen, so a pan event can tell a resting thumb from
-    /// a travelling one. A thumb at rest jitters well under a point; a real
-    /// drag clears this in a single frame.
-    private var lastDragTranslation: CGPoint?
-    private static let dipYieldsAboveTravel: CGFloat = 0.5
+    /// The card's scale for a shrink: 1 at none, `minimumGrabScale` at the
+    /// whole — and never below it. A negative shrink (a cancel spring's
+    /// overshoot, caught) reads above 1.
+    nonisolated static func grabScale(forEase ease: CGFloat) -> CGFloat {
+        max(1 - (1 - ZoomFlight.minimumGrabScale) * ease, ZoomFlight.minimumGrabScale)
+    }
 
-    /// How long the detach dip takes to settle.
-    private static let detachDuration: TimeInterval = 0.18
+    /// `grabScale(forEase:)` run backwards — what shrink a presented scale is.
+    nonisolated static func grabEase(forScale scale: CGFloat) -> CGFloat {
+        (1 - scale) / (1 - ZoomFlight.minimumGrabScale)
+    }
 
-    /// The card's scale for a drag progress — the ONE curve, used by the drag
-    /// and by the detach dip alike.
-    ///
-    /// Having the dip animate to a constant while the drag used this function
-    /// is what put a hole in the scale channel: for the dip's whole 180ms the
-    /// finger accumulated progress that nothing applied, and the first ungated
-    /// pan event discharged all of it in a single frame. Measured on a scripted
-    /// grab: the card's height went 830pt to 774pt in one frame, against
-    /// ~5.5pt/frame either side, and the drop grows with drag speed — 252pt at
-    /// 1800pt/s.
-    static func grabScale(at progress: CGFloat) -> CGFloat {
-        let span = ZoomFlight.detachScale - ZoomFlight.minimumGrabScale
-        return max(ZoomFlight.detachScale - span * progress, ZoomFlight.minimumGrabScale)
+    /// The card's scale for a drag progress. Having two definitions of this
+    /// (the dip's and the drag's) once put a 56pt hole in the scale channel;
+    /// there is one, and the tests pin its shape.
+    nonisolated static func grabScale(at progress: CGFloat) -> CGFloat {
+        grabScale(forEase: grabEase(at: progress))
     }
     /// Set when this grab's teardown has restored (or is done with) the
     /// destination, so the staged frame-0 hide — which waits on a display-link
@@ -203,8 +236,14 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         let translation = gesture.translation(in: view)
         switch gesture.state {
         case .began:
+            if gesture === regrabPan {
+                // A grab during the cancel spring: the card is caught where
+                // it is and this drag carries on from there (#2362).
+                catchSettlingCard(panTranslation: translation)
+                return
+            }
             // Direction was vetted by gestureRecognizerShouldBegin — claim
-            // immediately so the card detaches under the finger at frame 0.
+            // immediately so the card follows the finger from frame 0.
             beginGrab()
         case .changed:
             updateDrag(translation: translation, in: view)
@@ -243,9 +282,9 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
     // MARK: - UIViewControllerInteractiveTransitioning
 
     /// Stages the same flight the non-interactive animator flies — card,
-    /// shadow, dim, receded map — then fires the detach dip and hands control
-    /// to the pan events. No transition animation is started: the drag phase
-    /// owns the card frame-by-frame.
+    /// shadow, dim, receded map — at the page's own pose, and hands control to
+    /// the pan events. No animation is started, at staging or at `.began`:
+    /// the drag phase owns the card frame-by-frame.
     func startInteractiveTransition(_ context: any UIViewControllerContextTransitioning) {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
@@ -412,50 +451,19 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
             progress: 0, card: pageFrame, cornerRadius: screenRadius, isSettling: false
         ))
 
-        // The detach: a real spring, not a scrubbed keyframe — it registers
-        // the instant the grab starts, however slowly the finger then moves.
-        // It animates bounds/radius/subviews only; position stays on the live
-        // channel, so pan events keep landing during the settle.
-        //
-        // Deferred one runloop turn, deliberately: a navigation controller
-        // *defers* interactive-transition start and runs this method inside
-        // setup machinery where `UIView.animate` blocks apply without
-        // animating — the dip silently became an instant jump under the push
-        // pivot. One hop later the scope is a normal animation context. (Not
-        // a UIViewPropertyAnimator: its tracked animations entangled the
-        // release spring's completion under the transition, freezing it.)
-        detachDeadline = 0
-        hasYieldedDip = false
-        lastDragTranslation = nil
-        //
-        // ⚠️ AND RE-ASKED ON ARRIVAL: IS THIS STILL THE GRAB IT WAS FOR? The
-        // hop is a turn in which touch events can land — a flick whose `.ended`
-        // queued behind this staging, or a system gesture cancelling the pan —
-        // and `releaseGrab` then reports the outcome and starts the release
-        // spring. A dip arriving after that re-posed the card with
-        // `.beginFromCurrentState` over the release, and told the destination
-        // "progress 0, not settling" after it had been told the outcome: card
-        // and page pulled apart for the rest of the landing. Same rule as the
-        // content hide above (`hasAbandonedContentHide`).
-        DispatchQueue.main.async { [weak self] in
-            guard let self, self.isInteracting, self.flight?.card === flight.card else { return }
-            self.detachDeadline = CACurrentMediaTime() + Self.detachDuration
-            // Progress is still ~0 one runloop turn in, so this is the same dip
-            // it always was; pan events re-aim it from here.
-            self.springDetach(flight, to: Self.grabScale(at: 0), progress: 0)
-        }
+        // ⚠️ AND NOTHING ELSE AT THE GRAB (#2362). The detach dip that sprang
+        // the card to 0.95 here, one runloop turn later, is gone: the card is
+        // the page — its size, the display's corners — until the finger
+        // travels, and every channel is set directly by the pan events.
+        isCancelSettling = false
+        grabCatch = .none
+        catchPanTranslation = .zero
+        catchPercentOffset = 0
+        reportedPercent = 0
         context.updateInteractiveTransition(0)
     }
 
-    /// Springs the card's scale toward `scale` over whatever the dip has left.
-    ///
-    /// The shrinking duration is the point. A fixed one re-issued per pan event
-    /// behaves like a lag filter — the card trails the finger by the spring's
-    /// time constant, and the trailing error has to be discharged somewhere,
-    /// which is the very jump this replaces. Winding the duration down to the
-    /// deadline makes the animation vanish into a direct set exactly when the
-    /// window closes, so there is nothing left to discharge.
-    /// The card's corner for a drag progress: the display's own, scaled with
+    /// The card's corner for a shrink: the display's own, scaled with
     /// the card. One curve, so the card and anything drawing beside it can
     /// never be rounded differently.
     ///
@@ -474,47 +482,40 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
     /// reveal reached the same rule from the other end — see
     /// `RevealStage.heldRadius` — after a viewer reported its window turning
     /// into a capsule halfway through a drag that had decided nothing.
-    private static func grabCornerRadius(at progress: CGFloat, screen: CGFloat) -> CGFloat {
-        screen * grabScale(at: progress)
+    private static func grabCornerRadius(forEase ease: CGFloat, screen: CGFloat) -> CGFloat {
+        screen * grabScale(forEase: ease)
     }
 
-    /// Clears the dip's in-flight animations across the card and everything
-    /// autoresized under it, so the hand-over leaves no residue.
+    /// Clears a cancel spring's in-flight animations across the card and
+    /// everything autoresized under it, so a catch leaves no residue — a
+    /// UIView animation is not cancelled by writing its property, and an
+    /// additive one would keep adding what it had left onto the caught pose.
     ///
     /// The whole subtree, because the card's live surface and its host are
     /// sized by autoresizing: they carry their own copy of every `bounds.size`
     /// animation the card was given, and leaving those behind would keep the
     /// picture interpolating under a frame that has stopped.
-    private static func stopStackedAnimations(on layer: CALayer) {
-        layer.removeAllAnimations()
-        layer.sublayers?.forEach(stopStackedAnimations)
+    ///
+    /// Except the card's own `transform`: no pose writes it, so what rides it
+    /// is the give easing out (`GrabDeformation.release`), which a catch has
+    /// no reason to cut short.
+    static func stopSpringAnimations(on layer: CALayer, keepingTransform: Bool = true) {
+        for key in layer.animationKeys() ?? [] {
+            let path = (layer.animation(forKey: key) as? CAPropertyAnimation)?.keyPath
+            if keepingTransform, path == "transform" { continue }
+            layer.removeAnimation(forKey: key)
+        }
+        layer.sublayers?.forEach { stopSpringAnimations(on: $0, keepingTransform: false) }
     }
 
-    private func springDetach(_ flight: ZoomFlight, to scale: CGFloat, progress: CGFloat) {
-        let remaining = max(detachDeadline - CACurrentMediaTime(), 0)
-        let radius = Self.grabCornerRadius(at: progress, screen: screenRadius)
-        UIView.animate(
-            withDuration: remaining, delay: 0, usingSpringWithDamping: 0.8,
-            initialSpringVelocity: 0.4, options: [.allowUserInteraction, .beginFromCurrentState]
-        ) {
-            flight.poseFloating(scale: scale, cornerRadius: radius)
-            // ⚠️ THE DESTINATION RIDES THE DIP TOO, from inside the block.
-            //
-            // The dip is the one stretch of a grab where the card is ANIMATING
-            // rather than tracking: it springs to the detached scale on its own
-            // curve while the finger may not have moved at all. A destination
-            // told the card's model frame jumped straight to the target and sat
-            // there while the card was still on its way — the interface and the
-            // media visibly out of step at the start of every grab, which is
-            // what "they are not synchronised" was.
-            //
-            // Told the same target from in here, UIKit interpolates its answer
-            // on the dip's own spring. Same block, same curve, nothing to keep
-            // in step by hand.
-            self.destination?.setZoomDismissState(ZoomDismissState(
-                progress: progress, card: flight.card.frame,
-                cornerRadius: radius, isSettling: false
-            ))
+    /// Removes the animations on `layer` (only — not its sublayers) whose key
+    /// path is `keyPath`: what a catch takes off the dim and the presenter,
+    /// which may carry animations that are not the release's.
+    private static func stopAnimations(on layer: CALayer?, keyPath: String) {
+        guard let layer else { return }
+        for key in layer.animationKeys() ?? []
+        where (layer.animation(forKey: key) as? CAPropertyAnimation)?.keyPath == keyPath {
+            layer.removeAnimation(forKey: key)
         }
     }
 
@@ -542,8 +543,25 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         return rect
     }
 
-    private func updateDrag(translation: CGPoint, in view: UIView) {
-        guard isInteracting, let flight, let context else { return }
+    /// The drag translation a pan's own translation stands for: the pan's,
+    /// for a grab from rest; the caught pose's plus whatever the re-grab pan
+    /// has travelled since its `.began`, for a catch.
+    private func dragTranslation(fromPan translation: CGPoint) -> CGPoint {
+        CGPoint(
+            x: grabCatch.translation.x + translation.x - catchPanTranslation.x,
+            y: grabCatch.translation.y + translation.y - catchPanTranslation.y
+        )
+    }
+
+    /// Internal (not private) so a test can drive the drag without a finger.
+    func updateDrag(translation: CGPoint, in view: UIView) {
+        guard isInteracting, flight != nil, context != nil else { return }
+        applyDrag(dragTranslation(fromPan: translation), in: view)
+    }
+
+    /// Poses every channel of the held grab for a drag translation.
+    private func applyDrag(_ translation: CGPoint, in view: UIView) {
+        guard let flight, let context else { return }
         let progress = ZoomTransitionGeometry.dismissProgress(
             translation: activeAxis.along(translation),
             span: activeAxis.span(of: view.bounds.size)
@@ -582,6 +600,13 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         // is the motion the viewer sees.
         deformation?.track(translation: offset)
 
+        // ⚠️ ONE SHRINK FOR EVERY CHANNEL (#2362). Eased (`grabEase`): flat at
+        // the start, so a grab first just carries the page — no zoom out at
+        // the grab, none over the first ~60pt —, 0.9 at half the span, the
+        // floor only at the full span. A re-grab continues from the shrink it
+        // caught (`ZoomGrabCatch.ease`), which is the curve's for a grab from
+        // rest.
+        let shrink = grabCatch.ease(at: progress)
         // Scale channel: the card shrinks but keeps the PAGE's aspect ratio the
         // whole time it is held.
         //
@@ -592,11 +617,7 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         // aspect morph belongs to the release, which is when the outcome is
         // known: `poseAtSource(at:)` takes the card from this pose to the
         // tile's rect on the landing spring.
-        //
-        // Applied on EVERY event, dip or no dip. While the dip is settling the
-        // curve is handed to it as a moving target rather than skipped, so the
-        // finger's travel is never banked up to be released in one frame.
-        let scale = Self.grabScale(at: progress)
+        let scale = Self.grabScale(forEase: shrink)
         // ⚠️ THE CARD ROUNDS AS IT GOES, rather than snapping at the release.
         //
         // It held the display's radius for the whole drag and jumped to the
@@ -606,57 +627,105 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         // the release inherits the shape the drag already had, and a
         // destination that draws alongside the card can be told the same
         // number instead of guessing it.
-        let radius = Self.grabCornerRadius(at: progress, screen: screenRadius)
-        // ⚠️ THE DIP OWNS THE SCALE ONLY WHILE THE FINGER IS STILL, and its own
-        // note says why: it "springs to the detached scale on its own curve
-        // WHILE THE FINGER MAY NOT HAVE MOVED AT ALL". That premise is what
-        // makes an animated scale channel acceptable — nothing else is moving,
-        // so there is nothing for it to be out of step with.
-        //
-        // A finger that IS moving breaks it, and the break is visible. Position
-        // is set directly a few lines below, so the card's centre is exact to
-        // the touch; its SIZE is still on the dip's spring. Measured with
-        // `-grab-geometry`, the presented width trailed the model by up to 22pt
-        // through the dip. The card's live media is an aspect-fill of those
-        // bounds and a 1280x720 clip in a portrait card is magnified ~3.9x, so
-        // 22pt of size lag is ~85pt of picture arriving late against a frame
-        // that is tracking perfectly. Reported as the video following the drag
-        // a beat behind, and that is exactly what it is.
-        //
-        // So the dip hands the channel back the moment the drag travels, and
-        // ⚠️ IT ADOPTS WHAT IS ON SCREEN AS IT GOES. Simply switching to direct
-        // posing leaves the spring running — a UIView animation is not cancelled
-        // by writing its property — and the card would keep interpolating
-        // toward a target nothing is aiming at any more. Taking the presented
-        // bounds as the model first makes the hand-over a change of driver
-        // rather than of value: no jump, no residue.
-        let travel = lastDragTranslation.map {
-            hypot(translation.x - $0.x, translation.y - $0.y)
-        } ?? 0
-        lastDragTranslation = translation
-        if isDetachSettling, travel > Self.dipYieldsAboveTravel {
-            if let presented = flight.card.layer.presentation()?.bounds {
-                Self.stopStackedAnimations(on: flight.card.layer)
-                flight.card.bounds = presented
-            }
-            hasYieldedDip = true
-        }
-        if isDetachSettling {
-            springDetach(flight, to: scale, progress: progress)
-        } else {
-            flight.poseFloating(scale: scale, cornerRadius: radius)
-            // Outside the dip the card is not animating, so its model frame IS
-            // what it is showing and a direct set is exact. See `springDetach`
-            // for the branch where that stops being true.
-            destination?.setZoomDismissState(ZoomDismissState(
-                progress: progress, card: flight.card.frame,
-                cornerRadius: radius, isSettling: false
-            ))
-        }
-        dim?.alpha = 1 - progress
-        let mapScale = ZoomFlight.presenterDepthScale + (1 - ZoomFlight.presenterDepthScale) * progress
+        let radius = Self.grabCornerRadius(forEase: shrink, screen: screenRadius)
+        // Set directly, on every event, from the first: nothing in a held
+        // grab is on a spring, so the card's model frame IS what it shows and
+        // the destination can be told it exactly.
+        flight.poseFloating(scale: scale, cornerRadius: radius)
+        let shown = min(max(shrink, 0), 1)
+        destination?.setZoomDismissState(ZoomDismissState(
+            progress: shown, card: flight.card.frame,
+            cornerRadius: radius, isSettling: false
+        ))
+        // The dim, the presenter's depth and UIKit's percent — which scrubs
+        // the bars' alongside animations, the footer's fade among them — ride
+        // the same shrink: nothing changes at touch-down that a short drag
+        // has not earned, and nothing parts from the card.
+        dim?.alpha = 1 - shrink
+        let mapScale = ZoomFlight.presenterDepthScale + (1 - ZoomFlight.presenterDepthScale) * shrink
         presentingView?.transform = CGAffineTransform(scaleX: mapScale, y: mapScale)
-        context.updateInteractiveTransition(progress)
+        let percent = min(max(shown + catchPercentOffset * grabCatch.weight(at: progress), 0), 1)
+        reportedPercent = percent
+        context.updateInteractiveTransition(percent)
+    }
+
+    // MARK: - Re-grab
+
+    /// A grab during the cancel spring: catches the card where it IS — its
+    /// presented pose, scale and position — and carries the drag on from
+    /// there, in the same transition (#2362).
+    ///
+    /// ⚠️ WHY THE SAME TRANSITION. UIKit's interactive transition cannot be
+    /// re-entered once it has been told the outcome: a cancelled pop has to
+    /// complete before another can begin, and a second pop begun in the same
+    /// turn as the first one's completion is UIKit bookkeeping nobody here can
+    /// vouch for. So a cancel is no longer reported at the release
+    /// (`releaseGrab`): the transition stays interactive while the spring
+    /// carries the card home, and only when the card has settled is the
+    /// cancel reported and the stage torn down. A grab in between simply
+    /// resumes driving it — no teardown, no second staging, no surface handed
+    /// back and forth, no frame at full screen.
+    ///
+    /// Every channel the spring moves is caught at its presented value and
+    /// stopped there, so the pose on screen does not change at the catch; the
+    /// next pan event moves it from there (`ZoomGrabCatch`).
+    func catchSettlingCard(panTranslation: CGPoint) {
+        guard let flight else { return }
+        let presented = flight.card.layer.presentation()
+        catchSettlingCard(
+            presentedCenter: presented?.position ?? flight.card.center,
+            presentedSize: presented?.bounds.size ?? flight.card.bounds.size,
+            panTranslation: panTranslation
+        )
+    }
+
+    /// `catchSettlingCard(panTranslation:)` with the presented pose handed in
+    /// — internal, so a test can say what the spring was presenting.
+    func catchSettlingCard(presentedCenter: CGPoint, presentedSize: CGSize, panTranslation: CGPoint) {
+        guard isCancelSettling, !isInteracting, let flight, context != nil,
+              let view = pannedView else { return }
+        isCancelSettling = false
+        // The cancel's settle watch is stale from here: its card is in a hand.
+        releaseGeneration += 1
+        isInteracting = true
+        destination?.setContentScrollEnabled(false)
+        // Stop every animation the release spring started, at what it was
+        // presenting: the card's subtree (its give keeps easing out), the
+        // shadow, the dim's opacity and the presenter's depth. The values
+        // themselves are re-set below, by the same pose the drag applies.
+        Self.stopSpringAnimations(on: flight.card.layer)
+        flight.shadow.layer.removeAllAnimations()
+        Self.stopAnimations(on: dim?.layer, keyPath: "opacity")
+        Self.stopAnimations(on: presentingView?.layer, keyPath: "transform")
+        let span = activeAxis.span(of: view.bounds.size)
+        grabCatch = ZoomGrabCatch(
+            offset: CGPoint(x: presentedCenter.x - pageCenter.x, y: presentedCenter.y - pageCenter.y),
+            scale: presentedSize.width / max(flight.pageFrame.width, 1),
+            axis: activeAxis,
+            span: span
+        )
+        catchPanTranslation = panTranslation
+        let caughtShrink = min(max(grabCatch.ease(at: grabCatch.progress), 0), 1)
+        catchPercentOffset = reportedPercent - caughtShrink
+        deformation?.cancel()
+        deformation = GrabDeformation(layer: flight.card.layer)
+        // The pose the spring was presenting, now as the model — the
+        // destination told it as a held state, which drops whatever its own
+        // release animation had left in flight (`ZoomDismissState.isSettling`).
+        applyDrag(grabCatch.translation, in: view)
+        // Exact, not via the band's round trip.
+        flight.card.center = presentedCenter
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-grab-log") {
+            print(String(format: "[grab] %.3f CAUGHT the cancel at scale=%.4f offset=(%.1f, %.1f) progress=%.3f",
+                         CACurrentMediaTime(), presentedSize.width / max(flight.pageFrame.width, 1),
+                         presentedCenter.x - pageCenter.x, presentedCenter.y - pageCenter.y,
+                         grabCatch.progress))
+        }
+        // The cycle that was caught prints as one; the re-grab gets its own.
+        GrabFramePacer.shared.stop(outcome: "caught")
+        GrabFramePacer.shared.start()
+        #endif
     }
 
     // MARK: - Release
@@ -711,17 +780,32 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         // underneath: a tile tap, or a scroll or pan that moved the very
         // landing rect this release just froze. Topmost in the container,
         // removed when the transition finishes.
-        let shield = UIView(frame: context.containerView.bounds)
-        shield.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        context.containerView.addSubview(shield)
-        releaseShield = shield
+        //
+        // ⚠️ ONE SHIELD PER TRANSITION, carrying the RE-GRAB PAN (#2362). A
+        // grab during a cancel's spring lands on the shield, not on the feed
+        // it covers, so the shield hears it (`catchSettlingCard`); the pan's
+        // begin gate opens only while a cancel is settling, so a commit's
+        // spring stays untouchable. A re-grab that is released again reuses
+        // the shield it is tracking on: removing the view under a live
+        // recognizer would cancel the very gesture being released.
+        if releaseShield == nil {
+            let shield = UIView(frame: context.containerView.bounds)
+            shield.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            let regrab = UIPanGestureRecognizer(target: self, action: #selector(handlePan))
+            regrab.maximumNumberOfTouches = 1
+            regrab.delegate = self
+            shield.addGestureRecognizer(regrab)
+            regrabPan = regrab
+            context.containerView.addSubview(shield)
+            releaseShield = shield
+        }
         // Let go with the finger: the give eases out under the release spring.
         deformation?.release()
         deformation = nil
         destination?.setContentScrollEnabled(true)
 
         let progress = ZoomTransitionGeometry.dismissProgress(
-            translation: activeAxis.along(translation),
+            translation: activeAxis.along(dragTranslation(fromPan: translation)),
             span: activeAxis.span(of: view.bounds.size)
         )
         // Thresholds come from the shared release contract (CoreNavigation),
@@ -745,8 +829,21 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         // alongside blocks — the bars' glass coming back, ~25 ms — in the
         // release's frame, the 61–65 ms hitch of most grabs. A turn later
         // the release spring has its first frame. Still the same transition
-        // (checked by identity), still long before the spring ends; a cancel
-        // stays immediate.
+        // (checked by identity), still long before the spring ends.
+        //
+        // ⚠️ A CANCEL IS REPORTED WHEN ITS SPRING HAS SETTLED (#2362), in the
+        // settle watch below, right before the teardown. Until then the
+        // transition stays interactive — UIKit holds its percent where the
+        // drag left it, which with the eased shrink is little for a drag
+        // released short — so a grab during the spring can carry the same
+        // transition on (`catchSettlingCard`). Reported here, UIKit could not
+        // be re-entered before the completion, and a quick grab again waited
+        // for the card to get home and then started over from full screen.
+        // (The freeze recorded above came from RAMPING the percent during the
+        // spring; nothing is ramped here, and the teardown follows the card's
+        // presentation, not a completion block.)
+        releaseGeneration += 1
+        let generation = releaseGeneration
         if commit {
             let releasing = context
             DispatchQueue.main.async { [weak self] in
@@ -754,7 +851,7 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
                 current.finishInteractiveTransition()
             }
         } else {
-            context.cancelInteractiveTransition()
+            isCancelSettling = true
         }
 
         // Read once more at release, through the same function the drag used, so
@@ -856,13 +953,30 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
             // Strong, as the reveal grab's (`RevealDismissInteractionController`):
             // this is the only call that completes the transition and lifts
             // the release shield, and the watcher's ceiling bounds the hold.
+            //
+            // Unless a re-grab caught this release (#2362): the card is in a
+            // hand again, and the release that will end it has a watch of its
+            // own.
+            guard self.releaseGeneration == generation, !self.isInteracting else { return }
+            if !commit {
+                self.isCancelSettling = false
+                self.context?.cancelInteractiveTransition()
+            }
             self.finishTransition(cancelled: !commit)
         }
     }
 
+    #if DEBUG
+    /// What a test reads of the live stage.
+    var debugFlightCard: UIView? { flight?.card }
+    var debugPageFrame: CGRect? { flight?.pageFrame }
+    var debugReleaseShield: UIView? { releaseShield }
+    #endif
+
     /// Tears the stage down exactly like the non-interactive animator's
     /// completion, then reports the outcome to UIKit and drops all state.
-    /// (finish/cancelInteractiveTransition was already reported at release.)
+    /// (A commit was reported at release; a cancel, right before this call —
+    /// see `releaseGrab`.)
     /// The release's touch shield — see `releaseGrab`.
     private var releaseShield: UIView?
     /// Whether the committed release faded the card toward an off-screen
@@ -875,6 +989,7 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
     private func finishTransition(cancelled: Bool) {
         releaseShield?.removeFromSuperview()
         releaseShield = nil
+        regrabPan = nil
         defer {
             orientationLease?.release()
             orientationLease = nil
@@ -1003,7 +1118,11 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         context = nil
         flight = nil
         dim = nil
-        detachDeadline = 0
+        isCancelSettling = false
+        grabCatch = .none
+        catchPanTranslation = .zero
+        catchPercentOffset = 0
+        reportedPercent = 0
     }
 
     #if DEBUG
@@ -1064,6 +1183,17 @@ extension ZoomDismissInteractionController: UIGestureRecognizerDelegate {
     /// #2056), so the paging the feed owns never sees a competitor — and when
     /// it does begin, the intent is unambiguous enough to claim on the spot.
     func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        // ⚠️ THE RE-GRAB (#2362) has a gate of its own: it is not a new
+        // dismissal but the same one carried on, so the questions below —
+        // which post, which landing, which axis, which tenant — were all
+        // answered by the grab whose cancel it catches. It begins in ANY
+        // direction (the card is already off the page; a hand pulling it back
+        // toward the screen is holding it too), and only while a cancel is
+        // still settling: a commit's spring stays untouchable.
+        if gestureRecognizer === regrabPan {
+            let open = isCancelSettling && !isInteracting && context != nil && flight != nil
+            return grabLog("RE-GRAB during the cancel", open)
+        }
         // `context == nil` also gates on the PREVIOUS grab's transition having
         // fully completed — overlapping lifecycles must never share state.
         guard !isInteracting, context == nil,

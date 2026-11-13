@@ -16,6 +16,7 @@ import CoreNetworkingMocks
 import CoreRealtime
 import CoreRealtimeMocks
 import CoreStorage
+import DebugTools
 import DesignSystem
 import EmoteKit
 import EntityStore

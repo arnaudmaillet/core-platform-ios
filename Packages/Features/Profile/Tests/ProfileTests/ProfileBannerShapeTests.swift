@@ -5,6 +5,7 @@ import Testing
 import UIKit
 import HeroPage
 @testable import Profile
+@testable import ProfileSettings
 
 /// The two banner shapes as redesigned on 5 October 2026:
 /// - a POSTER (a cover, the vertical shape) runs down 80% of the screen, and

@@ -1,6 +1,7 @@
 import DesignSystem
 import Testing
 @testable import Profile
+@testable import ProfileSettings
 
 /// The age read behind Family and Teens and What You See (#799): a failed
 /// read used to answer "adult" — the adult wording on Family and Teens, and

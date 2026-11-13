@@ -526,11 +526,12 @@ struct InboxSystemSearchTests {
     }
 
     /// **The search alone on the trailing side (#2336).** The shell's
-    /// Messages header is `[bell] …` over the stacked field: no balance, at
-    /// rest or with the search open — the inbox has no heart, no spend and no
-    /// claim. Composed the shell's way (the bell injected, nothing trailing),
-    /// the bar's trailing group stays empty through an open and a close, and
-    /// the search is the header's one control besides the bell.
+    /// Messages header is `[bell][selector] …` over the stacked field (#2337):
+    /// no balance, at rest or with the search open — the inbox has no heart,
+    /// no spend and no claim. Composed the shell's way (the bell injected,
+    /// nothing trailing), the bar's trailing group stays empty through an
+    /// open and a close, and the leading group keeps the bell and the
+    /// selector.
     @Test func theSearchStandsAloneWithNoBalanceAtRestOrOpen() throws {
         let screen = searchableInbox()
         let bell = UIBarButtonItem(customView: UIView())
@@ -539,8 +540,10 @@ struct InboxSystemSearchTests {
 
         let search = try #require(screen.navigationItem.searchController)
         func assertBellAndSearchAlone(_ moment: String) {
-            #expect(screen.navigationItem.leftBarButtonItems?.count == 1, "\(moment): leading group")
+            #expect(screen.navigationItem.leftBarButtonItems?.count == 3, "\(moment): leading group")
             #expect(screen.navigationItem.leftBarButtonItems?.first === bell, "\(moment): the bell left the lead")
+            #expect(screen.navigationItem.leftBarButtonItems?.last?.identifier
+                == MessagesInboxViewController.selectorItemID, "\(moment): the selector left the bar")
             #expect(screen.navigationItem.rightBarButtonItems?.isEmpty ?? true,
                     "\(moment): a trailing item beside the search")
             #expect(screen.navigationItem.searchController === search, "\(moment): the search left the bar")

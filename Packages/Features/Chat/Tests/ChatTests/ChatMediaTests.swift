@@ -7,6 +7,7 @@ import CoreNetworkingMocks
 import FeedInterface
 import Foundation
 import MediaCore
+import TestSupport
 import Testing
 import UIKit
 @testable import Chat
@@ -169,14 +170,6 @@ struct ChatMediaTests {
     }
 
     // MARK: - The thread
-
-    private func settle(_ condition: () -> Bool) async -> Bool {
-        for _ in 0..<400 {
-            if condition() { return true }
-            try? await Task.sleep(for: .milliseconds(5))
-        }
-        return condition()
-    }
 
     /// ⚠️ OPTIMISTIC: the bubble is there at once, wearing the picture
     /// picked; a failure turns it into a retry, and the retry delivers it.

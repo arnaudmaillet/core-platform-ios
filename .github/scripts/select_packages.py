@@ -35,22 +35,33 @@ APP_ONLY = ("App/", "UITests/", "core-platform-ios.xcodeproj/", "dev/")
 # generates sources into the packages.
 EVERYTHING = (".github/", "Scripts/", "buf.gen.yaml")
 
-# Median minutes per lane on the hosted runner (first-attempt green runs,
-# 2026-09-29 to 10-01). Only the ORDER matters: lanes are started in matrix
-# order under `max-parallel`, so the longest go first and the short ones fill
-# the gaps at the end. Alphabetical order started Upload (12-13 min) LAST and
-# ran it alone for its whole length, ~7 minutes of tail on a ten-lane run.
-# A package missing here sorts as an average one; the table needs no upkeep to
-# stay correct, only to stay optimal.
+# Median minutes per lane on the hosted runner: the last 15 green develop
+# runs, 2026-11-11 to 11-12, measured for #2370. Only the ORDER matters:
+# lanes are started in matrix order under `max-parallel`, so the longest go
+# first and the short ones fill the gaps at the end. Alphabetical order once
+# started Upload LAST and ran it alone for its whole length; the October
+# table had CoreNavigation at 3 min (12.3 now), so it started last and ended
+# four wide runs in five. A package missing here sorts as an average one; the
+# table needs no upkeep to stay correct, only to stay optimal. Refresh it from
+# `gh run list --workflow CI --branch develop` when lanes drift.
 LANE_MINUTES = {
-    "Upload": 12.6, "Feed": 8.4, "MediaPlayback": 7.8, "Profile": 6.7,
-    "Search": 6.1, "Maps": 6.0, "EmoteKit": 5.8, "PostGrid": 5.6,
-    "MediaPlayback (legacy AVPlayerLayer)": 5.4, "Chat": 5.2,
-    "StickerKit": 4.3, "DesignSystem": 4.2, "Notifications": 3.8, "Auth": 3.6,
-    "CoreRealtime": 3.2, "CoreNetworking": 3.1, "CoreNavigation": 3.0,
-    "MediaCore": 2.4, "CoreStorage": 2.2, "CoreModels": 2.0,
+    "Feed": 15.9, "Upload": 14.7, "Maps": 12.7, "CoreNavigation": 12.3,
+    "Chat": 10.2, "Profile": 10.2, "MediaPlayback": 9.6,
+    "MediaPlayback (legacy AVPlayerLayer)": 8.8, "Search": 8.3,
+    "DesignSystem": 8.1, "EmoteKit": 7.6, "PostGrid": 7.1, "HeroPage": 6.8,
+    "CoreNetworking": 6.2, "Notifications": 6.1, "VoiceKit": 5.6,
+    "StickerKit": 5.6, "Auth": 5.3, "MediaCore": 5.3, "ShareSheet": 4.8,
+    "CacheKit": 4.7, "LocalStore": 3.4, "CoreRealtime": 3.3,
+    "CoreStorage": 3.2, "AuthInterface": 3.2, "EntityStore": 2.9,
+    "CoreModels": 2.6,
 }
 DEFAULT_LANE_MINUTES = 5.0
+
+# The repository's guards read every source and every manifest, so a change
+# anywhere can break one: every run that builds anything runs their lane
+# (#2371). It depends on nothing and takes about a minute, so it sorts last.
+ALWAYS = ("Packages/Tools/RepoGuards",)
+LANE_MINUTES["RepoGuards"] = 1.0
 
 # Lanes split across jobs (#2370): Feed runs ~2,600 tests, about 10 of its 17
 # minutes in execution, and ends most wide runs. `test_shard.py` balances its
@@ -162,17 +173,23 @@ def with_lanes(entry):
 
 
 def batched(small):
-    """Small lanes packed into jobs of about `BATCH_MINUTES` each."""
-    jobs, current, minutes = [], [], 0.0
+    """Small lanes packed into jobs of about `BATCH_MINUTES` each.
+
+    First fit, longest first: each lane joins the first job it still fits in,
+    so a one-minute lane (RepoGuards, on every run) rides along with others
+    instead of paying a job's fixed cost alone.
+    """
+    jobs, loads = [], []
     for e in sorted(small, key=lambda e: -LANE_MINUTES.get(e["label"], DEFAULT_LANE_MINUTES)):
         cost = LANE_MINUTES.get(e["label"], DEFAULT_LANE_MINUTES)
-        if current and minutes + cost > BATCH_MINUTES:
-            jobs.append(current)
-            current, minutes = [], 0.0
-        current.append(e)
-        minutes += cost
-    if current:
-        jobs.append(current)
+        for index, load in enumerate(loads):
+            if load + cost <= BATCH_MINUTES:
+                jobs[index].append(e)
+                loads[index] += cost
+                break
+        else:
+            jobs.append([e])
+            loads.append(cost)
     out = []
     for group in jobs:
         if len(group) == 1:
@@ -264,6 +281,9 @@ def main():
                 chosen = affected & testable
                 names = ", ".join(sorted(pkgs[d]["name"] for d in touched))
                 why = f"touched: {names}"
+
+    if build_app:
+        chosen = set(chosen) | {d for d in ALWAYS if d in testable}
 
     matrix = entries(pkgs, chosen)
     print(f"Reason: {why}")

@@ -1,0 +1,378 @@
+import Connect
+import CoreContracts
+import CoreModels
+import CoreNetworking
+import Foundation
+import PostGrid
+
+/// One page of a gallery corpus, newest first, and where the next one starts.
+public struct GalleryPage: Equatable, Sendable {
+    public let posts: [GalleryPost]
+    /// Nil when the corpus has no more.
+    public let nextPageToken: String?
+
+    public init(posts: [GalleryPost], nextPageToken: String?) {
+        self.posts = posts
+        self.nextPageToken = nextPageToken
+    }
+}
+
+/// What the gallery UI consumes; implemented by `ProfileGalleryRepository`,
+/// faked in view-model tests.
+public protocol ProfileGalleryProviding: Sendable {
+    /// The profile's own published posts (reposts included — split client-side
+    /// on `isRepost`), newest first.
+    func authoredPosts(for profileID: ProfileID) async throws -> [GalleryPost]
+    /// Posts by *others* that mention `handle` — the "Tagged" category.
+    /// Resolved through search.v1 post search, so fleet quality tracks the
+    /// search index; the mock indexes captions exactly.
+    func taggedPosts(for profileID: ProfileID, handle: String) async throws -> [GalleryPost]
+    /// Tiles for a list of post ids the caller already has.
+    ///
+    /// The Saved pile arrives as bare ids — `PostBookmarkStore`'s, filled
+    /// from engagement's `ListSavedPosts` (#837) — and needs the same
+    /// hydration every other tile gets. Order is the caller's: a saved pile
+    /// is ordered by when you saved it.
+    func posts(ids: [String]) async throws -> [GalleryPost]
+    /// A page of the profile's own posts: the first when `pageToken` is nil,
+    /// otherwise the one that token starts (#634).
+    func authoredPage(for profileID: ProfileID, after pageToken: String?) async throws -> GalleryPage
+    /// A page of the posts by others that mention `handle`, newest first.
+    func taggedPage(for profileID: ProfileID, handle: String, after pageToken: String?) async throws -> GalleryPage
+    /// The posts the profile liked, newest first (engagement
+    /// `ListLikesByProfile`, #411): the Liked tab. Empty for anyone but the
+    /// owner while the owner hides the tab — the server's rule.
+    func likedPosts(of profileID: ProfileID) async throws -> [GalleryPost]
+    /// The posts ANOTHER profile saved (engagement `ListSavedPosts`, #837):
+    /// its Saved tab, empty unless its owner shows it. The viewer's own pile
+    /// is `PostBookmarkStore`'s.
+    func savedPosts(of profileID: ProfileID) async throws -> [GalleryPost]
+}
+
+public extension ProfileGalleryProviding {
+    /// Providers that don't page: everything they have, once.
+    package func authoredPage(for profileID: ProfileID, after pageToken: String?) async throws -> GalleryPage {
+        guard pageToken == nil else { return GalleryPage(posts: [], nextPageToken: nil) }
+        return GalleryPage(posts: try await authoredPosts(for: profileID), nextPageToken: nil)
+    }
+
+    package func taggedPage(for profileID: ProfileID, handle: String, after pageToken: String?) async throws -> GalleryPage {
+        guard pageToken == nil else { return GalleryPage(posts: [], nextPageToken: nil) }
+        return GalleryPage(posts: try await taggedPosts(for: profileID, handle: handle), nextPageToken: nil)
+    }
+
+    /// Providers with no engagement reads: nothing liked, nothing saved.
+    package func likedPosts(of profileID: ProfileID) async throws -> [GalleryPost] { [] }
+    package func savedPosts(of profileID: ProfileID) async throws -> [GalleryPost] { [] }
+}
+
+/// Reads the gallery from post.v1 (listing + hydration) and search.v1 (tagged).
+///
+/// `ListPostsByProfile` returns bare summaries; every tile needs media, so each
+/// page is hydrated through `GetPost` — the same summary→view pattern the feed
+/// uses. Hydration failures drop the single post rather than failing the grid.
+public actor ProfileGalleryRepository: ProfileGalleryProviding {
+    package let postClient: any Post_V1_PostServiceClientInterface
+    private let searchClient: any Search_V1_SearchServiceClientInterface
+    private let counterClient: any Counter_V1_CounterServiceClientInterface
+    /// Resolves the people whose posts these are. Optional so a composition
+    /// root without one still gets a working grid — the tiles simply carry no
+    /// author, which is what every tile did before this existed.
+    private let profileClient: (any Profile_V1_ProfileServiceClientInterface)?
+    /// The Liked and Saved lists (#411, #837). Nil: both tabs stay empty.
+    private let engagementClient: (any Engagement_V1_EngagementServiceClientInterface)?
+    /// Identities already resolved, for the life of this actor.
+    ///
+    /// Cheap and worth it: the authored pages of a profile are by ONE person,
+    /// so the whole grid costs a single read and every later page — a tab
+    /// switch, a pull to refresh, the saved pile — costs none. A failed read is
+    /// cached as nothing known, deliberately: retrying it per page would turn
+    /// one unreachable person into a request per render.
+    private var authors: [ProfileID: GalleryAuthor?] = [:]
+    /// Posts per page, for both corpora (#634). Each page is hydrated one
+    /// `GetPost` per post, so a page is a burst of that many reads.
+    private let pageLimit: Int32
+
+    public init(
+        postClient: any Post_V1_PostServiceClientInterface,
+        searchClient: any Search_V1_SearchServiceClientInterface,
+        counterClient: any Counter_V1_CounterServiceClientInterface,
+        profileClient: (any Profile_V1_ProfileServiceClientInterface)? = nil,
+        engagementClient: (any Engagement_V1_EngagementServiceClientInterface)? = nil,
+        pageLimit: Int32 = 30
+    ) {
+        self.engagementClient = engagementClient
+        self.postClient = postClient
+        self.searchClient = searchClient
+        self.counterClient = counterClient
+        self.profileClient = profileClient
+        self.pageLimit = pageLimit
+    }
+
+    public func authoredPosts(for profileID: ProfileID) async throws -> [GalleryPost] {
+        try await authoredPage(for: profileID, after: nil).posts
+    }
+
+    public func taggedPosts(for profileID: ProfileID, handle: String) async throws -> [GalleryPost] {
+        try await taggedPage(for: profileID, handle: handle, after: nil).posts
+    }
+
+    /// ⚠️ FOLLOW THE TOKEN, NEVER THE COUNT: a hydration that fails drops its
+    /// tile, so a page can come back short with more behind it.
+    public func authoredPage(for profileID: ProfileID, after pageToken: String?) async throws -> GalleryPage {
+        var request = Post_V1_ListPostsByProfileRequest()
+        request.profileID = profileID.rawValue
+        request.limit = pageLimit
+        request.pageToken = pageToken ?? ""
+        let response = await postClient.listPostsByProfile(request: request, headers: [:])
+        switch response.result {
+        case .success(let body):
+            let posts = await withCounters(withAuthors(hydrate(postIDs: body.posts.map(\.postID))))
+            return GalleryPage(posts: posts, nextPageToken: body.nextToken.isEmpty ? nil : body.nextToken)
+        case .failure(let error):
+            throw ProfileError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
+        }
+    }
+
+    /// Sorted by RECENCY: the gallery's All merges this corpus with the
+    /// authored one by date, which only holds if both page in date order.
+    public func taggedPage(for profileID: ProfileID, handle: String, after pageToken: String?) async throws -> GalleryPage {
+        var request = Search_V1_SearchRequest()
+        request.query = "@" + handle
+        request.entityTypes = [.post]
+        request.sort = .recency
+        request.pageSize = pageLimit
+        request.pageToken = pageToken ?? ""
+        let response = await searchClient.search(request: request, headers: [:])
+        switch response.result {
+        case .success(let body):
+            let ids = body.hits.filter { $0.entityType == .post }.map(\.id)
+            // Self-mentions aren't "tagged by others"; drop own posts.
+            let posts = await withCounters(
+                withAuthors(hydrate(postIDs: ids).filter { $0.authorProfileID != profileID })
+            )
+            return GalleryPage(posts: posts, nextPageToken: body.nextPageToken.isEmpty ? nil : body.nextPageToken)
+        case .failure(let error):
+            throw ProfileError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
+        }
+    }
+
+    /// Decorates tiles with their counter.v1 projections — reactions,
+    /// comments, views — in ONE batched read for the whole page. Best-effort:
+    /// a counter outage leaves the counts nil (cells hide them) rather than
+    /// failing the grid.
+    public func posts(ids: [String]) async throws -> [GalleryPost] {
+        guard !ids.isEmpty else { return [] }
+        return await withCounters(withAuthors(hydrate(postIDs: ids)))
+    }
+
+    /// The Liked and Saved tabs arrive whole, like the viewer's own pile: at
+    /// most this many pages are followed (each id is a `GetPost`).
+    package static let listPagesRead = 3
+
+    public func likedPosts(of profileID: ProfileID) async throws -> [GalleryPost] {
+        guard let engagementClient else { return [] }
+        let ids = try await Self.collect { token in
+            var request = Engagement_V1_ListLikesByProfileRequest()
+            request.profileID = profileID.rawValue
+            request.limit = 100
+            request.pageToken = token
+            let response = await engagementClient.listLikesByProfile(request: request, headers: [:])
+            if let error = response.error {
+                throw ProfileError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
+            }
+            return (response.message?.postIds ?? [], response.message?.nextPageToken ?? "")
+        }
+        return try await posts(ids: ids)
+    }
+
+    public func savedPosts(of profileID: ProfileID) async throws -> [GalleryPost] {
+        guard let engagementClient else { return [] }
+        let ids = try await Self.collect { token in
+            var request = Engagement_V1_ListSavedPostsRequest()
+            request.profileID = profileID.rawValue
+            request.limit = 100
+            request.pageToken = token
+            let response = await engagementClient.listSavedPosts(request: request, headers: [:])
+            if let error = response.error {
+                throw ProfileError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
+            }
+            return (response.message?.posts.map(\.postID) ?? [], response.message?.nextPageToken ?? "")
+        }
+        return try await posts(ids: ids)
+    }
+
+    /// Every id of a paged list, up to `listPagesRead` pages, without twins.
+    private static func collect(
+        _ page: (String) async throws -> (ids: [String], next: String)
+    ) async throws -> [String] {
+        var ids: [String] = []
+        var token = ""
+        for _ in 0..<listPagesRead {
+            let answer = try await page(token)
+            ids += answer.ids
+            token = answer.next
+            if token.isEmpty { break }
+        }
+        var seen = Set<String>()
+        return ids.filter { seen.insert($0).inserted }
+    }
+
+    /// Attaches the person each tile belongs to.
+    ///
+    /// ⚠️ **The grid renders none of this**, which is exactly why it was missing
+    /// for so long: a profile page has no need to repeat whose posts you are
+    /// looking at. It is carried for the surface a tile OPENS INTO — the
+    /// full-screen page's author capsule and its attribution pill are seeded
+    /// from the tile's own model, and a tile with no author seeds a page with
+    /// an anonymous one. `ForYouDiscovery` has carried it for the same reason
+    /// since that grid learned to seed; this is the same fact, resolved the only
+    /// way this repository can get it.
+    ///
+    /// One read per DISTINCT author, not per post: the authored pages are a
+    /// single person, so a whole grid is one round trip. `post.v1` carries only
+    /// `profile_id` on a post view, so this cannot be folded into hydration —
+    /// see `dev/BACKEND_GAPS.md`; a `GetPost` that embedded its author would
+    /// remove this hop entirely.
+    package func withAuthors(_ hydrated: [HydratedPost]) async -> [GalleryPost] {
+        guard profileClient != nil else { return hydrated.map(\.post) }
+        let wanted = Set(hydrated.map(\.authorProfileID)).filter { authors[$0] == nil }
+        if !wanted.isEmpty {
+            let resolved = await withTaskGroup(of: (ProfileID, GalleryAuthor?).self) { group in
+                for id in wanted {
+                    group.addTask { [profileClient] in (id, await Self.author(of: id, using: profileClient)) }
+                }
+                var collected: [(ProfileID, GalleryAuthor?)] = []
+                for await pair in group { collected.append(pair) }
+                return collected
+            }
+            for (id, author) in resolved { authors[id] = author }
+        }
+        return hydrated.map { item in
+            guard let author = authors[item.authorProfileID] ?? nil else { return item.post }
+            var decorated = item.post
+            decorated.authorID = item.authorProfileID
+            decorated.authorName = author.displayName
+            decorated.authorHandle = author.handle
+            decorated.authorAvatarURL = author.avatarURL
+            return decorated
+        }
+    }
+
+    private static func author(
+        of id: ProfileID, using client: (any Profile_V1_ProfileServiceClientInterface)?
+    ) async -> GalleryAuthor? {
+        guard let client else { return nil }
+        var request = Profile_V1_GetProfileByIdRequest()
+        request.profileID = id.rawValue
+        let response = await client.getProfileByID(request: request, headers: [:])
+        guard case .success(let view) = response.result else { return nil }
+        return GalleryAuthor(
+            displayName: view.displayName,
+            handle: view.handle,
+            avatarURL: URL(string: view.avatarURL)
+        )
+    }
+
+    private func withCounters(_ posts: [GalleryPost]) async -> [GalleryPost] {
+        guard !posts.isEmpty else { return posts }
+        // The read itself is `PostCounterReader`, shared with the feed since its
+        // cards started showing reach — one batch shape, not two.
+        let byPostID = await PostCounterReader.counters(
+            forPostIDs: posts.map(\.id.rawValue), using: counterClient
+        )
+        return posts.map { post in
+            guard let counts = byPostID[post.id.rawValue] else { return post }
+            var decorated = post
+            decorated.reactionCount = counts.likes
+            decorated.commentCount = counts.comments
+            return decorated
+        }
+    }
+
+    /// Hydrates summaries into tiles concurrently, preserving input order.
+    private func hydrate(postIDs: [String]) async -> [HydratedPost] {
+        await withTaskGroup(of: (Int, HydratedPost?).self) { group in
+            for (index, postID) in postIDs.enumerated() {
+                group.addTask { [postClient] in
+                    var request = Post_V1_GetPostRequest()
+                    request.postID = postID
+                    let response = await postClient.getPost(request: request, headers: [:])
+                    return (index, response.message.map(HydratedPost.init))
+                }
+            }
+            var slots = [HydratedPost?](repeating: nil, count: postIDs.count)
+            for await (index, post) in group {
+                slots[index] = post
+            }
+            return slots.compactMap(\.self)
+        }
+    }
+}
+
+/// The identity slice a full-screen page needs from whoever wrote a tile —
+/// nothing more, since the grid itself draws none of it.
+private struct GalleryAuthor: Sendable {
+    package let displayName: String
+    package let handle: String
+    package let avatarURL: URL?
+}
+
+/// A gallery post plus the author id (needed for the tagged self-mention
+/// filter, but not part of the public tile model).
+package struct HydratedPost {
+    package let post: GalleryPost
+    package let authorProfileID: ProfileID
+
+    package init(view: Post_V1_PostView) {
+        let attachment = view.attachments.first
+        let kind: GalleryPost.Kind = switch view.kind {
+        case .textOnly: .text
+        case .mainVideo: .video
+        case .carousel: .photo
+        case .unspecified, .UNRECOGNIZED:
+            // Older services may not stamp a kind; route on MIME like the feed.
+            if let mime = attachment?.mimeType, mime.hasPrefix("video/") {
+                .video
+            } else if attachment != nil {
+                .photo
+            } else {
+                .text
+            }
+        }
+        var built = GalleryPost(
+            id: PostID(view.postID),
+            kind: kind,
+            isRepost: !view.parentID.isEmpty,
+            // Every attachment, in the author's order — `attachments` is a
+            // repeated field and this projection used to keep only its head.
+            pages: view.attachments.map { attachment in
+                GalleryPost.MediaPage(
+                    thumbnailURL: URL(
+                        string: attachment.thumbnailURL.isEmpty
+                            ? attachment.cdnURL : attachment.thumbnailURL
+                    ),
+                    // The stream itself, shared with the full-screen viewer so
+                    // the hero zoom keeps one item — see `GalleryPost.videoURL`.
+                    videoURL: attachment.mimeType.hasPrefix("video/")
+                        ? URL(string: attachment.cdnURL) : nil,
+                    // Missing dimensions fall through to 1 (square), which
+                    // withholds autoplay rather than guessing — see
+                    // `GalleryPost.aspectRatio`.
+                    aspectRatio: attachment.width > 0 && attachment.height > 0
+                        ? Double(attachment.width) / Double(attachment.height)
+                        : 1,
+                    assetID: attachment.assetID.isEmpty ? nil : attachment.assetID
+                )
+            },
+            caption: view.caption,
+            publishedAtMS: view.publishedAtMs
+        )
+        // A text post's voice (#2206): the tile stays `.text`.
+        built.voice = PostVoiceWire.voice(in: view)
+        // …and a showcase's card (#2216): the tile stays `.text`.
+        built.embed = PostEmbedWire.embed(in: view)
+        post = built
+        authorProfileID = ProfileID(view.profileID)
+    }
+}

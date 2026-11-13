@@ -154,7 +154,7 @@ final class ForYouStoryCell: UICollectionViewCell {
     }
 
     func configure(
-        with story: ForYouViewModel.FriendStory, imagePipeline: ImagePipeline,
+        with story: ForYouFriendStory, imagePipeline: ImagePipeline,
         animationScope: AnimatedAvatarScope? = nil
     ) {
         // The face's animation (#1358): For You's Friends faces play once on

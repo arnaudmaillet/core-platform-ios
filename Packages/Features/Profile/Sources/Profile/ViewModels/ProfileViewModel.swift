@@ -7,6 +7,7 @@ import MapsInterface
 import OSLog
 import PostGrid
 import ProfileInterface
+import ProfileSettings
 import ShareSheet
 
 @MainActor

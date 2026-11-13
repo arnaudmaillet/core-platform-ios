@@ -1,6 +1,7 @@
 import CoreModels
 import CoreNavigation
 import Foundation
+import TestSupport
 import Testing
 @testable import Chat
 
@@ -56,18 +57,6 @@ private func message(_ id: String, mine: Bool) -> ChatMessage {
 
 @MainActor
 struct ChatViewModelTests {
-    /// Waits for STATE, in looks (6,000 × 10 ms), never wall-clock time: a
-    /// starved runner spends none of the budget (#1115). Returns whether
-    /// `condition` came to hold, and every caller asserts it — a wait that
-    /// gives up silently lets the next line read the state from before.
-    private func settle(until condition: () async -> Bool) async -> Bool {
-        for _ in 0..<6_000 {
-            await Task.yield()
-            if await condition() { return true }
-            try? await Task.sleep(for: .milliseconds(10))
-        }
-        return await condition()
-    }
 
     private func isContent(_ phase: ConversationListViewModel.Phase?) -> Bool {
         if case .content = phase { true } else { false }

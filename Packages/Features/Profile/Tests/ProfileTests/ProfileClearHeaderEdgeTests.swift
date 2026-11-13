@@ -3,6 +3,7 @@ import Testing
 import UIKit
 @testable import Feed
 @testable import Profile
+@testable import ProfileSettings
 
 /// The profile's gallery pages, and the pager over them, hide the system's top
 /// edge effect under the header.

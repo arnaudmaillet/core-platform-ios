@@ -2,6 +2,7 @@ import CoreContracts
 import CoreNetworking
 import CoreStorage
 import Foundation
+import ProfileSettings
 import UIKit
 
 // MARK: - The wire

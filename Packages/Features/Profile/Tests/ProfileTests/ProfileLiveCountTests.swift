@@ -9,6 +9,7 @@ import Testing
 import UIKit
 @testable import Feed
 @testable import Profile
+@testable import ProfileSettings
 
 /// A profile's bare tiles and its gallery's flight draw the post's LIVE count
 /// (#896): a like made in the feed a tile opened is on the tile, and on the

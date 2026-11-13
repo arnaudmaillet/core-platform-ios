@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import Profile
+@testable import ProfileSettings
 
 /// When the shell offers a passkey (#840): always after a sign-up, after a
 /// sign-in no more than once every 30 days.

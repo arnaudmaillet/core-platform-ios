@@ -9,6 +9,7 @@ import Foundation
 import Testing
 import UIKit
 @testable import Profile
+@testable import ProfileSettings
 
 /// Settings → Family and Teens → Parental Supervision (#417, backend #670):
 /// pairing over the contract, the refusals in its words, and the screens.

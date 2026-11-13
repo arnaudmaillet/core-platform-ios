@@ -7,6 +7,7 @@ import DesignSystem
 import Foundation
 import Testing
 @testable import Profile
+@testable import ProfileSettings
 
 /// The settings reads and writes on `ProfileRepository`, end to end over the
 /// mock BFF with production wire bytes: private account (#388) and blocked

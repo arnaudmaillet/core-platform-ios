@@ -6,6 +6,7 @@ import Testing
 import UIKit
 import HeroPage
 @testable import Profile
+@testable import ProfileSettings
 
 /// A profile's landscape banner is a CARD (the owner, 2026-10-15): held off
 /// the screen's top and sides, its top held while the page climbs until the

@@ -6,6 +6,7 @@ import CoreNetworkingMocks
 import Foundation
 import Testing
 @testable import Profile
+@testable import ProfileSettings
 
 /// Settings → Account → Deactivate Account (#385), end to end over the mock:
 /// step-up first (backend #648), then the deactivation it unlocks, then the

@@ -104,7 +104,7 @@ final class FriendsStoriesRow: UIView, GridLeadSection {
     /// The row came to hold friends, or none — its host re-sizes.
     var onHeightChange: (() -> Void)?
     /// A friend's face was tapped.
-    var onStoryTapped: ((ForYouViewModel.FriendStory) -> Void)?
+    var onStoryTapped: ((ForYouFriendStory) -> Void)?
     /// The lift a committed long press opens from, while the window opens
     /// out of it (#1543, `TextRevealInstaller`).
     var previewLaunch: PreviewLaunch?
@@ -115,12 +115,12 @@ final class FriendsStoriesRow: UIView, GridLeadSection {
     /// What a long press on a friend offers under the preview, after "Open"
     /// — the host's rows (View Profile, Unfollow), since this view can service
     /// none of them.
-    var storyMenuElements: ((ForYouViewModel.FriendStory) -> [UIMenuElement])?
+    var storyMenuElements: ((ForYouFriendStory) -> [UIMenuElement])?
 
-    private(set) var stories: [ForYouViewModel.FriendStory] = []
+    private(set) var stories: [ForYouFriendStory] = []
     /// The friends as the view model last ordered them — what the row shows
     /// once it is free to re-sort (`releaseStoryOrder`).
-    private var latestStories: [ForYouViewModel.FriendStory] = []
+    private var latestStories: [ForYouFriendStory] = []
     /// The order the viewer has been SHOWN, held while the screen is theirs —
     /// nil until the row is first drawn in a window, and again once released.
     private var heldStoryOrder: [ProfileID]?
@@ -205,7 +205,7 @@ final class FriendsStoriesRow: UIView, GridLeadSection {
 
     /// Shows `friends` — in the order the viewer was shown, while it is held
     /// — and `newCount` after the title.
-    func render(_ friends: [ForYouViewModel.FriendStory], newCount: Int) {
+    func render(_ friends: [ForYouFriendStory], newCount: Int) {
         let hadFriends = !stories.isEmpty || showsPlaceholders
         latestStories = friends
         let ordered = heldStoryOrder.map { Self.holding(friends, in: $0) } ?? friends
@@ -244,8 +244,8 @@ final class FriendsStoriesRow: UIView, GridLeadSection {
     /// gave them, and one who left (an unfollow) simply goes. So a ring that
     /// clears moves nobody, and a follow-back still arrives where it belongs.
     static func holding(
-        _ fresh: [ForYouViewModel.FriendStory], in order: [ProfileID]
-    ) -> [ForYouViewModel.FriendStory] {
+        _ fresh: [ForYouFriendStory], in order: [ProfileID]
+    ) -> [ForYouFriendStory] {
         let rank = Dictionary(order.enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
         var known = fresh
             .filter { rank[$0.authorID] != nil }
@@ -387,7 +387,7 @@ final class FriendsStoriesRow: UIView, GridLeadSection {
         onStoryTapped?(story)
     }
 
-    func storyMenu(for story: ForYouViewModel.FriendStory) -> UIMenu {
+    func storyMenu(for story: ForYouFriendStory) -> UIMenu {
         let id = story.authorID
         var children: [UIMenuElement] = []
         if !story.posts.isEmpty {

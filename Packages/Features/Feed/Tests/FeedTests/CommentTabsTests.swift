@@ -94,6 +94,12 @@ struct CommentTabsTests {
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
         )
         controller.seedCommentCount(seeded)
+        // ⚠️ NOT THE SYSTEM KEYBOARD. Its guide is app-wide: a suite running
+        // alongside that focuses a field (on CI, with no hardware keyboard)
+        // raised this composer, and Recent's inset with it, by the keyboard's
+        // height — 228.67pt, the same on every starved run (#2392). The
+        // keyboard tests drive the rise themselves (`syncKeyboardRise`).
+        controller.setComposerTracksKeyboard(false)
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         window.rootViewController = controller
         window.isHidden = false

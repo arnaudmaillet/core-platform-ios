@@ -7,6 +7,7 @@ import PostGrid
 import Testing
 import UIKit
 @testable import Profile
+@testable import ProfileSettings
 
 /// Edit Profile → Video Banner (#944): the shop item at 500 gems until the
 /// account owns it, then the loop of one of the viewer's own video posts.

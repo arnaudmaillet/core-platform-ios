@@ -6,6 +6,7 @@ import PostGrid
 import Testing
 import UIKit
 @testable import Profile
+@testable import ProfileSettings
 
 /// The profile's gallery under a screen pushed over it, and on its own way
 /// out (#1914): its clips play while the screen holds half the viewport,

@@ -3,6 +3,7 @@ import Foundation
 import PostGrid
 import Testing
 @testable import Profile
+@testable import ProfileSettings
 
 // MARK: - Fixtures
 

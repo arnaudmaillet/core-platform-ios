@@ -4,6 +4,7 @@ import CoreNetworkingMocks
 import Foundation
 import Testing
 @testable import Profile
+@testable import ProfileSettings
 
 // Settings → Security and Login → Apps and Websites (#485).
 

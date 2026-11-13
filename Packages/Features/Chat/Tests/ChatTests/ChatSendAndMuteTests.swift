@@ -5,6 +5,7 @@ import CoreNetworking
 import CoreNetworkingMocks
 import FeedInterface
 import Foundation
+import TestSupport
 import Testing
 @testable import Chat
 
@@ -12,13 +13,6 @@ import Testing
 /// a retry — and the conversation's mute, written through chat.v1.
 @MainActor
 struct ChatSendAndMuteTests {
-    private func settle(_ condition: () -> Bool) async -> Bool {
-        for _ in 0..<400 {
-            if condition() { return true }
-            try? await Task.sleep(for: .milliseconds(5))
-        }
-        return condition()
-    }
 
     private func settleAsync(_ condition: () async -> Bool) async -> Bool {
         for _ in 0..<400 {
@@ -152,7 +146,8 @@ struct ChatSendAndMuteTests {
         var last: [ConversationThreadMessage] = []
         driver.onPhaseChange = { phase in if case .content(let messages) = phase { last = messages } }
         driver.viewDidLoad()
-        _ = await settle { false }
+        // A pause, not a wait: the history's first load lands (200 looks).
+        await settle(looks: 200) { false }
         driver.send("hi")
         #expect(last.last?.body == "hi")
         #expect(last.last?.delivery == .sending)

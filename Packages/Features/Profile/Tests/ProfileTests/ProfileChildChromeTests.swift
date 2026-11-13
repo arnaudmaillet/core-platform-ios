@@ -3,6 +3,7 @@ import MediaCore
 import Testing
 import UIKit
 @testable import Profile
+@testable import ProfileSettings
 
 /// The chrome the profile's child screens ask for.
 ///

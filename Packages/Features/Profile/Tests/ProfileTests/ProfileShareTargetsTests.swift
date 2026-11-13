@@ -6,6 +6,7 @@ import CoreNetworkingMocks
 import Foundation
 import Testing
 @testable import Profile
+@testable import ProfileSettings
 
 private struct ShareTargetsSessionStub: AuthSessionProviding {
     func currentState() async -> AuthState { .authenticated(AccountID(MockAuthService.accountID)) }

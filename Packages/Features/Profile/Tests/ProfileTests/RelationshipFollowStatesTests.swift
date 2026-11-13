@@ -9,6 +9,7 @@ import MediaCore
 import Testing
 import UIKit
 @testable import Profile
+@testable import ProfileSettings
 
 /// Follow states on the relations screen and the profile header (#726):
 /// a private profile is Requested, a refused follow takes Follow away, no

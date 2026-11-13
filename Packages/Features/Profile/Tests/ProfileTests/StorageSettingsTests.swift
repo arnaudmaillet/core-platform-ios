@@ -4,6 +4,7 @@ import Foundation
 import Testing
 import UIKit
 @testable import Profile
+@testable import ProfileSettings
 
 /// Settings → Storage (#899): usage and a clear per category through the
 /// coordinator, the storage limit, and Use Less Cellular Data.

@@ -3,6 +3,7 @@ import DesignSystem
 import FeedInterface
 import MediaCore
 import PostGrid
+import ProfileSettings
 import UIKit
 
 /// The Channels tab's page (#2232): the channels the profile owns, one row

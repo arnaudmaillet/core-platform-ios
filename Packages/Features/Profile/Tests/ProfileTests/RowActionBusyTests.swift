@@ -5,6 +5,7 @@ import PostGrid
 import Testing
 import UIKit
 @testable import Profile
+@testable import ProfileSettings
 
 /// A row action that removes its row (#1775): the row wears the kit's loader
 /// while the server works, then leaves — or comes back as it was, with the

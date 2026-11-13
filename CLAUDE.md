@@ -46,8 +46,9 @@ from fighting over `develop` and over CI.
 
 - A pull request runs only the test lanes `.github/scripts/select_packages.py`
   selects from its diff. A pull request can therefore be green and still break
-  a test in a package it never touched. Repo-wide guards live in single
-  packages, e.g. DesignSystem's `ScaledFontTests` and the haptics guard.
+  a test in a package it never touched. The repo-wide source-scan guards and
+  the package-layering guard live in `Packages/Tools/RepoGuards`, whose lane
+  every pull request runs (#2371).
 - The run on `push: develop` is the full-suite backstop and never cancels
   itself: one runs at a time, and the newest develop waits its turn. It is the
   only check on two pull requests that are green apart but break together. **A

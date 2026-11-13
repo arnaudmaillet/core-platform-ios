@@ -5,6 +5,7 @@ import FeedInterface
 import MediaCore
 import MediaPlayback
 import PostGrid
+import ProfileSettings
 import UIKit
 
 /// The profile's photos and videos as the media mosaic — what "View all"

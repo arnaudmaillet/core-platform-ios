@@ -16,10 +16,11 @@ import XCTest
 final class PillDragUITests: XCTestCase {
     override func setUp() { continueAfterFailure = false }
 
-    /// Messages: three tabs (All, Requests, Suggestions) in the bottom
-    /// accessory. For You had three too, until it became one page
-    /// (2026-09-29) and lost its selector — which is what these tests then
-    /// reported as "no selector" (#1154). Indices into `AppTab`.
+    /// Messages: three tabs (Chats, Requests, Suggestions) in the navigation
+    /// bar, right of the bell (#2337; in the bottom accessory before that —
+    /// `PillDragAudit` looks in both). For You had three too, until it became
+    /// one page (2026-09-29) and lost its selector — which is what these tests
+    /// then reported as "no selector" (#1154). Indices into `AppTab`.
     /// ⚠️ `-select-tab` takes an INDEX; a name is a silent no-op that lands on
     /// Explore and fakes a missing selector.
     private static let selectorTab = "2"

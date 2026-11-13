@@ -5,6 +5,7 @@ import Foundation
 import PostGrid
 import Testing
 @testable import Profile
+@testable import ProfileSettings
 
 /// THE GRID DRAWS NO AUTHOR, AND CARRIES ONE ANYWAY.
 ///

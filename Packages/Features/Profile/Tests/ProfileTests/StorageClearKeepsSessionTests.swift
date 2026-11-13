@@ -6,6 +6,7 @@ import LocalStore
 import MediaCore
 import Testing
 @testable import Profile
+@testable import ProfileSettings
 
 /// A CLEAR NEVER SIGNS THE VIEWER OUT (#899).
 ///

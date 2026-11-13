@@ -2,6 +2,7 @@ import CoreModels
 import CoreStorage
 import Foundation
 import PostGrid
+import ProfileSettings
 
 @MainActor
 public final class EditProfileViewModel {

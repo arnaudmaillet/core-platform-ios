@@ -6,6 +6,7 @@ import CoreNetworkingMocks
 import Foundation
 import Testing
 @testable import Profile
+@testable import ProfileSettings
 
 /// Settings → Security and Login → Two-Step Sign-In (#383, backend #649), end
 /// to end over the mock: enrol behind a step-up, the backup codes, new codes

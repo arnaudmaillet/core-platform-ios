@@ -6,9 +6,11 @@ import PackageDescription
 // DEBUG lab. AVFoundation lives here, outside the features, as it does in
 // MediaPlayback.
 //
-// ⚠️ IT DEPENDS ON NO LOCAL PACKAGE BUT CACHEKIT, for MediaPlayback's reason:
-// AVFoundation needs Apple's system `MediaCore` framework, which a dependency
-// on our `MediaCore` module would shadow. CacheKit depends on nothing.
+// ⚠️ IT DEPENDS ON NO LOCAL PACKAGE BUT CACHEKIT AND COREMODELS, for
+// MediaPlayback's reason: AVFoundation needs Apple's system `MediaCore`
+// framework, which a dependency on our `MediaCore` module would shadow.
+// CacheKit and CoreModels depend on nothing (CoreModels holds `AudioFocus`,
+// the floor MediaPlayback reads, #2373).
 //
 // `VoiceKitUI` (#2205) is the voice component every surface draws — the
 // conversation's bubble and a voice post's caption, in three sizes. A
@@ -23,10 +25,11 @@ let package = Package(
     ],
     dependencies: [
         .package(path: "../CacheKit"),
+        .package(path: "../../Kit/CoreModels"),
         .package(path: "../DesignSystem")
     ],
     targets: [
-        .target(name: "VoiceKit", dependencies: ["CacheKit"]),
+        .target(name: "VoiceKit", dependencies: ["CacheKit", "CoreModels"]),
         .target(name: "VoiceKitUI", dependencies: ["VoiceKit", "DesignSystem"]),
         .testTarget(name: "VoiceKitTests", dependencies: ["VoiceKit", "CacheKit"]),
         .testTarget(name: "VoiceKitUITests", dependencies: ["VoiceKitUI", "VoiceKit", "DesignSystem"])

@@ -9,6 +9,7 @@ import MediaCore
 import Testing
 import UIKit
 @testable import Profile
+@testable import ProfileSettings
 
 /// **Mute is a bell; the map star is a "Map" submenu of see-more (#689, the
 /// owner's call 2026-10-08).**

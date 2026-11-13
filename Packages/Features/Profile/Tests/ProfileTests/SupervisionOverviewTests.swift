@@ -8,6 +8,7 @@ import Foundation
 import Testing
 import UIKit
 @testable import Profile
+@testable import ProfileSettings
 
 /// A supervisor's view of a teen and the limits they set; a teen's view of
 /// themselves (#417, backend #670 parts 2 and 3).

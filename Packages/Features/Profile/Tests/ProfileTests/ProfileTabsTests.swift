@@ -8,6 +8,7 @@ import PostGrid
 import Testing
 import UIKit
 @testable import Profile
+@testable import ProfileSettings
 
 /// Which tabs a profile shows, and where the two new ones get their contents.
 ///

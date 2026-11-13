@@ -2,6 +2,7 @@ import Foundation
 import Testing
 import UIKit
 @testable import Profile
+@testable import ProfileSettings
 
 /// Two-step setup pushes at once and loads its secret itself (#800): the
 /// setup screen arrives on its loading state while `StartMfaEnrollment` is

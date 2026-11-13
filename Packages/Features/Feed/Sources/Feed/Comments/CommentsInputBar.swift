@@ -1477,23 +1477,31 @@ final class CommentsInputBar: UIView {
                 forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main
             ) { [weak self] note in
                 let frame = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue
+                let scope = KeyboardNotificationScope.window(of: note)
                 MainActor.assumeIsolated {
-                    self?.setKeyboardTop(endFrame: frame)
-                    self?.setKeyboardOpen(true)
+                    guard let self, self.hearsKeyboard(aimedAt: scope) else { return }
+                    self.setKeyboardTop(endFrame: frame)
+                    self.setKeyboardOpen(true)
                 }
             },
             NotificationCenter.default.addObserver(
                 forName: UIResponder.keyboardWillChangeFrameNotification, object: nil, queue: .main
             ) { [weak self] note in
                 let frame = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue
-                MainActor.assumeIsolated { self?.setKeyboardTop(endFrame: frame) }
+                let scope = KeyboardNotificationScope.window(of: note)
+                MainActor.assumeIsolated {
+                    guard let self, self.hearsKeyboard(aimedAt: scope) else { return }
+                    self.setKeyboardTop(endFrame: frame)
+                }
             },
             NotificationCenter.default.addObserver(
                 forName: UIResponder.keyboardWillHideNotification, object: nil, queue: .main
-            ) { [weak self] _ in
+            ) { [weak self] note in
+                let scope = KeyboardNotificationScope.window(of: note)
                 MainActor.assumeIsolated {
-                    self?.setKeyboardTop(endFrame: nil)
-                    self?.setKeyboardOpen(false)
+                    guard let self, self.hearsKeyboard(aimedAt: scope) else { return }
+                    self.setKeyboardTop(endFrame: nil)
+                    self.setKeyboardOpen(false)
                 }
             },
         ]

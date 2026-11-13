@@ -4,6 +4,7 @@ import LocalStore
 import Testing
 import UIKit
 @testable import Profile
+@testable import ProfileSettings
 
 /// The settings screens open on what the server last said (#1776), with no
 /// skeleton, then revalidate in place.

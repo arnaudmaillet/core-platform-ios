@@ -4,6 +4,7 @@ import MediaCore
 import Testing
 import UIKit
 @testable import Profile
+@testable import ProfileSettings
 
 /// A person opened from a surface that showed them opens SEEDED (#1859): their
 /// name, handle, avatar and frame at once, their counters as bones, nothing

@@ -4,6 +4,7 @@ import CoreModels
 import CoreNetworking
 import CoreNetworkingMocks
 import Foundation
+import TestSupport
 import Testing
 @testable import Chat
 
@@ -60,20 +61,8 @@ struct HistoryPagingTests {
         var ids: [String] = []
     }
 
-    /// Waits for STATE, in looks (6,000 × 10 ms), never wall-clock time: a
-    /// starved runner spends none of the budget (#1115). Returns whether
-    /// `condition` came to hold; every caller asserts it.
-    private func settle(until condition: () async -> Bool) async -> Bool {
-        for _ in 0..<6_000 {
-            await Task.yield()
-            if await condition() { return true }
-            try? await Task.sleep(for: .milliseconds(10))
-        }
-        return await condition()
-    }
-
     /// Grace for "nothing more should happen".
-    private func settle() async {
+    private func pause() async {
         try? await Task.sleep(for: .milliseconds(100))
     }
 
@@ -123,7 +112,7 @@ struct HistoryPagingTests {
         #expect(shown.ids == ["a", "b", "c", "d"])
 
         viewModel.loadOlder() // the start: nothing left to ask
-        await settle()
+        await pause()
         #expect(await provider.requests == [nil, "p2"])
     }
 

@@ -2,6 +2,7 @@ import Foundation
 import UIKit
 import Testing
 @testable import Profile
+@testable import ProfileSettings
 
 /// Your Data and Permissions (#414) and the app's privacy manifest it reads.
 @MainActor

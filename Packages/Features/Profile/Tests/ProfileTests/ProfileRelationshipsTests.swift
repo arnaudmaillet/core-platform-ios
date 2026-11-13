@@ -6,6 +6,7 @@ import Foundation
 import Testing
 import UIKit
 @testable import Profile
+@testable import ProfileSettings
 
 @MainActor
 private final class SpyRouter: Router {

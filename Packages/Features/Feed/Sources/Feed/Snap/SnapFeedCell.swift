@@ -1268,6 +1268,18 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // the photograph. The release is the one time it should spring, and
         // that is what `settling` says.
         let centre = CGPoint(x: card.midX, y: card.midY)
+        // ⚠️ A HELD STATE DROPS WHAT A RELEASE LEFT IN FLIGHT (#2362). A grab
+        // during a cancel's spring catches the card where it is and says so
+        // here, as a held state, mid-spring: the stages and the window still
+        // carry the release's animations — additive ones on position and
+        // transform, which would keep adding what they had left onto the
+        // caught pose, the page parting from the card until the spring ended.
+        // A held grab animates nothing here, so whatever is in flight is the
+        // release's; a layer without animations costs a nil check.
+        if !settling {
+            stages.forEach { if $0.layer.animationKeys() != nil { $0.layer.removeAllAnimations() } }
+            if let mask = flightMask, mask.layer.animationKeys() != nil { mask.layer.removeAllAnimations() }
+        }
         if settling {
             stages.forEach { $0.center = centre }
         } else {
@@ -2193,6 +2205,11 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// The two stages' opacities, and whether they take touches (#1915).
     var debugStageAlphas: [CGFloat] { stages.map(\.alpha) }
     var debugStagesTakeTouches: Bool { stages.allSatisfy(\.isUserInteractionEnabled) }
+    /// Whether anything is animating the grab's stages or its window (#2362).
+    var debugGrabAnimates: Bool {
+        stages.contains { $0.layer.animationKeys() != nil }
+            || flightMask?.layer.animationKeys() != nil
+    }
     var debugChromeInsets: UIEdgeInsets { frozenInsets }
     #endif
 

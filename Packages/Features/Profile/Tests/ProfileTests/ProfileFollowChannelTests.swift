@@ -11,6 +11,7 @@ import Testing
 import UIKit
 @testable import Feed
 @testable import Profile
+@testable import ProfileSettings
 
 /// "Follow from Search → the profile header and the feed's '+' agree"
 /// (#896), the Profile half. Search opens a person's profile; the follow

@@ -6,6 +6,7 @@ import CoreNetworkingMocks
 import Foundation
 import Testing
 @testable import Profile
+@testable import ProfileSettings
 
 /// Mute (#403, backend #722), end to end over the mock BFF: the profile
 /// menu's per-scope toggles and Settings → Safety → Muted Accounts.

@@ -1,3 +1,4 @@
+import ProfileSettings
 import ShareSheet
 
 // The profile's share sheet is the shared `ShareSheet` package's since

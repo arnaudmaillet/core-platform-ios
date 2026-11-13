@@ -189,8 +189,14 @@ struct VoiceCommentRecordTests {
     /// records nothing.
     @Test func thePostsFieldHoldsForAVoiceCommentAndATapStillTypes() throws {
         let (controller, window) = page(VoiceCommentSource())
-        defer { window.isHidden = true }
         let bar = controller.composeBar
+        // ⚠️ Focused, but with no system keyboard (`raisesNoKeyboard`), and
+        // given back however the test ends.
+        defer {
+            bar.debugTextView.resignFirstResponder()
+            window.isHidden = true
+        }
+        bar.debugTextView.raisesNoKeyboard()
         #expect(bar.configuration.voice == .comment)
         let composer = try #require(controller.voiceComposer, "nothing records the comments' hold")
         #expect(composer.recorder.limit == 60)
@@ -204,7 +210,6 @@ struct VoiceCommentRecordTests {
         try #require(bar.debugTextView.isFirstResponder, "a tap didn't type")
         #expect(!bar.debugFieldHoldBegins, "the focused field's long press records")
         #expect(composer.phase == .idle)
-        bar.debugTextView.resignFirstResponder()
     }
 
     /// The sheet's composer records the same voice comment.
@@ -261,9 +266,16 @@ struct VoiceCommentRecordTests {
     @Test func aRepliesVoiceGoesToTheParent() async throws {
         let source = VoiceCommentSource(seeded: [comment("c1")])
         let (controller, window) = page(source)
-        defer { window.isHidden = true }
-        let composer = try #require(controller.voiceComposer)
         let bar = controller.composeBar
+        // ⚠️ A reply focuses the field (`enterReplyState`) and this test waits
+        // with it focused: no system keyboard (`raisesNoKeyboard`), and given
+        // back however it ends.
+        defer {
+            bar.debugTextView.resignFirstResponder()
+            window.isHidden = true
+        }
+        bar.debugTextView.raisesNoKeyboard()
+        let composer = try #require(controller.voiceComposer)
         controller.enterReplyState(for: CommentDisplayModel(entry: comment("c1")))
         #expect(bar.debugFieldHoldBegins, "a reply's voice can't be held")
         // The hold begins, then the keyboard goes over the empty field.

@@ -2,6 +2,7 @@ import Connect
 import Foundation
 import Testing
 @testable import Profile
+@testable import ProfileSettings
 
 /// Settings → Account → Delete Account (#386): the 30-day window, what the
 /// screen says before and after a request, and that a request goes out once.

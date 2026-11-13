@@ -7,6 +7,7 @@ import Foundation
 import PostGrid
 import Testing
 @testable import Profile
+@testable import ProfileSettings
 
 /// Settings → Privacy → Posts Visible to Others (#411, backend #729), end to
 /// end over the mock BFF.

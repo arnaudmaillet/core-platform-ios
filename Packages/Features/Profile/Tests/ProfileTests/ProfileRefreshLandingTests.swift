@@ -7,6 +7,7 @@ import Testing
 import UIKit
 @testable import Feed
 @testable import Profile
+@testable import ProfileSettings
 
 /// **A pull-to-refresh lands for what it brought, and nothing more.**
 ///

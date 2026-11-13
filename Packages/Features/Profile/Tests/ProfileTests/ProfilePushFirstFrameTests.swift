@@ -6,6 +6,7 @@ import PostGrid
 import Testing
 import UIKit
 @testable import Profile
+@testable import ProfileSettings
 
 /// **A pushed profile's first frame is honest, and it settles in place.**
 ///

@@ -3,6 +3,7 @@ import DesignSystem
 import Testing
 import UIKit
 @testable import Profile
+@testable import ProfileSettings
 
 /// The segment titles keep their counts at every width.
 ///

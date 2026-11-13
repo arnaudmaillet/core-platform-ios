@@ -181,7 +181,11 @@ final class LoginFlowCoordinator {
         guard let signUp, callsInFlight.insert(.sendCode).inserted else { return }
         step?.setWorking(true)
         Task { [weak self] in
-            defer { self?.callsInFlight.remove(.sendCode) }
+            // The guard is released ONCE per call: early on a failure (see
+            // the catch), or here. A defer that released it again would drop
+            // the guard of a retry already in flight.
+            var released = false
+            defer { if !released { self?.callsInFlight.remove(.sendCode) } }
             do {
                 let challenge = try await signUp.startVerification(
                     channel, to: destination, locale: Locale.current.identifier(.bcp47)
@@ -193,6 +197,15 @@ final class LoginFlowCoordinator {
                 guard let self, self.isInForm(step) else { return }
                 showCode(challenge, display: display)
             } catch {
+                // ⚠️ THE GUARD GOES BEFORE THE BUSY STATE ENDS. The screen
+                // opens again in `endWorking`'s completion, a main turn before
+                // this task resumes, and the `defer` only ran after that: a
+                // Continue tapped in between met a guard still up and was
+                // dropped without a word (develop's backstop, 2026-11-12,
+                // `aRefusedSMSClearsTheBusyStateAndLetsTheNextTapSend`).
+                // On success the guard stays until the code step is pushed.
+                released = true
+                self?.callsInFlight.remove(.sendCode)
                 await step?.endWorking()
                 self?.presentFlowError(error, on: step as? SignUpStepViewController)
             }
@@ -275,10 +288,15 @@ final class LoginFlowCoordinator {
         methods?.setWorking(method)
         screen.view.isUserInteractionEnabled = false
         Task { [weak self] in
+            // Released once per call, as in `sendCode`: early on a failure,
+            // or here.
+            var released = false
             defer {
-                screen.view.isUserInteractionEnabled = true
-                methods?.setWorking(nil)
-                self?.callsInFlight.remove(.federatedSignIn)
+                if !released {
+                    screen.view.isUserInteractionEnabled = true
+                    methods?.setWorking(nil)
+                    self?.callsInFlight.remove(.federatedSignIn)
+                }
             }
             do {
                 let nonce = try await signUp.startFederatedSignIn()
@@ -302,6 +320,13 @@ final class LoginFlowCoordinator {
             } catch is FederatedSignInCancelled {
                 return
             } catch {
+                // The guard goes before the row ends, as in `sendCode`:
+                // `endWorking` clears the row at once and waits for its
+                // animation, and the next tap must find the guard down.
+                // `endWorking` clears the row itself.
+                released = true
+                screen.view.isUserInteractionEnabled = true
+                self?.callsInFlight.remove(.federatedSignIn)
                 await methods?.endWorking()
                 self?.presentFlowError(error, on: nil)
             }
@@ -320,10 +345,14 @@ final class LoginFlowCoordinator {
         methods?.setWorking(method)
         screen.view.isUserInteractionEnabled = false
         Task { [weak self] in
+            // Released once per call (see `sendCode`).
+            var released = false
             defer {
-                screen.view.isUserInteractionEnabled = true
-                methods?.setWorking(nil)
-                self?.callsInFlight.remove(.passkeySignIn)
+                if !released {
+                    screen.view.isUserInteractionEnabled = true
+                    methods?.setWorking(nil)
+                    self?.callsInFlight.remove(.passkeySignIn)
+                }
             }
             do {
                 let request = try await signUp.startPasskeySignIn()
@@ -345,6 +374,10 @@ final class LoginFlowCoordinator {
             } catch is PasskeyCancelled {
                 return
             } catch {
+                // The guard goes before the row ends (see `sendCode`).
+                released = true
+                screen.view.isUserInteractionEnabled = true
+                self?.callsInFlight.remove(.passkeySignIn)
                 await methods?.endWorking()
                 self?.presentFlowError(error, on: nil)
             }

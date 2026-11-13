@@ -1,3 +1,4 @@
+import DesignSystem
 import Foundation
 
 /// A country's place in the world's activity, and what it costs to unlock.
@@ -21,14 +22,12 @@ public struct CountryStanding: Sendable, Equatable {
         self.price = price
     }
 
-    /// A count as the offer and the shop print it: "12.4K", "3.1M", "860".
+    /// A count as the offer and the shop print it: "12.4K", "3.1M", "860" —
+    /// the app's one rule (`CountFormatter`), truncating. This used to round
+    /// on its own (`%.1fK`, `%.0fK` past 10k), so a country's 1,999 likes
+    /// read "2.0K" here and "1.9K" on every other surface (#2390).
     public static func compact(_ value: Int64) -> String {
-        switch value {
-        case 1_000_000...: String(format: "%.1fM", Double(value) / 1_000_000)
-        case 10_000...: String(format: "%.0fK", Double(value) / 1_000)
-        case 1_000...: String(format: "%.1fK", Double(value) / 1_000)
-        default: "\(value)"
-        }
+        CountFormatter.compactString(for: value)
     }
 
     /// The price tiers by rank: the busiest countries cost the most.

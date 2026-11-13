@@ -7,6 +7,7 @@ import Foundation
 import Testing
 import UIKit
 @testable import Profile
+@testable import ProfileSettings
 
 /// Find Friends from Contacts (#412, `FindProfilesByContacts`, backend #806),
 /// end to end over the mock BFF, whose matcher keeps the fleet's rules:
