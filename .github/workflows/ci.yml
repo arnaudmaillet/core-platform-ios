@@ -50,8 +50,9 @@ env:
 jobs:
   # ── Which packages have tests ────────────────────────────────────────────
   # Ubuntu, not macOS: this is a `find` over the working tree, and macOS
-  # runners are the scarce resource (5 concurrent on the free plan for public
-  # repos). Emits the matrix the test job fans out over.
+  # runners are the scarce resource (5 concurrent GitHub-hosted on the free
+  # plan for public repos; one self-hosted Mac for the test lanes). Emits the
+  # matrix the test job fans out over.
   discover:
     name: discover packages
     runs-on: ubuntu-latest
@@ -233,20 +234,34 @@ jobs:
   # not sharing DerivedData, is the fix: a shared tree would put every module
   # on every target's search path and hide exactly the missing-dependency bug
   # this CI exists to catch (PR #127).
+  #
+  # ⚠️ THE LANES RUN ON A SELF-HOSTED MAC, XCODE 27; `build app` STAYS ON
+  # GITHUB, XCODE 26. The Xcode 26 compile of the app (Debug and Release) is
+  # the guard against Swift that Xcode 27 accepts and 26 rejects, so it keeps
+  # GitHub's pinned toolchain. The lanes moved to free the five GitHub macOS
+  # slots: one Mac runs ONE job at a time, so a run's lanes queue there one
+  # after another (`max-parallel` is moot on it). Each lane keeps its own
+  # DerivedData and package checkouts between runs on that Mac (see
+  # `.ci-state` below), so an unchanged graph is not compiled again.
+  #
+  # Mac off, asleep or busy for good: set the repository variable
+  # MACOS_RUNNER=github (Settings → Secrets and variables → Actions →
+  # Variables) and the lanes go back to macos-latest with Xcode 26, unchanged.
   test:
     name: test ${{ matrix.pkg.label }}
     needs: discover
     # A change that cannot reach any package (app sources, docs) selects no
     # lanes. Guard on the count rather than handing GitHub an empty matrix.
     if: ${{ needs.discover.outputs.count != '0' }}
-    runs-on: macos-latest
+    runs-on: ${{ vars.MACOS_RUNNER == 'github' && 'macos-latest' || fromJSON('["self-hosted", "macOS", "ARM64", "xcode"]') }}
     timeout-minutes: 45
     strategy:
       fail-fast: false      # one red package must not hide the others
-      # The free plan allows 5 concurrent macOS jobs across the account.
-      # A pull request takes 4 (the app build is the fifth). The develop
-      # backstop takes 2, so a pull request queued after it still finds
-      # slots; it is the run nobody is waiting on.
+      # Only matters on GitHub (MACOS_RUNNER=github): the free plan allows 5
+      # concurrent macOS jobs across the account. A pull request takes 4 (the
+      # app build is the fifth). The develop backstop takes 2, so a pull
+      # request queued after it still finds slots; it is the run nobody is
+      # waiting on.
       max-parallel: ${{ github.event_name == 'push' && 2 || 4 }}
       matrix:
         # Longest lane first (select_packages.py), so the last slot to free
@@ -256,6 +271,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Select Xcode 26
+        if: ${{ runner.environment == 'github-hosted' }}
         run: |
           XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
           if [ -z "$XC" ]; then
@@ -266,8 +282,26 @@ jobs:
           echo "Selecting $XC"
           sudo xcode-select -s "$XC/Contents/Developer"
 
-      # Restore only: `build app` saves these (see there).
+      # The self-hosted Mac uses the Xcode its owner selected: no `sudo` there
+      # (it would wait on a password). Its lanes' state persists between runs
+      # in `.ci-state`, next to the checkout and out of `actions/checkout`'s
+      # clean; below 10 GB free it is wiped, and every lane starts cold once.
+      - name: This Mac's Xcode, and disk
+        if: ${{ runner.environment == 'self-hosted' }}
+        run: |
+          xcodebuild -version
+          STATE="$RUNNER_WORKSPACE/.ci-state"
+          FREE_GB=$(df -g "$RUNNER_WORKSPACE" | awk 'NR==2 {print $4}')
+          echo "Free disk: ${FREE_GB} GB"
+          if [ "$FREE_GB" -lt 10 ] && [ -d "$STATE" ]; then
+            echo "::warning::${FREE_GB} GB free on the runner: wiping $STATE"
+            rm -rf "$STATE"
+          fi
+
+      # Restore only: `build app` saves these (see there). The self-hosted Mac
+      # keeps its own mirrors in that same directory between runs.
       - name: Restore Swift package mirrors
+        if: ${{ runner.environment == 'github-hosted' }}
         uses: actions/cache/restore@v4
         with:
           path: ~/Library/Caches/org.swift.swiftpm/repositories
@@ -283,8 +317,14 @@ jobs:
           TEST_RUNNER_AVSBDL_RENDER: ${{ matrix.pkg.avsbdl }}
         run: |
           set -o pipefail
-          SPM="$GITHUB_WORKSPACE/.spm"
           NAME='${{ matrix.pkg.name }}'
+          # One directory per package, outside the checkout: on the
+          # self-hosted Mac it survives to the next run (incremental builds),
+          # and two packages never share a DerivedData tree (see the header
+          # of this job). On a GitHub runner it starts empty every time.
+          STATE="$RUNNER_WORKSPACE/.ci-state/$NAME"
+          SPM="$STATE/spm"
+          DERIVED="$STATE/DerivedData"
 
           # On a fresh runner xcodebuild reports "Supported platforms for the
           # buildables is empty" and falls back to My Mac unless the package
@@ -356,7 +396,8 @@ jobs:
           # No sysdiagnose on a red test: it added ~1m40s to every failing lane
           # (run 36904429986, EmoteKit) and nothing ever downloads it.
           xcodebuild test -scheme "$SCHEME" -destination "id=$DEST_ID" \
-            -clonedSourcePackagesDirPath "$SPM" -skipMacroValidation "$NO_INDEX" \
+            -clonedSourcePackagesDirPath "$SPM" -derivedDataPath "$DERIVED" \
+            -skipMacroValidation "$NO_INDEX" \
             -collect-test-diagnostics never
 
   # ── The required check ───────────────────────────────────────────────────

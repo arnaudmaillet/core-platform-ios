@@ -15,9 +15,9 @@ from fighting over `develop` and over CI.
 - So open (or push to) a pull request only when the work is finished:
   - **rebase on a fresh `origin/develop` first**, so the run tests something
     close to what will land;
-  - run the touched packages' tests **and a Release build** locally. CI is
-    Xcode 26, which can reject Swift that a local Xcode 27 accepts, and it builds
-    Debug and Release.
+  - run the touched packages' tests **and a Release build** locally. CI builds
+    the app with Xcode 26, which can reject Swift that a local Xcode 27
+    accepts, and it builds Debug and Release.
 - Prefer independent pull requests based on `develop`. **Stack only for a real
   dependency.** A stacked pull request has to be replayed and tested again once
   its predecessor lands. When two sessions touch the same files, coordinate:
@@ -36,8 +36,9 @@ from fighting over `develop` and over CI.
 
 - **Commit locally; push only when the pull request's current CI run has
   finished, or when the work is ready for review.** Each push restarts that pull
-  request's CI, and macOS runners are capped at 5 concurrent jobs for the whole
-  account. One run (app build + test lanes) takes all of them.
+  request's CI, and every test lane of every run queues on **one self-hosted
+  Mac that runs one job at a time** (see CI shape). A stale push makes every
+  other session's lanes wait behind it.
 - Batch a round of iterations into a single push.
 - Stacked pull requests (base other than `develop`) run no CI, so pushing
   those is cheap.
@@ -54,3 +55,13 @@ from fighting over `develop` and over CI.
   only check on two pull requests that are green apart but break together. **A
   red `develop` run blocks the queue**: the session whose change broke it pushes
   a fix first, ahead of everything else.
+- Where each job runs:
+  - `build app` (Debug + Release) on GitHub's `macos-latest`, **Xcode 26**:
+    the guard against Swift only Xcode 27 accepts.
+  - the test lanes (and `hero-uitests.yml`) on a **self-hosted Mac, Xcode
+    27**, one job at a time. Each lane keeps its DerivedData and package
+    checkouts there between runs, so a lane can be green on an incremental
+    build.
+  - If that Mac is off, the lanes wait in the queue and the required
+    `build-test` check never arrives. Setting the repository variable
+    `MACOS_RUNNER=github` sends them back to `macos-latest` with Xcode 26.
