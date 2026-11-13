@@ -414,7 +414,7 @@ public final class CommentRowView: UIView {
         )
         config?.baseForegroundColor = .secondaryLabel
         if let count {
-            var title = AttributedString(ThreadCounts.countText(Int(count)))
+            var title = AttributedString(CountFormatter.compactString(for: Int(count)))
             title.font = UIFont.appFont(forTextStyle: .caption1)
             config?.attributedTitle = title
         } else {
@@ -694,7 +694,7 @@ public final class CommentRowView: UIView {
         config?.image = LikesSymbol.likeImage(staked: liked, glyph)
         config?.baseForegroundColor = .secondaryLabel
         if count > 0 {
-            var title = AttributedString(ThreadCounts.countText(count))
+            var title = AttributedString(CountFormatter.compactString(for: count))
             title.font = UIFont.appFont(forTextStyle: .caption1)
             config?.attributedTitle = title
         } else {

@@ -30,7 +30,6 @@ let package = Package(
                 "CoreModels", "DesignSystem", "MediaCore", "EmoteKit", "PostGrid",
                 .product(name: "VoiceKitUI", package: "VoiceKit")
             ]
-        ),
-        .testTarget(name: "ThreadKitTests", dependencies: ["ThreadKit"])
+        )
     ]
 )

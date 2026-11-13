@@ -506,10 +506,10 @@ final class SnapSubtitleView: UIView {
         return animation
     }
 
-    /// Compact engagement figure — the engagement rail's old recipe,
-    /// verbatim, so counts read identically wherever they resurface.
+    /// Compact engagement figure: the app's one spelling of a count
+    /// (`CountFormatter`, truncating: 1,999 is "1.9K", never "2.0k"; #2390).
     /// Internal (not private) for tests.
-    static func countText(_ count: Int) -> String { ThreadCounts.countText(count) }
+    static func countText(_ count: Int) -> String { CountFormatter.compactString(for: count) }
 
     /// One cue's opacity segment. `fadingIn` opens with the lead-in + ramp
     /// (content announcing itself); otherwise the segment is a flat clamp
