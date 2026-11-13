@@ -20,24 +20,20 @@ import Testing
 /// A repository guard (`RepoGuards`, #2371): every pull request runs it.
 struct LaunchArgumentReadGuardTests {
     /// Raw reads each package may still hold, as `Layer/Package` (or `App`).
+    /// A package that is not listed may hold none: CoreStorage, MediaCore,
+    /// HeroPage, ShareSheet, VoiceKit, Auth and Notifications declare
+    /// theirs (#2374, 2).
     static let budget: [String: Int] = [
         "App": 84,
         "Core/CoreNavigation": 48,
         "Core/CoreNetworking": 25,
-        "Core/CoreStorage": 14,
         "Core/DebugTools": 22,
         "Core/DesignSystem": 16,
-        "Core/HeroPage": 1,
-        "Core/MediaCore": 7,
         "Core/MediaPlayback": 15,
         "Core/PostGrid": 12,
-        "Core/ShareSheet": 2,
-        "Core/VoiceKit": 2,
-        "Features/Auth": 6,
         "Features/Chat": 13,
         "Features/Feed": 202,
         "Features/Maps": 74,
-        "Features/Notifications": 1,
         "Features/Profile": 39,
         "Features/Search": 16,
         "Features/Upload": 27,

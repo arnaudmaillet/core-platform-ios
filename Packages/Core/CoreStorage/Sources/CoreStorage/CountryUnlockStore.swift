@@ -1,4 +1,5 @@
 import Foundation
+import LaunchArguments
 
 /// The countries an ACCOUNT has unlocked on the map — not a profile's: every
 /// profile of one account sees the same world.
@@ -21,7 +22,7 @@ public final class CountryUnlockStore: @unchecked Sendable {
         // home country, plus whatever a seed grants again on this launch
         // (`seedUnlocks`; the app's mock seed is skipped with
         // `-countries-no-seed`).
-        if ProcessInfo.processInfo.arguments.contains("-countries-reset") {
+        if LaunchArgument.countriesReset.isPassed() {
             for key in defaults.dictionaryRepresentation().keys
             where key.hasPrefix(Self.keyPrefix) || key.hasPrefix(Self.seedKeyPrefix) {
                 defaults.removeObject(forKey: key)

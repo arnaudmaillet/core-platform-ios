@@ -1,3 +1,4 @@
+import LaunchArguments
 import MediaCore
 import MediaPlayback
 import PostGrid
@@ -1995,7 +1996,7 @@ open class HeroHeaderView: UIView {
         // In the header's space wherever the banner stands (`moveBanner`).
         let foot = bannerView.convert(bannerView.bounds, to: self).maxY
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-hero-blur-trace") {
+        if LaunchArgument.heroBlurTrace.isPassed() {
             print("HERO-BLUR header fade format=\(bannerFormat) avatar=\(avatar) foot=\(foot)")
         }
         #endif

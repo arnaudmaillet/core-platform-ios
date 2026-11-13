@@ -1,4 +1,5 @@
 import Foundation
+import LaunchArguments
 
 /// One reading of the viewer's wallet: everything the UI renders, resolved
 /// at a single instant so two labels on one screen can never disagree about
@@ -616,7 +617,7 @@ public final class WalletStore: @unchecked Sendable {
         let arguments = launchArguments
         // `-wallet-reset`: deterministic QA — a scripted launch always starts
         // from the seeded first-run wallet.
-        if arguments.contains("-wallet-reset") {
+        if LaunchArgument.walletReset.isPassed(in: arguments) {
             for key in [k(Key.balance), k(Key.lifetimeEarned), k(Key.lifetimeSpent), k(Key.lastClaimAt),
                         k(Key.claimedToday), k(Key.claimedTodayDay), k(Key.streakDays), k(Key.boostTotals),
                         k(Key.stakedAt), k(Key.seeded), k(Key.demoStakesSeeded), k(Key.gemsGranted), k(Key.gemsSpent),
@@ -626,15 +627,14 @@ public final class WalletStore: @unchecked Sendable {
         }
         // `-wallet-balance N`: a specific balance without earning it first —
         // 0 shows the insufficient-funds path, 10000 shows wide layouts.
-        if let index = arguments.firstIndex(of: "-wallet-balance"),
-           index + 1 < arguments.count, let balance = Int(arguments[index + 1]) {
+        if let balance = LaunchArgument.walletBalance.intValue(in: arguments) {
             defaults.set(balance, forKey: k(Key.balance))
             defaults.set(true, forKey: k(Key.seeded))
         }
         // `-wallet-claim-ready`: the claim is immediately available — the
         // pulse, the enabled button, and the payout are all reachable without
         // waiting out a real hour.
-        if arguments.contains("-wallet-claim-ready") {
+        if LaunchArgument.walletClaimReady.isPassed(in: arguments) {
             defaults.removeObject(forKey: k(Key.lastClaimAt))
             defaults.removeObject(forKey: k(Key.claimedToday))
             defaults.removeObject(forKey: k(Key.claimedTodayDay))
@@ -642,22 +642,19 @@ public final class WalletStore: @unchecked Sendable {
         // `-wallet-streak N`: an established streak whose chain is alive
         // (last claim landed yesterday), so the next claim both continues it
         // and pays the multiplied amount.
-        if let index = arguments.firstIndex(of: "-wallet-streak"),
-           index + 1 < arguments.count, let streak = Int(arguments[index + 1]) {
+        if let streak = LaunchArgument.walletStreak.intValue(in: arguments) {
             defaults.set(streak, forKey: k(Key.streakDays))
             let yesterday = Self.utcCalendar.date(byAdding: .day, value: -1, to: now())!
             defaults.set(yesterday.timeIntervalSince1970, forKey: k(Key.lastClaimAt))
         }
         // `-wallet-gems N`: exactly N gems to spend, whatever was earned.
-        if let index = arguments.firstIndex(of: "-wallet-gems"),
-           index + 1 < arguments.count, let gems = Int(arguments[index + 1]) {
+        if let gems = LaunchArgument.walletGems.intValue(in: arguments) {
             defaults.set(0, forKey: k(Key.gemsSpent))
             defaults.set(gems - stakesLocked(at: now()).reduce(0) { $0 + $1.gems }, forKey: k(Key.gemsGranted))
         }
         // `-wallet-stake-shots N`: a ×100 cartridge pack with N shots left
         // (0 empties it) — the menu's loaded face without a trip to the shop.
-        if let index = arguments.firstIndex(of: "-wallet-stake-shots"),
-           index + 1 < arguments.count, let shots = Int(arguments[index + 1]) {
+        if let shots = LaunchArgument.walletStakeShots.intValue(in: arguments) {
             defaults.set(max(0, shots), forKey: k(Key.stakeShots))
         }
         #endif

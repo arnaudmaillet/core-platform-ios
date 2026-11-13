@@ -1,5 +1,6 @@
 import CoreNavigation
 import DesignSystem
+import LaunchArguments
 import MediaCore
 import UIKit
 
@@ -315,7 +316,7 @@ public final class ShareSheetViewController: UIViewController {
     override public func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         #if DEBUG
-        guard ProcessInfo.processInfo.arguments.contains("-profile-share-demo") else { return }
+        guard LaunchArgument.profileShareDemo.isPassed() else { return }
         let field = searchBar.searchTextField
         print("SEARCH-ROW bar=\(Int(searchBar.bounds.height)) "
             + "field=\(Int(field.bounds.height)) "
@@ -757,7 +758,7 @@ public final class ShareSheetViewController: UIViewController {
                 : (deviceCornerRadius > 0 ? deviceCornerRadius : nil)
         }
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-profile-share-demo") {
+        if LaunchArgument.profileShareDemo.isPassed() {
             print("SHEET-MODE searching=\(searching) "
                 + "detents=\(sheet.detents.count) "
                 + "selected=\(sheet.selectedDetentIdentifier?.rawValue ?? "nil") "

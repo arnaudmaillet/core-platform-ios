@@ -1,5 +1,6 @@
 import AuthInterface
 import DesignSystem
+import LaunchArguments
 import SafariServices
 import UIKit
 
@@ -146,7 +147,7 @@ final class LoginFlowCoordinator {
             self?.presentPhoneSignInUnavailable()
         }
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-login-demo-phone") {
+        if LaunchArgument.loginDemoPhone.isPassed() {
             verification.qaAutoVerify = "123456"
         }
         #endif
@@ -689,7 +690,7 @@ final class LoginFlowCoordinator {
     /// when that never happens. The 1s stays as a beat before the first push.
     private func runQAHooksIfNeeded() {
         let arguments = ProcessInfo.processInfo.arguments
-        if arguments.contains("-login-demo-phone") {
+        if LaunchArgument.loginDemoPhone.isPassed(in: arguments) {
             qaWhenSettled("login-demo-phone", on: MethodSelectionViewController.self) { [self] in
                 showPhoneAuth()
                 guard let top = topScreen as? PhoneAuthViewController else {
@@ -698,7 +699,7 @@ final class LoginFlowCoordinator {
                 }
                 top.qaAutoSend = "612345678"
             }
-        } else if arguments.contains("-login-demo-signup") {
+        } else if LaunchArgument.loginDemoSignup.isPassed(in: arguments) {
             qaWhenSettled("login-demo-signup", on: MethodSelectionViewController.self) { [self] in
                 showRegistration()
             }

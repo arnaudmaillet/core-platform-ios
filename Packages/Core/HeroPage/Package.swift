@@ -12,6 +12,7 @@ let package = Package(
         .library(name: "HeroPage", targets: ["HeroPage"])
     ],
     dependencies: [
+        .package(path: "../../Kit/LaunchArguments"),
         // `HeaderIdentityFade`, the hero kit's primitives.
         .package(path: "../DesignSystem"),
         // The pages the pager hosts (`PostGridPage`, #1653).
@@ -30,6 +31,7 @@ let package = Package(
     ],
     targets: [
         .target(name: "HeroPage", dependencies: [
+            "LaunchArguments",
             "DesignSystem", "FeedInterface", "PostGrid", "MediaCore", "MediaPlayback", "EmoteKit", "CoreNavigation"
         ]),
         .testTarget(name: "HeroPageTests", dependencies: ["HeroPage", "DesignSystem", "FeedInterface", "PostGrid", "MediaCore"])

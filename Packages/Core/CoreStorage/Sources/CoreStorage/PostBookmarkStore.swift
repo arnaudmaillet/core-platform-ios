@@ -1,5 +1,6 @@
 import CoreModels
 import Foundation
+import LaunchArguments
 
 /// Where every screen reads whether the viewer saved a post, in memory: the
 /// app's `EntityStore` (#896), whose saved fact is viewer-scoped (wiped on a
@@ -203,12 +204,9 @@ public final class PostBookmarkStore: @unchecked Sendable {
     /// active profile resolved — and run once, for that pile: a later
     /// profile switch in the same launch resets nothing.
     private func armLaunchHooks(_ arguments: [String]) {
-        let seed: [String]? = arguments.firstIndex(of: "-seed-bookmarks").flatMap { index in
-            arguments.indices.contains(index + 1)
-                ? arguments[index + 1].split(separator: ",").map(String.init)
-                : nil
-        }
-        let hooks = LaunchHooks(reset: arguments.contains("-reset-bookmarks"), seed: seed)
+        let seed: [String]? = LaunchArgument.seedBookmarks.value(in: arguments)
+            .map { $0.split(separator: ",").map(String.init) }
+        let hooks = LaunchHooks(reset: LaunchArgument.resetBookmarks.isPassed(in: arguments), seed: seed)
         guard hooks.reset || hooks.seed != nil else { return }
         let observer = NotificationCenter.default.addObserver(
             forName: StorageScope.didChangeNotification, object: scope, queue: nil

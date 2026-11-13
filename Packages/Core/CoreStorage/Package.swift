@@ -8,10 +8,11 @@ let package = Package(
         .library(name: "CoreStorage", targets: ["CoreStorage"])
     ],
     dependencies: [
+        .package(path: "../../Kit/LaunchArguments"),
         .package(path: "../../Kit/CoreModels")
     ],
     targets: [
-        .target(name: "CoreStorage", dependencies: ["CoreModels"]),
+        .target(name: "CoreStorage", dependencies: ["LaunchArguments", "CoreModels"]),
         .testTarget(name: "CoreStorageTests", dependencies: ["CoreStorage", "CoreModels"])
     ]
 )

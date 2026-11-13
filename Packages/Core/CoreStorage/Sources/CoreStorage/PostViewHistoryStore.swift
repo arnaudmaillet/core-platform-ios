@@ -1,4 +1,5 @@
 import Foundation
+import LaunchArguments
 
 /// The posts the viewer viewed (#1344): the profile's History tab, newest
 /// first. Every post opened or swiped onto in the vertical feed counts, the
@@ -50,7 +51,7 @@ public final class PostViewHistoryStore: @unchecked Sendable {
         self.now = now
         #if DEBUG
         // Every profile's pile: the active profile is not known yet at launch.
-        if ProcessInfo.processInfo.arguments.contains("-reset-view-history") {
+        if LaunchArgument.resetViewHistory.isPassed() {
             for key in defaults.dictionaryRepresentation().keys where key.hasPrefix(Self.baseKey) {
                 defaults.removeObject(forKey: key)
             }
