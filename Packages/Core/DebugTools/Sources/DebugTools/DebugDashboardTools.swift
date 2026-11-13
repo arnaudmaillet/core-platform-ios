@@ -17,8 +17,11 @@ import VoiceKitUI
 /// local push and the mock scenarios. The frame-rate overlay and memory live
 /// with the generic sections in CoreNavigation.
 @MainActor
-enum DebugDashboardTools {
-    static func entries(container: AppContainer) -> [DebugDashboard.Entry] {
+public enum DebugDashboardTools {
+    /// `cacheCoordinator` and `localStore` are the composition root's: the
+    /// two things the caches-and-resets page clears (#2386: no `AppContainer`
+    /// here, so the tools live outside App).
+    public static func entries(cacheCoordinator: CacheCoordinator, localStore: LocalStore?) -> [DebugDashboard.Entry] {
         DebugTools.register(DebugTool(
             id: "network-log",
             title: "Network log",
@@ -31,7 +34,7 @@ enum DebugDashboardTools {
         return [
             DebugDashboard.Entry(title: "Network", symbol: "arrow.up.arrow.down") { networkList() },
             DebugDashboard.Entry(title: "Caches and Resets", symbol: "internaldrive") {
-                DebugListViewController(title: "Caches and Resets") { cacheSections(container: container) }
+                DebugListViewController(title: "Caches and Resets") { cacheSections(cacheCoordinator: cacheCoordinator, localStore: localStore) }
             },
             DebugDashboard.Entry(title: "Preferences", symbol: "slider.horizontal.3") { preferencesList() },
             DebugDashboard.Entry(title: "Permissions", symbol: "hand.raised") { permissionsList() },
@@ -48,7 +51,7 @@ enum DebugDashboardTools {
     }
 
     /// The failed calls the network log kept, for a bug report.
-    static func failedCallsText() -> String {
+    public static func failedCallsText() -> String {
         let failed = NetworkLog.shared.snapshot.filter(\.failed)
         guard NetworkLog.shared.isOn || !failed.isEmpty else { return "(the network log was off)" }
         return failed.isEmpty ? "(no failed call kept)" : failed.map { call in
@@ -140,8 +143,8 @@ enum DebugDashboardTools {
 
     // MARK: - Caches and resets
 
-    private static func cacheSections(container: AppContainer) -> [DebugSection] {
-        let caches = container.cacheCoordinator.registeredCaches.sorted { $0.usage.bytes > $1.usage.bytes }
+    private static func cacheSections(cacheCoordinator: CacheCoordinator, localStore: LocalStore?) -> [DebugSection] {
+        let caches = cacheCoordinator.registeredCaches.sorted { $0.usage.bytes > $1.usage.bytes }
         let total = caches.reduce(0) { $0 + $1.usage.bytes }
         let bytes = ByteCountFormatter()
         var rows: [DebugRow] = caches.map { cache in
@@ -158,7 +161,7 @@ enum DebugDashboardTools {
             caches.forEach { $0.removeAll(reason: .clear) }
         }))
         var resets: [DebugRow] = []
-        if let store = container.localStore {
+        if let store = localStore {
             resets.append(.action("Clear the Local Store", detail: "Feed, chat, wallet history and pins kept offline", run: {
                 store.removeAll()
             }))

@@ -24,14 +24,20 @@ let package = Package(
         .package(path: "../MediaPlayback"),
         .package(path: "../PostGrid"),
         // `NetworkConditionsMenu` flips the mock transport's conditions.
-        .package(path: "../CoreNetworking")
+        .package(path: "../CoreNetworking"),
+        // The dashboard's caches and resets, and its voice preferences.
+        .package(path: "../CacheKit"),
+        .package(path: "../LocalStore"),
+        .package(path: "../VoiceKit")
     ],
     targets: [
         .target(
             name: "DebugTools",
             dependencies: [
                 "CoreModels", "DesignSystem", "CoreNavigation", "MediaPlayback", "PostGrid",
-                .product(name: "CoreNetworkingMocks", package: "CoreNetworking")
+                .product(name: "CoreNetworkingMocks", package: "CoreNetworking"),
+                "CacheKit", "LocalStore",
+                .product(name: "VoiceKitUI", package: "VoiceKit")
             ],
             swiftSettings: [
                 .defaultIsolation(MainActor.self),

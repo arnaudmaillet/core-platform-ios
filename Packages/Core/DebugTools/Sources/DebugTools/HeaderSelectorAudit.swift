@@ -1,3 +1,4 @@
+import CoreNavigation
 import DesignSystem
 import UIKit
 
@@ -24,17 +25,17 @@ import UIKit
 /// Every one of those is invisible in a screenshot, which is why this walks the
 /// real view tree and hit-tests real points instead.
 @MainActor
-final class HeaderSelectorAudit {
-    struct Finding {
-        let surface: String
-        var problems: [String] = []
-        var isClean: Bool { problems.isEmpty }
+public final class HeaderSelectorAudit {
+    public struct Finding {
+        public let surface: String
+        public var problems: [String] = []
+        public var isClean: Bool { problems.isEmpty }
     }
 
     private let tabBarController: UITabBarController
     private let selectTab: @MainActor (AppTab) -> Void
 
-    init(tabBarController: UITabBarController, selectTab: @escaping @MainActor (AppTab) -> Void) {
+    public init(tabBarController: UITabBarController, selectTab: @escaping @MainActor (AppTab) -> Void) {
         self.tabBarController = tabBarController
         self.selectTab = selectTab
     }
@@ -65,7 +66,7 @@ final class HeaderSelectorAudit {
         .profile: .bottomAccessory,
     ]
 
-    func run(tabs: [AppTab]) async {
+    public func run(tabs: [AppTab]) async {
         print("[header-audit] begin: \(tabs.count) surfaces")
         var findings: [Finding] = []
         for tab in tabs {
@@ -209,7 +210,7 @@ final class HeaderSelectorAudit {
 
     /// The visible selector's frame in its window, or `.null` if there is none —
     /// the value the current-surface mode watches until it stops changing.
-    var selectorFrameOnScreen: CGRect {
+    public var selectorFrameOnScreen: CGRect {
         guard let selector = locateSelector()?.bar,
               let window = selector.window,
               selector.bounds.width > 1
@@ -219,13 +220,13 @@ final class HeaderSelectorAudit {
 
     /// Whether a selector is on screen yet — what the current-surface mode
     /// waits for, so a slow load is not read as a missing capsule.
-    var hasSelectorOnScreen: Bool {
+    public var hasSelectorOnScreen: Bool {
         guard let selector = locateSelector()?.bar else { return false }
         return selector.window != nil && selector.bounds.width > 1
     }
 
     /// Audits whichever navigation bar is currently on screen.
-    func audit(surface: String) -> Finding {
+    public func audit(surface: String) -> Finding {
         var finding = Finding(surface: surface)
         guard let nav = topNavigationController else {
             finding.problems.append("no navigation controller")
@@ -512,7 +513,7 @@ final class HeaderSelectorAudit {
     /// `-header-bar-tree`: the bar's real subview tree. The overflow detector
     /// returned NONE for a bar that was visibly showing a `•••`, so its heuristics
     /// were guesses; this is how the control gets named instead of guessed at.
-    func dumpBarTree() {
+    public func dumpBarTree() {
         guard let bar = topNavigationController?.navigationBar else { return }
         func walk(_ view: UIView, _ depth: Int) {
             let pad = String(repeating: "  ", count: depth)

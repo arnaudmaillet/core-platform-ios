@@ -1,3 +1,4 @@
+import CoreNavigation
 import UIKit
 
 /// The bar's detached trailing item: a "+" that opens a menu of ways to make a
