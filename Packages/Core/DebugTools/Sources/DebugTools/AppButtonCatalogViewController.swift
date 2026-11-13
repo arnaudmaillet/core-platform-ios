@@ -16,21 +16,21 @@ import UIKit
 /// ⚠️ A COPY OF EACH CALL SITE'S CONFIGURATION, not the call site: the
 /// profile's and the place's buttons are private to their views. Where a
 /// factory is public (`PostCardAction.make`), it is the one used here.
-final class AppButtonCatalogViewController: UIViewController {
+public final class AppButtonCatalogViewController: UIViewController {
     private let scroll = UIScrollView()
     private let column = UIStackView()
     private var buttons: [AppControl] = []
     private var anchorButtons: [AppButton] = []
 
-    init() {
+    public init() {
         super.init(nibName: nil, bundle: nil)
         title = "Buttons"
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    override func viewDidLoad() {
+    public override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = Surface.page
         scroll.alwaysBounceVertical = true
@@ -71,7 +71,7 @@ final class AppButtonCatalogViewController: UIViewController {
         buildGalleryLink()
     }
 
-    override func viewWillDisappear(_ animated: Bool) {
+    public override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         view.window?.layer.speed = 1
     }
@@ -681,13 +681,13 @@ final class AppButtonCatalogViewController: UIViewController {
 /// The profile tray's bubble: `HeroHeaderView.bubbleSize`, restated so the
 /// catalog needs no HeroPage import for one number.
 private enum HeroHeaderMetrics {
-    static let bubble: CGFloat = 44
+    public static let bubble: CGFloat = 44
 }
 /// A dashed frame just outside a view: the slot a button holds.
 private final class SlotFrameView: UIView {
     private let dash = CAShapeLayer()
 
-    init(around content: UIView) {
+    public init(around content: UIView) {
         super.init(frame: .zero)
         dash.fillColor = nil
         dash.lineWidth = 1
@@ -705,9 +705,9 @@ private final class SlotFrameView: UIView {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    override func layoutSubviews() {
+    public override func layoutSubviews() {
         super.layoutSubviews()
         dash.frame = bounds
         dash.path = UIBezierPath(roundedRect: bounds.insetBy(dx: -3, dy: -3), cornerRadius: 6).cgPath

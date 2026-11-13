@@ -2,6 +2,7 @@
 import CoreNavigation
 import CoreNetworkingMocks
 #endif
+import DebugTools
 import DesignSystem
 import MediaCore
 import UIKit

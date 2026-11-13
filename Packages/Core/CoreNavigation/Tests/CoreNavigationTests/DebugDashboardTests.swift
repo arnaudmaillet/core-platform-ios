@@ -70,7 +70,7 @@ struct DebugDashboardTests {
             "Packages/Core/CoreNetworking/Sources/CoreNetworking/NetworkLog.swift",
             "App/Shell/DebugDashboardTools.swift",
             "App/Shell/DebugDashboardWiring.swift",
-            "App/Shell/NetworkConditionsMenu.swift",
+            "Packages/Core/DebugTools/Sources/DebugTools/NetworkConditionsMenu.swift",
         ]
         for file in files {
             let text = try String(contentsOf: root.appendingPathComponent(file), encoding: .utf8)

@@ -38,10 +38,10 @@ import UIKit
 /// `variableBlur`, radius 2, 62pt; plus a half-opacity radius-16 gaussian in
 /// dark) under a titled bar too.
 @MainActor
-final class StatusBarBlurAudit {
+public final class StatusBarBlurAudit {
     private static var shared: StatusBarBlurAudit?
 
-    static func installIfRequested(in window: UIWindow) {
+    public static func installIfRequested(in window: UIWindow) {
         guard ProcessInfo.processInfo.arguments.contains("-status-bar-blur-audit"), shared == nil else { return }
         shared = StatusBarBlurAudit(window: window)
     }
@@ -61,9 +61,9 @@ final class StatusBarBlurAudit {
     }
 
     private final class Proxy: NSObject {
-        weak var owner: StatusBarBlurAudit?
-        init(_ owner: StatusBarBlurAudit) { self.owner = owner }
-        @objc func tick() { MainActor.assumeIsolated { owner?.sample() } }
+        public weak var owner: StatusBarBlurAudit?
+        public init(_ owner: StatusBarBlurAudit) { self.owner = owner }
+        @objc public func tick() { MainActor.assumeIsolated { owner?.sample() } }
     }
 
     /// Unbuffered: `print` from an app that never exits reads empty from a
@@ -222,9 +222,9 @@ final class StatusBarBlurAudit {
     }
 
     private struct Backdrop {
-        var owner: String
-        var frame: CGRect
-        var filters: String
+        public var owner: String
+        public var frame: CGRect
+        public var filters: String
     }
 
     /// Every visible backdrop layer under `root`, framed in the window.

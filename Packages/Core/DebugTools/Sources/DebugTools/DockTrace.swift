@@ -35,10 +35,10 @@ import UIKit
 /// transition completed — the landing. With the rule in force the bar should
 /// arrive (`hidden=N`, `bar` ramping up) while the phase still reads `moving`.
 @MainActor
-final class DockTrace {
+public final class DockTrace {
     private static var shared: DockTrace?
 
-    static func installIfRequested(tabBarController: UITabBarController) {
+    public static func installIfRequested(tabBarController: UITabBarController) {
         guard ProcessInfo.processInfo.arguments.contains("-dock-trace"), shared == nil else { return }
         shared = DockTrace(tabBarController: tabBarController)
     }
@@ -59,9 +59,9 @@ final class DockTrace {
     /// A display link retains its target; the proxy keeps that from pinning
     /// the trace (and through it the tab bar controller) forever.
     private final class Proxy: NSObject {
-        weak var owner: DockTrace?
-        init(_ owner: DockTrace) { self.owner = owner }
-        @objc func tick() { MainActor.assumeIsolated { owner?.sample() } }
+        public weak var owner: DockTrace?
+        public init(_ owner: DockTrace) { self.owner = owner }
+        @objc public func tick() { MainActor.assumeIsolated { owner?.sample() } }
     }
 
     private func sample() {

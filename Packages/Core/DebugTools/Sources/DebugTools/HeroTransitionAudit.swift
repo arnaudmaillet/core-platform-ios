@@ -36,11 +36,11 @@ import UIKit
 /// flags just the states that are wrong in EVERY context: a stranded card,
 /// two players on one asset at settle, a census gone negative.
 @MainActor
-final class HeroTransitionAudit {
-    private(set) static var shared: HeroTransitionAudit?
+public final class HeroTransitionAudit {
+    public private(set) static var shared: HeroTransitionAudit?
 
     /// Installs under `-hero-audit`; a launch without the flag costs nothing.
-    static func installIfRequested(pools: [(label: String, pool: VideoPlaybackController)]) {
+    public static func installIfRequested(pools: [(label: String, pool: VideoPlaybackController)]) {
         guard ProcessInfo.processInfo.arguments.contains("-hero-audit"), shared == nil else { return }
         shared = HeroTransitionAudit(pools: pools)
     }

@@ -29,10 +29,10 @@ import UIKit
 /// `.inline` at 234 docked beside the shrunken bar. A check reading the height
 /// finds nothing on a screen that is working perfectly.
 @MainActor
-final class AccessoryCollapseAudit {
-    private(set) static var shared: AccessoryCollapseAudit?
+public final class AccessoryCollapseAudit {
+    public private(set) static var shared: AccessoryCollapseAudit?
 
-    static func installIfRequested(tabBarController: UITabBarController) {
+    public static func installIfRequested(tabBarController: UITabBarController) {
         guard ProcessInfo.processInfo.arguments.contains("-accessory-collapse-probe"),
               shared == nil
         else { return }

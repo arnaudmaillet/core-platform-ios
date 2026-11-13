@@ -45,7 +45,7 @@ struct BarContractGuardTests {
     /// screen putting its selector in the band fails here.
     static let selectorAccessoryHosts: [String: Int] = [
         "Packages/Core/HeroPage/Sources/HeroPage/HeroPageSelector.swift": 1,
-        "App/Shell/LensLab.swift": 1,
+        "Packages/Core/DebugTools/Sources/DebugTools/LensLab.swift": 1,
     ]
 
     /// Hosts whose bars are kept by identifier (`BarItemStore`, #2331): an

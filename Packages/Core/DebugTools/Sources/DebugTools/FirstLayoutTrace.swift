@@ -46,14 +46,14 @@ import UIKit
 /// prewarmed screens (`prepareForHeroPresentation`, the snap feed's staged
 /// panels) lay out off-window on purpose.
 @MainActor
-enum FirstLayoutTrace {
+public enum FirstLayoutTrace {
     private static var isInstalled = false
     private static var reports = 0
     /// Enough for a session; each report is ~40 lines.
     private static let reportCap = 80
     private static var sink: FileHandle?
 
-    static func installIfRequested() {
+    public static func installIfRequested() {
         guard ProcessInfo.processInfo.arguments.contains("-first-layout-trace"),
               !isInstalled
         else { return }
@@ -81,7 +81,7 @@ enum FirstLayoutTrace {
     /// depth 1; the inner view's own pass then reads AT RISK, because those
     /// animations were attached by the parent's pass, not its own). No report
     /// there means the detector is broken, not the app.
-    static func selfTestIfRequested(in window: UIWindow) {
+    public static func selfTestIfRequested(in window: UIWindow) {
         guard ProcessInfo.processInfo.arguments.contains("-first-layout-trace-selftest"),
               isInstalled
         else { return }

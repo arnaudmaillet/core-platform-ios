@@ -10,12 +10,12 @@ import UIKit
 /// schedules an outage that ends on its own — the same switchboard the
 /// `-mock-offline` / `-mock-outage` / `-mock-fail` launch arguments set at
 /// launch. Mock mode only; DEBUG only.
-enum NetworkConditionsMenu {
+public enum NetworkConditionsMenu {
     /// The services one can fail alone, by the RPC path they match.
-    static let services = ["TimelineService", "ProfileService", "ChatService", "Comment", "MediaService"]
+    public static let services = ["TimelineService", "ProfileService", "ChatService", "Comment", "MediaService"]
 
     @MainActor
-    static func entry(faults: MockNetworkFaults, bff: MockBFF) -> DebugDashboard.Entry {
+    public static func entry(faults: MockNetworkFaults, bff: MockBFF) -> DebugDashboard.Entry {
         DebugDashboard.Entry(title: "Mock Network", symbol: "network") {
             DebugListViewController(title: "Mock Network") { sections(faults: faults, bff: bff) }
         }
@@ -54,7 +54,7 @@ enum NetworkConditionsMenu {
         ]
     }
 
-    static func describe(_ conditions: SimulatedConditions) -> String {
+    public static func describe(_ conditions: SimulatedConditions) -> String {
         if conditions == .none { return "online" }
         var parts: [String] = []
         if conditions.latency.upperBound > 0 { parts.append("slow") }
@@ -68,10 +68,10 @@ enum NetworkConditionsMenu {
 }
 
 /// A window that reports a shake — the debug sheets' trigger.
-final class DebugShakeWindow: AppWindow {
-    var onShake: (() -> Void)?
+public final class DebugShakeWindow: AppWindow {
+    public var onShake: (() -> Void)?
 
-    override func motionEnded(_ motion: UIEvent.EventSubtype, with event: UIEvent?) {
+    public override func motionEnded(_ motion: UIEvent.EventSubtype, with event: UIEvent?) {
         guard motion == .motionShake, let onShake else { return super.motionEnded(motion, with: event) }
         onShake()
     }
