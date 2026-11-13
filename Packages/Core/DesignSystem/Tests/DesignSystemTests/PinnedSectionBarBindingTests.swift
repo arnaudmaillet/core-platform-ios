@@ -7,7 +7,7 @@ import UIKit
 /// (leading or trailing, the screen's other items kept), a tap, the deferral
 /// past a turn, and a bar toast taking the trailing group and giving it back.
 @MainActor
-@Suite(.serialized)
+@Suite(.serialized, .ownsToastClock)
 struct PinnedSectionBarBindingTests {
     private let sections = [
         PinnedSectionBarBinding.Section(id: "new", title: "New", count: 3),

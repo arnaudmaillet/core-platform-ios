@@ -12,7 +12,7 @@ import UIKit
 /// a plain window (`ToastOverlay.makeForTests`), set and restored inside each
 /// test with no `await` in between (`global-test-state-await-trap`).
 @MainActor
-@Suite(.serialized)
+@Suite(.serialized, .ownsToastClock)
 struct ToastOverlayTests {
 
     private let bounds = CGRect(x: 0, y: 0, width: 402, height: 874)

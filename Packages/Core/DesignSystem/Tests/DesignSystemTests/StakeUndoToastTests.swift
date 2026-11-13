@@ -6,7 +6,7 @@ import UIKit
 /// tap of a burst, Undo for the whole burst, no haptic of its own, and closed
 /// by the surface when the burst can no longer be taken back.
 @MainActor
-@Suite(.serialized)
+@Suite(.serialized, .ownsToastClock)
 struct StakeUndoToastTests {
     @MainActor private final class Ledger {
         var undos = 0

@@ -7,7 +7,7 @@ import UIKit
 /// is measured at the label's width now, the toast waits while the sheet is
 /// up, and acting from the sheet runs the toast's action.
 @MainActor
-@Suite(.serialized)
+@Suite(.serialized, .ownsToastClock)
 struct ToastFullMessageTests {
     private static let long = "Couldn't ask to follow @ava.moreau because the server said no"
 

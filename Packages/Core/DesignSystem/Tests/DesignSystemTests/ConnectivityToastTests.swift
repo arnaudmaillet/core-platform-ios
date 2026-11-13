@@ -7,7 +7,7 @@ import UIKit
 /// to "Back online", which leaves on its own; and the condition outranks the
 /// plain confirmations at the top.
 @MainActor
-@Suite(.serialized)
+@Suite(.serialized, .ownsToastClock)
 struct ConnectivityToastTests {
 
     private func hosting(_ body: (UIViewController, ConnectivityToast, (TimeInterval) -> Void) throws -> Void) rethrows {

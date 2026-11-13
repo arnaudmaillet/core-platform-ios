@@ -6,7 +6,7 @@ import UIKit
 /// action as wide as the margins allow with its control flush trailing, one
 /// hugging its text; 48 pt, with an action or without (one height, 2026-11-06).
 @MainActor
-@Suite(.serialized)
+@Suite(.serialized, .ownsToastClock)
 struct ToastLayoutTests {
     private func hosting(_ body: (UIWindow, UIView) throws -> Void) rethrows {
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
