@@ -31,14 +31,50 @@ struct SnapCoverLoadTests {
 
         let firstURL = try #require(first.mediaURL), secondURL = try #require(second.mediaURL)
         await fetcher.release(firstURL)
-        _ = try await pipeline.image(for: firstURL)
+        _ = try await within("step 1: the previous post's picture never came back from the pipeline") {
+            try await pipeline.image(for: firstURL)
+        }
         #expect(cell.debugShownPhoto == nil, "the previous post's picture landed")
 
         await fetcher.release(secondURL)
-        let expected = try await pipeline.image(for: secondURL)
-        for _ in 0..<6_000 where cell.debugShownPhoto == nil { try? await Task.sleep(for: .milliseconds(5)) }
-        #expect(cell.debugShownPhoto === expected)
+        guard let expected = try await within("step 2: the new post's picture never came back from the pipeline", {
+            try await pipeline.image(for: secondURL)
+        }) else { return }
+        for _ in 0..<Self.looks where cell.debugShownPhoto == nil { try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(cell.debugShownPhoto === expected, "step 3: the new post's picture was never drawn")
     }
+
+    /// A look budget, not a deadline. ⚠️ Under a starved Feed lane a look took
+    /// ~100 ms, and an unbudgeted await (or 6,000 looks) ran into the 10-minute
+    /// `.timeLimit`, which hung the process instead of naming the step that
+    /// never resumed. 1,500 looks stay under ~150 s at that rate.
+    private static let looks = 1_500
+
+    /// Awaits `operation` under the look budget: a fetch that never resumes
+    /// fails here, named, instead of hanging the suite.
+    private func within(
+        _ step: String, _ operation: @escaping @Sendable () async throws -> UIImage
+    ) async throws -> UIImage? {
+        let outcome = Outcome()
+        let task = Task {
+            do { outcome.set(.success(try await operation())) } catch { outcome.set(.failure(error)) }
+        }
+        for _ in 0..<Self.looks {
+            if let result = outcome.result { return try result.get() }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        task.cancel()
+        Issue.record("\(step)")
+        return nil
+    }
+}
+
+/// What the watched task ended with, read by the look loop.
+private final class Outcome: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: Result<UIImage, any Error>?
+    var result: Result<UIImage, any Error>? { lock.withLock { value } }
+    func set(_ result: Result<UIImage, any Error>) { lock.withLock { value = result } }
 }
 
 /// Holds each URL's fetch until the test releases it.

@@ -139,7 +139,12 @@ struct PostDetailCommentsTests {
     /// failing wait never ran. Success returns at once, so a fast run pays
     /// nothing; a starved runner gets 6,000 looks. It answers, and every
     /// caller asserts the answer, so a wait that never holds fails right there.
-    private static let looks = 6_000
+    ///
+    /// ⚠️ 1,500, NOT 6,000: under a starved Feed lane a look took ~100 ms, so
+    /// 6,000 of them outlasted the tests' 10-minute `.timeLimit` and a wait that
+    /// never held hung the process ("Restarting after unexpected exit") instead
+    /// of naming itself. 1,500 stays under ~150 s at that rate.
+    private static let looks = 1_500
 
     private func settle(until condition: () -> Bool) async -> Bool {
         for _ in 0..<Self.looks {
@@ -306,17 +311,17 @@ struct PostDetailCommentsTests {
         var posted: [String] = []
         viewModel.onCommentPosted = { posted.append($0) }
         viewModel.viewDidLoad()
-        #expect(await settle { if case .loaded = lastComments { true } else { false } })
+        #expect(await settle { if case .loaded = lastComments { true } else { false } }, "step 1: the first load never reported .loaded")
 
         viewModel.submitComment("crossed")
-        #expect(await settle { provider.storedIDs.count == 1 })
+        #expect(await settle { provider.storedIDs.count == 1 }, "step 2: the held send never reached the store")
         viewModel.refresh()
         #expect(await settle {
             if case .loaded(let models) = lastComments { return models.count == 1 }
             return false
-        })
+        }, "step 3: the refresh never showed the stored comment: \(String(describing: lastComments))")
         provider.release()
-        #expect(await settle { !composing })
+        #expect(await settle { !composing }, "step 4: the released send never ended composing")
 
         guard case .loaded(let models) = lastComments else {
             Issue.record("no stream: \(String(describing: lastComments))")
@@ -340,20 +345,20 @@ struct PostDetailCommentsTests {
         var lastComments: PostDetailViewModel.CommentsState?
         viewModel.onCommentsChange = { lastComments = $0 }
         viewModel.viewDidLoad()
-        #expect(await settle { if case .loaded = lastComments { true } else { false } })
+        #expect(await settle { if case .loaded = lastComments { true } else { false } }, "step 1: the first load never reported .loaded")
 
         viewModel.submitComment("twice on purpose")
-        #expect(await settle { failures == 1 })
+        #expect(await settle { failures == 1 }, "step 2: the lost answer was never reported as a failure")
         viewModel.refresh()
         #expect(await settle {
             if case .loaded(let models) = lastComments { return models.count == 1 }
             return false
-        })
+        }, "step 3: the refresh never showed the comment that landed: \(String(describing: lastComments))")
         viewModel.submitComment("twice on purpose")
         #expect(await settle {
             if case .loaded(let models) = lastComments { return models.count == 2 }
             return false
-        })
+        }, "step 4: the second comment never joined the stream: \(String(describing: lastComments)), stored \(provider.storedIDs)")
 
         let ids = provider.storedIDs
         #expect(ids.count == 2 && Set(ids).count == 2, "the second comment was swallowed: \(ids)")
