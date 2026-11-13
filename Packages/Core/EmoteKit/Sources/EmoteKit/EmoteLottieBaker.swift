@@ -409,7 +409,18 @@ enum EmoteMainPark {
             // where it belongs, and a commit made while it sleeps finds
             // nothing of the main thread's to lay out. A flush with nothing
             // pending costs nothing.
+            //
+            // ⚠️ IT DID NOT CLOSE #1603 FOR GOOD. A Feed run on CI (#2426)
+            // still saw a bake lay out the floating bar. Measured since: a
+            // background commit lays out neither a mark the main thread made
+            // in a window nor a tree in no window (`EmoteCommitReachTests`),
+            // so that bar reached the bake's transaction some other way. The
+            // probe, on in every test run, records who marks a bar and
+            // whether one in a window is still pending here.
             CATransaction.flush()
+            #if DEBUG
+            EmoteOffMainLayoutProbe.checkAfterFlush()
+            #endif
             installed.condition.lock()
             installed.mainAsleep = true
             installed.everAsleep = true
@@ -438,6 +449,16 @@ enum EmoteMainPark {
         CFRunLoopAddObserver(CFRunLoopGetMain(), waking, .commonModes)
         return installed
     }()
+
+    #if DEBUG
+    /// Whether the main thread sleeps, as the gate sees it: for the probe's
+    /// reports only.
+    static var debugMainAsleep: Bool {
+        gate.condition.lock()
+        defer { gate.condition.unlock() }
+        return gate.mainAsleep
+    }
+    #endif
 
     private static func noteCappedWait(_ counters: EmoteParkCounters) {
         counters.capped.add(1, ordering: .relaxed)

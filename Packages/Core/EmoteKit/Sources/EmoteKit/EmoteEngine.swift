@@ -39,7 +39,14 @@ import UIKit
 @MainActor
 public final class EmoteEngine {
     public static let shared: EmoteEngine = {
-        let engine = EmoteEngine(seeds: .bundled, registry: .shared)
+        var seeds: EmoteSeeds? = .bundled
+        #if DEBUG
+        // `EMOTE_NO_SEEDS=1` (`TEST_RUNNER_EMOTE_NO_SEEDS=1` for a test run):
+        // every emote bakes, so a test run exercises the bake thread's parked
+        // commits the way a cold device does (#1603's probe).
+        if ProcessInfo.processInfo.environment["EMOTE_NO_SEEDS"] == "1" { seeds = nil }
+        #endif
+        let engine = EmoteEngine(seeds: seeds, registry: .shared)
         engine.hotSet = EmoteHotSet(defaults: .standard)
         // The disk's index, read off the main thread before the first emote
         // asks: it says which sheets are a read away (`skeletonDelay`).
