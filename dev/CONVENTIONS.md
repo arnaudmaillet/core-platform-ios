@@ -2,7 +2,12 @@
 
 How code is laid out and written in this repository. Audit #2366, item #2390.
 
-The rules that a scan can check run in `Packages/Tools/RepoGuards`, which every pull request runs. Most of those guards are **ratchets**: they hold today's count per package and fail when it grows. Lowering a count is always welcome. When you lower one, lower the baseline in the same pull request, so the gain stays.
+The rules that a scan can check reliably run in `Packages/Tools/RepoGuards`, which every pull request runs:
+- `LayeringGuardTests` checks the layers;
+- `SharedHelperGuardTests` holds one implementation per shared helper;
+- `DebugToolsGuardTests` keeps the debug tools `#if DEBUG`.
+
+The rest of this page is review, not a scan. The concurrency and error rules have too many legitimate exceptions for a count to judge, so a reviewer holds new code to them.
 
 ## Packages and layers
 
