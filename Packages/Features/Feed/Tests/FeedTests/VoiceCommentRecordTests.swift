@@ -190,12 +190,13 @@ struct VoiceCommentRecordTests {
     @Test func thePostsFieldHoldsForAVoiceCommentAndATapStillTypes() throws {
         let (controller, window) = page(VoiceCommentSource())
         let bar = controller.composeBar
-        // ⚠️ The REAL keyboard: given back however the test ends, or every
-        // suite running alongside lays out under it (#2392).
+        // ⚠️ Focused, but with no system keyboard (`raisesNoKeyboard`), and
+        // given back however the test ends.
         defer {
             bar.debugTextView.resignFirstResponder()
             window.isHidden = true
         }
+        bar.debugTextView.raisesNoKeyboard()
         #expect(bar.configuration.voice == .comment)
         let composer = try #require(controller.voiceComposer, "nothing records the comments' hold")
         #expect(composer.recorder.limit == 60)
@@ -266,13 +267,14 @@ struct VoiceCommentRecordTests {
         let source = VoiceCommentSource(seeded: [comment("c1")])
         let (controller, window) = page(source)
         let bar = controller.composeBar
-        // ⚠️ A reply raises the REAL keyboard (`enterReplyState` focuses the
-        // field) and this test waits with it up: given back however it ends,
-        // or every suite running alongside lays out under it (#2392).
+        // ⚠️ A reply focuses the field (`enterReplyState`) and this test waits
+        // with it focused: no system keyboard (`raisesNoKeyboard`), and given
+        // back however it ends.
         defer {
             bar.debugTextView.resignFirstResponder()
             window.isHidden = true
         }
+        bar.debugTextView.raisesNoKeyboard()
         let composer = try #require(controller.voiceComposer)
         controller.enterReplyState(for: CommentDisplayModel(entry: comment("c1")))
         #expect(bar.debugFieldHoldBegins, "a reply's voice can't be held")
