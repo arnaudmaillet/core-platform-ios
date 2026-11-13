@@ -68,7 +68,7 @@ struct DebugDashboardTests {
             "Packages/Core/CoreNavigation/Sources/CoreNavigation/DebugDashboard/FrameRateOverlay.swift",
             "Packages/Core/CoreNavigation/Sources/CoreNavigation/DebugDashboard/DebugInterfaceTools.swift",
             "Packages/Core/CoreNetworking/Sources/CoreNetworking/NetworkLog.swift",
-            "App/Shell/DebugDashboardTools.swift",
+            "Packages/Core/DebugTools/Sources/DebugTools/DebugDashboardTools.swift",
             "App/Shell/DebugDashboardWiring.swift",
             "Packages/Core/DebugTools/Sources/DebugTools/NetworkConditionsMenu.swift",
         ]

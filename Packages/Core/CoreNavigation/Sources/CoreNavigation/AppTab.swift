@@ -1,0 +1,34 @@
+import Foundation
+
+/// The places of the app shell's bar, in bar order. In CoreNavigation since
+/// #2386, beside `AppRoute`, so the debug tools can name a tab.
+///
+/// The bar shows a fifth item, DETACHED at the trailing edge — the "+"
+/// (`CreateTabItem`) — giving `| Explore  For You  Messages  Profile |  + |`
+/// with no custom bar. It is deliberately NOT a case here: it opens a menu and
+/// is never selected, so nothing can route to it and `-select-tab` has no index
+/// for it.
+///
+/// **Every case here is now a real selectable root.** Slot 1 used to be `.feed`,
+/// a bar button that was not a *place*: its selection was vetoed and the
+/// timeline was pushed onto whichever tab you were on. It is now `.forYou`, an
+/// ordinary tab with its own stack; the timeline moved behind a tile tap on
+/// that grid and stays reachable as `AppRoute.feed` (see `FeedFlowCoordinator`).
+///
+/// Backed by a stable string identifier (not an ordinal), so reordering the bar
+/// never silently repoints a route.
+///
+/// ⚠️ Declaration order IS bar order, and `-select-tab <n>` indexes
+/// `allCases` — indices are unchanged by the Feed→For You swap (both sit at 1),
+/// but `-select-tab 1` now SELECTS a tab where it used to trigger a push.
+///
+/// `.explore` was `.maps` until 2026-09-26 (the tab is named for the job, the
+/// Maps feature behind it kept its name). Same slot, so `-select-tab 0` still
+/// opens it; the raw value moved with the case, so the one place a NAME is
+/// typed — `-nav-stress <cycles> <tab>` — now takes `explore`.
+public enum AppTab: String, CaseIterable, Sendable {
+    case explore
+    case forYou
+    case messages
+    case profile
+}

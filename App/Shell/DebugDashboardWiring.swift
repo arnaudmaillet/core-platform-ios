@@ -39,7 +39,9 @@ enum DebugDashboardWiring {
             entries.append(NetworkConditionsMenu.entry(faults: container.mockNetworkFaults, bff: container.mockBackend.bff))
         }
         entries += [DebugDashboard.flagsEntry, DebugDashboard.performanceEntry, DebugDashboard.interfaceEntry]
-        entries += DebugDashboardTools.entries(container: container)
+        entries += DebugDashboardTools.entries(
+            cacheCoordinator: container.cacheCoordinator, localStore: container.localStore
+        )
         entries.append(DebugDashboard.logsEntry)
         DebugDashboard.entries = entries
         Task { await refreshViewer(container: container) }

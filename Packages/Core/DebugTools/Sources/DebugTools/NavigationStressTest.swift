@@ -17,12 +17,12 @@ import UIKit
 /// a view thinks; a hit test says what a finger would actually reach, which is
 /// the only question worth asking here.
 @MainActor
-final class NavigationStressTest {
+public final class NavigationStressTest {
     /// What one audit found. Empty `problems` is a pass.
-    struct Report {
-        let cycle: Int
-        var problems: [String] = []
-        var isClean: Bool { problems.isEmpty }
+    public struct Report {
+        public let cycle: Int
+        public var problems: [String] = []
+        public var isClean: Bool { problems.isEmpty }
     }
 
     private let tabBarController: UITabBarController
@@ -38,7 +38,7 @@ final class NavigationStressTest {
     /// any one of them strands every grab beneath it.
     private let targetDepth = 7
 
-    init(
+    public init(
         tabBarController: UITabBarController,
         router: any Router,
         selectTab: @escaping @MainActor (AppTab) -> Void
@@ -59,7 +59,7 @@ final class NavigationStressTest {
     /// on its own terms, so a leak that only one of them produces is invisible
     /// from any other. The Profile tab in particular is a ROOT profile — the
     /// case whose dismissal rules differ from a pushed one.
-    func run(cycles: Int, tabs: [AppTab] = AppTab.allCases) async {
+    public func run(cycles: Int, tabs: [AppTab] = AppTab.allCases) async {
         print("[nav-stress] begin: \(cycles) cycles × \(tabs.count) tabs")
         var failures = 0
         var attempted = 0
