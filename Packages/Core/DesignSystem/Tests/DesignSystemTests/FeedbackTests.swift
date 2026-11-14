@@ -6,7 +6,7 @@ import UIKit
 /// The one feedback presenter (#804): the right host, the failure style, the
 /// paired haptic, and nothing else calling the renderer.
 @MainActor
-@Suite(.serialized)
+@Suite(.serialized, .ownsToastClock)
 struct FeedbackTests {
     /// `root` as a visible window's root, taken down within the test (a
     /// window released visible in a dirty turn crashes the host).

@@ -9,7 +9,7 @@ import UIKit
 ///
 /// Time is a hand-driven `ToastClock`, swapped and put back synchronously.
 @MainActor
-@Suite(.serialized)
+@Suite(.serialized, .ownsToastClock)
 struct ToastUndoTests {
 
     private final class Ledger {
