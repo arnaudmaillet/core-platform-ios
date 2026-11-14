@@ -15,9 +15,15 @@ from fighting over `develop` and over CI.
 - So open (or push to) a pull request only when the work is finished:
   - **rebase on a fresh `origin/develop` first**, so the run tests something
     close to what will land;
-  - run the touched packages' tests **and a Release build** locally. CI builds
-    the app with Xcode 26, which can reject Swift that a local Xcode 27
-    accepts, and it builds Debug and Release.
+  - locally, run **a Release build and the tests you changed or that cover
+    the code you changed** (`-only-testing` on those suites), not the whole
+    lanes: the pull request's CI runs every lane the change reaches, and
+    running them twice made each change wait for a free Mac (owner,
+    2026-11-14). Run those local builds in the background QoS
+    (`taskpolicy -b xcodebuild …`) so they never starve a CI job on the same
+    Mac. CI builds the app with Xcode 26, which can reject Swift that a local
+    Xcode 27 accepts, and it builds Debug and Release.
+  - A test-only change needs no Release build: no app target compiles tests.
 - Prefer independent pull requests based on `develop`. **Stack only for a real
   dependency.** A stacked pull request has to be replayed and tested again once
   its predecessor lands. When two sessions touch the same files, coordinate:
