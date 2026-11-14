@@ -75,6 +75,24 @@ SHARDS = {"Packages/Features/Feed": 2}
 SMALL_LANE_MINUTES = 5.6
 BATCH_MINUTES = 12.0
 
+# Lanes that run on GitHub's hosted Macs (Xcode 26) rather than the
+# self-hosted Mac (Xcode 27), side by side with it (#2370). One Mac runs one
+# job at a time, and a run's lanes queued there one after another for hours
+# while the five hosted slots held two jobs.
+#
+# ⚠️ DATA AND LOGIC ONLY. A hosted runner is a slower, shared VM (Chat: 6.5 min
+# there, 4.3 on the Mac), and the suites that measure time, play media or
+# animate — Feed, Upload, Maps, CoreNavigation, MediaPlayback, HeroPage,
+# EmoteKit, VoiceKit, Profile, DesignSystem's toasts — went red there on
+# starvation (#599, #2392). They stay on the Mac. A package not listed runs on
+# the Mac: a new package needs no entry to be tested, only to be moved.
+HOSTED_LANES = {
+    "CoreModels", "AuthInterface", "CoreStorage", "CoreRealtime", "LocalStore",
+    "CacheKit", "EntityStore", "CoreNetworking", "RepoGuards", "LaunchArguments",
+    "TestSupport",
+    "Chat", "Search", "Auth", "Notifications", "StickerKit", "ShareSheet",
+}
+
 DEP_RE = re.compile(r'\.package\(\s*path:\s*"([^"]+)"')
 NAME_RE = re.compile(r'name:\s*"([^"]+)"')
 
@@ -202,7 +220,11 @@ def batched(small):
     return out
 
 
-def entries(pkgs, dirs):
+def entries(pkgs, dirs, hosted_only=False):
+    """(self-hosted Mac jobs, hosted jobs), each longest first.
+
+    `hosted_only` (MACOS_RUNNER=github, the Mac off): every lane is hosted.
+    """
     out = []
     for d in sorted(dirs):
         meta = pkgs[d]
@@ -226,18 +248,23 @@ def entries(pkgs, dirs):
         out.append({"label": "MediaPlayback (legacy AVPlayerLayer)",
                     "name": "MediaPlayback", "dir": mp,
                     "scheme": "MediaPlayback", "avsbdl": "0", "shard": ""})
-    # The legacy-backing lane keeps a job of its own (its environment differs).
-    small = [e for e in out if not e.get("shard") and not e["avsbdl"]
-             and LANE_MINUTES.get(e["label"], DEFAULT_LANE_MINUTES) <= SMALL_LANE_MINUTES]
-    out = [e for e in out if e not in small] + batched(small)
+    def jobs(lanes):
+        # The legacy-backing lane keeps a job of its own (its environment differs).
+        small = [e for e in lanes if not e.get("shard") and not e["avsbdl"]
+                 and LANE_MINUTES.get(e["label"], DEFAULT_LANE_MINUTES) <= SMALL_LANE_MINUTES]
+        lanes = [e for e in lanes if e not in small] + batched(small)
 
-    def minutes(e):
-        return e.get("_minutes", LANE_MINUTES.get(e["label"], DEFAULT_LANE_MINUTES))
-    # Longest first (stable, so ties keep their directory order).
-    out.sort(key=lambda e: -minutes(e))
-    for e in out:
-        e.pop("_minutes", None)
-    return [with_lanes(e) for e in out]
+        def minutes(e):
+            return e.get("_minutes", LANE_MINUTES.get(e["label"], DEFAULT_LANE_MINUTES))
+        # Longest first (stable, so ties keep their directory order).
+        lanes.sort(key=lambda e: -minutes(e))
+        for e in lanes:
+            e.pop("_minutes", None)
+        return [with_lanes(e) for e in lanes]
+
+    # Split before batching, so a batch never mixes the two machines.
+    hosted = [e for e in out if hosted_only or e["name"] in HOSTED_LANES]
+    return jobs([e for e in out if e not in hosted]), jobs(hosted)
 
 
 def docs_only(files):
@@ -285,20 +312,25 @@ def main():
     if build_app:
         chosen = set(chosen) | {d for d in ALWAYS if d in testable}
 
-    matrix = entries(pkgs, chosen)
+    hosted_only = os.environ.get("MACOS_RUNNER", "").strip() == "github"
+    matrix, hosted = entries(pkgs, chosen, hosted_only=hosted_only)
     print(f"Reason: {why}")
     print(f"App build: {'yes' if build_app else 'no'}")
-    print(f"Lanes: {len(matrix)} of {len(testable) + 1} (longest first)")
-    for e in matrix:
-        print(f"  - {e['label']}")
+    print(f"Jobs: {len(matrix)} on the self-hosted Mac, {len(hosted)} on GitHub's hosted Macs"
+          + (" (MACOS_RUNNER=github: every lane hosted)" if hosted_only else ""))
+    for where, jobs in (("Mac", matrix), ("hosted", hosted)):
+        for e in jobs:
+            print(f"  - [{where}] {e['label']}")
     out = os.environ.get("GITHUB_OUTPUT")
     if out:
         with open(out, "a", encoding="utf-8") as fh:
             fh.write(f"matrix={json.dumps(matrix, separators=(',', ':'))}\n")
             fh.write(f"count={len(matrix)}\n")
+            fh.write(f"hosted_matrix={json.dumps(hosted, separators=(',', ':'))}\n")
+            fh.write(f"hosted_count={len(hosted)}\n")
             fh.write(f"app={'true' if build_app else 'false'}\n")
     else:
-        print(json.dumps(matrix, separators=(",", ":")))
+        print(json.dumps({"mac": matrix, "hosted": hosted}, separators=(",", ":")))
     return 0
 
 
