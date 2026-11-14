@@ -1,6 +1,7 @@
 #if DEBUG
 import DesignSystem
 internal import SwiftUI
+import LaunchArguments
 import UIKit
 
 /// PROTOTYPE (#1369), DEBUG only: the paused clip's play triangle MADE OF
@@ -34,9 +35,8 @@ enum GlassPlayMark {
     /// The variant the launch arguments ask for; nil without the flag.
     static let variant: Variant? = {
         let arguments = ProcessInfo.processInfo.arguments
-        guard let index = arguments.firstIndex(of: "-glass-play-mark") else { return nil }
-        let next = arguments.indices.contains(index + 1) ? arguments[index + 1] : ""
-        return Variant(rawValue: next) ?? .regular
+        guard LaunchArgument.glassPlayMark.isPassed(in: arguments) else { return nil }
+        return LaunchArgument.glassPlayMark.value(in: arguments).flatMap { Variant(rawValue: $0) } ?? .regular
     }()
 }
 

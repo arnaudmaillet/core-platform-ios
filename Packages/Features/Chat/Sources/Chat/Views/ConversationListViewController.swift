@@ -1,6 +1,7 @@
 import DesignSystem
 import CoreModels
 import CoreNavigation
+import LaunchArguments
 import MediaCore
 import UIKit
 
@@ -192,7 +193,7 @@ final class ConversationListViewController: UIViewController {
         // word. It now waits for a visible row on a list in a window (the
         // table is only shown once the skeleton gives way to content), and
         // prints GAVE UP if one never comes.
-        if ProcessInfo.processInfo.arguments.contains("-chat-pin-demo") {
+        if LaunchArgument.chatPinDemo.isPassed() {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
                 QAWait.until("-chat-pin-demo: a visible row", { [weak self] in
                     guard let self else { return true }
@@ -216,7 +217,7 @@ final class ConversationListViewController: UIViewController {
         // via a held CGEvent drag (mouse down, jitter for ~1.4s, up). The
         // comment here used to say otherwise. Both halves were verified that
         // way on the Requests tab, which wears the same seam.
-        if ProcessInfo.processInfo.arguments.contains("-chat-preview-demo") {
+        if LaunchArgument.chatPreviewDemo.isPassed() {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
                 guard let self, let id = self.adapter.allIdentifiers.first,
                       let make = self.threadPreviewProvider else { return }

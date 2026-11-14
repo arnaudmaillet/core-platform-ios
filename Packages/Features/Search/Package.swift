@@ -12,6 +12,8 @@ let package = Package(
         .package(path: "../../FeatureInterfaces/SearchInterface"),
         .package(path: "../../Kit/CoreContracts"),
         .package(path: "../../Kit/CoreModels"),
+        // Its launch arguments, declared (#2374).
+        .package(path: "../../Kit/LaunchArguments"),
         .package(path: "../../Core/CoreNavigation"),
         .package(path: "../../Core/CoreNetworking"),
         .package(path: "../../Core/CoreStorage"),
@@ -30,6 +32,7 @@ let package = Package(
                 "SearchInterface",
                 "CoreContracts",
                 "CoreModels",
+                "LaunchArguments",
                 "CoreNavigation",
                 // `NetworkFailure`: the repository error keeps why a call
                 // failed, so the screen can say "You're offline" (#794).

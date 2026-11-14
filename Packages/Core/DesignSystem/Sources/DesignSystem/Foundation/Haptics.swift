@@ -1,3 +1,4 @@
+import LaunchArguments
 import UIKit
 
 /// Whether the app vibrates (Settings → App and Device → Playback and Sound
@@ -289,7 +290,7 @@ public enum Haptics {
     /// `-haptics-log`: a `haptic <role>` line per play — the simulator's QA
     /// hook (it has no Taptic Engine: a sim run can only check that the right
     /// role fired).
-    static let logs = ProcessInfo.processInfo.arguments.contains("-haptics-log")
+    static let logs = LaunchArgument.hapticsLog.isPassed()
 
     /// The playground's player (#2193): plays `sound` now, behind the switch
     /// but with no pacing — the playground's bursts set their own spacing.

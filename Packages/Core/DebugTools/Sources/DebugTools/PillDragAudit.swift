@@ -1,4 +1,5 @@
 import DesignSystem
+import LaunchArguments
 import UIKit
 
 #if DEBUG
@@ -27,7 +28,7 @@ public final class PillDragAudit {
     public private(set) static var shared: PillDragAudit?
 
     public static func installIfRequested(tabBarController: UITabBarController) {
-        guard ProcessInfo.processInfo.arguments.contains("-pill-drag-probe"),
+        guard LaunchArgument.pillDragProbe.isPassed(),
               shared == nil
         else { return }
         shared = PillDragAudit(tabBarController: tabBarController)
@@ -84,7 +85,7 @@ public final class PillDragAudit {
     private var demo: (start: CGFloat, target: CGFloat, frame: Int)?
 
     private func stepDemoIfRequested(on bar: PagedTabBar) {
-        guard ProcessInfo.processInfo.arguments.contains("-pill-drag-demo") else { return }
+        guard LaunchArgument.pillDragDemo.isPassed() else { return }
         let strip = bar.debugStripOnScreen
         let pill = bar.debugPillOnScreen
         guard strip.width > 0, pill.width > 0, bar.debugSegmentCount > 1 else { return }

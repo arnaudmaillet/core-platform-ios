@@ -1,5 +1,6 @@
 import CoreModels
 import FeedInterface
+import LaunchArguments
 import MediaPlayback
 import UIKit
 
@@ -242,9 +243,7 @@ public struct UploadFeatureBuilder {
     private static func makeLibrary() -> any MediaLibraryReading {
         #if DEBUG
         let arguments = ProcessInfo.processInfo.arguments
-        if let flag = arguments.firstIndex(of: "-upload-fake-library"),
-           arguments.count > flag + 1,
-           let count = Int(arguments[flag + 1]) {
+        if let count = LaunchArgument.uploadFakeLibrary.intValue(in: arguments) {
             return DebugMediaLibrary(count: count)
         }
         #endif

@@ -1,5 +1,6 @@
 #if DEBUG
 import CoreNavigation
+import LaunchArguments
 import UIKit
 
 /// `-latency-bench` (#2116): UIKit's own floor for each kind of response,
@@ -12,7 +13,7 @@ import UIKit
 /// tabs, a navigation stack each), so the tab and the push pay the same
 /// chrome; the screens are empty.
 public enum LatencyBench {
-    public static var isRequested: Bool { ProcessInfo.processInfo.arguments.contains("-latency-bench") }
+    public static var isRequested: Bool { LaunchArgument.latencyBench.isPassed() }
 
     public static func makeRoot() -> UIViewController {
         let tabs = UITabBarController()
@@ -94,25 +95,23 @@ public final class LatencyBenchViewController: UIViewController {
     /// `-latency-bench-tools-off` (on, then off again: back to the baseline).
     private static var autoCycles: Int? {
         let arguments = ProcessInfo.processInfo.arguments
-        guard let index = arguments.firstIndex(of: "-latency-bench-auto"), index + 1 < arguments.count else { return nil }
-        return Int(arguments[index + 1])
+        return LaunchArgument.latencyBenchAuto.intValue(in: arguments)
     }
 
     private static var benchTools: [String] {
         let arguments = ProcessInfo.processInfo.arguments
-        guard let index = arguments.firstIndex(of: "-latency-bench-tools"), index + 1 < arguments.count else { return [] }
-        return arguments[index + 1].split(separator: ",").map(String.init)
+        return LaunchArgument.latencyBenchTools.value(in: arguments)?.split(separator: ",").map(String.init) ?? []
     }
 
     private func runAuto(_ cycles: Int) {
         let arguments = ProcessInfo.processInfo.arguments
         Task { @MainActor [weak self] in
             try? await Task.sleep(for: .seconds(4))
-            if arguments.contains("-latency-bench-auto-off") { InteractionLatency.setActive(false, badge: false) }
+            if LaunchArgument.latencyBenchAutoOff.isPassed(in: arguments) { InteractionLatency.setActive(false, badge: false) }
             DebugDashboard.close()
             let tools = Self.benchTools.compactMap(DebugTools.tool)
             tools.forEach { $0.set(true) }
-            if arguments.contains("-latency-bench-tools-off") { tools.forEach { $0.set(false) } }
+            if LaunchArgument.latencyBenchToolsOff.isPassed(in: arguments) { tools.forEach { $0.set(false) } }
             try? await Task.sleep(for: .seconds(1))
             var pushes: [Double] = []
             for _ in 0..<cycles {
@@ -129,9 +128,9 @@ public final class LatencyBenchViewController: UIViewController {
             let sorted = pushes.dropFirst().sorted()
             func at(_ q: Double) -> String { String(format: "%.2f", sorted[min(sorted.count - 1, Int(Double(sorted.count) * q))]) }
             let latency: String = InteractionLatency.isActive ? "on" : InteractionLatency.isInstalled ? "off" : "never"
-            let dashboard: String = arguments.contains("-debug-dashboard") ? "opened-closed" : "never"
+            let dashboard: String = LaunchArgument.debugDashboard.isPassed(in: arguments) ? "opened-closed" : "never"
             let toolIDs: String = tools.isEmpty ? "none" : tools.map(\.id).joined(separator: ",")
-            let toolState: String = tools.isEmpty ? "" : arguments.contains("-latency-bench-tools-off") ? "(on-off)" : "(on)"
+            let toolState: String = tools.isEmpty ? "" : LaunchArgument.latencyBenchToolsOff.isPassed(in: arguments) ? "(on-off)" : "(on)"
             print("[bench-auto] latency=\(latency) dashboard=\(dashboard) tools=\(toolIDs)\(toolState)"
                   + " pushes=\(sorted.count) p50=\(at(0.5))ms p90=\(at(0.9))ms")
         }

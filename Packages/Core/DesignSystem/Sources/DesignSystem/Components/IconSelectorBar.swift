@@ -1,3 +1,4 @@
+import LaunchArguments
 import UIKit
 
 /// A row of icons where exactly one is chosen, and the choice can be **tapped or
@@ -567,7 +568,7 @@ public final class IconSelectorBar: UIView {
     private func traceChainOnce() {
         let traceKey = "\(bounds.size)-\(String(describing: platterOverhang))"
         guard lastTracedKey != traceKey, bounds.width > 0, window != nil,
-              ProcessInfo.processInfo.arguments.contains("-tabbar-shape-trace") else { return }
+              LaunchArgument.tabbarShapeTrace.isPassed() else { return }
         lastTracedKey = traceKey
         var chain: [String] = []
         var view: UIView? = self

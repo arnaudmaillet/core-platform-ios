@@ -1,5 +1,6 @@
 #if DEBUG
 import DesignSystem
+import LaunchArguments
 import ObjectiveC
 import UIKit
 
@@ -15,7 +16,7 @@ import UIKit
 /// parameters, read rather than guessed.
 @MainActor
 public enum LensLab {
-    public static var isRequested: Bool { ProcessInfo.processInfo.arguments.contains("-lens-lab") }
+    public static var isRequested: Bool { LaunchArgument.lensLab.isPassed() }
 
     public static func makeRoot() -> UIViewController { LensLabTabBarController() }
 }
@@ -50,7 +51,7 @@ private final class LensLabTabBarController: UITabBarController {
         let accessory = SelectorAccessory(strip: bar)
         accessory.install(into: self, owner: selectedViewController)
         self.accessory = accessory
-        if ProcessInfo.processInfo.arguments.contains("-lens-lab-dump") {
+        if LaunchArgument.lensLabDump.isPassed() {
             let link = CADisplayLink(target: self, selector: #selector(probeNativeLens))
             link.preferredFrameRateRange = CAFrameRateRange(minimum: 10, maximum: 15)
             link.add(to: .main, forMode: .common)

@@ -1,5 +1,6 @@
 import CoreNavigation
 import DesignSystem
+import LaunchArguments
 import UIKit
 
 /// The first step of posting media: the viewer's own library, and what they
@@ -243,7 +244,7 @@ final class MediaPickerViewController: UIViewController {
     /// depending on the threshold — a number that depends on the threshold is not
     /// a measurement. The view hierarchy answers exactly.
     private func logBubbleMetrics() {
-        guard ProcessInfo.processInfo.arguments.contains("-upload-log-sheet"),
+        guard LaunchArgument.uploadLogSheet.isPassed(),
               let bar = navigationController?.navigationBar
         else { return }
         // ⚠️ **THE LAYOUT PASS BELONGS INSIDE THE GUARD, NOT BEFORE IT.** These
@@ -301,7 +302,7 @@ final class MediaPickerViewController: UIViewController {
     }
 
     private func logBarState(_ when: String) {
-        guard ProcessInfo.processInfo.arguments.contains("-upload-log-sheet"),
+        guard LaunchArgument.uploadLogSheet.isPassed(),
               let bar = navigationController?.toolbar
         else { return }
         let standard = bar.standardAppearance
@@ -956,7 +957,7 @@ extension MediaPickerViewController {
     /// ⚠️ `NSLog`, NOT `print`: stdout is discarded by `simctl launch` unless it
     /// is handed a pty, and killing that pty takes the app with it.
     func logTray(_ moment: String) {
-        guard ProcessInfo.processInfo.arguments.contains("-upload-log-sheet") else { return }
+        guard LaunchArgument.uploadLogSheet.isPassed() else { return }
         view.layoutIfNeeded()
         NSLog(
             "[tray] %@ frame=%@ hidden=%@ alpha=%.2f super=%@ idx=%@ blur=%@ blurHidden=%@ safeBottom=%.1f",
@@ -1016,7 +1017,7 @@ extension MediaPickerViewController {
         // Last, so it carries the picks made above with it. Without this the
         // editor is unreachable on a simulator: the grid cannot be tapped and
         // neither can "Next".
-        if arguments.contains("-upload-edit") { goNext() }
+        if LaunchArgument.uploadEdit.isPassed(in: arguments) { goNext() }
         // ⚠️ **A ROUND TRIP, NOT A COORDINATE TAP.** The bar-state probe fires on
         // the picker's `viewDidAppear`, so the defect only shows after going to
         // the editor AND COMING BACK — and this has to be replayable identically
@@ -1030,7 +1031,7 @@ extension MediaPickerViewController {
         // — never runs; nothing said so. It now pops the editor THIS hook
         // pushed, once it is on top with no transition in flight, and says so
         // if there was no editor to push (an empty selection) or it never lands.
-        if arguments.contains("-upload-edit-return") {
+        if LaunchArgument.uploadEditReturn.isPassed(in: arguments) {
             goNext()
             if let nav = navigationController, let editor = nav.topViewController, editor !== self {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak nav, weak editor] in
@@ -1046,8 +1047,8 @@ extension MediaPickerViewController {
                 QAWait.fail("-upload-edit-return", "no editor was pushed (selection empty? pass -upload-pick)")
             }
         }
-        if arguments.contains("-upload-bench-slides") { runSlideBench() }
-        if arguments.contains("-upload-bench-drag") { runDragBench() }
+        if LaunchArgument.uploadBenchSlides.isPassed(in: arguments) { runSlideBench() }
+        if LaunchArgument.uploadBenchDrag.isPassed(in: arguments) { runDragBench() }
     }
 
     private static func debugArgument(_ flag: String, in arguments: [String]) -> String? {

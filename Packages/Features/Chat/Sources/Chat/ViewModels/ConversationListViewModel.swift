@@ -1,6 +1,7 @@
 import CoreModels
 import CoreNavigation
 import Foundation
+import LaunchArguments
 
 /// The "All" surface's view model: active conversations, with unread ones
 /// marked in place rather than split off.
@@ -85,7 +86,7 @@ public final class ConversationListViewModel {
     /// for the same reason.
     private static func openingBaseline(_ now: Date) -> Date {
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-inbox-mock-new-activity") {
+        if LaunchArgument.inboxMockNewActivity.isPassed() {
             return .distantPast
         }
         #endif

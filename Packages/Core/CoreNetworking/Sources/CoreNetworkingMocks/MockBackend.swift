@@ -66,8 +66,8 @@ public struct MockBackend: Sendable {
         // account, so Settings → Account Status can be seen in both states;
         // `-mock-report-history` gives the viewer past reports, one per outcome.
         let moderationService = MockModerationService(
-            seedsViewerRestriction: ProcessInfo.processInfo.arguments.contains("-mock-account-restricted"),
-            seedsReportHistory: ProcessInfo.processInfo.arguments.contains("-mock-report-history")
+            seedsViewerRestriction: LaunchArgument.mockAccountRestricted.isPassed(),
+            seedsReportHistory: LaunchArgument.mockReportHistory.isPassed()
         )
 
         let bff = MockBFF()
@@ -78,7 +78,7 @@ public struct MockBackend: Sendable {
         // account is what the next auth login resumes.
         // `-mock-two-step`: the demo account starts with two-step sign-in on
         // (#383), so the sign-in's second step shows without enrolling first.
-        let accountLifecycle = MockAccountLifecycle(twoStepOn: ProcessInfo.processInfo.arguments.contains("-mock-two-step"))
+        let accountLifecycle = MockAccountLifecycle(twoStepOn: LaunchArgument.mockTwoStep.isPassed())
         let auth = MockAuthService(lifecycle: accountLifecycle)
         auth.register(on: bff)
         // Apps and Websites (#485): none unless `-mock-authorized-apps`.
@@ -87,9 +87,7 @@ public struct MockBackend: Sendable {
         // `-mock-verification pending|rejected|approved` gives the viewer a
         // verification request in that state (#415).
         let arguments = ProcessInfo.processInfo.arguments
-        let verificationSeed = arguments.firstIndex(of: "-mock-verification").flatMap { index in
-            index + 1 < arguments.count ? arguments[index + 1] : nil
-        }
+        let verificationSeed = LaunchArgument.mockVerification.value(in: arguments)
         let socialServices = MockSocialServices(
             dataset: dataset, postStore: postStore, verificationSeed: verificationSeed, counters: counterStore,
             drawsVoicePosts: drawsVoicePosts
@@ -101,7 +99,7 @@ public struct MockBackend: Sendable {
             dataset: dataset,
             isPrivate: { socialServices.isPrivate($0) },
             isSuggestible: { socialServices.isSuggestible($0) },
-            seedsFollowRequests: ProcessInfo.processInfo.arguments.contains("-mock-follow-requests")
+            seedsFollowRequests: LaunchArgument.mockFollowRequests.isPassed()
         )
         // Viewer-aware reads (#447, backend #690/#691): a block either way,
         // or a private author none of the readers follows, withholds the
@@ -207,7 +205,7 @@ public struct MockBackend: Sendable {
             },
             // `-mock-held-comments` holds two comments on each of the viewer's first
             // three posts for their review (#416).
-            seedsHeldComments: ProcessInfo.processInfo.arguments.contains("-mock-held-comments"),
+            seedsHeldComments: LaunchArgument.mockHeldComments.isPassed(),
             // Replies rank by their likes — wallet stakes on the comment (#637).
             likeCount: { counterStore.likeCount(target: "comment:" + $0) },
             // Viewer-aware (#447, backend #692): a post's comments are read
@@ -338,10 +336,7 @@ public struct MockBackend: Sendable {
     /// typo'd huge number should not hang the app seeding posts).
     private static var seededPostCount: Int? {
         let arguments = ProcessInfo.processInfo.arguments
-        guard let position = arguments.firstIndex(of: "-mock-post-count"),
-              arguments.indices.contains(position + 1),
-              let count = Int(arguments[position + 1])
-        else { return nil }
+        guard let count = LaunchArgument.mockPostCount.intValue(in: arguments) else { return nil }
         return min(max(count, 1), 2000)
     }
 }

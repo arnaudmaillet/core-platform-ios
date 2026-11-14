@@ -1,4 +1,5 @@
 import Foundation
+import LaunchArguments
 import MediaPlayback
 
 #if DEBUG
@@ -25,7 +26,7 @@ import MediaPlayback
 /// wrong — a passing run prints its cycle count and nothing else.
 @MainActor
 public enum CarouselPlaybackAudit {
-    public static let isEnabled = ProcessInfo.processInfo.arguments.contains("-carousel-audit")
+    public static let isEnabled = LaunchArgument.carouselAudit.isPassed()
 
     private(set) static var failures = 0
     private(set) static var checks = 0

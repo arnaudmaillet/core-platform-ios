@@ -1,6 +1,7 @@
 import Connect
 import CoreContracts
 import Foundation
+import LaunchArguments
 import SwiftProtobuf
 
 /// Fake of `account.v1`'s family supervision (#417, backend #670), for the
@@ -170,14 +171,12 @@ public final class MockSupervisionService: @unchecked Sendable {
     /// The seed `-mock-supervision <seed>` names, if any.
     public static var launchSeed: Seed? {
         let arguments = ProcessInfo.processInfo.arguments
-        guard let index = arguments.firstIndex(of: "-mock-supervision"), index + 1 < arguments.count else { return nil }
-        return Seed(rawValue: arguments[index + 1])
+        return LaunchArgument.mockSupervision.value(in: arguments).flatMap { Seed(rawValue: $0) }
     }
 
     private static var launchMinutesToday: Int? {
         let arguments = ProcessInfo.processInfo.arguments
-        guard let index = arguments.firstIndex(of: "-mock-screen-time-used"), index + 1 < arguments.count else { return nil }
-        return Int(arguments[index + 1])
+        return LaunchArgument.mockScreenTimeUsed.intValue(in: arguments)
     }
 
     private static func link(_ role: Account_V1_SupervisionRole, index: Int, since: Date) -> Link {

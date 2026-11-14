@@ -1,4 +1,5 @@
 import DesignSystem
+import LaunchArguments
 import UIKit
 
 #if DEBUG
@@ -33,7 +34,7 @@ public final class AccessoryCollapseAudit {
     public private(set) static var shared: AccessoryCollapseAudit?
 
     public static func installIfRequested(tabBarController: UITabBarController) {
-        guard ProcessInfo.processInfo.arguments.contains("-accessory-collapse-probe"),
+        guard LaunchArgument.accessoryCollapseProbe.isPassed(),
               shared == nil
         else { return }
         shared = AccessoryCollapseAudit(tabBarController: tabBarController)

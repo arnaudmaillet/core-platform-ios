@@ -1,5 +1,6 @@
 import AVFoundation
 import DesignSystem
+import LaunchArguments
 import MediaPlayback
 import UIKit
 
@@ -372,7 +373,7 @@ extension MediaEditorViewController {
     /// cannot change while the process runs, which is what makes caching it
     /// correct rather than merely faster — `VideoRenderFlags` states the same
     /// rule for the same reason.
-    private static let probesFollow = ProcessInfo.processInfo.arguments.contains("-timeline-probe")
+    private static let probesFollow = LaunchArgument.timelineProbe.isPassed()
 
     private func probeFollowBeat() {
         guard Self.probesFollow else { return }

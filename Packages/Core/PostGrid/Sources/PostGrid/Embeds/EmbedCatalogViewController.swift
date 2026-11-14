@@ -1,6 +1,7 @@
 #if DEBUG
 import CoreModels
 import DesignSystem
+import LaunchArguments
 import MediaCore
 import UIKit
 
@@ -15,7 +16,7 @@ import UIKit
 /// be seen.
 public final class EmbedCatalogViewController: UIViewController {
     /// `-embed-catalog` at launch.
-    public static var isRequested: Bool { ProcessInfo.processInfo.arguments.contains("-embed-catalog") }
+    public static var isRequested: Bool { LaunchArgument.embedCatalog.isPassed() }
 
     private let pipeline: ImagePipeline?
     private let scroll = UIScrollView()

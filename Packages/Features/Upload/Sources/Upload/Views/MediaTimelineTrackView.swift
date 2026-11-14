@@ -1,4 +1,5 @@
 import DesignSystem
+import LaunchArguments
 import MediaPlayback
 import UIKit
 
@@ -1379,7 +1380,7 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
     var followAnimator: UIViewPropertyAnimator?
 
     /// ⚠️ **RESOLVED ONCE** — `MediaEditorViewController.probesFollow` says why.
-    private static let probesFollow = ProcessInfo.processInfo.arguments.contains("-timeline-probe")
+    private static let probesFollow = LaunchArgument.timelineProbe.isPassed()
 
     /// Whether the film is in the middle of an eased move. A beat that lands
     /// during one is ignored: the ease is already going where the player is, and

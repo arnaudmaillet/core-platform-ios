@@ -1,5 +1,6 @@
 import CoreModels
 import DesignSystem
+import LaunchArguments
 import MediaPlayback
 import UIKit
 
@@ -81,9 +82,7 @@ public final class GridVideoPlaybackCoordinator {
         // against a real ladder without a rebuild — capped and uncapped runs of
         // the same build, same fixtures, same scroll position.
         let arguments = ProcessInfo.processInfo.arguments
-        if let position = arguments.firstIndex(of: "-grid-bitrate-cap"),
-           position + 1 < arguments.count,
-           let override = Double(arguments[position + 1]) {
+        if let override = LaunchArgument.gridBitrateCap.doubleValue(in: arguments) {
             return override
         }
         #endif
@@ -578,7 +577,7 @@ public final class GridVideoPlaybackCoordinator {
         // success — twice in this issue's history a conclusion was drawn from a
         // trace that was never live. This says so instead, and names what WAS
         // playing, which is usually the reason (a tile that does not autoplay).
-        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+        if LaunchArgument.zoomLiveLog.isPassed() {
             if let surface = loans[id]?.loadedVideoRenderView {
                 surface.debugLabel = "tile"
                 surface.debugTracksFlight = true
@@ -747,7 +746,7 @@ public final class GridVideoPlaybackCoordinator {
         // swipe. Declining falls through to the card's own cover, which is the
         // current page's.
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+        if LaunchArgument.zoomLiveLog.isPassed() {
             let cell = loans[id]
             print(String(format: "[zoom-live] %.3f grid donate ask %@ playing=%@ current=%@",
                          CACurrentMediaTime(), id.rawValue,
@@ -780,7 +779,7 @@ public final class GridVideoPlaybackCoordinator {
         // Same rule as `donateLiveSurface`, for the same reason: a surface that
         // is not showing the viewer's media must not be flown.
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+        if LaunchArgument.zoomLiveLog.isPassed() {
             print(String(format: "[zoom-live] %.3f grid attach ask %@ playing=%@ current=%@",
                          CACurrentMediaTime(), id.rawValue,
                          loans[id] == nil ? "N" : "Y",
@@ -889,7 +888,7 @@ public final class GridVideoPlaybackCoordinator {
         }
         flightSurfaces.add(view)
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+        if LaunchArgument.zoomLiveLog.isPassed() {
             print(String(format: "[zoom-live] %.3f grid landing surface %@ -> primed",
                          CACurrentMediaTime(), id.rawValue))
         }
@@ -1528,7 +1527,7 @@ public final class GridVideoPlaybackCoordinator {
     /// Timestamped start/stop trace under `-grid-playback-log`. Timestamps are
     /// what show that reconciles land DURING a drag rather than only after it,
     /// so the line is deliberately cheap enough to leave on while scrolling.
-    static let tracesTransitions = ProcessInfo.processInfo.arguments.contains("-grid-playback-log")
+    static let tracesTransitions = LaunchArgument.gridPlaybackLog.isPassed()
 
     static func logPool(_ count: Int, handoff: PostID?) {
         guard tracesTransitions else { return }

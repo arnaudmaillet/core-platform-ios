@@ -415,7 +415,7 @@ final class BackdropFrameReducer: @unchecked Sendable {
 /// screen WITH their frame (`onTime`) rather than after it (`late`). The
 /// measurement behind the design, kept.
 enum LiveBackdropTrace {
-    static let isEnabled = ProcessInfo.processInfo.arguments.contains("-live-backdrop-log")
+    static let isEnabled = LaunchArgument.liveBackdropLog.isPassed()
     @MainActor private static var window = Window()
 
     private struct Window {

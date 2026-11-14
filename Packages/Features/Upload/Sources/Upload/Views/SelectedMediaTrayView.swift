@@ -1,4 +1,5 @@
 import DesignSystem
+import LaunchArguments
 import UIKit
 
 /// The strip of what has been chosen, in the order it will be posted in: a
@@ -224,7 +225,7 @@ final class SelectedMediaTrayView: UIView {
         // press that produces nothing is indistinguishable from one that was
         // never delivered, and guessing between those two is what cost five
         // builds while that detent was being fitted.
-        if ProcessInfo.processInfo.arguments.contains("-upload-log-sheet") {
+        if LaunchArgument.uploadLogSheet.isPassed() {
             NSLog("[tray] began item=%d took=%@", indexPath.item, took ? "yes" : "no")
         }
         #endif

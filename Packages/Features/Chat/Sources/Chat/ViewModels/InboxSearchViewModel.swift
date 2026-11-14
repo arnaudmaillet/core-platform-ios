@@ -500,7 +500,7 @@ final class InboxSearchViewModel {
             .filter { $0.kind == .query }
             .prefix(Self.idleRowLimit)
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-inbox-recents-trace") {
+        if LaunchArgument.inboxRecentsTrace.isPassed() {
             print("[recents] store=\(recents == nil ? "nil" : "present") "
                 + "total=\(recents?.recents.count ?? -1) queries=\(queries.count)")
         }
@@ -549,7 +549,7 @@ final class InboxSearchViewModel {
         guard trimmed.count >= 2 else { return }
         let entry = recents?.recordQuery(trimmed)
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-inbox-recents-trace") {
+        if LaunchArgument.inboxRecentsTrace.isPassed() {
             print("[recents] recorded=\(entry?.text ?? "nil") "
                 + "storeNow=\(recents?.recents.count ?? -1)")
         }

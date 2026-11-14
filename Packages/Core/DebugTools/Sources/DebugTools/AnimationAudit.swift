@@ -1,5 +1,6 @@
 #if DEBUG
 import AVFoundation
+import LaunchArguments
 import QuartzCore
 import UIKit
 
@@ -19,7 +20,7 @@ public enum AnimationAudit {
     private static var timer: Timer?
 
     public static func startIfRequested() {
-        guard ProcessInfo.processInfo.arguments.contains("-animation-audit"), timer == nil else { return }
+        guard LaunchArgument.animationAudit.isPassed(), timer == nil else { return }
         let timer = Timer(timeInterval: 5, repeats: true) { _ in
             MainActor.assumeIsolated { report() }
         }

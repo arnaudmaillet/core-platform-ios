@@ -1,6 +1,7 @@
 import Connect
 import CoreContracts
 import Foundation
+import LaunchArguments
 
 /// The member's countries, as geo_discovery.v1 keeps them (#1475, backend
 /// #910): `GetCountryUnlocks` and `UnlockCountry`, paid with the mock
@@ -34,9 +35,9 @@ public final class MockCountryUnlockService: @unchecked Sendable {
         self.wallet = wallet
         self.homeCountry = homeCountry
         let arguments = ProcessInfo.processInfo.arguments
-        self.seed = arguments.contains("-countries-no-seed") ? [] : seed
+        self.seed = LaunchArgument.countriesNoSeed.isPassed(in: arguments) ? [] : seed
         self.persistence = persistence
-        if arguments.contains("-countries-reset") {
+        if LaunchArgument.countriesReset.isPassed(in: arguments) {
             persistence?.removeObject(forKey: Self.persistenceKey)
         }
         unlocks = persistence?.data(forKey: Self.persistenceKey)

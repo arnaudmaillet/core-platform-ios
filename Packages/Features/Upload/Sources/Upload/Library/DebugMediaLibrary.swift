@@ -1,6 +1,7 @@
 #if DEBUG
 // `PlaceholderVideoFetcher` — the feed's mock video source, reused here so a
 // picked debug video is a real clip rather than a promise of one.
+import LaunchArguments
 import MediaPlayback
 import UIKit
 
@@ -118,10 +119,8 @@ final class DebugMediaLibrary: MediaLibraryReading {
     /// forces the state the banner exists for.
     var access: MediaLibraryAccess {
         let arguments = ProcessInfo.processInfo.arguments
-        guard let flag = arguments.firstIndex(of: "-upload-access"),
-              arguments.count > flag + 1
-        else { return .granted }
-        switch arguments[flag + 1] {
+        guard let access = LaunchArgument.uploadAccess.value(in: arguments) else { return .granted }
+        switch access {
         case "limited": return .limited
         case "denied": return .denied
         case "undetermined": return .undetermined
@@ -144,10 +143,7 @@ final class DebugMediaLibrary: MediaLibraryReading {
     /// real library runs off the main actor, not to thumbnails.
     private var latency: Duration {
         let arguments = ProcessInfo.processInfo.arguments
-        guard let flag = arguments.firstIndex(of: "-upload-fake-latency"),
-              arguments.count > flag + 1,
-              let milliseconds = Int(arguments[flag + 1])
-        else { return .zero }
+        guard let milliseconds = LaunchArgument.uploadFakeLatency.intValue(in: arguments) else { return .zero }
         return .milliseconds(milliseconds)
     }
 
@@ -385,7 +381,7 @@ final class DebugMediaLibrary: MediaLibraryReading {
     /// download the fetcher then refuses, which reads as "real videos are
     /// broken" rather than "they are off".
     static var usesRealClips: Bool {
-        ProcessInfo.processInfo.arguments.contains("-rich-media")
+        LaunchArgument.richMedia.isPassed()
     }
 }
 #endif

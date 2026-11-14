@@ -1,6 +1,7 @@
 import CoreModels
 import CoreStorage
 import DesignSystem
+import LaunchArguments
 import MediaCore
 import UIKit
 import CoreNavigation
@@ -194,9 +195,7 @@ final class SearchResultsViewController: UIViewController {
         // a swipe and the simulator injects none, so without this only the
         // first tab can ever be seen offline.
         let arguments = ProcessInfo.processInfo.arguments
-        if let index = arguments.firstIndex(of: "-search-results-tab"),
-           index + 1 < arguments.count,
-           let tab = Int(arguments[index + 1]), (0...1).contains(tab) {
+        if let tab = LaunchArgument.searchResultsTab.intValue(in: arguments), (0...1).contains(tab) {
             DispatchQueue.main.async { [weak self] in
                 self?.tabBar.select(tab)
                 self?.pager.setActivePage(tab, animated: false)
@@ -210,12 +209,12 @@ final class SearchResultsViewController: UIViewController {
         // goes through `becomeFirstResponder` on purpose: the refusal it meets
         // in `textFieldShouldBeginEditing` is the thing being tested, so an
         // instrument calling `onEditQuery` directly would prove nothing.
-        if arguments.contains("-search-tap-query") {
+        if LaunchArgument.searchTapQuery.isPassed(in: arguments) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
                 _ = self?.searchField.becomeFirstResponder()
             }
         }
-        if arguments.contains("-search-filters-open") {
+        if LaunchArgument.searchFiltersOpen.isPassed(in: arguments) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
                 self?.presentFilters()
             }
@@ -643,7 +642,7 @@ final class SearchResultsViewController: UIViewController {
     /// every recogniser on the way, with its class, its state and the view it
     /// is attached to — the one that leaves this screen is in that list.
     private func auditGestures(_ reason: String) {
-        guard ProcessInfo.processInfo.arguments.contains("-search-gesture-audit") else { return }
+        guard LaunchArgument.searchGestureAudit.isPassed() else { return }
         var lines: [String] = []
         var node: UIView? = tabBar
         while let current = node {
@@ -678,7 +677,7 @@ final class SearchResultsViewController: UIViewController {
     /// with the flag and one without settles it in a minute on a device.
     private static var gestureGateIsOff: Bool {
         #if DEBUG
-        ProcessInfo.processInfo.arguments.contains("-search-no-gesture-gate")
+        LaunchArgument.searchNoGestureGate.isPassed()
         #else
         false
         #endif
@@ -802,7 +801,7 @@ final class SearchResultsViewController: UIViewController {
         #if DEBUG
         // `-search-refine-cycle`: ask for the refine screen on a timer, so the
         // bar transition in BOTH directions can be filmed.
-        if ProcessInfo.processInfo.arguments.contains("-search-refine-cycle"),
+        if LaunchArgument.searchRefineCycle.isPassed(),
            !hasDrivenRefineCycle {
             hasDrivenRefineCycle = true
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
@@ -999,7 +998,7 @@ extension SearchResultsViewController {
     /// `xcrun simctl get_app_container <udid> <bundle> data`.
     static func traceNavigation(_ line: String) {
         #if DEBUG
-        guard ProcessInfo.processInfo.arguments.contains("-search-nav-trace") else { return }
+        guard LaunchArgument.searchNavTrace.isPassed() else { return }
         print("[search-nav] \(line)")
         guard let directory = FileManager.default.urls(
             for: .documentDirectory, in: .userDomainMask

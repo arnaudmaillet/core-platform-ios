@@ -1,6 +1,7 @@
 import Connect
 import CoreContracts
 import Foundation
+import LaunchArguments
 import SwiftProtobuf
 
 /// Shared mutable counter state: seeded like-counts per post, mutated by the
@@ -141,7 +142,7 @@ public final class MockEngagementService: @unchecked Sendable {
         self.persistence = persistence
         // `-reset-bookmarks` (the app's QA hook) empties the server's saves
         // too: the device's pile would otherwise come back with the list.
-        if ProcessInfo.processInfo.arguments.contains("-reset-bookmarks") {
+        if LaunchArgument.resetBookmarks.isPassed() {
             persistence?.removeObject(forKey: Self.persistenceKey)
         }
         saves = persistence?.dictionary(forKey: Self.persistenceKey) as? [String: [String]] ?? [:]
@@ -445,7 +446,7 @@ public final class MockWalletService: @unchecked Sendable {
         self.persistence = persistence
         self.now = now
         // `-wallet-reset` (the app's QA hook) opens every wallet afresh.
-        if ProcessInfo.processInfo.arguments.contains("-wallet-reset") {
+        if LaunchArgument.walletReset.isPassed() {
             persistence?.removeObject(forKey: Self.persistenceKey)
         }
         accounts = persistence?.data(forKey: Self.persistenceKey)
@@ -454,8 +455,7 @@ public final class MockWalletService: @unchecked Sendable {
         // `-wallet-gems N` (the app's QA hook): every wallet holds exactly N
         // gems, the server's balance now that a member's gems are its (#1475).
         let arguments = ProcessInfo.processInfo.arguments
-        if let index = arguments.firstIndex(of: "-wallet-gems"), index + 1 < arguments.count,
-           let gems = Int64(arguments[index + 1]) {
+        if let gems = LaunchArgument.walletGems.value(in: arguments).flatMap({ Int64($0) }) {
             debugGems = gems
             accounts = accounts.mapValues { account in
                 var dressed = account

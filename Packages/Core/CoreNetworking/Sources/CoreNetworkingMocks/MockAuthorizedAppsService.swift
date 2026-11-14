@@ -1,6 +1,7 @@
 import Connect
 import CoreContracts
 import Foundation
+import LaunchArguments
 import SwiftProtobuf
 
 /// Fake of auth.v1 `ListAuthorizedApps` / `RevokeAppAuthorization` (#485,
@@ -11,7 +12,7 @@ public final class MockAuthorizedAppsService: @unchecked Sendable {
     private let lock = NSLock()
     private var apps: [Auth_V1_AuthorizedApp]
 
-    public init(seeded: Bool = ProcessInfo.processInfo.arguments.contains("-mock-authorized-apps"), now: Date = Date()) {
+    public init(seeded: Bool = LaunchArgument.mockAuthorizedApps.isPassed(), now: Date = Date()) {
         apps = seeded ? Self.demoApps(now: now) : []
     }
 

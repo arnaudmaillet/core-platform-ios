@@ -2,6 +2,7 @@ import CoreModels
 import CoreStorage
 import DesignSystem
 import EmoteKit
+import LaunchArguments
 import MediaCore
 import MediaPlayback
 import UIKit
@@ -490,7 +491,7 @@ public final class PostGridTileCell: UICollectionViewCell {
         // the surface back is only worth anything if there is something behind
         // it; a nil here means the tile is black no matter what the renderer
         // does, and the fix belongs in the cover pipeline rather than here.
-        if ProcessInfo.processInfo.arguments.contains("-avsbdl-log") {
+        if LaunchArgument.avsbdlLog.isPassed() {
             print(String(format: "[avsbdl] %.3f tile beginVideoPreview cover=%@",
                          CACurrentMediaTime(), media.renderedCover == nil ? "NIL" : "present"))
         }

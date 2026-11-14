@@ -1,3 +1,4 @@
+import LaunchArguments
 import UIKit
 
 /// THE section title — every section of the app wears this one view, in the
@@ -575,7 +576,7 @@ public final class SectionTitleView: UIView {
     /// the window's, and the gaps of its run — once per change. The number
     /// that proves every surface identical, read off the running app rather
     /// than off a screenshot's pixels.
-    private static let isAuditing = ProcessInfo.processInfo.arguments.contains("-section-title-audit")
+    private static let isAuditing = LaunchArgument.sectionTitleAudit.isPassed()
     private var lastAudit: String?
 
     private func auditIfAsked() {

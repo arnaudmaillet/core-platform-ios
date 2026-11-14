@@ -2,6 +2,7 @@
 // declared one. See the note in `post()`.
 import AVFoundation
 import CoreNetworking
+import LaunchArguments
 import MediaPlayback
 import CoreModels
 import StickerKit
@@ -461,11 +462,11 @@ final class NewPostViewController: UIViewController {
         guard !hasRunTheDebugScript else { return }
         hasRunTheDebugScript = true
         let arguments = ProcessInfo.processInfo.arguments
-        if arguments.contains("-upload-save-to-photos"), !settings.savesToPhotos {
+        if LaunchArgument.uploadSaveToPhotos.isPassed(in: arguments), !settings.savesToPhotos {
             setToggle(true, for: .saveToPhotos)
             reconfigure([.saveToPhotos])
         }
-        if arguments.contains("-upload-publish") {
+        if LaunchArgument.uploadPublish.isPassed(in: arguments) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.post() }
         }
     }

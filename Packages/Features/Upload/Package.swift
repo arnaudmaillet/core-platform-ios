@@ -14,6 +14,8 @@ let package = Package(
         .package(path: "../../FeatureInterfaces/FeedInterface"),
         .package(path: "../../Kit/CoreContracts"),
         .package(path: "../../Kit/CoreModels"),
+        // Its launch arguments, declared (#2374).
+        .package(path: "../../Kit/LaunchArguments"),
         // A screen closes itself through its stack's arbiter (#1144).
         .package(path: "../../Core/CoreNavigation"),
         // The picker wears the app's chrome: the segmented strip in its bottom
@@ -38,6 +40,7 @@ let package = Package(
                 "FeedInterface",
                 "CoreContracts",
                 "CoreModels",
+                "LaunchArguments",
                 "CoreNavigation",
                 "CoreNetworking",
                 "DesignSystem",

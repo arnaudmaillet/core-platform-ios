@@ -1,4 +1,5 @@
 import DesignSystem
+import LaunchArguments
 import UIKit
 
 #if DEBUG
@@ -42,7 +43,7 @@ public final class StatusBarBlurAudit {
     private static var shared: StatusBarBlurAudit?
 
     public static func installIfRequested(in window: UIWindow) {
-        guard ProcessInfo.processInfo.arguments.contains("-status-bar-blur-audit"), shared == nil else { return }
+        guard LaunchArgument.statusBarBlurAudit.isPassed(), shared == nil else { return }
         shared = StatusBarBlurAudit(window: window)
     }
 
@@ -130,7 +131,7 @@ public final class StatusBarBlurAudit {
         for backdrop in all {
             Self.log("[sbb]   \(backdrop.owner) y=\(Int(backdrop.frame.minY)) h=\(Int(backdrop.frame.height)) \(backdrop.filters)")
         }
-        if ProcessInfo.processInfo.arguments.contains("-status-bar-blur-audit-deep") {
+        if LaunchArgument.statusBarBlurAuditDeep.isPassed() {
             Self.dumpEdgeEffects(in: window)
         }
     }
