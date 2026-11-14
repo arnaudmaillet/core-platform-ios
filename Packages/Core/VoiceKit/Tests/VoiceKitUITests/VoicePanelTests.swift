@@ -353,7 +353,7 @@ struct VoicePanelTests {
     /// re-lays a list.
     @Test func everyStateKeepsThePanel() {
         let playbacks: [VoiceView.State.Playback] = [
-            .rest, .loading, .playing(progress: 0.4), .paused(progress: 0.6), .failed,
+            .rest, .loading(progress: 0), .playing(progress: 0.4), .paused(progress: 0.6), .failed,
         ]
         let frames = playbacks.map { laidOut(.full, width: 340, role: .message, playback: $0).debugPanelFrame }
         #expect(Set(frames.map(\.height)).count == 1, "\(frames)")
@@ -377,7 +377,7 @@ struct VoicePanelTests {
         #expect(view.debugShowsTimer && !view.debugShowsSpeed && view.debugTimerText == total)
         #expect(view.debugTimerAlpha == 1 && view.debugSpeedAlpha == 0)
 
-        state.playback = .loading
+        state.playback = .loading(progress: 0)
         view.update(state)
         #expect(view.debugShowsSpeed, "the glyph and the slot change together, on the tap")
 
@@ -414,7 +414,7 @@ struct VoicePanelTests {
         let count = view.waveform.bars.count
         #expect(slot.width > 0 && slot.height > 0)
         #expect(abs(view.debugTimerFrame.maxX - slot.maxX) < 0.5, "the timer isn't against the slot's trailing edge")
-        let playbacks: [VoiceView.State.Playback] = [.loading, .playing(progress: 0.3), .paused(progress: 0.6), .rest, .failed]
+        let playbacks: [VoiceView.State.Playback] = [.loading(progress: 0), .playing(progress: 0.3), .paused(progress: 0.6), .rest, .failed]
         for (index, playback) in playbacks.enumerated() {
             state.playback = playback
             state.speedLabel = ["1×", "1.5×", "2×"][index % 3]
@@ -591,13 +591,13 @@ struct VoicePanelTests {
         #expect(large == CGRect(x: 0, y: 0, width: 60, height: 50))
     }
 
-    /// On screen the change is the morph (#2329): the timer's words go up
-    /// and out as the speed's come up and in, in place against the slot's
-    /// trailing edge — both fading on one curve, so the slot is never empty;
-    /// to paused, the reverse. No ground grows (#2364). Under Reduce Motion
-    /// a plain cross-fade; off screen, a cut.
+    /// On screen the change is the play glyph's swap (#2414): the leaving
+    /// words shrink and fade on the glyph's leave, the arriving ones spring
+    /// up from small on its arrive, in place against the slot's trailing
+    /// edge; to paused, the reverse. No ground grows (#2364). Under Reduce
+    /// Motion a plain cross-fade; off screen, a cut.
     @Test(arguments: [false, true])
-    func theSlotMorphsOrCrossFades(_ reduced: Bool) {
+    func theSlotSwapsLikeTheGlyphOrCrossFades(_ reduced: Bool) throws {
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 400, height: 200))
         window.isHidden = false
         defer { window.isHidden = true }
@@ -612,32 +612,35 @@ struct VoicePanelTests {
         view.update(state)
         #expect(view.debugShowsSpeed)
         #expect(view.debugTimerAlpha == 0 && view.debugSpeedAlpha == 1)
-        #expect(view.debugSlotMotion == (reduced ? .crossFade : .morph))
+        #expect(view.debugSlotMotion == (reduced ? .crossFade : .scaleAndFade))
         #expect(view.debugSlotIsFading, "the slot cut")
-        let durations = view.debugSlotOpacityDurations
-        let duration = reduced ? VoiceView.slotCrossFadeDuration : VoiceView.slotMorphDuration
-        #expect(durations.count == 2 && durations.allSatisfy { abs($0 - duration) < 0.001 },
-                "the timer and the speed don't trade places together: \(durations)")
         // No ground, whatever the motion (#2364), and the words in place.
         #expect(!view.debugSpeedHasAGround)
         #expect(view.debugSpeedFrame == slot && abs(view.debugSpeedWordsFrame.maxX - slot.maxX) < 0.5)
+        let small = CGAffineTransform(scaleX: PlayPauseGlyph.swapScale, y: PlayPauseGlyph.swapScale)
         if reduced {
+            let durations = view.debugSlotOpacityDurations
+            #expect(durations.count == 2 && durations.allSatisfy { abs($0 - VoiceView.slotCrossFadeDuration) < 0.001 },
+                    "the timer and the speed don't dissolve together: \(durations)")
             #expect(!view.debugSlotIsTurning && view.debugSpeedTransform == .identity, "Reduce Motion moved the words")
         } else {
-            #expect(view.debugSlotIsTurning, "the words don't turn")
-            #expect(view.debugTimerTransform.ty < 0, "the timer doesn't go up")
-            #expect(view.debugTimerTransform.tx == 0, "the timer moves sideways")
-            #expect(view.debugSpeedTransform == .identity, "the speed doesn't land in place")
+            // The glyph's leave on the timer, its arrive on the speed.
+            let leave = try #require(view.debugTimerOpacityDuration)
+            #expect(abs(leave - PlayPauseGlyph.leaveDuration) < 0.001, "the timer doesn't leave on the glyph's clock: \(leave)")
+            #expect(view.debugSpeedOpacityDuration != nil, "the speed doesn't fade in")
+            #expect(view.debugSlotIsTurning, "the words don't scale")
+            #expect(view.debugTimerTransform == small, "the timer doesn't shrink to the glyph's scale")
+            #expect(view.debugSpeedTransform == .identity, "the speed doesn't land whole")
         }
 
         state.playback = .paused(progress: 0.5)
         view.update(state)
         #expect(view.debugShowsTimer && view.debugTimerAlpha == 1 && view.debugSpeedAlpha == 0)
-        #expect(view.debugSlotMotion == (reduced ? .crossFade : .morph))
+        #expect(view.debugSlotMotion == (reduced ? .crossFade : .scaleAndFade))
         if !reduced {
-            #expect(view.debugTimerTransform == .identity, "the timer doesn't land in place")
-            #expect(view.debugSpeedTransform.ty > 0, "the speed doesn't go down")
-            #expect(view.debugSpeedTransform.tx == 0, "the speed moves sideways")
+            #expect(view.debugTimerTransform == .identity, "the timer doesn't land whole")
+            #expect(view.debugSpeedTransform == small, "the speed's words don't shrink to the glyph's scale")
+            #expect(view.debugSpeedFrame == slot, "the speed's button moved: only its words scale")
         }
         view.removeFromSuperview()
 
@@ -666,15 +669,15 @@ struct VoicePanelTests {
         view.layoutIfNeeded()
         #expect(view.debugTimerText == "0:34")
 
-        state.playback = .loading
+        state.playback = .loading(progress: 0)
         view.update(state)
-        #expect(view.debugSlotMotion == .morph && view.debugSlotIsTurning, "the tap didn't start the morph")
+        #expect(view.debugSlotMotion == .scaleAndFade && view.debugSlotIsTurning, "the tap didn't start the swap")
         #expect(PlayPauseGlyph.debugCopies(of: view.debugPlayButton) > 0, "the tap didn't start the glyph's swap")
         let speed = view.debugSpeedTransform
 
         state.playback = .playing(progress: 0)
         view.update(state)
-        #expect(view.debugSlotIsTurning, "playing cut the morph")
+        #expect(view.debugSlotIsTurning, "playing cut the swap")
         #expect(view.debugSlotOpacityDurations.count == 2, "playing cut the fades")
         #expect(view.debugSpeedTransform == speed, "playing moved the speed's words")
         #expect(PlayPauseGlyph.debugCopies(of: view.debugPlayButton) > 0, "playing cut the glyph's swap")
@@ -683,7 +686,7 @@ struct VoicePanelTests {
             state.playback = .playing(progress: progress)
             view.update(state)
         }
-        #expect(view.debugSlotIsTurning && view.debugTimerText == "0:34", "a frame of playback cut the morph")
+        #expect(view.debugSlotIsTurning && view.debugTimerText == "0:34", "a frame of playback cut the swap")
 
         // Paused, the timer comes back with the time reached.
         state.playback = .paused(progress: 0.5)

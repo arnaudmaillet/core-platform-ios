@@ -115,7 +115,10 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
         public enum Playback: Equatable {
             /// Not started, or played to its end: the duration shows.
             case rest
-            case loading
+            /// On its way, from the tap until the audio plays — at
+            /// `progress`, where it was (#2414): a resume keeps its bars
+            /// and its time drawn; a first play from the start is at 0.
+            case loading(progress: Double)
             case playing(progress: Double)
             /// Paused mid-way.
             case paused(progress: Double)
@@ -125,16 +128,26 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
 
         public var progress: Double {
             switch playback {
-            case .playing(let progress), .paused(let progress): progress
+            case .playing(let progress), .paused(let progress), .loading(let progress): progress
             default: 0
             }
         }
 
+        /// Under way: playing, paused mid-way, or on its way back from a
+        /// place (#2414) — the timer then reads the time played, never the
+        /// length, within a tap.
         public var isUnderway: Bool {
             switch playback {
             case .playing, .paused: true
+            case .loading(let progress): progress > 0
             default: false
             }
+        }
+
+        /// On its way, wherever from.
+        public var isLoading: Bool {
+            if case .loading = playback { return true }
+            return false
         }
     }
 
@@ -174,10 +187,11 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
     public enum SlotMotion: Equatable, Sendable {
         /// Off screen, a row filled afresh.
         case cut
-        /// The words cross-fade in place against the slot's trailing edge
-        /// while they turn like a counter's digit (#2329, #2364: no ground
-        /// grows any more).
-        case morph
+        /// The play glyph's own swap (#2414, `PlayPauseGlyph`'s scale and
+        /// fade): the leaving words shrink and fade, the arriving ones
+        /// spring up from small as they fade in, each about its own centre
+        /// against the slot's trailing edge (#2364).
+        case scaleAndFade
         /// Reduce Motion: one dissolves into the other in place.
         case crossFade
     }
@@ -395,20 +409,28 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
         return words.insetBy(dx: -dx, dy: -dy)
     }
 
-    // MARK: - The slot's morph (#2329)
+    // MARK: - The slot's swap (#2414)
 
-    /// The timer ⇄ speed change: one motion, eased in and out, no overshoot.
-    public static let slotMorphDuration: TimeInterval = 0.25
-    /// How far the words travel as they turn — up and out, up and in.
-    public static let slotTurnDistance: CGFloat = 6
-    /// Reduce Motion's cross-fade between the timer and the speed.
-    public static let slotCrossFadeDuration: TimeInterval = 0.2
+    /// ⚠️ THE TIMER ⇄ SPEED IS THE PLAY GLYPH'S SWAP, READ, NOT COPIED (#2414).
+    /// The slot used to turn on its own clock (0.25 s, the words rising
+    /// 6 pt and fading, overlapped) beside the glyph's scale and fade, and
+    /// the owner's recording caught "14″" drawn over "1×", each half faded.
+    /// The words now leave and arrive on `PlayPauseGlyph`'s timings, at the
+    /// same instant as the glyph, so the two never part.
+    public static var slotSwapScale: CGFloat { PlayPauseGlyph.swapScale }
+    public static var slotLeaveDuration: TimeInterval { PlayPauseGlyph.leaveDuration }
+    public static var slotArriveDuration: TimeInterval { PlayPauseGlyph.arriveDuration }
+    public static var slotArriveDelay: TimeInterval { PlayPauseGlyph.arriveDelay }
+    public static var slotArriveDamping: CGFloat { PlayPauseGlyph.arriveDamping }
+    /// Reduce Motion's cross-fade between the timer and the speed: the
+    /// glyph's.
+    public static var slotCrossFadeDuration: TimeInterval { PlayPauseGlyph.crossFadeDuration }
 
     /// The slot's change: cut off screen or for a row filled afresh, the
-    /// morph on screen, a cross-fade under Reduce Motion.
+    /// glyph's scale and fade on screen, a cross-fade under Reduce Motion.
     public static func slotMotion(animated: Bool, reducesMotion: Bool) -> SlotMotion {
         guard animated else { return .cut }
-        return reducesMotion ? .crossFade : .morph
+        return reducesMotion ? .crossFade : .scaleAndFade
     }
 
     /// The timer's font (#2329), and the speed's (#2364): a row button's
@@ -1032,7 +1054,7 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
         // The glyph turns on the tap — a play waiting on its audio already
         // shows pause — and the loader takes its place only when the wait
         // lasts (the owner's device check, 2026-11-06: no delay).
-        if state.playback == .loading, !sending {
+        if state.isLoading, !sending {
             if loader.isHidden, pendingLoader == nil {
                 let work = DispatchWorkItem { [weak self] in
                     self?.pendingLoader = nil
@@ -1070,7 +1092,7 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
         showSlot(Self.slotContent(for: state.playback), animated: onScreen)
 
         // The unplayed dot fades once playback starts.
-        let showsDot = state.unplayed && !state.isUnderway && state.playback != .loading
+        let showsDot = state.unplayed && !state.isUnderway && !state.isLoading
         if showsDot != !dot.isHidden {
             if showsDot || window == nil || reducesMotion() {
                 dot.isHidden = !showsDot
@@ -1171,23 +1193,20 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
         timerLabel.text = Self.timerText(shownTime, style: timerStyle)
     }
 
-    /// The timer or the speed (#2274) — one motion between them (#2329,
-    /// `slotMotion`), the words against the slot's trailing edge (#2364):
+    /// The timer or the speed (#2274) — the play glyph's swap between them
+    /// (#2414, `slotMotion`), the words against the slot's trailing edge
+    /// (#2364):
     ///
     /// ```
-    ///  to playing   the timer's words go up a few points and fade out as
-    ///               "1×" comes up from below and fades in — a counter's
-    ///               digit turning, in place
-    ///  to paused    the reverse: "1×" goes down and out, the time comes
-    ///               down and in
+    ///  leaving    shrinks to 0.4 and fades out (the glyph's leave)
+    ///  arriving   springs up from 0.4 as it fades in (the glyph's arrive)
     /// ```
     ///
-    /// One motion, `slotMorphDuration`, eased in and out with no overshoot,
-    /// interruptible from where it is. The two overlap throughout — the one
-    /// fading out as the other fades in, never an empty slot — and the slot
-    /// keeps its one size, so nothing beside it moves. No ground grows any
-    /// more (#2364: the speed has none). Under Reduce Motion a plain
-    /// cross-fade; off screen, a cut.
+    /// Each word scales about its own centre, so it stays against the
+    /// slot's trailing edge, and the slot keeps its one size: nothing beside
+    /// it moves. A swap overtaking one in flight starts from where the
+    /// words are drawn. Under Reduce Motion a plain cross-fade; off screen,
+    /// a cut.
     ///
     /// ⚠️ NOTHING IS LAID OUT HERE. A spring around `layoutIfNeeded` held
     /// the play button's new glyph back until it settled (filmed, 2026-11-06);
@@ -1204,7 +1223,7 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
         switch motion {
         case .cut: settleSlot(speed: speed)
         case .crossFade: crossFadeSlot(speed: speed)
-        case .morph: morphSlot(speed: speed)
+        case .scaleAndFade: swapSlot(speed: speed)
         }
         refreshAccessibilityElements()
     }
@@ -1215,7 +1234,7 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
 
     /// No change in flight on the slot's parts.
     private func stopSlotAnimations() {
-        for layer in [speedButton.layer, timerLabel.layer] { layer.removeAllAnimations() }
+        for layer in [speedButton.layer, speedButton.wordsLayer, timerLabel.layer] { layer.removeAllAnimations() }
     }
 
     /// The speed takes touches only while it is the slot's: a tap on a
@@ -1229,6 +1248,7 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
         stopSlotAnimations()
         setSpeedTakesTouches(speed)
         speedButton.transform = .identity
+        speedButton.wordsTransform = .identity
         speedButton.alpha = speed ? 1 : 0
         speedButton.isHidden = !speed
         timerLabel.transform = .identity
@@ -1241,6 +1261,7 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
         stopSlotAnimations()
         setSpeedTakesTouches(speed)
         speedButton.transform = .identity
+        speedButton.wordsTransform = .identity
         timerLabel.transform = .identity
         if speed { speedButton.isHidden = false }
         UIView.animate(
@@ -1255,56 +1276,71 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
         }
     }
 
-    /// The turn (#2329, #2364): the timer's words and the speed's trade
-    /// places in the slot, each rising and fading — up and out, up and in —
-    /// against its trailing edge. No mask, no ground: the words alone.
-    private func morphSlot(speed: Bool) {
+    /// The glyph's swap on the slot's words (#2414): the leaving words —
+    /// the timer, or the speed's words on their button — shrink and fade on
+    /// `PlayPauseGlyph`'s leave; the arriving ones spring up from small on
+    /// its arrive. Fades on the timer and on the speed's button, scales on
+    /// the timer and on the speed's words (its button fills the slot, its
+    /// words stand against the trailing edge: they scale about their own
+    /// centre, never the slot's).
+    private func swapSlot(speed: Bool) {
         let id = slotChangeID
-        let up = CGAffineTransform(translationX: 0, y: -Self.slotTurnDistance)
-        let down = CGAffineTransform(translationX: 0, y: Self.slotTurnDistance)
+        let small = CGAffineTransform(scaleX: Self.slotSwapScale, y: Self.slotSwapScale)
         setSpeedTakesTouches(speed)
-        // From rest, each part starts where the other direction leaves it;
-        // mid-way, from where it is now (`beginFromCurrentState`).
-        let resting = [speedButton.layer, timerLabel.layer].allSatisfy { ($0.animationKeys() ?? []).isEmpty }
+        // From where they are drawn: a swap overtaking one in flight starts
+        // from there, not from rest.
+        let speedAlpha = speedButton.layer.presentation().map { CGFloat($0.opacity) } ?? speedButton.alpha
+        let speedScale = speedButton.wordsLayer.presentation().map { CATransform3DGetAffineTransform($0.transform) }
+            ?? speedButton.wordsTransform
+        let timerAlpha = timerLabel.layer.presentation().map { CGFloat($0.opacity) } ?? timerLabel.alpha
+        let timerScale = timerLabel.layer.presentation().map { CATransform3DGetAffineTransform($0.transform) }
+            ?? timerLabel.transform
+        stopSlotAnimations()
         UIView.performWithoutAnimation {
-            if resting {
-                if speed {
-                    speedButton.alpha = 0
-                    speedButton.transform = down
-                    timerLabel.transform = .identity
-                    timerLabel.alpha = 1
-                } else {
-                    speedButton.alpha = 1
-                    speedButton.transform = .identity
-                    timerLabel.transform = up
-                    timerLabel.alpha = 0
-                }
-            }
             speedButton.isHidden = false
+            speedButton.transform = .identity
+            if speed {
+                timerLabel.alpha = timerAlpha
+                timerLabel.transform = timerScale
+                speedButton.alpha = 0
+                speedButton.wordsTransform = small
+            } else {
+                speedButton.alpha = speedAlpha
+                speedButton.wordsTransform = speedScale
+                timerLabel.alpha = 0
+                timerLabel.transform = small
+            }
         }
         UIView.animate(
-            withDuration: Self.slotMorphDuration, delay: 0,
-            options: [.curveEaseInOut, .beginFromCurrentState, .allowUserInteraction]
+            withDuration: Self.slotLeaveDuration, delay: 0, options: [.curveEaseIn, .allowUserInteraction]
+        ) {
+            if speed {
+                self.timerLabel.alpha = 0
+                self.timerLabel.transform = small
+            } else {
+                self.speedButton.alpha = 0
+                self.speedButton.wordsTransform = small
+            }
+        }
+        UIView.animate(
+            withDuration: Self.slotArriveDuration, delay: Self.slotArriveDelay,
+            usingSpringWithDamping: Self.slotArriveDamping, initialSpringVelocity: 0, options: [.allowUserInteraction]
         ) {
             if speed {
                 self.speedButton.alpha = 1
-                self.speedButton.transform = .identity
-                self.timerLabel.transform = up
-                self.timerLabel.alpha = 0
+                self.speedButton.wordsTransform = .identity
             } else {
-                self.speedButton.alpha = 0
-                self.speedButton.transform = down
-                self.timerLabel.transform = .identity
                 self.timerLabel.alpha = 1
+                self.timerLabel.transform = .identity
             }
         } completion: { _ in
             guard id == self.slotChangeID else { return }
-            // At rest: the timer back in place; the speed gone, back in
-            // place too.
-            self.timerLabel.transform = .identity
-            if !speed {
+            // At rest: the leaving words back to full size, out of sight.
+            if speed {
+                self.timerLabel.transform = .identity
+            } else {
                 self.speedButton.isHidden = true
-                self.speedButton.transform = .identity
+                self.speedButton.wordsTransform = .identity
             }
         }
     }
@@ -1622,20 +1658,25 @@ public final class VoiceView: UIView, UIGestureRecognizerDelegate {
     public var debugSlotIsFading: Bool {
         [timerLabel.layer, speedButton.layer].contains { $0.animationKeys()?.contains("opacity") == true }
     }
-    /// Whether the words are turning now (#2329): a transform animation on
-    /// the timer and on the speed.
+    /// Whether the words are scaling now (#2414): a transform animation on
+    /// the timer and on the speed's words.
     public var debugSlotIsTurning: Bool {
-        [timerLabel.layer, speedButton.layer].allSatisfy { $0.animationKeys()?.contains("transform") == true }
+        [timerLabel.layer, speedButton.wordsLayer].allSatisfy { $0.animationKeys()?.contains("transform") == true }
     }
     /// The slot's last change (#2329).
     public var debugSlotMotion: SlotMotion { lastSlotMotion }
     /// The timer's and the speed's opacity animations' durations now — one
-    /// each while they trade places, the same: they overlap throughout.
+    /// each while they trade places: the glyph's leave and its arrive.
     public var debugSlotOpacityDurations: [CFTimeInterval] {
         [timerLabel.layer, speedButton.layer].compactMap { $0.animation(forKey: "opacity")?.duration }
     }
-    /// The speed's and the timer's transforms now (their model values).
-    public var debugSpeedTransform: CGAffineTransform { speedButton.transform }
+    /// The timer's opacity animation's duration now, and the speed's (#2414).
+    public var debugTimerOpacityDuration: CFTimeInterval? { timerLabel.layer.animation(forKey: "opacity")?.duration }
+    public var debugSpeedOpacityDuration: CFTimeInterval? { speedButton.layer.animation(forKey: "opacity")?.duration }
+    public var debugSpeedOpacityAnimation: CAAnimation? { speedButton.layer.animation(forKey: "opacity") }
+    /// The speed's words' and the timer's transforms now (their model
+    /// values) — the speed's button itself never moves.
+    public var debugSpeedTransform: CGAffineTransform { speedButton.wordsTransform }
     public var debugTimerTransform: CGAffineTransform { timerLabel.transform }
     /// The timer's font, and the speed's.
     public var debugTimerFont: UIFont? { timerLabel.font }
@@ -2197,6 +2238,16 @@ final class VoiceSpeedButton: UIControl {
 
     /// The words' opacity now (their model value).
     var wordsAlpha: CGFloat { label.alpha }
+
+    /// The words alone, for the slot's swap (#2414): they scale about their
+    /// own centre, against the trailing edge, while the button fills the
+    /// slot.
+    var wordsView: UIView { label }
+    var wordsLayer: CALayer { label.layer }
+    var wordsTransform: CGAffineTransform {
+        get { label.transform }
+        set { label.transform = newValue }
+    }
 
     /// Whether it draws anything but its words: a fill, a border, a
     /// shadow, a corner, another view.

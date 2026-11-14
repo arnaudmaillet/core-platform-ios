@@ -2857,7 +2857,8 @@ extension ConversationThreadViewController {
         if voicePlayer.messageID == message.id {
             let progress = voicePlayer.progress ?? voicePositions[message.id] ?? 0
             state.playback = switch voicePlayer.state {
-            case .loading: .loading
+            // On its way, it keeps its place (#2414, `VoicePlaybackHub`).
+            case .loading: .loading(progress: progress)
             case .playing: .playing(progress: progress)
             case .paused: progress > 0 ? .paused(progress: progress) : .rest
             case .failed: .failed
@@ -2894,7 +2895,8 @@ extension ConversationThreadViewController {
 
     private func toggleVoice(_ id: String) {
         guard let message = messagesByID[id], let media = message.media, let url = voiceURL(of: media) else { return }
-        if voicePlayer.messageID == id, voicePlayer.state == .playing {
+        // On the intent (#2414): a voice on its way pauses, keeping its place.
+        if voicePlayer.messageID == id, voicePlayer.state == .playing || voicePlayer.state == .loading {
             voicePlayer.pause()
             return
         }

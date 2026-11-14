@@ -69,9 +69,11 @@ public final class VoicePlaybackHub {
         bindings[ObjectIdentifier(view)] = nil
     }
 
-    /// Plays voice `id` or pauses it.
+    /// Plays voice `id` or pauses it — on the intent (#2414): a voice on
+    /// its way (`.loading`) pauses, keeping its place; it used to start
+    /// again from a place remembered at an older pause, or from 0.
     public func toggle(_ id: String) {
-        if player.messageID == id, player.state == .playing {
+        if player.messageID == id, player.state == .playing || player.state == .loading {
             player.pause()
             return
         }
@@ -122,7 +124,8 @@ public final class VoicePlaybackHub {
     func pauseForBackground() {
         guard player.state == .playing || player.state == .loading else { return }
         rememberShown()
-        player.pause()
+        // Sent away, the session goes back at once: no grace (#2414).
+        player.pause(releaseAtOnce: true)
         refresh()
     }
 
@@ -134,14 +137,17 @@ public final class VoicePlaybackHub {
     // MARK: - State
 
     /// What a view bound to `id` shows: the player's word when it speaks
-    /// for it, where it was left otherwise.
+    /// for it, where it was left otherwise. ⚠️ ON ITS WAY, IT KEEPS ITS
+    /// PLACE (#2414): `.loading` carries the position, so the played bars
+    /// and the timer stay where they were while the session answers — they
+    /// went grey and the timer showed the length for a frame or two.
     public func state(for id: String, duration: TimeInterval, levels: [UInt8]?) -> VoiceView.State {
         var state = VoiceView.State(levels: levels ?? VoiceView.genericLevels, duration: duration)
         state.speedLabel = player.speed.label
         if player.messageID == id {
             let progress = player.progress ?? positions[id] ?? 0
             state.playback = switch player.state {
-            case .loading: .loading
+            case .loading: .loading(progress: progress)
             case .playing: .playing(progress: progress)
             case .paused: progress > 0 ? .paused(progress: progress) : .rest
             case .failed: .failed
