@@ -170,7 +170,7 @@ final class MessageRequestCell: UITableViewCell {
     }
 
     /// ⚠️ THE "+" IS ASKED FIRST, as on an All row: its touch area reaches
-    /// past the 48 pt disc and the stack round it, which would refuse the
+    /// past the 56 pt disc and the stack round it, which would refuse the
     /// touch before the badge saw it.
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
         if let badge = avatarView.tappableBadge, !isHidden, alpha > 0.01,

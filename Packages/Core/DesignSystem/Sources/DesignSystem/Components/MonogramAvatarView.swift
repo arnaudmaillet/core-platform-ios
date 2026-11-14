@@ -16,7 +16,12 @@ import UIKit
 /// behind it as the permanent fallback.
 public final class MonogramAvatarView: UIView {
     /// The list-row diameter, shared by every surface that shows a person.
-    public static let rowDiameter: CGFloat = 48
+    ///
+    /// ⚠️ 56 PT SINCE #2420 (the owner, 2026-11-13): Instagram's and TikTok's
+    /// people rows, measured side by side with ours, agree on a 56 pt face in
+    /// a 72 pt row; ours was 48 in ~62. The row's pitch follows from it
+    /// (`PersonListCell.comfortableRowHeight`).
+    public static let rowDiameter: CGFloat = 56
 
     /// The initials, drawn into a layer's contents (`drawInitials`).
     let initials = CALayer()
@@ -80,7 +85,7 @@ public final class MonogramAvatarView: UIView {
     }
 
     /// Drawn once per change of initials, side or scale (`setMonogram`
-    /// ignores the same initials again): a 48 pt disc is a few kilobytes,
+    /// ignores the same initials again): a 56 pt disc is a few kilobytes,
     /// and no cache of images lives outside the pipeline (#894).
     private static func initialsImage(_ text: String, side: CGFloat, scale: CGFloat) -> UIImage {
         let format = UIGraphicsImageRendererFormat()

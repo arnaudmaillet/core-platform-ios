@@ -1583,6 +1583,42 @@ struct InboxOneListTests {
         #expect(!view.debugWearsUnreadStyle, "a read row is bold")
     }
 
+    /// A conversation's name is regular on a read row and semibold with
+    /// unread (#2420, Instagram's and TikTok's inboxes), at `headline`'s size
+    /// either way; Bold Text steps each up once.
+    @Test func theNameIsRegularReadAndSemiboldUnread() {
+        #expect(ConversationRowView.nameWeight(isUnread: false, boldText: false) == .regular)
+        #expect(ConversationRowView.nameWeight(isUnread: true, boldText: false) == .semibold)
+        #expect(ConversationRowView.nameWeight(isUnread: false, boldText: true) == .semibold)
+        #expect(ConversationRowView.nameWeight(isUnread: true, boldText: true) == .bold)
+
+        let view = ConversationRowView()
+        view.configure(with: row(new: true, unread: 0))
+        let read = view.debugTitleFont
+        view.configure(with: row(new: true, unread: 2))
+        let unread = view.debugTitleFont
+        #expect(read.fontName == ConversationRowView.nameFont(isUnread: false).fontName, "a read name is not regular")
+        #expect(unread.fontName == ConversationRowView.nameFont(isUnread: true).fontName, "an unread name is not semibold")
+        #expect(read.fontName != unread.fontName, "read and unread names wear one weight")
+        #expect(read.pointSize == unread.pointSize, "the weight moved the size")
+        #expect(read.pointSize == UIFont.appFont(forTextStyle: .headline).pointSize, "the name left headline's size")
+    }
+
+    /// The row stands on the people rows' pitch: the 56 pt face with 8 pt
+    /// above and below at the default size (#2420), read or unread alike.
+    @Test func aConversationRowStandsOnThePeoplePitch() {
+        for unread in [0, 2] {
+            let view = ConversationRowView()
+            view.configure(with: row(new: true, unread: unread))
+            let height = view.systemLayoutSizeFitting(
+                CGSize(width: 402, height: 0),
+                withHorizontalFittingPriority: .required, verticalFittingPriority: .fittingSizeLevel
+            ).height
+            #expect(abs(height - PersonRowMetrics.rowHeight) < 0.5, "the row is \(height), the pitch \(PersonRowMetrics.rowHeight)")
+        }
+        #expect(MonogramAvatarView.rowDiameter == 56)
+    }
+
     /// VoiceOver says "new" only for a count in the primary.
     @Test func unreadWordsSayNewOnlyForAPrimaryCount() {
         #expect(ConversationRowView.unreadWords(row(new: true, unread: 3)) == "3 new unread")
