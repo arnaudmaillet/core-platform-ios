@@ -873,6 +873,14 @@ struct PlaceProfileTests {
 
     /// A pull during the first hydration starts nothing of its own — and the
     /// hydration's settle still ends its spinner.
+    ///
+    /// ⚠️ THE SPINNER AND THE POSTS KEEP TWO CLOCKS (develop run 43590125943).
+    /// The spinner turns at least `minimumShown` (1 s) from the pull; the
+    /// posts wait out the cold bones' minimum (0.3 s) once those have shown
+    /// (`SkeletonGate.finish`). Either can come first: a main thread held past
+    /// the spinner's second, with the bones' delay firing late just before the
+    /// answer, stops the spinner 0.3 s before the posts land (reproduced 5/5
+    /// that way). So the test waits for both.
     @Test func aPullDuringTheFirstHydrationEndsWithIt() async {
         let answers = Answers([.success([post("p1", reactions: 10)])])
         answers.held = true
@@ -883,7 +891,7 @@ struct PlaceProfileTests {
         profile.debugReleasePull()
         #expect(profile.debugIsRefreshing)
         answers.held = false
-        #expect(await settle(until: { !profile.debugIsRefreshing }))
+        #expect(await settle(until: { !profile.debugIsRefreshing && !profile.renderedActivity.isEmpty }))
 
         #expect(!profile.debugIsRefreshing, "the coalesced pull's spinner never stopped")
         #expect(answers.calls == 1, "a pull in flight must not start a second load")
