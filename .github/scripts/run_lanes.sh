@@ -14,6 +14,48 @@
 set -eo pipefail
 SPM="$GITHUB_WORKSPACE/.spm"
 read -ra FIELDS <<< "$LANES"
+
+# ⚠️ THE MAC'S LANES COMPILE THROUGH A CACHE THAT OUTLIVES THE RUN (#2370).
+# A Mac lane was mostly its build: Profile 8 min of compiling for 48 s of
+# tests, 38 of the Mac's 65 backstop minutes (run 43607137004). Every
+# package builds alone in its own DerivedData, deleted afterwards, so the
+# shared graph (SwiftProtobuf, Connect, CoreModels, DesignSystem…) compiled
+# again in every lane of every run. Compilation caching keys each compile on
+# its inputs and its whole command line, search paths included, so unlike a
+# shared DerivedData it hides no missing dependency (#127). The keys hold
+# absolute paths, which are the same on the Mac from run to run (the
+# workspace, `.spm`, `$RUNNER_TEMP/DerivedData/<package>`), so the store the
+# last run left answers this run's unchanged modules. Measured on the Mac
+# (Xcode 27.2, Profile, `build-for-testing` twice from an empty DerivedData
+# at the same path): 2,319 s cold, 491 s warm, 465 hits and no miss, a
+# 971 MB store.
+#
+# The Mac runs one job at a time, so the store has one writer.
+#
+# ⚠️ THE MAC'S DISK IS ITS OWNER'S, AND A FULL ONE TOOK THE RUNNER DOWN
+# (2026-11-13). Before every package, not once per job: the store is
+# emptied past CAS_LIMIT_GB, or whenever the disk has less than
+# CAS_FLOOR_GB free — room for a package's ~3 GB DerivedData and the
+# owner's own work. It refills from the next lanes. Hosted runners keep
+# their cold builds: their disk is fresh every job.
+CACHE=()
+if [ "${RUNNER_ENVIRONMENT:-}" = "self-hosted" ]; then
+  CAS="$HOME/Library/Caches/core-platform-ios-ci-cas"
+  CAS_LIMIT_GB="${CAS_LIMIT_GB:-15}"
+  CAS_FLOOR_GB="${CAS_FLOOR_GB:-25}"
+  CACHE=(COMPILATION_CACHE_ENABLE_CACHING=YES "COMPILATION_CACHE_CAS_PATH=$CAS"
+         COMPILATION_CACHE_ENABLE_DIAGNOSTIC_REMARKS=YES)
+fi
+trim_cache() {
+  [ ${#CACHE[@]} -ne 0 ] && [ -d "$CAS" ] || return 0
+  local used free
+  used=$(du -sk "$CAS" | cut -f1)
+  free=$(df -k "$HOME" | awk 'NR == 2 {print $4}')
+  if [ "$used" -gt $((CAS_LIMIT_GB * 1024 * 1024)) ] || [ "$free" -lt $((CAS_FLOOR_GB * 1024 * 1024)) ]; then
+    echo "Compilation cache emptied: $((used / 1024 / 1024)) GB used, $((free / 1024 / 1024)) GB free on the disk"
+    rm -rf "${CAS:?}"
+  fi
+}
 FAILED=()
 for ((i = 0; i < ${#FIELDS[@]}; i += 4)); do
   DIR="${FIELDS[i]}"; NAME="${FIELDS[i+1]}"
@@ -21,6 +63,7 @@ for ((i = 0; i < ${#FIELDS[@]}; i += 4)); do
   [ "$PINNED" = "-" ] && PINNED=""
   [ "$SHARD" = "-" ] && SHARD=""
   echo "::group::$NAME${SHARD:+ ($SHARD)}"
+  trim_cache
   DERIVED="$RUNNER_TEMP/DerivedData/$NAME${SHARD:+-${SHARD%/*}}"
   if ! (
     cd "$GITHUB_WORKSPACE/$DIR"
@@ -92,15 +135,33 @@ for ((i = 0; i < ${#FIELDS[@]}; i += 4)); do
     #
     # No sysdiagnose on a red test: it added ~1m40s to every failing
     # lane (run 36904429986) and nothing ever downloads it.
-    xcodebuild test -scheme "$SCHEME" -destination "id=$DEST_ID" \
-      -clonedSourcePackagesDirPath "$SPM" -derivedDataPath "$DERIVED" \
-      -skipMacroValidation "$NO_INDEX" \
-      -collect-test-diagnostics never "${FILTER[@]}"
+    LOG="$RUNNER_TEMP/lane-$NAME${SHARD:+-${SHARD%/*}}.log"
+    lane() {
+      xcodebuild test -scheme "$SCHEME" -destination "id=$DEST_ID" \
+        -clonedSourcePackagesDirPath "$SPM" -derivedDataPath "$DERIVED" \
+        -skipMacroValidation "$NO_INDEX" \
+        -collect-test-diagnostics never "${FILTER[@]}" "$@" 2>&1 | tee "$LOG"
+    }
+    if ! lane "${CACHE[@]}"; then
+      # A crash of the build service is the cache's fault, not the
+      # change's (as `build app` does): build again without it.
+      [ ${#CACHE[@]} -ne 0 ] && grep -q "build system has crashed" "$LOG" || exit 1
+      echo "::warning::$NAME: the build service crashed with compilation caching on; building without it"
+      rm -rf "$DERIVED"
+      # ⚠️ EXPLICIT: `set -e` does not apply inside an `if` condition, so a
+      # failed retry would otherwise leave the subshell on the echo below and
+      # read as green.
+      lane || exit 1
+    fi
+    if [ ${#CACHE[@]} -ne 0 ]; then
+      echo "Compilation cache ($NAME): $(grep -c '^Cache hit' "$LOG" || true) hits, $(grep -c '^Cache miss' "$LOG" || true) misses"
+    fi
+    exit 0
   ); then
     FAILED+=("$NAME${SHARD:+ ($SHARD)}")
     echo "::error::$NAME${SHARD:+ ($SHARD)} failed"
   fi
-  rm -rf "$DERIVED"
+  rm -rf "$DERIVED" "$RUNNER_TEMP/lane-$NAME${SHARD:+-${SHARD%/*}}.log"
   echo "::endgroup::"
 done
 if [ ${#FAILED[@]} -ne 0 ]; then
