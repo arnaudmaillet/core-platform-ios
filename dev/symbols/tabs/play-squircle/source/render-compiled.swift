@@ -32,7 +32,7 @@ save(render(NSSize(width: 560, height: 300), .white) {
 func bar(_ bg: NSColor, _ ink: NSColor, selected: Bool, badged: Bool) -> NSBitmapImageRep {
     render(NSSize(width: 230, height: 50), bg) {
         let fy = "core.square.play" + (badged ? ".badge" : "") + (selected ? ".fill" : "")
-        let row = [("core.paperplane", false), (fy, badged), ("core.chats", false)]
+        let row = [("core.map", false), (fy, badged), ("core.chats", false)]
         for (i, (n, b)) in row.enumerated() {
             let img = sym(n, 17, b ? [ink, pink] : [ink])
             let x = 30 + CGFloat(i) * 70 + (30 - img.size.width) / 2

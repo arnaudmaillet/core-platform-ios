@@ -24,10 +24,30 @@ struct TabGlyphTests {
         #expect(TabGlyph.badgeTint == Palette.tint)
     }
 
-    /// The owner's glyphs, by tab.
+    /// The owner's glyphs, by tab: Explore's is their map (#2413), in all
+    /// four states.
     @Test func eachTabWearsTheOwnersGlyph() {
-        #expect(TabGlyph.explore.symbol(selected: false, badged: false) == .paperplane)
+        #expect(TabGlyph.explore.symbol(selected: false, badged: false) == .map)
+        #expect(TabGlyph.explore.symbol(selected: true, badged: false) == .mapFill)
+        #expect(TabGlyph.explore.symbol(selected: false, badged: true) == .mapBadge)
+        #expect(TabGlyph.explore.symbol(selected: true, badged: true) == .mapBadgeFill)
         #expect(TabGlyph.messages.symbol(selected: false, badged: false) == .chats)
+    }
+
+    /// The owner's map (#2413) stands as tall as the glyph beside it in the
+    /// bar, Messages', outlined and filled. Sized by ink alone (1.36 units a
+    /// drawing pixel) it stood 3 pt shorter in the bar, and the guest's gear
+    /// outgrew it (`TabFacesTests`). The badged states are left out: the
+    /// owner's "clear" placement pushes the badge past the map's box, so
+    /// their image is taller by the badge, not the map.
+    @Test(arguments: [(false, false), (true, false)])
+    func theMapIsAsTallAsTheMessagesGlyph(_ state: (Bool, Bool)) throws {
+        let configuration = TabGlyph.symbolConfiguration
+        let map = try #require(TabGlyph.explore.symbol(selected: state.0, badged: state.1).image(configuration))
+        let chats = try #require(TabGlyph.messages.symbol(selected: state.0, badged: state.1).image(configuration))
+        print("[tab-glyph-size] \(state) map \(map.size) chats \(chats.size)")
+        #expect(abs(map.size.height - chats.size.height) <= chats.size.height * 0.08,
+                "the map is \(map.size.height) tall, Messages' glyph \(chats.size.height)")
     }
 
     /// ⚠️ #1692: a tab's glyph keeps the system's size at every text size, as

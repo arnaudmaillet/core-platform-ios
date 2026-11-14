@@ -24,7 +24,7 @@ struct TabFacesTests {
         let gear = try #require(TabFaces.system(outline: "gearshape", fill: "gearshape.fill"))
         let explore = try #require(TabGlyph.explore.symbol(selected: false, badged: false).image(TabGlyph.symbolConfiguration))
         #expect(abs(gear.outline.size.height - explore.size.height) <= 3,
-                "gear \(gear.outline.size) beside the paper plane \(explore.size)")
+                "gear \(gear.outline.size) beside the map \(explore.size)")
     }
 
     /// The tab wears both: the outline as its image, the fill as its selected
