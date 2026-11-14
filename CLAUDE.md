@@ -36,9 +36,10 @@ from fighting over `develop` and over CI.
 
 - **Commit locally; push only when the pull request's current CI run has
   finished, or when the work is ready for review.** Each push restarts that pull
-  request's CI, and every test lane of every run queues on **one self-hosted
-  Mac that runs one job at a time** (see CI shape). A stale push makes every
-  other session's lanes wait behind it.
+  request's CI. Most test lanes queue on **one self-hosted Mac that runs one
+  job at a time**, the rest on GitHub's five hosted macOS slots shared by the
+  whole account (see CI shape). A stale push makes every other session's
+  lanes wait behind it.
 - Batch a round of iterations into a single push.
 - Stacked pull requests (base other than `develop`) run no CI, so pushing
   those is cheap.
@@ -58,11 +59,16 @@ from fighting over `develop` and over CI.
 - Where each job runs:
   - `build app` (Debug + Release) and `compile tests (Xcode 26)` on GitHub's
     `macos-latest`, **Xcode 26**: the guard against Swift only Xcode 27
-    accepts, for the app and for every selected package's tests.
-  - the test lanes (and `hero-uitests.yml`) on a **self-hosted Mac, Xcode
-    27**, one job at a time. Every package builds from scratch there:
-    DerivedData lives in the job's temporary directory and is deleted after
-    the package's tests, so no lane is green on a stale module.
-  - If that Mac is off, the lanes wait in the queue and the required
+    accepts, for the app and for the Mac lanes' tests.
+  - the data-and-logic lanes (`HOSTED_LANES` in `select_packages.py`: models,
+    storage, networking, Chat, Search, Auth…) on GitHub's `macos-latest`,
+    **Xcode 26**, as `test … (hosted)`, three at a time for a pull request
+    (#2370).
+  - every other lane (and `hero-uitests.yml`) on a **self-hosted Mac, Xcode
+    27**, one job at a time: the suites that measure time, play media or
+    animate. Every package builds from scratch there: DerivedData lives in the
+    job's temporary directory and is deleted after the package's tests, so no
+    lane is green on a stale module.
+  - If that Mac is off, its lanes wait in the queue and the required
     `build-test` check never arrives. Setting the repository variable
-    `MACOS_RUNNER=github` sends them back to `macos-latest` with Xcode 26.
+    `MACOS_RUNNER=github` sends every lane to `macos-latest` with Xcode 26.

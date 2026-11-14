@@ -59,6 +59,8 @@ jobs:
     outputs:
       matrix: ${{ steps.list.outputs.matrix }}
       count: ${{ steps.list.outputs.count }}
+      hosted_matrix: ${{ steps.list.outputs.hosted_matrix }}
+      hosted_count: ${{ steps.list.outputs.hosted_count }}
       app: ${{ steps.list.outputs.app }}
     steps:
       # ⚠️ A PUSH TO DEVELOP WAITS ITS TURN. Every merge is followed within a
@@ -86,6 +88,8 @@ jobs:
           # Empty on a push to develop, which is what makes that run the full
           # set — the backstop for a closure this script got wrong.
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          # `github` (the Mac off): every lane goes to the hosted job.
+          MACOS_RUNNER: ${{ vars.MACOS_RUNNER }}
         run: python3 .github/scripts/select_packages.py
 
   # ── The app itself ───────────────────────────────────────────────────────
@@ -235,46 +239,82 @@ jobs:
   # on every target's search path and hide exactly the missing-dependency bug
   # this CI exists to catch (PR #127).
   #
-  # ⚠️ THE LANES RUN ON A SELF-HOSTED MAC, XCODE 27; `build app` AND
-  # `compile tests` STAY ON GITHUB, XCODE 26. Xcode 26 can reject Swift that
-  # 27 accepts, so it still compiles the app (Debug and Release) and every
-  # selected package's tests. The lanes moved to free the five GitHub macOS
-  # slots: one Mac runs ONE job at a time, so a run's jobs queue there one
-  # after another (`max-parallel` is moot on it).
+  # ⚠️ TWO MACHINES, SIDE BY SIDE (#2370). The lanes `select_packages.py`
+  # lists in HOSTED_LANES (data and logic: models, storage, networking, Chat,
+  # Search…) run on GitHub's hosted Macs with Xcode 26, `test-hosted`; every
+  # other lane runs on the self-hosted Mac with Xcode 27, `test`. One Mac runs
+  # ONE job at a time, so with every lane on it a run's jobs queued there for
+  # hours while the five hosted slots held two. Suites that measure time, play
+  # media or animate stay on the Mac: a hosted runner is a slower, shared VM.
   #
-  # Nothing persists between runs on that Mac: a package's DerivedData is
+  # `build app` and `compile tests` stay on GitHub, Xcode 26: Xcode 26 can
+  # reject Swift that 27 accepts, so it still compiles the app (Debug and
+  # Release) and the Mac lanes' tests. The hosted lanes are Xcode 26 already.
+  #
+  # Nothing persists between runs on the Mac: a package's DerivedData is
   # ~3 GB, the Mac has little disk, and a tree kept across runs can keep a lane
   # green on a module that no longer exists. Each package builds in the job's
-  # temporary directory, deleted as soon as its tests have run.
+  # temporary directory, deleted as soon as its tests have run
+  # (`run_lanes.sh`).
   #
   # Mac off, asleep or busy for good: set the repository variable
   # MACOS_RUNNER=github (Settings → Secrets and variables → Actions →
-  # Variables) and the lanes go back to macos-latest with Xcode 26, unchanged.
+  # Variables) and every lane goes to `test-hosted`, Xcode 26.
   test:
     name: test ${{ matrix.pkg.label }}
     needs: discover
-    # A change that cannot reach any package (app sources, docs) selects no
-    # lanes. Guard on the count rather than handing GitHub an empty matrix.
+    # A change that cannot reach a Mac lane selects none. Guard on the count
+    # rather than handing GitHub an empty matrix.
     if: ${{ needs.discover.outputs.count != '0' }}
-    runs-on: ${{ vars.MACOS_RUNNER == 'github' && 'macos-latest' || fromJSON('["self-hosted", "macOS", "ARM64", "xcode"]') }}
+    runs-on: ${{ fromJSON('["self-hosted", "macOS", "ARM64", "xcode"]') }}
     timeout-minutes: 45
     strategy:
       fail-fast: false      # one red package must not hide the others
-      # Only matters on GitHub (MACOS_RUNNER=github): the free plan allows 5
-      # concurrent macOS jobs across the account. A pull request takes 4 (the
-      # app build is the fifth). The develop backstop takes 2, so a pull
-      # request queued after it still finds slots; it is the run nobody is
-      # waiting on.
-      max-parallel: ${{ github.event_name == 'push' && 2 || 4 }}
       matrix:
-        # Longest lane first (select_packages.py), so the last slot to free
-        # up is not running Upload alone.
+        # Longest lane first (select_packages.py).
         pkg: ${{ fromJSON(needs.discover.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v4
 
+      # The self-hosted Mac uses the Xcode its owner selected: no `sudo`
+      # there, it would wait on a password. It keeps its own Swift package
+      # mirrors between runs.
+      - name: This Mac's Xcode, and disk
+        run: |
+          xcodebuild -version
+          df -h "$RUNNER_TEMP" | awk 'NR==2 {print "Free disk: " $4}'
+
+      - name: Test ${{ matrix.pkg.label }}
+        env:
+          # Empty for every lane but the legacy-backing one. VideoRenderFlags
+          # only reacts to the literal "0", so an empty value is the default
+          # path — no conditional needed.
+          TEST_RUNNER_AVSBDL_RENDER: ${{ matrix.pkg.avsbdl }}
+          LANES: ${{ matrix.pkg.lanes }}
+        run: .github/scripts/run_lanes.sh
+
+  # The hosted half of the lanes (see `test`), on GitHub's macOS runners.
+  test-hosted:
+    name: test ${{ matrix.pkg.label }} (hosted)
+    needs: discover
+    if: ${{ needs.discover.outputs.hosted_count != '0' }}
+    runs-on: macos-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      # The free plan allows 5 concurrent hosted macOS jobs across the
+      # account, and `build app` and `compile tests` take two of them: a pull
+      # request runs 3 hosted lanes at once, the develop backstop 1, so a pull
+      # request queued after it still finds slots; it is the run nobody is
+      # waiting on. With MACOS_RUNNER=github there is no `compile tests`, and
+      # every lane is here: 4 and 2.
+      max-parallel: ${{ vars.MACOS_RUNNER == 'github' && (github.event_name == 'push' && 2 || 4) || (github.event_name == 'push' && 1 || 3) }}
+      matrix:
+        pkg: ${{ fromJSON(needs.discover.outputs.hosted_matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+
       - name: Select Xcode 26
-        if: ${{ runner.environment == 'github-hosted' }}
         run: |
           XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
           if [ -z "$XC" ]; then
@@ -285,143 +325,27 @@ jobs:
           echo "Selecting $XC"
           sudo xcode-select -s "$XC/Contents/Developer"
 
-      # The self-hosted Mac uses the Xcode its owner selected: no `sudo`
-      # there, it would wait on a password.
-      - name: This Mac's Xcode, and disk
-        if: ${{ runner.environment == 'self-hosted' }}
-        run: |
-          xcodebuild -version
-          df -h "$RUNNER_TEMP" | awk 'NR==2 {print "Free disk: " $4}'
-
-      # Restore only: `build app` saves these (see there). The self-hosted Mac
-      # keeps its own mirrors in that same directory between runs.
+      # Restore only: `build app` saves these (see there).
       - name: Restore Swift package mirrors
-        if: ${{ runner.environment == 'github-hosted' }}
         uses: actions/cache/restore@v4
         with:
           path: ~/Library/Caches/org.swift.swiftpm/repositories
           key: spm-mirrors-${{ hashFiles('**/Package.resolved') }}
           restore-keys: spm-mirrors-
 
-      # `lanes` is what this job runs, one after another: `dir name scheme
-      # shard` per package, `-` for an empty field (select_packages.py). A
-      # long lane is one shard of a package (#2370: Feed in two); short ones
-      # share a job, paying its fixed cost — checkout, Xcode, mirrors, a
-      # simulator boot — once. Each package gets its own DerivedData, in the
-      # job's temporary directory, so no module leaks onto another's search
-      # path; it is deleted once the package's tests have run (see the header
-      # of this job).
       - name: Test ${{ matrix.pkg.label }}
         env:
-          # Empty for every lane but the legacy-backing one. VideoRenderFlags
-          # only reacts to the literal "0", so an empty value is the default
-          # path — no conditional needed.
           TEST_RUNNER_AVSBDL_RENDER: ${{ matrix.pkg.avsbdl }}
           LANES: ${{ matrix.pkg.lanes }}
-        run: |
-          set -o pipefail
-          SPM="$GITHUB_WORKSPACE/.spm"
-          read -ra FIELDS <<< "$LANES"
-          FAILED=()
-          for ((i = 0; i < ${#FIELDS[@]}; i += 4)); do
-            DIR="${FIELDS[i]}"; NAME="${FIELDS[i+1]}"
-            PINNED="${FIELDS[i+2]}"; SHARD="${FIELDS[i+3]}"
-            [ "$PINNED" = "-" ] && PINNED=""
-            [ "$SHARD" = "-" ] && SHARD=""
-            echo "::group::$NAME${SHARD:+ ($SHARD)}"
-            DERIVED="$RUNNER_TEMP/DerivedData/$NAME${SHARD:+-${SHARD%/*}}"
-            if ! (
-              cd "$GITHUB_WORKSPACE/$DIR"
-
-              # On a fresh runner xcodebuild reports "Supported platforms for
-              # the buildables is empty" and falls back to My Mac unless the
-              # package resolves first.
-              xcodebuild -resolvePackageDependencies -scheme "$NAME" -clonedSourcePackagesDirPath "$SPM"
-
-              # Multi-product packages (e.g. CoreNetworking + CoreNetworkingMocks)
-              # put the test action on the auto-generated "<name>-Package"
-              # scheme, not the product scheme; single-product packages only
-              # have "<name>". Prefer -Package when it exists, unless the
-              # matrix pinned a scheme.
-              SCHEME="$PINNED"
-              if [ -z "$SCHEME" ]; then
-                SCHEME="$NAME"
-                if xcodebuild -list -clonedSourcePackagesDirPath "$SPM" 2>/dev/null \
-                     | grep -qE "^[[:space:]]+${NAME}-Package$"; then
-                  SCHEME="${NAME}-Package"
-                fi
-              fi
-              echo "Using scheme: $SCHEME"
-
-              # CoreSimulator enumerates its devices lazily, and asking too
-              # early gets an answer with the "Any iOS Simulator Device"
-              # placeholder and nothing else (run 33816841427: MediaPlayback
-              # green and red on the same scheme). Warm the list, then retry.
-              xcrun simctl list devices available >/dev/null 2>&1 || true
-
-              # A concrete iPhone simulator from xcodebuild's own destination
-              # list for THIS scheme (guaranteed valid). The `|| true` on the
-              # assignments: under `bash -e` and pipefail a grep that matches
-              # nothing would abort here, before the diagnostic below runs.
-              DEST_ID=""
-              for attempt in 1 2 3 4 5 6; do
-                DESTS=$(xcodebuild -scheme "$SCHEME" -showdestinations \
-                  -clonedSourcePackagesDirPath "$SPM" 2>&1) || true
-                DEST_ID=$(printf '%s\n' "$DESTS" \
-                  | grep 'platform:iOS Simulator' | grep -iE 'name:iPhone' \
-                  | grep -oE 'id:[0-9A-Fa-f-]+' | head -1 | cut -d: -f2) || true
-                if [ -n "$DEST_ID" ]; then
-                  break
-                fi
-                echo "attempt $attempt: no iPhone destination yet, retrying"
-                printf '%s\n' "$DESTS" | tail -20
-                sleep 10
-              done
-              if [ -z "$DEST_ID" ]; then
-                echo "::error::No iPhone simulator destination for scheme $SCHEME after 6 attempts"
-                xcrun simctl list runtimes | grep -i ios >&2 || true
-                exit 1
-              fi
-              echo "Using simulator id=$DEST_ID (attempt $attempt)"
-
-              # A shard's filter (#2370): `-only-testing` for its suites, or,
-              # for the last shard, `-skip-testing` for every other shard's —
-              # so a suite the script cannot see still runs.
-              FILTER=()
-              if [ -n "$SHARD" ]; then
-                read -ra FILTER <<< "$(python3 -I "$GITHUB_WORKSPACE/.github/scripts/test_shard.py" . "${SHARD%/*}" "${SHARD#*/}")"
-                echo "Shard $SHARD: ${#FILTER[@]} filter arguments"
-              fi
-
-              # ⚠️ DO NOT BOOT THE SIMULATOR DURING THE BUILD (PR #354: a
-              # first boot on a 3-core, 7 GB runner starves the compiler). The
-              # boot stays where `xcodebuild test` puts it, after the build;
-              # a job's later packages find it booted.
-              #
-              # No sysdiagnose on a red test: it added ~1m40s to every failing
-              # lane (run 36904429986) and nothing ever downloads it.
-              xcodebuild test -scheme "$SCHEME" -destination "id=$DEST_ID" \
-                -clonedSourcePackagesDirPath "$SPM" -derivedDataPath "$DERIVED" \
-                -skipMacroValidation "$NO_INDEX" \
-                -collect-test-diagnostics never "${FILTER[@]}"
-            ); then
-              FAILED+=("$NAME${SHARD:+ ($SHARD)}")
-              echo "::error::$NAME${SHARD:+ ($SHARD)} failed"
-            fi
-            rm -rf "$DERIVED"
-            echo "::endgroup::"
-          done
-          if [ ${#FAILED[@]} -ne 0 ]; then
-            echo "::error::Failed in this job: ${FAILED[*]}"
-            exit 1
-          fi
+        run: .github/scripts/run_lanes.sh
 
   # ── The lanes' tests, compiled by Xcode 26 ───────────────────────────────
-  # The lanes test with the self-hosted Mac's Xcode 27, and `build app` never
-  # compiles a test file, so without this job a test only Xcode 27 accepts
-  # would go green here and break the first run on the MACOS_RUNNER=github
-  # fallback. It compiles (`build-for-testing`, nothing runs) every package
-  # the lanes selected, on GitHub's Xcode 26, in ONE job.
+  # The Mac's lanes test with its Xcode 27, and `build app` never compiles a
+  # test file, so without this job a test only Xcode 27 accepts would go green
+  # here and break the first run on the MACOS_RUNNER=github fallback. It
+  # compiles (`build-for-testing`, nothing runs) every package the MAC's lanes
+  # selected, on GitHub's Xcode 26, in ONE job. The hosted lanes need none:
+  # they are Xcode 26 themselves.
   #
   # ONE DerivedData for every package, unlike the lanes: this job only asks
   # whether Xcode 26 accepts the Swift, so the shared graph (SwiftProtobuf,
@@ -503,7 +427,7 @@ jobs:
   # gated on anything.
   build-test:
     name: build-test
-    needs: [discover, build-app, test, compile-tests]
+    needs: [discover, build-app, test, test-hosted, compile-tests]
     # !cancelled(), not always(): with always() a cancelled run would still
     # report a red required check instead of no check at all.
     if: ${{ !cancelled() }}
@@ -514,7 +438,8 @@ jobs:
           set -uo pipefail
           echo "discover:  ${{ needs.discover.result }}"
           echo "build-app: ${{ needs.build-app.result }}"
-          echo "test:      ${{ needs.test.result }}"   # aggregate of every lane
+          echo "test:      ${{ needs.test.result }}"   # aggregate of the Mac's lanes
+          echo "test-hosted: ${{ needs.test-hosted.result }}"   # and the hosted ones
           echo "compile-tests: ${{ needs.compile-tests.result }}"
           FAILED=()
           [ "${{ needs.discover.result }}"  = "success" ] || FAILED+=("discover")
@@ -531,6 +456,10 @@ jobs:
             success|skipped) ;;
             *) FAILED+=("test") ;;
           esac
+          case "${{ needs.test-hosted.result }}" in
+            success|skipped) ;;
+            *) FAILED+=("test-hosted") ;;
+          esac
           # Skipped with the lanes (no package reached), or because the lanes
           # ran on Xcode 26 themselves (MACOS_RUNNER=github).
           case "${{ needs.compile-tests.result }}" in
@@ -543,7 +472,7 @@ jobs:
           fi
           if [ "${{ needs.build-app.result }}" = "skipped" ]; then
             echo "Documentation-only change: nothing to build or test."
-          elif [ "${{ needs.test.result }}" = "skipped" ]; then
+          elif [ "${{ needs.test.result }}" = "skipped" ] && [ "${{ needs.test-hosted.result }}" = "skipped" ]; then
             echo "App builds (Debug + Release) passed. No package could be reached by this change, so no lane ran."
           else
             echo "App builds (Debug + Release) and every selected package test passed."
