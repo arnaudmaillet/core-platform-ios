@@ -1,4 +1,5 @@
 #if DEBUG
+import LaunchArguments
 import MapKit
 import MediaCore
 import MediaPlayback
@@ -65,7 +66,7 @@ final class MapIconDebugHUD: UIView {
     /// test is looking for — and during a pan, which is the case under
     /// suspicion, it would be impossible to tell the two apart.
     private let logsToConsole =
-        ProcessInfo.processInfo.arguments.contains("-map-icon-hud-log")
+        LaunchArgument.mapIconHudLog.isPassed()
     private var lastLogged: CFTimeInterval = 0
 
     private var probedTick: Double?

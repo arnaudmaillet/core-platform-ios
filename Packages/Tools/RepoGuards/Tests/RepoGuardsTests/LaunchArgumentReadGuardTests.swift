@@ -23,14 +23,11 @@ struct LaunchArgumentReadGuardTests {
     /// A package that is not listed may hold none: CoreStorage, MediaCore,
     /// HeroPage, ShareSheet, VoiceKit, Auth and Notifications declare
     /// theirs (#2374, 2), and so do CoreNetworking, DebugTools, DesignSystem,
-    /// PostGrid, Chat, Search and Upload (#2374, 3).
+    /// PostGrid, Chat, Search and Upload (#2374, 3), and CoreNavigation,
+    /// MediaPlayback, Maps and Profile (#2374, 4).
     static let budget: [String: Int] = [
         "App": 83,
-        "Core/CoreNavigation": 48,
-        "Core/MediaPlayback": 15,
         "Features/Feed": 166,
-        "Features/Maps": 74,
-        "Features/Profile": 39,
     ]
 
     /// How many raw reads `text` holds.

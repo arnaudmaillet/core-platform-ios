@@ -1,4 +1,5 @@
 import DesignSystem
+import LaunchArguments
 import UIKit
 
 /// **THE TEXT REVEAL**. A hero for a page that has no media to fly.
@@ -1255,7 +1256,7 @@ enum RevealStage {
     /// Compare consecutive stamps against the durations asked for before
     /// believing any of it.
     static func log(_ leg: String, _ message: String) {
-        guard ProcessInfo.processInfo.arguments.contains("-text-reveal-log") else { return }
+        guard LaunchArgument.textRevealLog.isPassed() else { return }
         print(String(format: "[text-reveal] %.3f %@ %@", CACurrentMediaTime(), leg, message))
     }
     #endif
@@ -1657,7 +1658,7 @@ final class RevealTrajectoryProbe {
 
     static func begin(_ leg: String, tracking view: UIView, to target: CGRect)
         -> RevealTrajectoryProbe? {
-        guard ProcessInfo.processInfo.arguments.contains("-text-reveal-log") else { return nil }
+        guard LaunchArgument.textRevealLog.isPassed() else { return nil }
         return RevealTrajectoryProbe(leg: leg, tracked: view, target: target)
     }
 
@@ -1750,7 +1751,7 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
 
     func animateTransition(using context: any UIViewControllerContextTransitioning) {
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-grab-log") {
+        if LaunchArgument.grabLog.isPassed() {
             print("[pop] reveal animate")
         }
         #endif
@@ -1759,7 +1760,7 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
 
     func animationEnded(_ transitionCompleted: Bool) {
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-grab-log") {
+        if LaunchArgument.grabLog.isPassed() {
             print("[pop] reveal ended completed=\(transitionCompleted)")
         }
         #endif

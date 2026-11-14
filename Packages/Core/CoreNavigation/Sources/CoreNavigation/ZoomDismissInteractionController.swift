@@ -1,4 +1,5 @@
 
+import LaunchArguments
 import UIKit
 
 /// Turns a rightward drag on the snap feed into a *free-floating* interactive
@@ -287,7 +288,7 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
     /// the drag phase owns the card frame-by-frame.
     func startInteractiveTransition(_ context: any UIViewControllerContextTransitioning) {
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+        if LaunchArgument.zoomLiveLog.isPassed() {
             print("[zoom-live] GRAB from rest: staging own flight")
         }
         #endif
@@ -716,7 +717,7 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         // Exact, not via the band's round trip.
         flight.card.center = presentedCenter
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-grab-log") {
+        if LaunchArgument.grabLog.isPassed() {
             print(String(format: "[grab] %.3f CAUGHT the cancel at scale=%.4f offset=(%.1f, %.1f) progress=%.3f",
                          CACurrentMediaTime(), presentedSize.width / max(flight.pageFrame.width, 1),
                          presentedCenter.x - pageCenter.x, presentedCenter.y - pageCenter.y,
@@ -739,7 +740,7 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
     /// `-zoom-probe`. A teleport and a spring are indistinguishable in a log
     /// that only records the endpoints; this records the path.
     private func armReleaseProbe(card: UIView) {
-        guard ProcessInfo.processInfo.arguments.contains("-zoom-probe") else { return }
+        guard LaunchArgument.zoomProbe.isPassed() else { return }
         releaseProbe?.invalidate()
         releaseProbeStart = CACurrentMediaTime()
         releaseProbeCard = card
@@ -1264,7 +1265,7 @@ extension ZoomDismissInteractionController: UIGestureRecognizerDelegate {
     @discardableResult
     private func grabLog(_ reason: String, _ answer: Bool) -> Bool {
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-grab-log") {
+        if LaunchArgument.grabLog.isPassed() {
             print(String(format: "[grab] %.3f %@ -> %@",
                          CACurrentMediaTime(), reason, answer ? "yes" : "no"))
         }

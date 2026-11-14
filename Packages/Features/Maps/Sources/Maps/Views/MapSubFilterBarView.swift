@@ -1,5 +1,6 @@
 import CoreModels
 import DesignSystem
+import LaunchArguments
 import MediaCore
 import QuartzCore
 import UIKit
@@ -757,7 +758,7 @@ final class MapSubFilterBarView: UIView {
         let entity = MapSubFilterEntity(option: option)
         let label = option.content.accessibilityLabel
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-maps-trace-menu") {
+        if LaunchArgument.mapsTraceMenu.isPassed() {
             print("[maps] pill menu built at \(CACurrentMediaTime()) for \(subFilter) "
                 + "title=\"\(option.favorite?.title ?? "-")\" "
                 + "handle=\(option.favorite?.handle.map { "\"\($0)\"" } ?? "nil")")

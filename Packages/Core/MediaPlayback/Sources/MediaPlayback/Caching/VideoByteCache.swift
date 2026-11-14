@@ -1,6 +1,7 @@
 import AVFoundation
 import CacheKit
 import Foundation
+import LaunchArguments
 import ObjectiveC
 import Synchronization
 
@@ -394,7 +395,7 @@ public final class VideoByteCache: Sendable {
 /// miss, fetches, head preloads), in DEBUG builds only.
 enum VideoCacheAudit {
     #if DEBUG
-    static let isEnabled = ProcessInfo.processInfo.arguments.contains("-cache-audit")
+    static let isEnabled = LaunchArgument.cacheAudit.isPassed()
     #endif
 
     static func emit(_ line: @autoclosure () -> String) {

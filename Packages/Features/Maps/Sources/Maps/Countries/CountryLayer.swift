@@ -1,3 +1,4 @@
+import LaunchArguments
 import MapKit
 import UIKit
 
@@ -203,7 +204,7 @@ final class CountryLayer: NSObject {
             #endif
             await Task.detached(priority: .utility) { FlagPalette.warm(codes) }.value
             #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-maps-flag-log") {
+            if LaunchArgument.mapsFlagLog.isPassed() {
                 print(String(format: "[flags] warmed %d flags in %.1f ms (off main)",
                              codes.count, (CACurrentMediaTime() - started) * 1000))
             }

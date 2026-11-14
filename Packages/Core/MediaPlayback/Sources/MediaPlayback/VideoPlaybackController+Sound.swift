@@ -1,4 +1,5 @@
 import AVFoundation
+import LaunchArguments
 import QuartzCore
 
 extension VideoPlaybackController {
@@ -68,7 +69,7 @@ extension VideoPlaybackController {
     #if DEBUG
     /// `-sound-log`: who is heard, as the audible surface moves — and a census
     /// of every player's mute each time it changes (`debugSoundCensus`).
-    static let tracesSound = ProcessInfo.processInfo.arguments.contains("-sound-log")
+    static let tracesSound = LaunchArgument.soundLog.isPassed()
 
     func traceSound(_ message: @autoclosure () -> String) {
         guard Self.tracesSound else { return }

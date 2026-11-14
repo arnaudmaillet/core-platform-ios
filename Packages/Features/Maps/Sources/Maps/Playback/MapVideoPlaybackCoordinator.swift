@@ -1,4 +1,5 @@
 import CoreModels
+import LaunchArguments
 import MediaPlayback
 import UIKit
 
@@ -58,10 +59,8 @@ final class MapVideoPlaybackCoordinator {
         // `-map-video-concurrency <n>` raises the cap for measurement. The
         // shipped default stays 3; this exists because "can we play more?" is a
         // question no amount of reading answers.
-        let arguments = ProcessInfo.processInfo.arguments
-        if let index = arguments.firstIndex(of: "-map-video-concurrency"),
-           index + 1 < arguments.count, let value = Int(arguments[index + 1]) {
-            self.maxConcurrent = max(1, value)
+        if let concurrency = LaunchArgument.mapVideoConcurrency.intValue() {
+            self.maxConcurrent = max(1, concurrency)
             return
         }
         #endif

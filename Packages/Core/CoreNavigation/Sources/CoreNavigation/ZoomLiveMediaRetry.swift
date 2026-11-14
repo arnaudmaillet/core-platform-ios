@@ -1,3 +1,4 @@
+import LaunchArguments
 import UIKit
 
 /// Keeps asking for the flight's live video after take-off, and puts it on the
@@ -317,7 +318,7 @@ final class ZoomLiveMediaRetry: NSObject {
 
     private func logAdoption(_ surface: UIView, posed: Bool) {
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+        if LaunchArgument.zoomLiveLog.isPassed() {
             print(String(format: "[zoom-live] %.3f retry ADOPTED mid-flight (%@)%@",
                          CACurrentMediaTime(), String(describing: type(of: surface)), posed ? " posed by the flight" : ""))
         }

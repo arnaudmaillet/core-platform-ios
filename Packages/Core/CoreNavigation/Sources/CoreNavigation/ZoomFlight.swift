@@ -1,3 +1,4 @@
+import LaunchArguments
 import UIKit
 
 /// The flying unit shared by both dismissal drivers — the non-interactive
@@ -46,7 +47,7 @@ public enum ZoomFlightSpring {
 @MainActor
 final class ZoomGeometrySampler {
     static let shared = ZoomGeometrySampler()
-    static var isOn: Bool { ProcessInfo.processInfo.arguments.contains("-grab-geometry") }
+    static var isOn: Bool { LaunchArgument.grabGeometry.isPassed() }
 
     private var link: CADisplayLink?
     private weak var card: (any ZoomFlightCard)?
@@ -440,7 +441,7 @@ struct ZoomFlight {
             card.prepareZoomStillMediaForFlight(destinationSize: liveMediaSize)
         }
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+        if LaunchArgument.zoomLiveLog.isPassed() {
             print("[zoom-live] build live=\(card.zoomLiveMediaSurface != nil) destination=\(destination != nil)"
                   + " framed=\(framing.map { "\($0.mediaAspect.width)x\($0.mediaAspect.height)" } ?? "no")")
         }
@@ -611,7 +612,7 @@ struct ZoomFlight {
         // Same probe as `poseFloating`, on the two legs a grab's RELEASE and
         // the PRESENT both drive. Model against presentation, because the model
         // agreeing with itself proves nothing about what is on screen.
-        if ProcessInfo.processInfo.arguments.contains("-grab-geometry") {
+        if LaunchArgument.grabGeometry.isPassed() {
             let pres = card.layer.presentation()?.bounds
             print(String(format: "[page] %.3f card=%@ pres=%@ anim=[%@] | %@",
                          CACurrentMediaTime(), NSCoder.string(for: card.bounds),
@@ -685,7 +686,7 @@ struct ZoomFlight {
         // aspect-fill of a wider-than-tall video into a narrower card is
         // height-driven and therefore vertically invariant. One of those four
         // is false, and only the running app can say which.
-        if ProcessInfo.processInfo.arguments.contains("-grab-geometry") {
+        if LaunchArgument.grabGeometry.isPassed() {
             // ⚠️ THE MODEL AGREEING PROVES NOTHING. Both values below are
             // written in the same turn, so of course they match — the first
             // pass of this probe read only those and concluded "rigid". What a

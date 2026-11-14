@@ -1,6 +1,7 @@
 import CoreNavigation
 import DesignSystem
 import EmoteKit
+import LaunchArguments
 import MediaCore
 import MediaPlayback
 import PostGrid
@@ -974,7 +975,7 @@ final class PinCardView: UIView {
                 previewSheetView.setArt(preview.art, phase: phase)
             }
             #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            if LaunchArgument.zoomLiveLog.isPassed() {
                 print(String(format: "[zoom-live] sheet synced video=%.3fs frame %d -> %d, holds %d in %.2fs",
                              time, shown, target, plan.frame, plan.after))
             }
@@ -1019,16 +1020,16 @@ final class PinCardView: UIView {
     /// over a soft one.
     func beginFocusPull() {
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-no-focus-pull") { return }
+        if LaunchArgument.noFocusPull.isPassed() { return }
         #endif
         guard let start = sheetPixelsPerPoint() else { return }
         var duration = Self.focusPullDuration
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-focus-pull-slow") { duration = 2 }
+        if LaunchArgument.focusPullSlow.isPassed() { duration = 2 }
         #endif
         let pulled = videoRenderView.pullFocus(fromPixelsPerPoint: start, over: duration)
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+        if LaunchArgument.zoomLiveLog.isPassed() {
             print(String(format: "[zoom-live] focus pull from %.2f px/pt: %@", start, pulled ? "yes" : "no"))
         }
         #endif
@@ -2039,7 +2040,7 @@ extension PinCardView: ZoomFlightCard {
         // card. A cover that stays put while the card's edge sweeps over it is
         // a truncation, and it looks exactly like an aspect-fill re-crop from
         // the outside — the numbers are the only way to tell them apart.
-        if ProcessInfo.processInfo.arguments.contains("-blend-frame-log") {
+        if LaunchArgument.blendFrameLog.isPassed() {
             print("[blend-frame] t=\(String(format: "%.2f", t))"
                 + " card=\(NSCoder.string(for: bounds))"
                 + " arrival=\(NSCoder.string(for: imageView.frame))"

@@ -2,6 +2,7 @@ import AVFoundation
 import CacheKit
 import CoreMedia
 import Foundation
+import LaunchArguments
 import UIKit
 
 /// Where a loaded arrangement begins, and what it loops.
@@ -419,7 +420,7 @@ public final class VideoPlaybackController {
         // full-screen player without the item ever being replaced.
         if let parked, parked.url == mediaURL {
             #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            if LaunchArgument.zoomLiveLog.isPassed() {
                 print(String(format: "[zoom-live] %.3f ADOPTED parked player", CACurrentMediaTime()))
             }
             #endif

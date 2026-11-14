@@ -1,4 +1,5 @@
 import DesignSystem
+import LaunchArguments
 import ObjectiveC
 import QuartzCore
 import UIKit
@@ -336,8 +337,8 @@ public enum InteractionLatency {
 
     /// Installs under `-interaction-latency`; nothing otherwise.
     public static func installIfRequested(arguments: [String] = ProcessInfo.processInfo.arguments) {
-        guard arguments.contains("-interaction-latency") else { return }
-        install(log: true, hud: arguments.contains("-interaction-latency-hud"))
+        guard LaunchArgument.interactionLatency.isPassed(in: arguments) else { return }
+        install(log: true, hud: LaunchArgument.interactionLatencyHud.isPassed(in: arguments))
     }
 
     /// Turns the harness on or off at run time (the debug dashboard).

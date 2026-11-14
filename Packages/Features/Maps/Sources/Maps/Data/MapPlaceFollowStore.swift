@@ -1,5 +1,6 @@
 import CoreStorage
 import Foundation
+import LaunchArguments
 
 /// Client-side persistence for FOLLOWED PLACES — the cities/regions/countries
 /// the viewer favorites from a place gallery's header. No backend contract for
@@ -29,15 +30,13 @@ public final class MapPlaceFollowStore: @unchecked Sendable {
         #if DEBUG
         // `-maps-reset-followed-places`: deterministic QA — every scripted
         // launch starts unfollowed.
-        if ProcessInfo.processInfo.arguments.contains("-maps-reset-followed-places") {
+        if LaunchArgument.mapsResetFollowedPlaces.isPassed() {
             defaults.removeObject(forKey: key)
         }
         // `-maps-follow-place <placeID>`: start with one place followed, so a
         // launch can land straight on the Favorites sub-filter's filtered map
         // without driving the gallery toggle first.
-        if let position = ProcessInfo.processInfo.arguments.firstIndex(of: "-maps-follow-place"),
-           position + 1 < ProcessInfo.processInfo.arguments.count {
-            let seeded = ProcessInfo.processInfo.arguments[position + 1]
+        if let seeded = LaunchArgument.mapsFollowPlace.value() {
             var ids = Set(defaults.stringArray(forKey: key) ?? [])
             ids.insert(seeded)
             defaults.set(ids.sorted(), forKey: key)

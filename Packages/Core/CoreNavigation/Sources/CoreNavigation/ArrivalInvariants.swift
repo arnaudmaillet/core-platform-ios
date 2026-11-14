@@ -1,4 +1,5 @@
 #if DEBUG
+import LaunchArguments
 import UIKit
 
 /// A screen's own answers to "am I at rest?", for `ArrivalInvariants`.
@@ -147,7 +148,7 @@ public enum ArrivalInvariants {
         // bar's glass platters; a push caught and thrown back left that fade
         // frozen at the fraction it reached — the header's buttons dimmed at
         // rest. Read-only: native chrome is UIKit's, this only looks.
-        if ProcessInfo.processInfo.arguments.contains("-bar-dump") {
+        if LaunchArgument.barDump.isPassed() {
             Self.dumpBar(nav.navigationBar, phase: phase, sink: sink)
         }
         if phase == "rested" {

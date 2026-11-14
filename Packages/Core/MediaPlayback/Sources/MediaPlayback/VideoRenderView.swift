@@ -1,6 +1,7 @@
 import AVFoundation
 import AVKit
 import CoreMedia
+import LaunchArguments
 import QuartzCore
 import UIKit
 
@@ -428,7 +429,7 @@ public final class VideoRenderView: UIView {
         // starts flight-tracking, and that window is exactly where the
         // cold-open poster vanished — a defect the transition logs reported
         // as healthy. This is the trace that convicted it.
-        if ProcessInfo.processInfo.arguments.contains("-poster-log") {
+        if LaunchArgument.posterLog.isPassed() {
             print(String(format: "[poster] %.3f %@ ready=%@ image=%@ wasVisible=%@ -> shouldHide=%@",
                          CACurrentMediaTime(), debugLabelOrAnonymous,
                          ready ? "Y" : "n", posterView.image == nil ? "nil" : "set",
@@ -1180,7 +1181,7 @@ public final class VideoRenderView: UIView {
     /// what the viewer saw.
     private func logPoster(visible: Bool) {
         guard let debugLabel, debugTracksFlight,
-              ProcessInfo.processInfo.arguments.contains("-zoom-live-log")
+              LaunchArgument.zoomLiveLog.isPassed()
         else { return }
         // A poster that becomes visible on a surface nobody can see is not a
         // flash. Distinguishing the two needs the surface's actual on-screen
@@ -1236,7 +1237,7 @@ public final class VideoRenderView: UIView {
 
     private func logReadiness(_ ready: Bool) {
         guard let debugLabel, debugTracksFlight,
-              ProcessInfo.processInfo.arguments.contains("-zoom-live-log")
+              LaunchArgument.zoomLiveLog.isPassed()
         else { return }
         print(String(format: "[zoom-live] %.3f %@ readyForDisplay=%@",
                      CACurrentMediaTime(), debugLabel, ready ? "true" : "false"))

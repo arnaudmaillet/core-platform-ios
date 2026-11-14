@@ -2,6 +2,7 @@ import CoreContracts
 import CoreModels
 import CoreNetworking
 import Foundation
+import LaunchArguments
 
 public enum GeoDiscoveryError: Error, Equatable, Sendable {
     /// The call failed on the way to or at the server. `failure` keeps WHY
@@ -179,7 +180,7 @@ public actor GeoDiscoveryRepository: GeoDiscoveryProviding {
     static func kind(for pin: GeoDiscovery_V1_RadarPin) -> MapPin.Kind {
         guard !pin.thumbnailURL.isEmpty else { return .text }
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-maps-force-video"),
+        if LaunchArgument.mapsForceVideo.isPassed(),
            pin.thumbnailURL.contains("video") {
             return .video
         }

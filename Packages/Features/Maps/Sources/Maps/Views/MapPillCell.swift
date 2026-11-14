@@ -1,3 +1,4 @@
+import LaunchArguments
 import QuartzCore
 import UIKit
 
@@ -50,7 +51,7 @@ final class MapPillCell: UICollectionViewCell {
     /// `MapSubFilterBarView.debugPresentMenu(for:)`.
     func debugPresentMenu() {
         guard let pill else { return }
-        if ProcessInfo.processInfo.arguments.contains("-maps-trace-menu") {
+        if LaunchArgument.mapsTraceMenu.isPassed() {
             print("[maps] menu presentation requested at \(CACurrentMediaTime())")
         }
         pill.showsMenuAsPrimaryAction = true
@@ -175,7 +176,7 @@ final class MapPillCell: UICollectionViewCell {
                 built?.header,
                 UIDeferredMenuElement.uncached { [weak self] completion in
                     #if DEBUG
-                    if ProcessInfo.processInfo.arguments.contains("-maps-trace-menu") {
+                    if LaunchArgument.mapsTraceMenu.isPassed() {
                         print("[maps] menu verbs resolved at \(CACurrentMediaTime())")
                     }
                     #endif

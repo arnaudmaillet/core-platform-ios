@@ -2,6 +2,7 @@ import CoreModels
 import CoreNavigation
 import DesignSystem
 import FeedInterface
+import LaunchArguments
 import LocalStore
 import MapKit
 import MapsInterface
@@ -215,7 +216,7 @@ extension MapsViewController: MKMapViewDelegate {
         endIdlePreroll()
         guard let warm = warmPlayback(annotation.pin.postID, time) else {
             #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            if LaunchArgument.zoomLiveLog.isPassed() {
                 print("[zoom-live] touch-down warm: nothing to warm for \(annotation.pin.postID.rawValue)")
             }
             #endif
@@ -223,7 +224,7 @@ extension MapsViewController: MKMapViewDelegate {
         }
         playbackWarm = (annotation.pin.postID, warm)
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+        if LaunchArgument.zoomLiveLog.isPassed() {
             print(String(format: "[zoom-live] %.3f touch-down warm %@ at %@", CACurrentMediaTime(),
                          annotation.pin.postID.rawValue, time.map { String(format: "%.2fs", $0) } ?? "start"))
         }
@@ -279,7 +280,7 @@ extension MapsViewController: MKMapViewDelegate {
               offerSheet == nil,
               UIApplication.shared.applicationState == .active else {
             #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            if LaunchArgument.zoomLiveLog.isPassed() {
                 print("[zoom-live] idle preroll: not now (window=\(view.window != nil) transition=\(activeTransition != nil) "
                       + "warm=\(playbackWarm != nil) moving=\(isRegionTransitioning) "
                       + "active=\(UIApplication.shared.applicationState == .active))")
@@ -302,7 +303,7 @@ extension MapsViewController: MKMapViewDelegate {
         guard let chosen = Self.prerollCandidate(center: center, pins: candidates.map { ($0.id, $0.point) }),
               let annotation = candidates.first(where: { $0.id == chosen })?.annotation else {
             #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            if LaunchArgument.zoomLiveLog.isPassed() {
                 print("[zoom-live] idle preroll: no sheet-wearing marker in view")
             }
             #endif
@@ -324,7 +325,7 @@ extension MapsViewController: MKMapViewDelegate {
             endIdlePreroll()
             idlePrerollRested = true
             #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            if LaunchArgument.zoomLiveLog.isPassed() {
                 print("[zoom-live] idle preroll \(chosen.rawValue) let go: the map rested \(Int(Self.idlePrerollLifetime)) s")
             }
             #endif
@@ -332,7 +333,7 @@ extension MapsViewController: MKMapViewDelegate {
         idlePrerollExpiry = expiry
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.idlePrerollLifetime, execute: expiry)
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+        if LaunchArgument.zoomLiveLog.isPassed() {
             print("[zoom-live] idle preroll \(chosen.rawValue) of \(candidates.count) candidate(s)")
         }
         #endif
@@ -348,7 +349,7 @@ extension MapsViewController: MKMapViewDelegate {
         preroll.warm.resume(at: time)
         playbackWarm = preroll
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+        if LaunchArgument.zoomLiveLog.isPassed() {
             print("[zoom-live] preroll promoted \(postID.rawValue) at \(time.map { String(format: "%.2fs", $0) } ?? "-")")
         }
         #endif
@@ -457,7 +458,7 @@ extension MapsViewController: MKMapViewDelegate {
             // Pushed directly here it is the same controller with the same
             // content; what it does NOT exercise is the dismissal that normally
             // uncovers it, which keeps its own arguments.
-            if ProcessInfo.processInfo.arguments.contains("-maps-open-place"),
+            if LaunchArgument.mapsOpenPlace.isPassed(),
                let placePage {
                 navigationController?.pushViewController(placePage(UIViewController()), animated: true)
                 return
@@ -615,7 +616,7 @@ extension MapsViewController: MKMapViewDelegate {
         let warmFlies = warm?.hasPicture ?? false
         endPlaybackWarm(opened: warm != nil)
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+        if LaunchArgument.zoomLiveLog.isPassed() {
             print("[zoom-live] open: warm=\(warm == nil ? "none" : (warmFlies ? "flies" : "no picture yet"))")
         }
         #endif
@@ -732,7 +733,7 @@ extension MapsViewController: MKMapViewDelegate {
                     // the release commits. The filter bars are invisible under
                     // the gallery either way.
                     #if DEBUG
-                    if ProcessInfo.processInfo.arguments.contains("-grab-log") {
+                    if LaunchArgument.grabLog.isPassed() {
                         print("[caseb] splice+pop delegate=\(nav?.delegate.map { "\(type(of: $0))" } ?? "nil")"
                               + " stack=\(nav?.viewControllers.map { "\(type(of: $0))" } ?? [])")
                     }
@@ -1107,7 +1108,7 @@ extension MapsViewController: MKMapViewDelegate {
                 slide.revealGeometry = placeCardGeometry
             }
             #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-grab-log") {
+            if LaunchArgument.grabLog.isPassed() {
                 print("[card-close] stage axis=\(axis)"
                       + " geometry=\(slide.revealGeometry != nil)")
             }

@@ -1,4 +1,5 @@
 import CoreLocation
+import LaunchArguments
 import UIKit
 
 /// Whether the app may know where the device is.
@@ -82,9 +83,7 @@ public final class CurrentCountryProvider: NSObject, CurrentCountryLocating {
         self.resolve = resolve
         self.verifier = verifier
         #if DEBUG
-        let arguments = ProcessInfo.processInfo.arguments
-        pinned = arguments.firstIndex(of: "-current-country")
-            .flatMap { arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil }
+        pinned = LaunchArgument.currentCountry.value()
             .map { $0 == "none" ? nil : $0.uppercased() }
         #endif
         super.init()

@@ -1,6 +1,7 @@
 import CoreModels
 import CoreNavigation
 import DesignSystem
+import LaunchArguments
 import MediaCore
 import ProfileSettings
 import UIKit
@@ -190,7 +191,7 @@ final class ProfileRelationshipsViewController: UIViewController {
             // easy to misread from a video — a frame-by-frame measurement that
             // includes the selected segment's bold text reads as a jump even
             // when the lens is moving perfectly.
-            if ProcessInfo.processInfo.arguments.contains("-relationships-trace-progress") {
+            if LaunchArgument.relationshipsTraceProgress.isPassed() {
                 print("REL-PROGRESS \(progress)")
             }
             #endif
@@ -318,8 +319,8 @@ final class ProfileRelationshipsViewController: UIViewController {
     /// raises — so it exercises the real path back to `updateSearchResults`
     /// rather than calling the updater directly.
     private func qaContinueSearchSequence(_ arguments: [String]) {
-        let clears = arguments.contains("-profile-relationships-search-clear")
-        let cancels = arguments.contains("-profile-relationships-search-cancel")
+        let clears = LaunchArgument.profileRelationshipsSearchClear.isPassed(in: arguments)
+        let cancels = LaunchArgument.profileRelationshipsSearchCancel.isPassed(in: arguments)
         guard clears || cancels else { return }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
@@ -366,8 +367,8 @@ final class ProfileRelationshipsViewController: UIViewController {
         // on that tab, and `-profile-relationships-action` fires the first row's
         // trailing button — neither is reachable in the simulator, which can
         // deliver no taps.
-        if let index = arguments.firstIndex(of: "-profile-relationships-tab") {
-            switch arguments.dropFirst(index + 1).first {
+        if LaunchArgument.profileRelationshipsTab.isPassed(in: arguments) {
+            switch LaunchArgument.profileRelationshipsTab.value(in: arguments) {
             case "following": viewModel.qaSelectDirection(.following)
             case "friends": viewModel.qaSelectDirection(.friends)
             default: break
@@ -378,7 +379,7 @@ final class ProfileRelationshipsViewController: UIViewController {
         // `-mock-latency` the fixed delay found no rows, the view model's
         // `guard … else { return }` swallowed the tap, and the run printed
         // nothing either way.
-        if arguments.contains("-profile-relationships-action") {
+        if LaunchArgument.profileRelationshipsAction.isPassed(in: arguments) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
                 self?.qaWhenListSettled("profile-relationships-action") { rows in
                     guard let target = rows.first(where: { !$0.isViewer }) else {
@@ -395,7 +396,7 @@ final class ProfileRelationshipsViewController: UIViewController {
         // Dev convenience: `-profile-relationships-open-self` taps the viewer's
         // own "(Me)" row — the route that must land on the personal profile
         // directly, with no stranger-profile frame in between.
-        if arguments.contains("-profile-relationships-open-self") {
+        if LaunchArgument.profileRelationshipsOpenSelf.isPassed(in: arguments) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
                 self?.qaWhenListSettled("profile-relationships-open-self") { rows in
                     guard rows.contains(where: \.isViewer) else {
@@ -413,13 +414,12 @@ final class ProfileRelationshipsViewController: UIViewController {
         // `-profile-relationships-search-open`: presents search and types NOTHING,
         // so the placeholder is on screen for the whole transition and can be
         // measured frame by frame.
-        if arguments.contains("-profile-relationships-search-open") {
+        if LaunchArgument.profileRelationshipsSearchOpen.isPassed(in: arguments) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
                 self?.presentSearch()
             }
         }
-        if let index = arguments.firstIndex(of: "-profile-relationships-search"),
-           let text = arguments.dropFirst(index + 1).first, !text.hasPrefix("-") {
+        if let text = LaunchArgument.profileRelationshipsSearch.value(in: arguments), !text.hasPrefix("-") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
                 guard let self else { return }
                 // Activate exactly as a tap on the magnifier would, then type.
@@ -433,7 +433,7 @@ final class ProfileRelationshipsViewController: UIViewController {
         // profile ~2s in. The app-level `-auto-pop` fires at a fixed 2.5s,
         // which is before this screen has even been pushed; this one is
         // anchored to its own appearance, so the pop transition is recordable.
-        if arguments.contains("-profile-relationships-pop") {
+        if LaunchArgument.profileRelationshipsPop.isPassed(in: arguments) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
                 self?.closeScreen()
             }

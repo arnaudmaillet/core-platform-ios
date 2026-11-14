@@ -1,4 +1,5 @@
 import DesignSystem
+import LaunchArguments
 import UIKit
 
 /// One Liquid Glass filter pill, shared by the main filter bar and the
@@ -295,7 +296,7 @@ final class MapPillButton: UIButton {
 
     #if DEBUG
     private static let stressesLongTitles =
-        ProcessInfo.processInfo.arguments.contains("-maps-long-titles")
+        LaunchArgument.mapsLongTitles.isPassed()
     #endif
 
     /// The accent, resolved per trait collection: the brand's tint (#1124)

@@ -52,6 +52,8 @@ let package = Package(
                 "MapsInterface",
                 "CoreContracts",
                 "CoreModels",
+                // Its launch arguments, declared (#2374).
+                "LaunchArguments",
                 "MediaCore",
                 "CoreNavigation",
                 "CoreStorage",
@@ -94,6 +96,8 @@ let package = Package(
                 "MapsInterface",
                 "CoreContracts",
                 "CoreModels",
+                // Its launch arguments, declared (#2374).
+                "LaunchArguments",
                 "MediaCore",
                 "CoreNavigation",
                 "CoreStorage",

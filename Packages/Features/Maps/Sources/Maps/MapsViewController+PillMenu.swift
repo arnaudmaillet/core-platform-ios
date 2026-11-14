@@ -2,6 +2,7 @@ import CoreModels
 import CoreNavigation
 import DesignSystem
 import FeedInterface
+import LaunchArguments
 import LocalStore
 import MapKit
 import MapsInterface
@@ -176,8 +177,8 @@ extension MapsViewController {
         // Which surface a write woke is the whole question when the complaint
         // is "the other bar flashed", and it is invisible in a screenshot.
         let arguments = ProcessInfo.processInfo.arguments
-        if arguments.contains("-maps-toggle-subfilter") || arguments.contains("-maps-subfilter-remove")
-            || arguments.contains("-maps-pin-favorite") {
+        if LaunchArgument.mapsToggleSubfilter.isPassed(in: arguments) || LaunchArgument.mapsSubfilterRemove.isPassed(in: arguments)
+            || LaunchArgument.mapsPinFavorite.isPassed(in: arguments) {
             print("[maps] dock reload requested")
         }
         #endif

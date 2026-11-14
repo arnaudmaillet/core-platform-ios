@@ -1,5 +1,6 @@
 import CoreModels
 import Foundation
+import LaunchArguments
 import MapKit
 
 /// Client-side clustering, replacing `MKMapView`'s built-in pass.
@@ -248,7 +249,7 @@ enum MapClusterEngine {
         // decision's actual inputs — the difference between "the dynamic
         // rule chose X" and "the fallback fired because no spans arrived"
         // is invisible on screen.
-        if ProcessInfo.processInfo.arguments.contains("-maps-banding-log") {
+        if LaunchArgument.mapsBandingLog.isPassed() {
             let spans = spansByKind
                 .map { "\($0.key)=\(String(format: "%.1f", $0.value))km" }
                 .sorted().joined(separator: " ")
@@ -337,7 +338,7 @@ enum MapClusterEngine {
         // `-maps-banding-log` second line: the engine's OUTPUT — what merged
         // into what. The banding decision alone can't explain a marker the
         // collision pass produced.
-        if ProcessInfo.processInfo.arguments.contains("-maps-banding-log") {
+        if LaunchArgument.mapsBandingLog.isPassed() {
             let described = result
                 .map { item in
                     "\(item.place?.id ?? "generic")×\(item.memberIDs.count)"

@@ -1,4 +1,5 @@
 import DesignSystem
+import LaunchArguments
 import UIKit
 
 /// A container that keeps a drawer BEHIND its main screen and reveals it by
@@ -831,7 +832,7 @@ extension SideDrawerContainerViewController: UIGestureRecognizerDelegate {
     }
 
     #if DEBUG
-    private static let isTracing = ProcessInfo.processInfo.arguments.contains("-drawer-trace")
+    private static let isTracing = LaunchArgument.drawerTrace.isPassed()
     #endif
 
     /// Whether `other` is a DRAG that would fight for the same finger. Taps

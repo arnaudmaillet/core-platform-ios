@@ -1,5 +1,6 @@
 import CacheKit
 import DesignSystem
+import LaunchArguments
 import UIKit
 
 /// Settings → App and Device → Storage (#409, #899): what the device cache
@@ -57,7 +58,7 @@ package final class StorageSettingsViewController: UIViewController {
         // `-storage-clear-all`: Clear All, as the confirmed sheet runs it, once
         // the screen has measured (#899). Lets a simulator check clear and
         // relaunch in one go, so no other run of the app can come in between.
-        if ProcessInfo.processInfo.arguments.contains("-storage-clear-all") {
+        if LaunchArgument.storageClearAll.isPassed() {
             Task { [model] in
                 await model.refresh()
                 print("[storage] clear all from \(model.report?.total ?? -1) bytes")

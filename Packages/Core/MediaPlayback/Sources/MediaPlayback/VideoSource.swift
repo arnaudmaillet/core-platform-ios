@@ -2,6 +2,7 @@ import AVFoundation
 import CoreGraphics
 import CoreMedia
 import Foundation
+import LaunchArguments
 import UIKit
 
 /// Resolves a post's media URL to a locally-playable URL for `AVPlayerItem`.
@@ -133,7 +134,7 @@ public struct PlaceholderVideoFetcher: VideoSource {
         // must not touch the network — caching there would turn every
         // passthrough assertion into a download attempt, which is exactly the
         // offline guarantee this file's header promises.
-        guard ProcessInfo.processInfo.arguments.contains("-rich-media") else { return url }
+        guard LaunchArgument.richMedia.isPassed() else { return url }
         guard url.pathExtension.lowercased() != "m3u8" else { return url }
 
         // NOT `Hasher`. Swift's is randomly seeded PER PROCESS, so a key built

@@ -1,3 +1,4 @@
+import LaunchArguments
 import UIKit
 
 /// Lets the viewer catch a flight that is already flying and take it over —
@@ -157,7 +158,7 @@ final class ZoomFlightInterruptor: UIPercentDrivenInteractiveTransition {
             if handoff.touchUp() == .resumeTowardEnd {
                 detach()
                 #if DEBUG
-                if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+                if LaunchArgument.zoomLiveLog.isPassed() {
                     print(String(format: "[zoom-live] CATCH resume toward end from=%.2f", percentComplete))
                 }
                 #endif
@@ -220,7 +221,7 @@ final class ZoomFlightInterruptor: UIPercentDrivenInteractiveTransition {
                 railOrigin = Self.railPosition(of: card)
             }
             #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            if LaunchArgument.zoomLiveLog.isPassed() {
                 print(String(format: "[zoom-live] CATCH grab at=%.2f free=%@",
                              caught, grabbedCard == nil ? "no" : "yes"))
             }
@@ -241,7 +242,7 @@ final class ZoomFlightInterruptor: UIPercentDrivenInteractiveTransition {
                 #if DEBUG
                 dragEventCount += 1
                 if dragEventCount % 12 == 1,
-                   ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+                   LaunchArgument.zoomLiveLog.isPassed() {
                     print(String(format: "[zoom-live] CATCH drag t=(%.0f,%.0f) fraction=%.2f offset=(%.0f,%.0f)",
                                  translation.x, translation.y, percentComplete, offset.x, offset.y))
                 }
@@ -254,7 +255,7 @@ final class ZoomFlightInterruptor: UIPercentDrivenInteractiveTransition {
             ) else { return }
             detach()
             #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            if LaunchArgument.zoomLiveLog.isPassed() {
                 print(String(format: "[zoom-live] CATCH release completes=%@ caught=%.2f progress=%.2f vy=%.0f",
                              release.completes ? "yes" : "no", handoff.grabbedAt,
                              handoff.fraction(forVerticalTranslation: translation.y),
@@ -316,7 +317,7 @@ final class ZoomFlightInterruptor: UIPercentDrivenInteractiveTransition {
         var aligned: CGFloat?
         defer {
             #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            if LaunchArgument.zoomLiveLog.isPassed() {
                 let card = flightCard()
                 let bounds = card?.layer.presentation()?.bounds.size ?? card?.bounds.size
                 print(String(format: "[zoom-live] CATCH freeze at=%.2f (synced=%.2f) card=%.0fx%.0f",
@@ -393,11 +394,7 @@ final class ZoomFlightInterruptor: UIPercentDrivenInteractiveTransition {
     /// that has to give back a hoisted surface — and a real drag cannot be
     /// timed reliably against a 0.42s spring from a script.
     private func scheduleScriptedInterruptIfNeeded() {
-        let arguments = ProcessInfo.processInfo.arguments
-        guard let position = arguments.firstIndex(of: "-zoom-interrupt"),
-              position + 1 < arguments.count
-        else { return }
-        let mode = arguments[position + 1]
+        guard let mode = LaunchArgument.zoomInterrupt.value() else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
             guard let self else { return }
             self.pause()

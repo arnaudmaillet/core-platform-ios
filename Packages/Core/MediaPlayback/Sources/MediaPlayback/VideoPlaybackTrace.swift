@@ -1,4 +1,5 @@
 import Foundation
+import LaunchArguments
 
 /// A breadcrumb trail for the pool's OWNERSHIP boundaries.
 ///
@@ -12,7 +13,7 @@ import Foundation
 /// Silent unless `-carousel-audit` is on.
 @MainActor
 public enum VideoPlaybackTrace {
-    public private(set) static var isEnabled = ProcessInfo.processInfo.arguments.contains("-carousel-audit")
+    public private(set) static var isEnabled = LaunchArgument.carouselAudit.isPassed()
 
     #if DEBUG
     /// Test hook. The flag is read from launch arguments, which a unit test

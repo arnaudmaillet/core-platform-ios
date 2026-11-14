@@ -1,4 +1,5 @@
 import AVFoundation
+import LaunchArguments
 import QuartzCore
 
 /// `-zoom-live-log`'s view of the PRODUCER: who owns each player, when one is
@@ -12,7 +13,7 @@ import QuartzCore
 @MainActor
 enum VideoProducerLog {
     #if DEBUG
-    static let isEnabled = ProcessInfo.processInfo.arguments.contains("-zoom-live-log")
+    static let isEnabled = LaunchArgument.zoomLiveLog.isPassed()
     #else
     static let isEnabled = false
     #endif

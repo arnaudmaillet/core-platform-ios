@@ -3,6 +3,7 @@ import CoreModels
 import CoreNavigation
 import DesignSystem
 import FeedInterface
+import LaunchArguments
 import MapKit
 import MapsInterface
 import MediaCore
@@ -37,7 +38,7 @@ extension MapsViewController {
         // collapse into clusters — for screenshotting/driving cluster UI in
         // the sim, where pinch gestures can't be injected. Under dissolve
         // banding (~77 km diagonal) this is the CITY band.
-        if ProcessInfo.processInfo.arguments.contains("-maps-wide-region") {
+        if LaunchArgument.mapsWideRegion.isPassed() {
             var region = Self.defaultRegion
             region.span.latitudeDelta *= 6
             region.span.longitudeDelta *= 6
@@ -50,7 +51,7 @@ extension MapsViewController {
         // clusters, all in neutral rings. The city-band A/B is a region-scale
         // framing (e.g. `-maps-set-region 48.7,2.5,1.6`). Screenshotable in
         // the sim, where a pinch can't be injected.
-        if ProcessInfo.processInfo.arguments.contains("-maps-tight-region") {
+        if LaunchArgument.mapsTightRegion.isPassed() {
             var region = Self.defaultRegion
             region.span.latitudeDelta = 0.045
             region.span.longitudeDelta = 0.045
@@ -61,7 +62,7 @@ extension MapsViewController {
         // ~2261 km (2.7 × the res-1 span), so this is a Europe-scale framing:
         // countries roll up into amber markers — the top of the nesting
         // ladder, unreachable by the ×6 wide region (city band).
-        if ProcessInfo.processInfo.arguments.contains("-maps-country-region") {
+        if LaunchArgument.mapsCountryRegion.isPassed() {
             var region = Self.defaultRegion
             region.span.latitudeDelta = 20
             region.span.longitudeDelta = 20
@@ -221,7 +222,7 @@ extension MapsViewController {
         // `-maps-open-subfilter-sheet`: presents the sub-filter full-list
         // sheet ~3s in (the header's organize tap). Pair with
         // `-maps-select-filter friends|following|pinned`.
-        if ProcessInfo.processInfo.arguments.contains("-maps-open-subfilter-sheet") {
+        if LaunchArgument.mapsOpenSubfilterSheet.isPassed() {
             DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
                 self?.debugPresentSubFilterSheet()
             }
@@ -287,7 +288,7 @@ extension MapsViewController {
         let code = { (flag: String) in
             arguments.firstIndex(of: flag).flatMap { arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil }
         }
-        if countryAccess != nil, arguments.contains("-open-country-shop") || code("-offer-country") != nil
+        if countryAccess != nil, LaunchArgument.openCountryShop.isPassed(in: arguments) || code("-offer-country") != nil
             || code("-show-country") != nil {
             QAWait.until("country QA hook", timeout: 20, { [weak self] in
                 guard let self else { return true }
@@ -309,7 +310,7 @@ extension MapsViewController {
     /// the world's width is on screen, the region MapKit reports (and so the
     /// viewport the query is built from). Pairs with `-maps-zoom-sweep`.
     func logSettledCamera() {
-        guard ProcessInfo.processInfo.arguments.contains("-maps-camera-log") else { return }
+        guard LaunchArgument.mapsCameraLog.isPassed() else { return }
         let region = mapView.region
         print(String(
             format: "[maps-camera] settled distance=%.0f pitch=%.0f worldFraction=%.3f center=%.2f,%.2f span=%.2fx%.2f",
@@ -328,7 +329,7 @@ extension MapsViewController {
     /// so "do they move during the grab, and do they snap at the end?" is a number
     /// rather than an impression. Same instrument that found both For You defects.
     func installChromeTrace() {
-        guard ProcessInfo.processInfo.arguments.contains("-maps-trace-chrome") else { return }
+        guard LaunchArgument.mapsTraceChrome.isPassed() else { return }
         // Weak-target proxy, not `target: self`: a display link retains its
         // target, so the direct form pinned this controller for the life of
         // the process. The proxy dies with the controller; the link retires
@@ -501,7 +502,7 @@ extension MapsViewController {
     /// script on this side, so they are popped, which is the chevron's own path
     /// through the same animator.
     private func closeSoakedFeed() {
-        guard ProcessInfo.processInfo.arguments.contains("-maps-soak") else { return }
+        guard LaunchArgument.mapsSoak.isPassed() else { return }
         if let transition = activeTransition {
             // ⚠️ ALTERNATING AXES, because the two go to DIFFERENT SCREENS. A
             // horizontal close lands on the marker; a vertical one lands on the
@@ -524,10 +525,8 @@ extension MapsViewController {
     /// Read raw rather than through `debugArgumentValue`: a southern or
     /// western framing starts with a minus sign ("-33.4,151.2,40").
     static var debugSetRegion: MKCoordinateRegion? {
-        let arguments = ProcessInfo.processInfo.arguments
-        guard let position = arguments.firstIndex(of: "-maps-set-region"),
-              position + 1 < arguments.count else { return nil }
-        let parts = arguments[position + 1].split(separator: ",").compactMap { Double($0) }
+        guard let region = LaunchArgument.mapsSetRegion.value() else { return nil }
+        let parts = region.split(separator: ",").compactMap { Double($0) }
         guard parts.count == 3 else { return nil }
         return MKCoordinateRegion(
             center: CLLocationCoordinate2D(latitude: parts[0], longitude: parts[1]),
@@ -570,8 +569,7 @@ extension MapsViewController {
         let arguments = ProcessInfo.processInfo.arguments
         // `-maps-soak <cycles>`: arm once, then drive from the gate.
         if soakCyclesRemaining == 0, !didDebugOpenPin,
-           let index = arguments.firstIndex(of: "-maps-soak"), index + 1 < arguments.count,
-           let cycles = Int(arguments[index + 1]), cycles > 0 {
+           let cycles = LaunchArgument.mapsSoak.intValue(in: arguments), cycles > 0 {
             didDebugOpenPin = true
             soakCyclesRemaining = cycles
             print("[soak] armed for \(cycles) cycles")
@@ -587,9 +585,7 @@ extension MapsViewController {
         // annotation order, which is undefined — so two runs open two different
         // posts, and a transition A/B across two builds compares two different
         // flights. Three such comparisons proved nothing before this existed.
-        if let index = arguments.firstIndex(of: "-maps-open-post"),
-           index + 1 < arguments.count {
-            let wanted = arguments[index + 1]
+        if let wanted = LaunchArgument.mapsOpenPost.value(in: arguments) {
             guard !didDebugOpenPin,
                   views.contains(where: { ($0.annotation as? MapAnnotation)?.pin.postID.rawValue == wanted })
             else { return }
@@ -620,9 +616,9 @@ extension MapsViewController {
             })
             return
         }
-        let wantsText = arguments.contains("-maps-open-first-text-pin")
+        let wantsText = LaunchArgument.mapsOpenFirstTextPin.isPassed(in: arguments)
         guard !didDebugOpenPin,
-              wantsText || arguments.contains("-maps-open-first-pin") else { return }
+              wantsText || LaunchArgument.mapsOpenFirstPin.isPassed(in: arguments) else { return }
         let preferred: MapPin.Kind = wantsText ? .text : .video
         // The same pick at arm time and at fire time: by kind, then any pin
         // (media only). At fire time the post armed on is preferred, so a
@@ -716,13 +712,13 @@ extension MapsViewController {
     /// the corpus the tap actually passed on.
     func debugOpenFirstClusterIfRequested(among views: [MKAnnotationView]) {
         let arguments = ProcessInfo.processInfo.arguments
-        let wantsText = arguments.contains("-maps-open-first-text-cluster")
+        let wantsText = LaunchArgument.mapsOpenFirstTextCluster.isPassed(in: arguments)
         // `-maps-open-first-media-cluster`: the biggest MEDIA-faced cluster —
         // the hero-presented kind, which is also what the semantic-cluster
         // gallery flow rides (places seed by default in mock mode).
-        let wantsMedia = arguments.contains("-maps-open-first-media-cluster")
+        let wantsMedia = LaunchArgument.mapsOpenFirstMediaCluster.isPassed(in: arguments)
         guard !didDebugOpenPin,
-              wantsText || wantsMedia || arguments.contains("-maps-open-first-cluster")
+              wantsText || wantsMedia || LaunchArgument.mapsOpenFirstCluster.isPassed(in: arguments)
         else { return }
         // `-maps-open-place` only has an answer on a HIERARCHY marker: a city or
         // a country is a place before it is a photograph, and only those carry a
@@ -735,8 +731,8 @@ extension MapsViewController {
         // dismissal is the one landing this page has that nothing else
         // exercises — and a vertical drag on a TEXT post opens its comments
         // instead, which is why the media filter matters here too.
-        let wantsPlace = arguments.contains("-maps-open-place")
-            || arguments.contains("-maps-open-hierarchy-cluster")
+        let wantsPlace = LaunchArgument.mapsOpenPlace.isPassed(in: arguments)
+            || LaunchArgument.mapsOpenHierarchyCluster.isPassed(in: arguments)
         // The same pick at arm time (this batch) and at fire time (the whole
         // map, see `debugSelectMarker`).
         let pick: @MainActor ([MapComputedCluster]) -> MapComputedCluster? = { candidates in
@@ -786,10 +782,8 @@ extension MapsViewController {
         // nor the drag. Pair with `-snap-start-index N` to settle on a text
         // page first.
         let arguments = ProcessInfo.processInfo.arguments
-        if let position = arguments.firstIndex(of: "-text-swipe-demo"),
-           position + 1 < arguments.count,
-           let peak = Double(arguments[position + 1]) {
-            let axis: ZoomDismissAxis = arguments.contains("-zoom-demo-grab-vertical")
+        if let peak = LaunchArgument.textSwipeDemo.doubleValue(in: arguments) {
+            let axis: ZoomDismissAxis = LaunchArgument.zoomDemoGrabVertical.isPassed(in: arguments)
                 ? .vertical : .horizontal
             Task { @MainActor [weak slide] in
                 try? await Task.sleep(nanoseconds: 2_500_000_000)
@@ -801,9 +795,7 @@ extension MapsViewController {
                 // the first — the cancel-then-close-again route. A first peak
                 // under the release threshold springs back; this is the close
                 // that follows it on the same driver.
-                guard let again = arguments.firstIndex(of: "-text-swipe-demo-again"),
-                      again + 1 < arguments.count,
-                      let secondPeak = Double(arguments[again + 1]) else { return }
+                guard let secondPeak = LaunchArgument.textSwipeDemoAgain.doubleValue(in: arguments) else { return }
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
                 let drivenAgain = await slide?.debugPerformSwipe(
                     peakProgress: CGFloat(secondPeak), axis: axis
@@ -827,7 +819,7 @@ extension MapsViewController {
     /// the delegate on every step. Whether coalescing is worth anything is a
     /// question only this driver can answer.
     func installNavigationDrag() {
-        guard ProcessInfo.processInfo.arguments.contains("-maps-nav-drag") else { return }
+        guard LaunchArgument.mapsNavDrag.isPassed() else { return }
         // Around `-maps-set-region`'s framing when one is given: panning a
         // continent of country markers is not the workload panning Paris is.
         let home = Self.debugSetRegion ?? Self.defaultRegion
@@ -874,7 +866,7 @@ extension MapsViewController {
     /// doing. At the widest view the camera also crosses to the Pacific and
     /// back — a viewport across the antimeridian (`MapViewport.make`).
     func installZoomSweep() {
-        guard ProcessInfo.processInfo.arguments.contains("-maps-zoom-sweep") else { return }
+        guard LaunchArgument.mapsZoomSweep.isPassed() else { return }
         // `.stay` keeps the camera where it is; `.home` is where it was at
         // the first step (read then: this runs before the opening region).
         enum Centre { case stay, pacific, home }
@@ -916,7 +908,7 @@ extension MapsViewController {
     /// whichever window is frontmost and vanish silently when one overlaps, so
     /// a flaky driver would show up as a performance result.
     func installNavigationSweep() {
-        guard ProcessInfo.processInfo.arguments.contains("-maps-nav-sweep") else { return }
+        guard LaunchArgument.mapsNavSweep.isPassed() else { return }
         let home = Self.defaultRegion
         var step = 0
         Timer.scheduledTimer(withTimeInterval: 1.4, repeats: true) { [weak self] _ in
@@ -956,14 +948,11 @@ extension MapsViewController {
         // launch. Read even without the HUD: an A/B that depends on tapping a
         // control is an A/B whose two arms were run by hand, and the arm you
         // tapped second is the one whose viewport had already drifted.
-        if let index = ProcessInfo.processInfo.arguments.firstIndex(of: "-map-icon-policy"),
-           index + 1 < ProcessInfo.processInfo.arguments.count,
-           let policy = AnimatedIconView.MotionPolicy(
-               rawValue: ProcessInfo.processInfo.arguments[index + 1]
-           ) {
+        if let rawPolicy = LaunchArgument.mapIconPolicy.value(),
+           let policy = AnimatedIconView.MotionPolicy(rawValue: rawPolicy) {
             AnimatedIconView.forcedPolicy = policy
         }
-        guard ProcessInfo.processInfo.arguments.contains("-map-icon-hud") else { return }
+        guard LaunchArgument.mapIconHud.isPassed() else { return }
         let hud = MapIconDebugHUD(
             mapView: mapView, catalog: iconCatalog as? AnimatedIconCatalog, previews: previewCatalog, pool: videoPool
         )

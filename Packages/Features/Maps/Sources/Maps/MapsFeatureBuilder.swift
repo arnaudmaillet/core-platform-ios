@@ -2,6 +2,7 @@ import CoreLocation
 import CoreModels
 import CoreNavigation
 import FeedInterface
+import LaunchArguments
 import LocalStore
 import MapsInterface
 import MediaCore
@@ -159,7 +160,7 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
                         // ADVANCING sheets, so it reads zero for a marker that
                         // is wearing one perfectly, and every conclusion drawn
                         // from it was unfounded.
-                        if ProcessInfo.processInfo.arguments.contains("-maps-log-sheets") {
+                        if LaunchArgument.mapsLogSheets.isPassed() {
                             print("[sheet] \(pin.postID.rawValue) kind=\(pin.kind)"
                                   + " sheet=\(sheet ?? "nil") seeded=\(previews.count)")
                         }

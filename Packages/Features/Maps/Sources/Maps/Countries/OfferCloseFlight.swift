@@ -1,3 +1,4 @@
+import LaunchArguments
 import QuartzCore
 
 /// When a country's offer counts as CLOSING — the moment the map lowers the
@@ -80,7 +81,7 @@ struct OfferCloseFlight: Equatable {
 /// first region change. The gap between the request and the region change is
 /// the latency the user sees.
 enum OfferLog {
-    static let isOn = ProcessInfo.processInfo.arguments.contains("-maps-offer-log")
+    static let isOn = LaunchArgument.mapsOfferLog.isPassed()
 
     static func note(_ event: @autoclosure () -> String) {
         guard isOn else { return }

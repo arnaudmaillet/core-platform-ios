@@ -2,6 +2,7 @@ import CoreModels
 import CoreNavigation
 import DesignSystem
 import FeedInterface
+import LaunchArguments
 import LocalStore
 import MapKit
 import MapsInterface
@@ -164,7 +165,7 @@ final class MapsViewController: UIViewController {
     /// cap the sweep in case it runs during a pre-cluster frame.
     static let prewarmCap = 16
     /// Read once: `reconcileClustersForSettle` runs on every settle, in release too.
-    static let reconcileThrottleEnabled = ProcessInfo.processInfo.arguments.contains("-maps-reconcile-throttle")
+    static let reconcileThrottleEnabled = LaunchArgument.mapsReconcileThrottle.isPassed()
     /// The flight in progress, held for its life; its close-out is the
     /// session's (`HeroPushSession`).
     var activeSession: HeroPushSession?
@@ -199,7 +200,7 @@ final class MapsViewController: UIViewController {
             // bricked it for a whole session without anyone being able to say
             // what had happened.
             if oldValue != openGate,
-               ProcessInfo.processInfo.arguments.contains("-maps-log-gate") {
+               LaunchArgument.mapsLogGate.isPassed() {
                 print("[gate] \(oldValue.state) -> \(openGate.state) "
                       + "canOpen=\(openGate.canOpen ? "Y" : "n") "
                       + "inert=\(openGate.mapIsInert ? "Y" : "n")")
@@ -913,7 +914,7 @@ final class MapsViewController: UIViewController {
         // reads as a bug, and a blend where `none` was due is a slightly soft
         // landing. The ids are printed too: a `none` is only correct if the
         // two of them actually match.
-        if ProcessInfo.processInfo.arguments.contains("-zoom-blend-log") {
+        if LaunchArgument.zoomBlendLog.isPassed() {
             print("[zoom-blend] departure=\(departure?.rawValue ?? "nil")"
                 + " arrival=\(arrival?.rawValue ?? "nil") cover=\(cover.debugRow)")
         }

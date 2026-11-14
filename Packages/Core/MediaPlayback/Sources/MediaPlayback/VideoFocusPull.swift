@@ -1,6 +1,7 @@
 import CoreImage
 import CoreImage.CIFilterBuiltins
 import CoreVideo
+import LaunchArguments
 import UIKit
 
 /// A surface's picture coming up in resolution, from a few pixels per point to
@@ -84,7 +85,7 @@ final class VideoFocusPull {
     func cancel() {
         guard link != nil else { return }
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") { print("[focus-pull] end") }
+        if LaunchArgument.zoomLiveLog.isPassed() { print("[focus-pull] end") }
         #endif
         link?.invalidate()
         link = nil

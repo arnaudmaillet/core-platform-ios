@@ -3,6 +3,7 @@ import CoreNavigation
 import CoreNetworking
 import CoreStorage
 import Foundation
+import LaunchArguments
 import MapsInterface
 import OSLog
 import PostGrid
@@ -2053,7 +2054,7 @@ public final class ProfileViewModel {
             // relationship answer for a few seconds, making the nav-bar
             // skeleton capsule and its cross-fade to Follow/Following
             // observable (the mock otherwise answers mid-push).
-            if ProcessInfo.processInfo.arguments.contains("-profile-relationship-delay") {
+            if LaunchArgument.profileRelationshipDelay.isPassed() {
                 try? await Task.sleep(for: .seconds(3))
             }
             #endif
