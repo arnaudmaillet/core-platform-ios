@@ -234,6 +234,8 @@ struct SnapSubtitleViewTests {
     @Test func countTextFormatsCompactly() {
         #expect(SnapSubtitleView.countText(12) == "12")
         #expect(SnapSubtitleView.countText(999) == "999")
-        #expect(SnapSubtitleView.countText(1400) == "1.4k")
+        #expect(SnapSubtitleView.countText(1400) == "1.4K")
+        // Truncated, never rounded up (#2390): the app's one spelling.
+        #expect(SnapSubtitleView.countText(1999) == "1.9K")
     }
 }

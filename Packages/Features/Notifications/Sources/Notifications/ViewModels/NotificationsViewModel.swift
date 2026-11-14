@@ -102,7 +102,7 @@ public final class NotificationsViewModel {
     var notificationCenter: NotificationCenter = .default
     /// Removes its block observer when the model goes (#978): a `deinit` of
     /// a main-actor model cannot reach the token itself.
-    private var viewerObserver: ViewerObserver?
+    private var viewerObserver: NotificationTokens?
     /// The drawer's last 100 rows on the device (#897): the list opens on
     /// them, offline included, and every page the network answers is written
     /// back. Nil keeps them in memory.
@@ -169,7 +169,9 @@ public final class NotificationsViewModel {
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.viewerDidChange() }
         }
-        viewerObserver = ViewerObserver(center: center, token: token)
+        let viewerTokens = NotificationTokens(center: center)
+        viewerTokens.add(token)
+        viewerObserver = viewerTokens
     }
 
     /// The viewer observer's holder, for tests: it goes with the model, and
@@ -494,20 +496,6 @@ public final class NotificationsViewModel {
             from: shown, expanded: expandedSections, now: now(), calendar: calendar()
         ))
     }
-}
-
-/// A block observer, unregistered when this goes: with the view model that
-/// holds it, whatever thread releases it.
-final class ViewerObserver: @unchecked Sendable {
-    private let center: NotificationCenter
-    private let token: NSObjectProtocol
-
-    init(center: NotificationCenter, token: NSObjectProtocol) {
-        self.center = center
-        self.token = token
-    }
-
-    deinit { center.removeObserver(token) }
 }
 
 extension NotificationsViewModel {

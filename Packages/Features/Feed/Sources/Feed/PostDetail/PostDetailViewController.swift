@@ -35,7 +35,7 @@ final class PostDetailViewController: UIViewController {
     private let profileSwitcher: (any ProfileSwitcherPresenting)?
     /// Watches for profile switches made ANYWHERE — this composer's menu, or
     /// the profile header while the comments sit open underneath.
-    private let activeProfileObservers = NotificationObserverTokenBag()
+    private let activeProfileObservers = NotificationTokens()
 
     // MARK: - The two streams (#2007)
 
@@ -397,7 +397,7 @@ final class PostDetailViewController: UIViewController {
     /// through another surface (a text page shows this bar and the snap
     /// screen's spend path at once). Token bag, not deinit — the house
     /// escape hatch for main-actor state a nonisolated deinit can't touch.
-    private let walletObservers = NotificationObserverTokenBag()
+    private let walletObservers = NotificationTokens()
     /// The session's undoable spend through THIS bar. Its window is this
     /// controller's lifetime, which IS the product rule: the embedded
     /// comments panel is torn down when the page changes, so moving on
@@ -631,7 +631,7 @@ final class PostDetailViewController: UIViewController {
     ///    menu's own callback is what keeps the composer's face and the
     ///    identity that posts the comment from drifting apart.
     private func configureProfileSwitcher() {
-        activeProfileObservers.tokens = [
+        activeProfileObservers.replace(with: [
             NotificationCenter.default.addObserver(
                 forName: .activeProfileDidChange, object: nil, queue: .main
             ) { [weak self] notification in
@@ -649,7 +649,7 @@ final class PostDetailViewController: UIViewController {
                     self?.refreshProfileMenu()
                 }
             },
-        ]
+        ])
 
         refreshProfileMenu()
     }
@@ -977,13 +977,13 @@ final class PostDetailViewController: UIViewController {
         // it honest against spends made through any other surface.
         if let wallet {
             refreshBoostTotal()
-            walletObservers.tokens = [
+            walletObservers.replace(with: [
                 NotificationCenter.default.addObserver(
                     forName: WalletStore.didChangeNotification, object: wallet, queue: .main
                 ) { [weak self] _ in
                     MainActor.assumeIsolated { self?.refreshBoostTotal() }
                 },
-            ]
+            ])
         }
         // The engaged footer band (hidden outside the engagement): below
         // the bar, above the stream.
@@ -1861,11 +1861,11 @@ final class PostDetailViewController: UIViewController {
     /// keyboard finishes animating, and the empty page is fitted once, to
     /// where things are going.
     var keyboardHeightFromBottom: CGFloat?
-    private let keyboardObservers = NotificationObserverTokenBag()
+    private let keyboardObservers = NotificationTokens()
 
     private func observeKeyboardForEmptyPage() {
         let center = NotificationCenter.default
-        keyboardObservers.tokens = [
+        keyboardObservers.replace(with: [
             // The frame is read out here: a `Notification` cannot cross into
             // the main actor's isolation, and a `CGRect` can.
             center.addObserver(forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main) { [weak self] note in
@@ -1891,7 +1891,7 @@ final class PostDetailViewController: UIViewController {
                     self.keyboardWentDown()
                 }
             },
-        ]
+        ])
     }
 
     private func keyboardIsMoving(endingAt frame: CGRect?) {

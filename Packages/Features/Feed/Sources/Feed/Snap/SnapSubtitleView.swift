@@ -108,7 +108,7 @@ final class SnapSubtitleView: UIView {
     /// label, never inside it: the cue fade animates the label's opacity, and
     /// an effect view under a faded ancestor stops rendering. The blur follows
     /// the fade on its own strength instead.
-    private var pillBlur: CommentBlurView?
+    private var pillBlur: ProgressBlurView?
     /// The author avatar leading the cue — a compact round image at the
     /// zone's leading edge, pinned (via its wrapper) to the ZONE'S fixed
     /// center so it never moves as the cue grows from one line to two; the
@@ -452,9 +452,9 @@ final class SnapSubtitleView: UIView {
         CATransaction.commit()
     }
 
-    private func blurBehindPill() -> CommentBlurView {
+    private func blurBehindPill() -> ProgressBlurView {
         if let pillBlur { return pillBlur }
-        let blur = CommentBlurView(style: .systemMaterialDark)
+        let blur = ProgressBlurView(style: .systemMaterialDark)
         blur.accessibilityIdentifier = "subtitle-pill-blur"
         blur.clipsToBounds = true
         blur.layer.cornerCurve = .continuous
@@ -506,10 +506,10 @@ final class SnapSubtitleView: UIView {
         return animation
     }
 
-    /// Compact engagement figure — the engagement rail's old recipe,
-    /// verbatim, so counts read identically wherever they resurface.
+    /// Compact engagement figure: the app's one spelling of a count
+    /// (`CountFormatter`, truncating: 1,999 is "1.9K", never "2.0k"; #2390).
     /// Internal (not private) for tests.
-    static func countText(_ count: Int) -> String { ThreadCounts.countText(count) }
+    static func countText(_ count: Int) -> String { CountFormatter.compactString(for: count) }
 
     /// One cue's opacity segment. `fadingIn` opens with the lead-in + ramp
     /// (content announcing itself); otherwise the segment is a flat clamp

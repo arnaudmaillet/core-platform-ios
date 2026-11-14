@@ -1,3 +1,4 @@
+import CoreModels
 import DesignSystem
 import UIKit
 
@@ -56,7 +57,7 @@ final class SnapCommentsDetachedComposer {
     /// window's own does not follow them, measured 2026-11-04). While the
     /// bar edits, it takes every touch outside the bar.
     private let host = PassThroughView()
-    private let observers = NotificationObserverBag()
+    private let observers = NotificationTokens()
     private var isEditing = false
 
     init(source: CommentsInputBar, sheetView: UIView) {

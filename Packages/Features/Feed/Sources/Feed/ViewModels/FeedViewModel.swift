@@ -182,7 +182,7 @@ public final class FeedViewModel {
     nonisolated public static let reactionPageInterval: TimeInterval = 10
     /// Unregisters itself when the view model goes: a block observer's
     /// token is not `Sendable`, so the nonisolated `deinit` can't touch it.
-    private let preferencesObservation = NotificationObservation()
+    private let preferencesObservation = NotificationTokens()
     /// The posts the server withholds from this viewer (#2048): the app's
     /// one record, which this feed adds to and reads.
     let unavailablePosts: UnavailablePosts
@@ -222,11 +222,11 @@ public final class FeedViewModel {
         self.composedPosts = composedPosts
         self.router = router
         self.now = now
-        preferencesObservation.token = NotificationCenter.default.addObserver(
+        preferencesObservation.add(NotificationCenter.default.addObserver(
             forName: .mediaCommentPreferencesDidChange, object: nil, queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.rebuildCommentStreams() }
-        }
+        })
         entityObservation = self.entities.observePosts { [weak self] change in
             self?.entitiesDidChange(change)
         }

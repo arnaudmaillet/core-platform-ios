@@ -112,7 +112,7 @@ final class WalletSheetViewController: UIViewController {
     private var postLoads = WalletStakePostLoads()
 
     private var countdownTimer: Timer?
-    private let walletObservers = WalletObserverTokenBag()
+    private let walletObservers = NotificationTokens()
 
     /// Room under the bar before the balance: the balance's air (#1494).
     private static let topInset: CGFloat = Spacing.xl
@@ -263,7 +263,7 @@ final class WalletSheetViewController: UIViewController {
             await wallet.refreshStakesFromServer()
         }
 
-        walletObservers.tokens = [
+        walletObservers.replace(with: [
             NotificationCenter.default.addObserver(
                 forName: WalletStore.didChangeNotification, object: wallet, queue: .main
             ) { [weak self] _ in
@@ -279,7 +279,7 @@ final class WalletSheetViewController: UIViewController {
             ) { [weak self] _ in
                 MainActor.assumeIsolated { self?.headerCell?.header.popBalance() }
             },
-        ]
+        ])
         refresh()
         // Measured NOW, before the sheet asks its first detent: a guess here
         // would present at the guess and then jump to the answer.
@@ -965,16 +965,3 @@ extension WalletSheetViewController: UISheetPresentationControllerDelegate {
 /// Two heights over Shots (#1970): collapsed it is the daily glance and the
 /// clip behind plays on; large, it covers it. The default reads the detent.
 extension WalletSheetViewController: ScreenCovering {}
-
-/// Holds notification tokens and unregisters them on its own deallocation
-/// (when the owning sheet is released). `@unchecked Sendable` so its deinit
-/// may run off the main actor; `removeObserver` is itself thread-safe, and
-/// the tokens are only written on the main actor at setup time. `nonisolated`,
-/// because the App target's default-MainActor isolation would otherwise pin
-/// `tokens` to the main actor and put it out of deinit's reach.
-nonisolated final class WalletObserverTokenBag: @unchecked Sendable {
-    var tokens: [NSObjectProtocol] = []
-    deinit {
-        for token in tokens { NotificationCenter.default.removeObserver(token) }
-    }
-}

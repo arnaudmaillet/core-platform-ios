@@ -1,4 +1,5 @@
 import CoreContracts
+import CoreModels
 import CoreNetworking
 import CoreStorage
 import Foundation
@@ -174,7 +175,7 @@ public final class SavedPostsSync: PostSaveSyncing {
     /// outbox no longer says which — so every one of them wins.
     private var editsDuringRead: [(profile: String, postID: String, isSaved: Bool)] = []
     /// Removed with the sync (the bag's deinit, not a main-actor one).
-    private let observers = ObserverTokens()
+    private let observers = NotificationTokens()
     /// Whose recoveries flush the outbox; read by `start()`. Tests hand in
     /// their own — ⚠️ never flip `.shared`, other suites listen to it.
     var connectivity: ConnectivityMonitor = .shared
@@ -216,7 +217,7 @@ public final class SavedPostsSync: PostSaveSyncing {
     /// return of the network, foreground and viewer change.
     public func start() {
         let center = NotificationCenter.default
-        observers.tokens = [
+        observers.replace(with: [
             center.addObserver(
                 forName: ConnectivityMonitor.didRecoverNotification, object: connectivity, queue: .main
             ) { [weak self] _ in
@@ -232,7 +233,7 @@ public final class SavedPostsSync: PostSaveSyncing {
             center.addObserver(forName: StorageScope.didChangeNotification, object: scope, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.sendSoon() }
             }
-        ]
+        ])
         sendSoon()
     }
 
@@ -396,12 +397,6 @@ public final class SavedPostsSync: PostSaveSyncing {
         }
         done.insert(profile)
         defaults.set(Array(done), forKey: Self.reconciledKey)
-    }
-
-    /// Notification tokens, removed when the sync goes.
-    private final class ObserverTokens: @unchecked Sendable {
-        var tokens: [NSObjectProtocol] = []
-        deinit { tokens.forEach(NotificationCenter.default.removeObserver) }
     }
 
     private static func deduplicated(_ ids: [String]) -> [String] {

@@ -48,8 +48,8 @@ extension ForYouGridPage: PostGridPage {
     /// Hears the record once a host has shown something: a post learnt
     /// unavailable that this page holds leaves it at once.
     private func observeWithheldPosts() {
-        guard withheldObservation.token == nil else { return }
-        withheldObservation.token = NotificationCenter.default.addObserver(
+        guard withheldObservation.isEmpty else { return }
+        withheldObservation.add(NotificationCenter.default.addObserver(
             forName: UnavailablePosts.didChange, object: nil, queue: .main
         ) { [weak self] note in
             let ids = note.userInfo?[UnavailablePosts.idsKey] as? Set<PostID> ?? []
@@ -59,7 +59,7 @@ extension ForYouGridPage: PostGridPage {
                       let state = self.hostedState, Self.holds(state, anyOf: ids) else { return }
                 self.show(state)
             }
-        }
+        })
     }
 
     private static func holds(_ state: PostGridPageState, anyOf ids: Set<PostID>) -> Bool {

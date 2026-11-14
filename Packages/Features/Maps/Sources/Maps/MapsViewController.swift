@@ -67,7 +67,7 @@ final class MapsViewController: UIViewController {
     /// for the rest of the session — the exact failure the setting exists to
     /// prevent. And it must RE-DRESS rather than "reinstall if not running",
     /// which can only promote a marker and never demote one.
-    private let iconPolicyBag = MapNotificationBag()
+    private let iconPolicyBag = NotificationTokens()
     /// The player pool: the Shop's country cards play from it, and the debug
     /// readout tells DECODERS from surfaces with it (internal for +QA).
     var videoPool: VideoPlaybackController?
@@ -214,7 +214,7 @@ final class MapsViewController: UIViewController {
     /// animators — including the marker-reclaim that keeps a fast filter
     /// flip-flop from doubling a pin (see `MapAnnotationPopChoreographer`).
     private lazy var popChoreographer = MapAnnotationPopChoreographer(mapView: mapView)
-    private let appObservers = MapNotificationBag()
+    private let appObservers = NotificationTokens()
     #if DEBUG
     /// Internal (not private) only for the +QA hooks.
     var didDebugOpenPin = false
@@ -3758,15 +3758,6 @@ extension MapsViewController {
             iconPolicyBag.add(token)
         }
     }
-}
-
-/// Holds notification tokens and removes them when the owning VC is released.
-/// `@unchecked Sendable` so `deinit` may run off the main actor; the tokens are
-/// only mutated on the main actor and `removeObserver` is thread-safe.
-private final class MapNotificationBag: @unchecked Sendable {
-    private var tokens: [any NSObjectProtocol] = []
-    func add(_ token: any NSObjectProtocol) { tokens.append(token) }
-    deinit { tokens.forEach(NotificationCenter.default.removeObserver) }
 }
 
 #if DEBUG
