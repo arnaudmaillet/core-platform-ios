@@ -37,6 +37,12 @@ struct RehearsalLoopTests {
         return taken
     }
 
+    /// Blocks the main thread, synchronously: no main-queue work (the loop's
+    /// did-play-to-end handler) runs until it returns.
+    private func holdTheMainThread(for seconds: Double) {
+        Thread.sleep(forTimeInterval: seconds)
+    }
+
     /// The first sample after each backward jump.
     private func wraps(_ taken: [Double]) -> [Double] {
         zip(taken, taken.dropFirst()).compactMap { before, after in after + 0.3 < before ? after : nil }
@@ -71,6 +77,39 @@ struct RehearsalLoopTests {
         // that overshoots does so on every wrap (`TimingToleranceTests`).
         #expect(TimingTolerance.withinLoopButOne(taken, loop: 1.0...2.0, frame: 1.0 / 30),
                 "the rehearsal played past its range: \(high), \(taken.filter { $0 > 2.0 + 1.0 / 30 + 0.01 })")
+    }
+
+    /// ⚠️ A BUSY MAIN THREAD DOES NOT PLAY PAST THE RANGE (develop run
+    /// 43550480262). The wrap's seek waits for the main queue; the player
+    /// must stop at the range's end by itself (`setEndAction`), not play on
+    /// until the main thread is free. The main thread is held across the end
+    /// here, so the handler cannot run before the reading.
+    @Test func aBusyMainThreadDoesNotPlayPastTheRange() async throws {
+        let controller = controller()
+        let view = surface()
+        defer { controller.stop(view) }
+        try await loadWholeClip(controller, view, loop: 1.0...2.0)
+
+        var nearEnd = false
+        for _ in 0..<400 where !nearEnd {
+            try await Task.sleep(for: .milliseconds(10))
+            if let now = controller.playheadSeconds(in: view), now >= 1.7, now < 2.0 { nearEnd = true }
+        }
+        try #require(nearEnd, "guard: the playhead never came near the range's end")
+        holdTheMainThread(for: 0.5)
+        let held = try #require(controller.playheadSeconds(in: view))
+
+        #expect(held <= 2.0 + 1.0 / 30 + 0.01, "it played on past its range while the main thread was busy: \(held)")
+        // The loop's own stop at the end is not a viewer's pause: the editor
+        // still draws the clip as playing, and it still reads as advancing.
+        #expect(controller.isPaused(in: view) == false, "the wrap read as a pause at \(held)")
+        #expect(controller.isAdvancing(in: view), "the wrap read as stopped at \(held)")
+
+        // And the handler, once the main thread is free, takes it round.
+        try #require(await TimingTolerance.settle(looks: 200, step: .milliseconds(10)) {
+            (controller.playheadSeconds(in: view) ?? 0) < 1.5
+        }, "it never wrapped")
+        #expect(controller.isPaused(in: view) == false)
     }
 
     @Test func aWrapLandsOnTheRangeStart() async throws {
