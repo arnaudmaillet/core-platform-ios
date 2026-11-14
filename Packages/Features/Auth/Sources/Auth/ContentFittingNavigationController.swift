@@ -1,4 +1,5 @@
 import DesignSystem
+import LaunchArguments
 import UIKit
 
 /// The sign-in flow's navigation stacks, and the sheets they are presented
@@ -107,7 +108,7 @@ public final class ContentFittingNavigationController: UINavigationController, U
         // unevenly.
         let bar = max(0, step.view.safeAreaInsets.top - view.safeAreaInsets.top)
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-sheet-fit-trace") {
+        if LaunchArgument.sheetFitTrace.isPassed() {
             print("[sheet-fit] bar=\(bar) content=\(table.contentSize.height) "
                 + "inset=\(table.contentInset.top) step=\(type(of: topViewController!))")
         }

@@ -1,6 +1,7 @@
 #if DEBUG
 import AVFoundation
 import DesignSystem
+import LaunchArguments
 import UIKit
 import VoiceKit
 
@@ -19,7 +20,7 @@ import VoiceKit
 ///   still has a shape (`VoiceView.drawnShares`).
 public final class VoiceCatalogViewController: UIViewController {
     /// `-voice-catalog` at launch.
-    public static var isRequested: Bool { ProcessInfo.processInfo.arguments.contains("-voice-catalog") }
+    public static var isRequested: Bool { LaunchArgument.voiceCatalog.isPassed() }
 
     private let hub: VoicePlaybackHub
     private let scroll = UIScrollView()

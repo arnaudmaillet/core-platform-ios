@@ -30,7 +30,7 @@ let package = Package(
         .package(path: "../DesignSystem")
     ],
     targets: [
-        .target(name: "VoiceKit", dependencies: ["CacheKit", "CoreModels"]),
+        .target(name: "VoiceKit", dependencies: ["LaunchArguments", "CacheKit", "CoreModels"]),
         .target(name: "VoiceKitUI", dependencies: ["LaunchArguments", "VoiceKit", "DesignSystem"]),
         .testTarget(name: "VoiceKitTests", dependencies: ["VoiceKit", "CacheKit"]),
         .testTarget(name: "VoiceKitUITests", dependencies: ["VoiceKitUI", "VoiceKit", "DesignSystem"])

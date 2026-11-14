@@ -1,5 +1,6 @@
 import CoreModels
 import DesignSystem
+import LaunchArguments
 import MediaCore
 import NotificationsInterface
 import UIKit
@@ -452,7 +453,7 @@ final class NotificationsViewController: UIViewController {
     /// `-notifications-show-more`: presses "Show more" a second after the list
     /// is first on screen, so the expansion can be filmed without a tap.
     private func debugShowMoreIfRequested() {
-        guard ProcessInfo.processInfo.arguments.contains("-notifications-show-more") else { return }
+        guard LaunchArgument.notificationsShowMore.isPassed() else { return }
         QAWait.until("-notifications-show-more: a list with Show more", { [weak self] in
             guard let self else { return true }
             return sections.contains { $0.hiddenCount > 0 }

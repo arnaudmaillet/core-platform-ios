@@ -12,6 +12,7 @@ let package = Package(
         .library(name: "ShareSheet", targets: ["ShareSheet"])
     ],
     dependencies: [
+        .package(path: "../../Kit/LaunchArguments"),
         .package(path: "../../Kit/CoreModels"),
         .package(path: "../CoreNavigation"),
         .package(path: "../DesignSystem"),
@@ -20,7 +21,7 @@ let package = Package(
     targets: [
         .target(
             name: "ShareSheet",
-            dependencies: ["CoreModels", "CoreNavigation", "DesignSystem", "MediaCore"]
+            dependencies: ["LaunchArguments", "CoreModels", "CoreNavigation", "DesignSystem", "MediaCore"]
         ),
         .testTarget(name: "ShareSheetTests", dependencies: ["ShareSheet"])
     ]

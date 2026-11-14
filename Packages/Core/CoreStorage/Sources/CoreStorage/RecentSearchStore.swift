@@ -1,4 +1,5 @@
 import Foundation
+import LaunchArguments
 
 /// One entry in the viewer's search history.
 ///
@@ -169,17 +170,16 @@ public final class RecentSearchStore: @unchecked Sendable {
         // `-reset-recent-searches`: deterministic QA, so a scripted launch
         // always starts from an empty history. The bookmark store carries the
         // same hook for the same reason.
-        if ProcessInfo.processInfo.arguments.contains("-reset-recent-searches") {
+        if LaunchArgument.resetRecentSearches.isPassed() {
             defaults.removeObject(forKey: Self.key)
         }
         // `-seed-recent-searches a,b,c`: a history without having to submit
         // three searches by hand first. Listed newest-first, which is the
         // order they render in. Seeding more than `collapsedLimit` is how the
         // "See more" row gets exercised.
-        if let index = ProcessInfo.processInfo.arguments.firstIndex(of: "-seed-recent-searches"),
-           index + 1 < ProcessInfo.processInfo.arguments.count {
+        if let list = LaunchArgument.seedRecentSearches.value() {
             let stamp = self.now()
-            let seeded = ProcessInfo.processInfo.arguments[index + 1]
+            let seeded = list
                 .split(separator: ",")
                 .compactMap { RecentSearch.query(String($0), searchedAtMS: stamp) }
             write(Array(seeded.prefix(Self.storageLimit)))

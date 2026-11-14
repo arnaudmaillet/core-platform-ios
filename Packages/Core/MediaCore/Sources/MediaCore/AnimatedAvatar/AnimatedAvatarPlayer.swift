@@ -1,4 +1,5 @@
 import DesignSystem
+import LaunchArguments
 import UIKit
 
 /// The screens where an avatar plays on its first display rather than in the
@@ -449,7 +450,7 @@ public final class AnimatedAvatarPlayer: UIView {
 
     #if DEBUG
     /// `-avatar-play-log`: each play's frames and loops, and when it ended.
-    private static let logsPlays = ProcessInfo.processInfo.arguments.contains("-avatar-play-log")
+    private static let logsPlays = LaunchArgument.avatarPlayLog.isPassed()
     private var playStartedAt: CFTimeInterval?
 
     /// What a test reads.

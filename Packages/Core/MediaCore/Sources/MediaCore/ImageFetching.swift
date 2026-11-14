@@ -1,6 +1,7 @@
 import CacheKit
 import CoreModels
 import Foundation
+import LaunchArguments
 import UIKit
 
 /// Byte-level image source. The pipeline owns caching, coalescing, and
@@ -228,10 +229,7 @@ public struct SchemeRoutingImageFetcher: ImageFetching {
 
     #if DEBUG
     private static let debugMediaDelay: UInt64? = {
-        let arguments = ProcessInfo.processInfo.arguments
-        guard let position = arguments.firstIndex(of: "-slow-media"),
-              position + 1 < arguments.count,
-              let milliseconds = UInt64(arguments[position + 1]) else { return nil }
+        guard let milliseconds = LaunchArgument.slowMedia.value().flatMap({ UInt64($0) }) else { return nil }
         return milliseconds * NSEC_PER_MSEC
     }()
     #endif

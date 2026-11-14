@@ -1,4 +1,5 @@
 #if DEBUG
+import LaunchArguments
 import UIKit
 
 /// `-voice-lab`: the voice engine on a bench (#2101), alone in the window —
@@ -7,7 +8,7 @@ import UIKit
 /// composer (#2102) and the row (#2104) draw the real thing.
 @MainActor
 public enum VoiceLab {
-    public static var isRequested: Bool { ProcessInfo.processInfo.arguments.contains("-voice-lab") }
+    public static var isRequested: Bool { LaunchArgument.voiceLab.isPassed() }
 
     public static func makeRoot() -> UIViewController { UINavigationController(rootViewController: VoiceLabViewController()) }
 }

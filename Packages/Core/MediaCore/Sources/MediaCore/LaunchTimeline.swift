@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import LaunchArguments
 import os
 
 /// How long after the process started a launch milestone was reached (#1765):
@@ -45,7 +46,7 @@ public enum LaunchTimeline {
         }
         logger.info("\(milestone, privacy: .public) +\(elapsed, format: .fixed(precision: 3), privacy: .public)s")
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-launch-log") {
+        if LaunchArgument.launchLog.isPassed() {
             print(String(format: "[launch] %@ +%.3fs", milestone, elapsed))
         }
         #endif

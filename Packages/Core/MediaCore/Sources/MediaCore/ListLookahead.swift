@@ -1,4 +1,5 @@
 import CacheKit
+import LaunchArguments
 import QuartzCore
 import UIKit
 
@@ -423,7 +424,7 @@ public final class ScrollLookahead {
     }
 
     #if DEBUG
-    private static let audits = ProcessInfo.processInfo.arguments.contains("-cache-audit")
+    private static let audits = LaunchArgument.cacheAudit.isPassed()
     #endif
 
     private static func unique(_ requests: [ImageRequest]) -> [ImageRequest] {

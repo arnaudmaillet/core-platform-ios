@@ -1,6 +1,7 @@
 import CacheKit
 import Foundation
 import ImageIO
+import LaunchArguments
 import Synchronization
 import UIKit
 
@@ -787,7 +788,7 @@ public final class ImagePipeline: Sendable {
     }
 
     #if DEBUG
-    private static let audits = ProcessInfo.processInfo.arguments.contains("-cache-audit")
+    private static let audits = LaunchArgument.cacheAudit.isPassed()
     #endif
 }
 

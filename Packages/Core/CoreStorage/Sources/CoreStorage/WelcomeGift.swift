@@ -1,4 +1,5 @@
 import Foundation
+import LaunchArguments
 
 /// The likes a guest's sign-up brings (guest mode decision 11,
 /// `dev/GUEST_MODE_REPORT.md` §3.2; the owner, 2026-10-14, #1146).
@@ -37,7 +38,7 @@ public final class WelcomeGift: @unchecked Sendable {
         self.now = now
         #if DEBUG
         // `-welcome-gift-reset`: a fresh device, as far as the gift goes.
-        if ProcessInfo.processInfo.arguments.contains("-welcome-gift-reset") {
+        if LaunchArgument.welcomeGiftReset.isPassed() {
             defaults.removeObject(forKey: Key.openedAt)
             defaults.removeObject(forKey: Key.settled)
         }

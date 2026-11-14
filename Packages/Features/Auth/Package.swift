@@ -8,6 +8,7 @@ let package = Package(
         .library(name: "Auth", targets: ["Auth"])
     ],
     dependencies: [
+        .package(path: "../../Kit/LaunchArguments"),
         .package(path: "../../FeatureInterfaces/AuthInterface"),
         .package(path: "../../Kit/CoreContracts"),
         .package(path: "../../Kit/CoreModels"),
@@ -19,6 +20,7 @@ let package = Package(
         .target(
             name: "Auth",
             dependencies: [
+                "LaunchArguments",
                 "AuthInterface",
                 "CoreContracts",
                 "CoreModels",

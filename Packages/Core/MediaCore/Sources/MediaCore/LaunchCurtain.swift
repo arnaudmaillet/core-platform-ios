@@ -1,3 +1,4 @@
+import LaunchArguments
 import UIKit
 
 /// The launch screen held over the shell until the first post's media is on
@@ -42,8 +43,7 @@ public final class LaunchCurtain {
     public static let cap: TimeInterval = {
         #if DEBUG
         let arguments = ProcessInfo.processInfo.arguments
-        if let index = arguments.firstIndex(of: "-launch-cap"), index + 1 < arguments.count,
-           let seconds = TimeInterval(arguments[index + 1]) { return seconds }
+        if let seconds = LaunchArgument.launchCap.doubleValue(in: arguments) { return seconds }
         // A QA launch onto post N waits for that page (`readyMilestone`), past
         // the start-index hook's own settle.
         if arguments.contains(startIndexFlag) { return 8 }

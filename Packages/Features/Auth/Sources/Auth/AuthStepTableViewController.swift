@@ -1,4 +1,5 @@
 import DesignSystem
+import LaunchArguments
 import UIKit
 
 /// Every sign-in step's inset-grouped table, its content laid from the TOP
@@ -52,12 +53,12 @@ class AuthStepTableViewController: UITableViewController {
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         let arguments = ProcessInfo.processInfo.arguments
-        if arguments.contains("-login-landscape") {
+        if LaunchArgument.loginLandscape.isPassed(in: arguments) {
             view.window?.windowScene?.requestGeometryUpdate(
                 .iOS(interfaceOrientations: .landscapeRight)
             )
         }
-        if arguments.contains("-login-layout-audit") {
+        if LaunchArgument.loginLayoutAudit.isPassed(in: arguments) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [self] in
                 print("AUDIT sectionHeaderTopPadding=\(tableView.sectionHeaderTopPadding)")
                 for section in 0..<tableView.numberOfSections {

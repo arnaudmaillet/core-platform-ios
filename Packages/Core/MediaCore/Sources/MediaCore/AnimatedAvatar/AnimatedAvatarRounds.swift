@@ -1,4 +1,5 @@
 import DesignSystem
+import LaunchArguments
 import UIKit
 
 /// Who plays, among the animated avatars on screen (#1424, the owner,
@@ -59,10 +60,10 @@ public final class AnimatedAvatarRounds {
         /// without the flag.
         static func launch(_ arguments: [String]) -> Tuning {
             var tuning = Tuning.standard
-            guard let index = arguments.firstIndex(of: "-avatar-rounds"), arguments.indices.contains(index + 1) else {
+            guard let spec = LaunchArgument.avatarRounds.value(in: arguments) else {
                 return tuning
             }
-            for pair in arguments[index + 1].split(separator: " ") {
+            for pair in spec.split(separator: " ") {
                 let parts = pair.split(separator: "=", maxSplits: 1).map(String.init)
                 guard parts.count == 2 else { continue }
                 let bounds = parts[1].split(separator: "-").compactMap { Double($0) }

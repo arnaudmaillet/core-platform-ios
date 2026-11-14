@@ -1,4 +1,5 @@
 import Foundation
+import LaunchArguments
 
 /// A gem-shop item that changes how a profile looks (#947): bought once, for
 /// good, by the ACCOUNT — every profile of the account may use it.
@@ -66,7 +67,7 @@ public final class ProfileItemStore: @unchecked Sendable {
         self.defaults = defaults
         #if DEBUG
         // `-profile-items-reset`: every account owns nothing again.
-        if ProcessInfo.processInfo.arguments.contains("-profile-items-reset") {
+        if LaunchArgument.profileItemsReset.isPassed() {
             for key in defaults.dictionaryRepresentation().keys where key.hasPrefix(Self.keyPrefix) {
                 defaults.removeObject(forKey: key)
             }
