@@ -19,10 +19,15 @@ from fighting over `develop` and over CI.
     the code you changed** (`-only-testing` on those suites), not the whole
     lanes: the pull request's CI runs every lane the change reaches, and
     running them twice made each change wait for a free Mac (owner,
-    2026-11-14). Run those local builds in the background QoS
-    (`taskpolicy -b xcodebuild …`) so they never starve a CI job on the same
-    Mac. CI builds the app with Xcode 26, which can reject Swift that a local
-    Xcode 27 accepts, and it builds Debug and Release.
+    2026-11-14). CI builds the app with Xcode 26, which can reject Swift
+    that a local Xcode 27 accepts, and it builds Debug and Release.
+  - **Only those `-only-testing` runs may run beside a CI job on the Mac**,
+    in the background QoS (`taskpolicy -b xcodebuild …`). An **app build**
+    (Release, or Debug for screenshots) and simulator captures wait until
+    the self-hosted runner is idle **and** no workflow run is in progress:
+    the background QoS limits CPU and disk, not memory. A Debug app build
+    beside a Mac job turned #2449's Upload lane red (a video poster that
+    failed to decode, 2026-11-14).
   - A test-only change needs no Release build: no app target compiles tests.
 - Prefer independent pull requests based on `develop`. **Stack only for a real
   dependency.** A stacked pull request has to be replayed and tested again once
