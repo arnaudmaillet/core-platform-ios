@@ -36,7 +36,8 @@ import CoreNavigation
 @MainActor
 public final class PostCardStaking {
     private let wallet: WalletStore
-    private let entities: EntityStore?
+    /// The posts' live counts, through the store's post seams (#2377).
+    private let entities: (any PostEntityReading & PostEntityWriting)?
     /// Where a bound row's save glyph reads its answer back.
     private let saves: PostBookmarkStore
     private var entityObservation: EntityObservation?
@@ -63,7 +64,11 @@ public final class PostCardStaking {
     ///   card keeps the count its post was configured with.
     /// - Parameter saves: the pile whose answers a bound row's save glyph
     ///   draws again when the store says a save changed.
-    public init(wallet: WalletStore, entities: EntityStore?, saves: PostBookmarkStore = .shared) {
+    public init(
+        wallet: WalletStore,
+        entities: (any PostEntityReading & PostEntityWriting)?,
+        saves: PostBookmarkStore = .shared
+    ) {
         self.wallet = wallet
         self.entities = entities
         self.saves = saves
@@ -145,7 +150,7 @@ public final class PostCardStaking {
     private func showLiveCount(on readout: any PostCardLikeReadout, for postID: PostID) {
         guard let entities else { return }
         if let carried = readout.postLikeCount {
-            entities.mergeCounts([postID: PostCounts(likes: carried)], freshness: .ifUnknown)
+            entities.mergeCounts([postID: PostCounts(likes: carried)], tier: .recent, freshness: .ifUnknown)
         }
         if let live = entities.post(postID)?.likeCount { readout.showLikeCount(live) }
     }

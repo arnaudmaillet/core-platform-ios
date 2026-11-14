@@ -79,7 +79,10 @@ public final class EntityObservation: Sendable {
     private let onCancel: @Sendable () -> Void
     private let cancelled = Flag()
 
-    init(onCancel: @escaping @Sendable () -> Void) {
+    /// `onCancel` runs once, on `cancel()` or release. Public for the fakes
+    /// a consumer's tests put behind `PostEntityReading` or
+    /// `ProfileEntityReading` (#2377).
+    public init(onCancel: @escaping @Sendable () -> Void) {
         self.onCancel = onCancel
     }
 

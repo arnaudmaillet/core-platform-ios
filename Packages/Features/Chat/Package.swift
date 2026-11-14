@@ -75,7 +75,8 @@ let package = Package(
                 "CoreNavigation",
                 "CoreNetworking",
                 "FeedInterface",
-                // `InboxRelationMarkTests` (#2049).
+                // `InboxRelationMarkTests` (#2049); `InboxRelationsSeamTests`
+                // fakes its protocols (#2377).
                 "EntityStore",
                 // `ChatMediaTests` builds an uploader and a transport (#681).
                 "MediaCore",
