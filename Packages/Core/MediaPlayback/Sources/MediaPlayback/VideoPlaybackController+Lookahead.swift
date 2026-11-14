@@ -437,7 +437,7 @@ extension VideoPlaybackController {
 
     public func isAdvancing(in view: VideoRenderView) -> Bool {
         guard !isStilled(view), let player = watchedPlayer(in: view) else { return false }
-        return player.timeControlStatus != .paused
+        return !readsPaused(player)
     }
 
     /// Whether `view` is already bound to a player for **this** asset.
@@ -571,7 +571,7 @@ extension VideoPlaybackController {
     func pauseIfOnlyStillsRemain(on player: AVPlayer, besides key: ObjectIdentifier) {
         let remaining = surfaces(sharing: player, besides: key)
         guard !remaining.isEmpty, remaining.keys.allSatisfy({ pausedSurfaces.contains($0) }),
-              player.timeControlStatus != .paused
+              !readsPaused(player)
         else { return }
         pausedAnchors[ObjectIdentifier(player)] = player.currentTime()
         player.pause()
@@ -636,7 +636,7 @@ extension VideoPlaybackController {
         guard let player = watchedPlayer(in: view) else { return false }
         guard rate.isFinite, rate > 0 else { return false }
         player.defaultRate = Float(rate)
-        if player.timeControlStatus != .paused { player.rate = Float(rate) }
+        if !readsPaused(player) { player.rate = Float(rate) }
         return true
     }
 
@@ -1008,7 +1008,7 @@ extension VideoPlaybackController {
     public func isPaused(in view: VideoRenderView) -> Bool? {
         guard let player = watchedPlayer(in: view) else { return nil }
         if isStilled(view) { return true }
-        return player.timeControlStatus == .paused
+        return readsPaused(player)
     }
 
     /// Toggles play/pause for the player bound to `view` (a user tapping the
@@ -1021,7 +1021,7 @@ extension VideoPlaybackController {
             setPaused(false, in: view)
             return false
         }
-        if player.timeControlStatus == .paused {
+        if readsPaused(player) {
             player.play()
             return false
         } else {

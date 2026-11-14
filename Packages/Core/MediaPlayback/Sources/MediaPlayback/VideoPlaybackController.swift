@@ -609,7 +609,6 @@ public final class VideoPlaybackController {
         }
         renderer(for: player)?.setItem(item, composing: composed)
         player.isMuted = true
-        player.actionAtItemEnd = .none
         bind(player, to: view)
         activePlayers[key] = player
         surfaces[key] = WeakSurface(view: view)
@@ -774,7 +773,7 @@ public final class VideoPlaybackController {
         composing composed: ComposedVideo? = nil
     ) {
         let key = ObjectIdentifier(player)
-        let wasPaused = player.timeControlStatus == .paused
+        let wasPaused = readsPaused(player)
         // ⚠️ A SEEK CHASED ON THE OLD ITEM BELONGS TO THE OLD CLOCK — dropped, as
         // `retire` drops it, or its completion would chase the new item to a
         // position measured on the old one.
@@ -822,6 +821,64 @@ public final class VideoPlaybackController {
         if case .range(let range) = loop {
             item.forwardPlaybackEndTime = CMTime(seconds: range.upperBound, preferredTimescale: 600)
         }
+        Self.setEndAction(of: player, for: loop)
+    }
+
+    /// What `player` does when its item reaches its end.
+    ///
+    /// ⚠️ **A RANGE PAUSES AT ITS END; EVERYTHING ELSE DOES NOTHING.** With
+    /// `.none` the player plays on past `forwardPlaybackEndTime` until the
+    /// did-play-to-end handler, on the main queue, seeks it back: as late as
+    /// the main thread is busy. CI read the rehearsal 0.15 s past its range,
+    /// twice in one run (develop run 43550480262), film the range does not
+    /// hold. `.pause` stops the player at the end itself, and the handler
+    /// seeks to the range's start and plays again. A whole item or a file ends
+    /// where its media ends, so `.none` costs nothing there and keeps the
+    /// player's rate.
+    static func setEndAction(of player: AVPlayer, for loop: Looping?) {
+        if case .range = loop {
+            player.actionAtItemEnd = .pause
+        } else {
+            player.actionAtItemEnd = .none
+        }
+    }
+
+    /// Whether `player` stands paused at the end of the range it loops: the
+    /// player stopped itself there (`setEndAction`) and the did-play-to-end
+    /// handler has not taken it back to the range's start yet.
+    ///
+    /// ⚠️ **THAT PAUSE IS THE LOOP'S, NOT A VIEWER'S.** It lasts as long as the
+    /// main queue takes to run the handler, and nothing reading "paused" may
+    /// act on it: the editor's glyph would flash to play, a toggle would play
+    /// instead of pausing, a swap would keep the new arrangement stopped.
+    /// Those readers ask `readsPaused` instead of `timeControlStatus`.
+    ///
+    /// A viewer's pause stops the playhead before the end, never on it: the
+    /// end is only reached playing.
+    func isWrapping(_ player: AVPlayer) -> Bool {
+        guard case .range = looping[ObjectIdentifier(player)],
+              player.timeControlStatus == .paused,
+              let item = player.currentItem, item.forwardPlaybackEndTime.isValid
+        else { return false }
+        let nearEnd = CMTimeSubtract(item.forwardPlaybackEndTime, CMTime(value: 6, timescale: 600))
+        return CMTimeCompare(item.currentTime(), nearEnd) >= 0
+    }
+
+    /// Whether `player` is paused as a viewer or a caller paused it: its
+    /// `timeControlStatus`, except around a range's wrap, which reads as
+    /// playing:
+    /// - the loop's own stop at the range's end (`isWrapping`);
+    /// - the moment after the wrap's `play()`, before `timeControlStatus`
+    ///   follows the rate. Measured: with `.pause` at the end, a range looping
+    ///   0.3 s read "paused" at its start on up to 24 of 800 samples taken 10 ms
+    ///   apart (none with `.none`), and the player always ran on. Its `rate`
+    ///   is already 1 there; a viewer's pause sets it to 0.
+    /// A player that loops no range answers its `timeControlStatus` alone, as
+    /// it always did.
+    func readsPaused(_ player: AVPlayer) -> Bool {
+        guard player.timeControlStatus == .paused else { return false }
+        guard case .range = looping[ObjectIdentifier(player)] else { return true }
+        return player.rate == 0 && !isWrapping(player)
     }
 
     /// Where the player goes back to when its item ends.
@@ -867,11 +924,13 @@ public final class VideoPlaybackController {
         guard let range else {
             looping[key] = .wholeItem
             item.forwardPlaybackEndTime = .invalid
+            Self.setEndAction(of: player, for: .wholeItem)
             return true
         }
         guard let loop = Self.loopable(range) else { return false }
         looping[key] = .range(loop)
         item.forwardPlaybackEndTime = CMTime(seconds: loop.upperBound, preferredTimescale: 600)
+        Self.setEndAction(of: player, for: .range(loop))
         seek(toSeconds: loop.lowerBound, in: view, toleranceSeconds: 0)
         return true
     }
@@ -1582,6 +1641,7 @@ public final class VideoPlaybackController {
         seeking.remove(ObjectIdentifier(player))
         // And a pooled player runs no arrangement, and loops no range.
         looping.removeValue(forKey: ObjectIdentifier(player))
+        Self.setEndAction(of: player, for: nil)
         // Nor carries a song, nor is heard.
         forgetSound(of: player)
         player.replaceCurrentItem(with: nil)
