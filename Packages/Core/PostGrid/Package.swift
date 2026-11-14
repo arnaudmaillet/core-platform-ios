@@ -8,6 +8,7 @@ let package = Package(
         .library(name: "PostGrid", targets: ["PostGrid"])
     ],
     dependencies: [
+        .package(path: "../../Kit/LaunchArguments"),
         .package(path: "../../Kit/CoreModels"),
         .package(path: "../MediaCore"),
         .package(path: "../MediaPlayback"),
@@ -33,6 +34,7 @@ let package = Package(
         .target(
             name: "PostGrid",
             dependencies: [
+                "LaunchArguments",
                 "CoreModels", "MediaCore", "MediaPlayback", "DesignSystem", "CoreNavigation",
                 "CoreStorage", "EntityStore", "EmoteKit",
                 .product(name: "VoiceKitUI", package: "VoiceKit")

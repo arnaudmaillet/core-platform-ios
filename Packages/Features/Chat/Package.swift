@@ -8,6 +8,7 @@ let package = Package(
         .library(name: "Chat", targets: ["Chat"])
     ],
     dependencies: [
+        .package(path: "../../Kit/LaunchArguments"),
         .package(path: "../../FeatureInterfaces/ChatInterface"),
         .package(path: "../../FeatureInterfaces/AuthInterface"),
         .package(path: "../../Kit/CoreContracts"),
@@ -46,6 +47,7 @@ let package = Package(
         .target(
             name: "Chat",
             dependencies: [
+                "LaunchArguments",
                 "ChatInterface",
                 "AuthInterface",
                 "CoreContracts",

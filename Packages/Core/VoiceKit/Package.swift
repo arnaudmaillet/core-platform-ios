@@ -24,13 +24,14 @@ let package = Package(
         .library(name: "VoiceKitUI", targets: ["VoiceKitUI"])
     ],
     dependencies: [
+        .package(path: "../../Kit/LaunchArguments"),
         .package(path: "../CacheKit"),
         .package(path: "../../Kit/CoreModels"),
         .package(path: "../DesignSystem")
     ],
     targets: [
         .target(name: "VoiceKit", dependencies: ["CacheKit", "CoreModels"]),
-        .target(name: "VoiceKitUI", dependencies: ["VoiceKit", "DesignSystem"]),
+        .target(name: "VoiceKitUI", dependencies: ["LaunchArguments", "VoiceKit", "DesignSystem"]),
         .testTarget(name: "VoiceKitTests", dependencies: ["VoiceKit", "CacheKit"]),
         .testTarget(name: "VoiceKitUITests", dependencies: ["VoiceKitUI", "VoiceKit", "DesignSystem"])
     ]

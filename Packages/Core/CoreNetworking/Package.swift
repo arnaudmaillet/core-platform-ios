@@ -11,6 +11,7 @@ let package = Package(
         .library(name: "CoreNetworkingMocks", targets: ["CoreNetworkingMocks"])
     ],
     dependencies: [
+        .package(path: "../../Kit/LaunchArguments"),
         .package(path: "../../Kit/CoreContracts"),
         .package(path: "../../Kit/CoreModels"),
         .package(url: "https://github.com/connectrpc/connect-swift.git", from: "1.0.0"),
@@ -40,6 +41,7 @@ let package = Package(
         .target(
             name: "CoreNetworkingMocks",
             dependencies: [
+                "LaunchArguments",
                 "CoreNetworking",
                 "CoreContracts",
                 // `PostVoice`, the seeded voice posts (#2206).
