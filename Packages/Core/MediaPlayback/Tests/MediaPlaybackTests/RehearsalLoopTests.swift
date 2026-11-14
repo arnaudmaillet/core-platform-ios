@@ -48,6 +48,31 @@ struct RehearsalLoopTests {
         zip(taken, taken.dropFirst()).compactMap { before, after in after + 0.3 < before ? after : nil }
     }
 
+    /// Every playhead sample for `seconds`, 10 ms apart, with when it was read.
+    private func timedSamples(
+        _ controller: VideoPlaybackController, _ view: VideoRenderView, for seconds: Double
+    ) async throws -> [(head: Double, at: ContinuousClock.Instant)] {
+        var taken: [(head: Double, at: ContinuousClock.Instant)] = []
+        for _ in 0..<Int(seconds * 100) {
+            try await Task.sleep(for: .milliseconds(10))
+            if let now = controller.playheadSeconds(in: view) { taken.append((now, .now)) }
+        }
+        return taken
+    }
+
+    /// The first sample after each backward jump, with the seconds since the
+    /// last sample before it: how late the sampler may have read the landing
+    /// (`TimingTolerance.landedAt`).
+    private func landings(
+        _ taken: [(head: Double, at: ContinuousClock.Instant)]
+    ) -> [(head: Double, gap: Double)] {
+        zip(taken, taken.dropFirst()).compactMap { before, after in
+            guard after.head + 0.3 < before.head else { return nil }
+            let gap = after.at - before.at
+            return (after.head, Double(gap.components.seconds) + Double(gap.components.attoseconds) / 1e18)
+        }
+    }
+
     private func loadWholeClip(
         _ controller: VideoPlaybackController, _ view: VideoRenderView,
         loop: ClosedRange<Double>?, segments: [VideoExportSegment] = [], picture: Bool = true,
@@ -118,11 +143,14 @@ struct RehearsalLoopTests {
         defer { controller.stop(view) }
         try await loadWholeClip(controller, view, loop: 1.0...2.0)
 
-        let landings = wraps(try await samples(controller, view, for: 3.5))
+        let found = landings(try await timedSamples(controller, view, for: 3.5))
 
-        #expect(!landings.isEmpty, "guard: it never looped")
-        for landing in landings {
-            #expect(abs(landing - 1.0) < 0.1, "a wrap landed at \(landing), not at the range's start")
+        #expect(!found.isEmpty, "guard: it never looped")
+        // ⚠️ A LATE SAMPLER READS THE LANDING LATE (develop run 43569731579:
+        // 1.675 s). See `TimingTolerance.landedAt`.
+        for landing in found {
+            #expect(TimingTolerance.landedAt(1.0, head: landing.head, gap: landing.gap),
+                    "a wrap landed at \(landing.head), read \(landing.gap) s after the last reading, not at the range's start")
         }
     }
 
@@ -158,9 +186,10 @@ struct RehearsalLoopTests {
         let item = try #require(controller.debugItem(in: view))
         #expect(!item.forwardPlaybackEndTime.isValid, "the new item kept an end")
 
-        let landings = wraps(try await samples(controller, view, for: 3.8))
-        #expect(!landings.isEmpty, "guard: it never looped")
-        #expect(landings.allSatisfy { $0 < 0.1 }, "the whole item wrapped to \(landings)")
+        let found = landings(try await timedSamples(controller, view, for: 3.8))
+        #expect(!found.isEmpty, "guard: it never looped")
+        #expect(found.allSatisfy { TimingTolerance.landedAt(0, head: $0.head, gap: $0.gap) },
+                "the whole item wrapped to \(found)")
     }
 
     @Test func clearingTheRangeLetsTheClipPlayOn() async throws {
@@ -185,10 +214,11 @@ struct RehearsalLoopTests {
         let second = surface()
         defer { controller.stop(second) }
         try await loadWholeClip(controller, second, loop: nil)
-        let landings = wraps(try await samples(controller, second, for: 4.6))
+        let found = landings(try await timedSamples(controller, second, for: 4.6))
 
-        #expect(!landings.isEmpty, "guard: the second clip never looped")
-        #expect(landings.allSatisfy { $0 < 0.1 }, "a reused player wrapped to the old range: \(landings)")
+        #expect(!found.isEmpty, "guard: the second clip never looped")
+        #expect(found.allSatisfy { TimingTolerance.landedAt(0, head: $0.head, gap: $0.gap) },
+                "a reused player wrapped to the old range: \(found)")
     }
 
     /// ⚠️ **THE TABLE SHRINKS WITH THE LOANS.** A player the pool has no room

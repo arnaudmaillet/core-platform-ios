@@ -56,6 +56,17 @@ struct TimingToleranceTests {
                 "more than a period past the end: it ran on into the item")
     }
 
+    /// A wrap read late is read further on from the start, by as much as the
+    /// sampler was late; a wrap that landed in the wrong place, read promptly,
+    /// still fails.
+    @Test func aLateReadingOfALandingIsNotAWrongLanding() {
+        #expect(TimingTolerance.landedAt(1.0, head: 1.02, gap: 0.01), "prompt, at the start")
+        #expect(TimingTolerance.landedAt(1.0, head: 1.675, gap: 0.70), "read 0.7 s late (CI, run 43569731579)")
+        #expect(!TimingTolerance.landedAt(1.0, head: 1.675, gap: 0.01), "read promptly, 0.675 s past the start: broken")
+        #expect(!TimingTolerance.landedAt(1.0, head: 0.5, gap: 0.70), "before the start: broken")
+        #expect(!TimingTolerance.landedAt(0.0, head: 1.2, gap: 0.3), "a whole item wrapping into its middle: broken")
+    }
+
     /// A look budget is spent by polls, not by time: a condition that never
     /// holds fails after its looks; one that holds stops at once.
     /// A restart's small step back adds no film; the end wrapping to the
