@@ -166,6 +166,23 @@ enum TimingTolerance {
         )
     }
 
+    /// Whether a wrap's first reading, `head`, is where a loop that went back to
+    /// `start` puts it, given the `gap` in seconds between it and the last
+    /// reading before the wrap.
+    ///
+    /// ⚠️ **A LATE SAMPLER READS A LANDING LATE** (develop run 43569731579,
+    /// `aWrapLandsOnTheRangeStart`: 1.675 s in a 1…2 s loop). The clip plays on
+    /// from the range's start while the sampler sleeps, so its first reading
+    /// after the wrap is as far past the start as the sampler was late. A
+    /// fixed "within 0.1 s of the start" fails a correct loop whenever the
+    /// runner holds the sampler. What a broken landing does still fails:
+    /// - it lands short of the start — a reading before it;
+    /// - it lands further on than the time since the last reading allows —
+    ///   a seek to the wrong place, read promptly.
+    static func landedAt(_ start: Double, head: Double, gap: Double, slack: Double = 0.1) -> Bool {
+        head > start - slack && head - start < gap + slack
+    }
+
     /// How much film a looping item played between two playhead readings.
     ///
     /// ⚠️ **A SMALL STEP BACK IS NOT A WRAP** (#599). A composed reader that
