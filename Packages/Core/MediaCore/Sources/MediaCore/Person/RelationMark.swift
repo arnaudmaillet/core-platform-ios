@@ -290,22 +290,25 @@ public final class RelationBadgeView: UIButton {
 
     /// The disc's ink for a badge (#1197, the owner 2026-10-15): the "+"
     /// black; a FOLLOWED check and a pending request grey, their mark pink;
-    /// FRIENDS pink, their mark white; clear for none.
+    /// FRIENDS black (`2C2C2E` in the dark), their mark mint (#2440); clear
+    /// for none.
     public static func discInk(for badge: PersonPill.Badge) -> UIColor {
         switch badge {
         case .none, .loading: .clear
         case .follow: PersonPillBadgeInks.restingDisc
         case .following, .pending: PersonPillBadgeInks.quietDisc
-        case .friends: PersonPillBadgeInks.accent
+        case .friends: PersonPillBadgeInks.friendsDisc
         }
     }
 
-    /// The glyph's ink for a badge: pink on the grey discs, white elsewhere.
+    /// The glyph's ink for a badge: pink on the grey discs, mint on Friends'
+    /// dark one (#2440), white on the "+".
     public static func glyphInk(for badge: PersonPill.Badge) -> UIColor {
         switch badge {
         case .none, .loading: .clear
         case .following, .pending: PersonPillBadgeInks.accent
-        case .follow, .friends: PersonPillBadgeInks.glyph
+        case .friends: PersonPillBadgeInks.friendsGlyph
+        case .follow: PersonPillBadgeInks.glyph
         }
     }
 
