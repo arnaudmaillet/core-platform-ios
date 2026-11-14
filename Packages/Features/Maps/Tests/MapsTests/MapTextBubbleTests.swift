@@ -186,7 +186,11 @@ struct MapTextBubbleTests {
         let maps = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("Sources/Maps")
-        for name in ["MapsViewController.swift", "MapsViewController+TextBubble.swift"] {
+        // Every file of the map screen: its extensions split by responsibility.
+        let names = try FileManager.default.contentsOfDirectory(atPath: maps.path)
+            .filter { $0.hasPrefix("MapsViewController") && $0.hasSuffix(".swift") }
+        #expect(names.count > 2, "the map screen's files were not found")
+        for name in names {
             let source = try String(contentsOf: maps.appendingPathComponent(name), encoding: .utf8)
             #expect(!source.contains("usesTextBubble"), "\(name) still gates the bubble")
             #expect(!source.contains("DebugFlags.isOn(\"-map-text"), "\(name) still reads a bubble flag")

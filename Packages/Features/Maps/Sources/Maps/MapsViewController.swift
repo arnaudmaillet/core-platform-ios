@@ -23,14 +23,14 @@ final class MapsViewController: UIViewController {
     private let dockedPlaces = MapDockedPlacesStore()
     #if DEBUG
     /// `-maps-offer-country` ran (#1600).
-    private var didDebugOfferCountry = false
+    var didDebugOfferCountry = false
     #endif
     /// Internal (not private) only for the +QA hooks.
     let viewModel: MapsViewModel
     /// Sources the filter bar's scrollable favorites section (fail-open:
     /// empty just hides the section).
-    private let favoritesRepository: any MapFavoritesProviding
-    private var favoritesTask: Task<Void, Never>?
+    let favoritesRepository: any MapFavoritesProviding
+    var favoritesTask: Task<Void, Never>?
     /// Reads and writes the pinned set behind the favorites section — the one
     /// place the never-curated fallback is resolved, shared with the profile
     /// screen's pin button so the two cannot disagree about what a pin means.
@@ -38,11 +38,12 @@ final class MapsViewController: UIViewController {
     let pinService: MapProfilePinService
     /// What the favorites section currently shows — the seed material when a
     /// first pin/unpin materializes the store from the fallback.
-    private var currentFavorites: [MapFavorite] = []
+    var currentFavorites: [MapFavorite] = []
     /// What the sub-filter row currently shows — the full-list sheet's data.
-    /// Internal (read-only) only for the +QA hooks.
-    private(set) var currentSubFilterOptions: [MapSubFilterOption] = []
-    private let imagePipeline: ImagePipeline
+    /// Internal so the extensions (+MapViewDelegate, +QA) reach it; only the
+    /// gate transitions here and in +MapViewDelegate write it.
+    var currentSubFilterOptions: [MapSubFilterOption] = []
+    let imagePipeline: ImagePipeline
     /// The baked animated-icon catalogue, or `nil` where the surface has none.
     ///
     /// Separate from `imagePipeline` on purpose. Icons are decoded WHOLE
@@ -77,7 +78,7 @@ final class MapsViewController: UIViewController {
     #endif
     /// Builds the snap feed a pin/cluster tap expands into (reuses the Feed
     /// feature via `FeedFeatureBuilding.makeSnapFeedViewController`).
-    private let makeSnapFeed: ([PostID]) -> UIViewController
+    let makeSnapFeed: ([PostID]) -> UIViewController
     /// Pushes that same feed with the platform's own slide, for a marker with
     /// nothing to fly. Goes through the feed's `pushSnapFeed` seam rather than
     /// this controller calling `pushViewController` itself: the pushed feed
@@ -87,12 +88,12 @@ final class MapsViewController: UIViewController {
     /// The last argument builds the screen a VERTICAL dismissal lands on
     /// (the semantic cluster's place page), or `nil` for a plain marker
     /// (#2015: every non-media marker opens this way now).
-    private let pushPlainSnapFeed: ([PostID], UIViewController, ((UIViewController) -> UIViewController)?) -> Void
+    let pushPlainSnapFeed: ([PostID], UIViewController, ((UIViewController) -> UIViewController)?) -> Void
     /// The same window built for a CLOSE, pushing nothing — what a feed opened
     /// by a hero uses when the viewer has paged onto a post it cannot fly.
     /// Injected like its push-shaped sibling: Maps depends on FeedInterface and
     /// never on Feed.
-    private let makeRevealGeometry:
+    let makeRevealGeometry:
         (UIViewController, TextRevealOrigin, (() -> Void)?) -> RevealGeometry
     /// Builds the place gallery a HIERARCHY cluster's feed dismisses into
     /// (`FeedFeatureBuilding.makeClusterGallery`): (member ids, the place
@@ -107,38 +108,38 @@ final class MapsViewController: UIViewController {
     /// whose posts the page lists past the pins (#643); the last argument
     /// stages the page's OWN dismissal back to the cluster marker
     /// (`makeMapReturnSource`).
-    private let makeClusterGallery: (
+    let makeClusterGallery: (
         [PostID], MapPlace, String, CLLocationCoordinate2D, UIViewController,
         @escaping (@escaping () -> UIImage?) -> (any ZoomTransitionSource)?,
         ((UIViewController) -> RevealGeometry?)?
     ) -> UIViewController
     /// Warms the given posts into the shared cache so a tap opens instantly.
-    private let prewarm: ([PostID]) async -> Void
+    let prewarm: ([PostID]) async -> Void
     /// Opens someone's profile (the sub-filter sheet's Profile swipe). A
     /// closure, not a router: the Maps package stays navigation-agnostic —
     /// the shell decides that this means the `.profile` route, exactly as it
     /// does for the avatar and compose bar items.
-    private let openProfile: (ProfileID, ProfileIdentityStub?) -> Void
+    let openProfile: (ProfileID, ProfileIdentityStub?) -> Void
     /// Starts (or resumes) a thread with someone the map surfaces — the pill
     /// menu's Send Message. Injected for the same reason as `openProfile`:
     /// Maps stays ignorant of routes and of the Messages feature.
-    private let openConversation: (ProfileID, ProfileIdentityStub?) -> Void
+    let openConversation: (ProfileID, ProfileIdentityStub?) -> Void
     /// The current viewport's prefetch, cancelled when the map settles elsewhere.
-    private var prewarmTask: Task<Void, Never>?
+    var prewarmTask: Task<Void, Never>?
     /// Starts a post's page player at touch-down on its marker (#646).
-    private let warmPlayback: (PostID, TimeInterval?) -> (any FeedPlaybackWarm)?
+    let warmPlayback: (PostID, TimeInterval?) -> (any FeedPlaybackWarm)?
     /// The player a finger on a marker started, until the post opens or the
     /// touch gives up.
-    private var playbackWarm: (postID: PostID, warm: any FeedPlaybackWarm)?
+    var playbackWarm: (postID: PostID, warm: any FeedPlaybackWarm)?
     /// How long a touch that ended without opening keeps its warm player: the
     /// tap is recognised on touch-up, in the same turn or the next.
     static let warmOpenWindow: TimeInterval = 0.6
     /// Prerolls ONE post page player, paused on its first frame (#654).
-    private let prerollPlayback: (PostID, TimeInterval?) -> (any FeedPlaybackWarm)?
+    let prerollPlayback: (PostID, TimeInterval?) -> (any FeedPlaybackWarm)?
     /// The one prerolled player: the marker nearest the centre at the last
     /// idle settle. Promoted to `playbackWarm` when that marker is touched.
-    private var idlePreroll: (postID: PostID, warm: any FeedPlaybackWarm)?
-    private var idlePrerollWork: DispatchWorkItem?
+    var idlePreroll: (postID: PostID, warm: any FeedPlaybackWarm)?
+    var idlePrerollWork: DispatchWorkItem?
     /// How long the map has to rest before a player is spent on it.
     static let idlePrerollDelay: TimeInterval = 0.6
     /// How long a preroll waits for its tap before it is let go (#654).
@@ -149,24 +150,24 @@ final class MapsViewController: UIViewController {
     /// still a wake per refresh. A map left alone gets 20 s of it, then
     /// nothing until the viewer moves it or comes back to it.
     static let idlePrerollLifetime: TimeInterval = 20
-    private var idlePrerollExpiry: DispatchWorkItem?
+    var idlePrerollExpiry: DispatchWorkItem?
     /// Set when a preroll timed out; cleared by the next settle or return, so
     /// a map left alone is not re-prerolled every 20 s by stray refreshes.
-    private var idlePrerollRested = false
+    var idlePrerollRested = false
     /// Tries left this rest when the feed had nothing to preroll yet — the
     /// map warms its visible posts' data on the same settle, so the first ask
     /// can beat it (measured: `hydrated=false`, then nothing for 25 s).
-    private var idlePrerollRetries = 0
+    var idlePrerollRetries = 0
     static let idlePrerollRetryLimit = 3
     static let idlePrerollRetryDelay: TimeInterval = 1.5
     /// Runaway guard: clustering already bounds the visible set to a handful, but
     /// cap the sweep in case it runs during a pre-cluster frame.
-    private static let prewarmCap = 16
+    static let prewarmCap = 16
     /// Read once: `reconcileClustersForSettle` runs on every settle, in release too.
-    private static let reconcileThrottleEnabled = ProcessInfo.processInfo.arguments.contains("-maps-reconcile-throttle")
+    static let reconcileThrottleEnabled = ProcessInfo.processInfo.arguments.contains("-maps-reconcile-throttle")
     /// The flight in progress, held for its life; its close-out is the
     /// session's (`HeroPushSession`).
-    private var activeSession: HeroPushSession?
+    var activeSession: HeroPushSession?
     /// The "one flight at a time" latch, and the flight's controller.
     /// Internal (not private) only for the +QA hooks.
     var activeTransition: ZoomTransitionController? { activeSession?.controller }
@@ -175,7 +176,7 @@ final class MapsViewController: UIViewController {
     /// because `UINavigationController.delegate` is weak and nothing else
     /// would keep this driver alive to see its own swipe; released by its
     /// `onFeedPopped`.
-    private var cardClose: InteractiveSlideDismissal?
+    var cardClose: InteractiveSlideDismissal?
     /// True from the moment a plain push is fired until the map is back on
     /// screen. It does for that path exactly what `activeTransition` does for
     /// the flight: the instant-tap recognizer and MapKit's own `didSelect` can
@@ -185,8 +186,9 @@ final class MapsViewController: UIViewController {
     /// see `MapOpenGate`. It replaces two booleans that were set in three
     /// branches and released from five unrelated places, and it is the ONLY
     /// thing that writes the map's interaction.
-    /// Internal (read-only) only for the +QA hooks.
-    private(set) var openGate = MapOpenGate() {
+    /// Internal so the extensions (+MapViewDelegate, +QA) reach it; only the
+    /// gate transitions here and in +MapViewDelegate write it.
+    var openGate = MapOpenGate() {
         didSet {
             applyMapInteraction()
             #if DEBUG
@@ -209,11 +211,11 @@ final class MapsViewController: UIViewController {
         }
     }
     /// Chooses which ≤3 visible video pins autoplay.
-    private let videoCoordinator: MapVideoPlaybackCoordinator
+    let videoCoordinator: MapVideoPlaybackCoordinator
     /// Runs the pins' staggered pop-in/pop-out and owns the in-flight
     /// animators — including the marker-reclaim that keeps a fast filter
     /// flip-flop from doubling a pin (see `MapAnnotationPopChoreographer`).
-    private lazy var popChoreographer = MapAnnotationPopChoreographer(mapView: mapView)
+    lazy var popChoreographer = MapAnnotationPopChoreographer(mapView: mapView)
     private let appObservers = NotificationTokens()
     #if DEBUG
     /// Internal (not private) only for the +QA hooks.
@@ -253,29 +255,29 @@ final class MapsViewController: UIViewController {
     let countryAccess: (any CountryAccess)?
     /// Where the device is: the locate button and the "See posts around you"
     /// card (`MapLocationControls`). Nil shows neither.
-    private let locator: (any CurrentCountryLocating)?
+    let locator: (any CurrentCountryLocating)?
     /// What the Shop's Boosts sells (the ×100 cartridge pack); nil sells none.
-    private let stakePacks: (any StakePackSelling)?
+    let stakePacks: (any StakePackSelling)?
     /// What the Shop's Profile shelf sells (#944); nil sells none.
-    private let profileItems: (any ProfileItemSelling)?
+    let profileItems: (any ProfileItemSelling)?
     /// Whether the viewer has an account. A guest follows no one, so the
     /// favourites dock and the people rows stay empty for them.
-    private let isMember: @MainActor () -> Bool
+    let isMember: @MainActor () -> Bool
     /// The country each pin stands in, looked up once per post: the atlas
     /// test is point-in-polygon, and the reconcile runs on every settle.
-    private var pinCountries: [PostID: String] = [:]
+    var pinCountries: [PostID: String] = [:]
     /// A pick waiting to become a flight and an offer (`mapTapped`).
-    private var pendingOffer: DispatchWorkItem?
+    var pendingOffer: DispatchWorkItem?
     /// The open offer, if any.
     /// The marker the instant tap just opened, and when: MapKit's own
     /// selection of it lands about 0.3 s later and must not open it twice (#760).
-    private var instantTap: (annotation: ObjectIdentifier, at: CFTimeInterval)?
+    var instantTap: (annotation: ObjectIdentifier, at: CFTimeInterval)?
 
-    private weak var offerSheet: CountryUnlockSheetViewController?
+    weak var offerSheet: CountryUnlockSheetViewController?
     /// The open offer's camera bookkeeping — where the map was before it,
     /// whether closing flies back there, whether a cancelled close reframes
     /// (`MapCountryOfferState`).
-    private var offerState = MapCountryOfferState()
+    var offerState = MapCountryOfferState()
     /// The filter-pill carousel floating above the tab bar. The map's first
     /// bottom overlay: pinned to the safe area (the map itself is full-bleed
     /// and draws under the floating tab bar).
@@ -292,7 +294,7 @@ final class MapsViewController: UIViewController {
     let barsStack = UIStackView()
     /// The row above the filter bars: the locate button, or the "See posts
     /// around you" card while nothing is open (guest mode §3.1).
-    private let locationControls = MapLocationControlsView()
+    let locationControls = MapLocationControlsView()
 
     // MARK: The text bubble (#2203; every build since #2299)
 
@@ -308,36 +310,36 @@ final class MapsViewController: UIViewController {
     let loadTextPosts: ([PostID]) async -> [PostID: GalleryPost]
     let heldTextPost: (PostID) -> GalleryPost?
     /// A tap asked where the device is: fly to its country once it is known.
-    private var fliesToCurrentCountry = false
+    var fliesToCurrentCountry = false
 
     // MARK: Guest location lock (#564)
 
     /// A guest without location roams the world at country level (#1907,
     /// `MapDepthClamp`), with the bar's "Allow location" as the way out
     /// (`GuestLocationOffering`). See `guestLocationLocked(isMember:permission:)`.
-    private(set) var isGuestLocked = false
+    var isGuestLocked = false
     /// Told when the guest's location offer comes or goes (#1907).
     var onGuestLocationOfferChange: ((Bool) -> Void)?
     /// The dark veil over the locked map, above the map and below the bars, so
     /// the location card stays on top of it.
     /// The deepest band the viewer may reach (#1907): the country band for
     /// a guest without location, everything otherwise.
-    private lazy var depthClamp = MapDepthClamp(mapView: mapView)
+    lazy var depthClamp = MapDepthClamp(mapView: mapView)
     /// The world view is framed once the map has a size: framed in
     /// `viewDidLoad`, before it has one, MapKit picks a continent instead.
-    private var needsWorldView = false
+    var needsWorldView = false
     /// The bars' offset from the view's raw bottom edge; see `syncBarsPosition`.
-    private var barsBottomConstraint: NSLayoutConstraint!
+    var barsBottomConstraint: NSLayoutConstraint!
     /// In-flight people fetch for the sub-filter row; superseded on every
     /// primary change so a slow list can't populate a stale row.
-    private var subFilterLoadTask: Task<Void, Never>?
+    var subFilterLoadTask: Task<Void, Never>?
     /// Logical sub-filter-bar visibility — tracked separately from
     /// `isHidden`, which lags behind during the fade-out.
-    private var isSubFilterBarVisible = false
+    var isSubFilterBarVisible = false
     /// The row's session memory — the people caches, the viewer's order and
     /// deletions per primary, the mutes — and its pure rules
     /// (`MapSubFilterRowMemory`).
-    private var subFilterMemory = MapSubFilterRowMemory()
+    var subFilterMemory = MapSubFilterRowMemory()
     /// The dock's and the rows' people on the device (#1776): the screen
     /// opens on them, then revalidates. Set by the builder before the view
     /// loads; nil keeps them for the session.
@@ -345,33 +347,33 @@ final class MapsViewController: UIViewController {
     /// What the people row is currently SHOWING — the yardstick a refresh
     /// measures itself against. Nil whenever the row holds something else
     /// (place categories) or nothing at all.
-    private var renderedSubFilterRow: MapSubFilterRowState?
+    var renderedSubFilterRow: MapSubFilterRowState?
     /// The raw pin model, updated from each diff. Clustering is computed from
     /// this: the map itself never holds raw pins, only the engine's markers, so
     /// the query/diff layer stays a pure model feed with no MapKit coupling.
-    private var pins: [PostID: MapPin] = [:]
+    var pins: [PostID: MapPin] = [:]
     /// The engine's markers currently on the map, keyed by a stable identity: a
     /// `MapAnnotation` single keys off its post id (`p:<id>`), a
     /// `MapComputedCluster` off a synthetic id (`c:<n>`) it keeps for life so it
     /// survives representative churn (see `reconcileClusters`). Excludes markers
     /// mid fade-out — those live in the pop choreographer until it retires them.
-    private var displayed: [String: MKAnnotation] = [:]
+    var displayed: [String: MKAnnotation] = [:]
     /// Marker collision size in screen points — the pin footprint plus a hair
     /// of margin, so two markers that would touch are grouped instead.
-    private static let clusterCellPoints = MapAnnotationView.side + 8
+    static let clusterCellPoints = MapAnnotationView.side + 8
     /// Mints stable, content-free identities for cluster markers. A cluster's
     /// natural id (its representative) churns as the Top-K set shifts; a marker
     /// keeps this synthetic id for its whole life on the map instead
     /// (see `reconcileClusters` / `MapClusterTracker`).
-    private var clusterMarkerSeq = 0
+    var clusterMarkerSeq = 0
     /// Which band markers the last layout hid behind a stronger neighbour —
     /// the engine's hysteresis memory, handed back on every reconcile (see
     /// `MapClusterEngine.Occlusion`).
-    private var bandOcclusion = MapClusterEngine.Occlusion()
+    var bandOcclusion = MapClusterEngine.Occlusion()
 
     /// Debounce so a continuous pan fires one query on settle, not per frame.
-    private var pendingQuery: DispatchWorkItem?
-    private static let settleDelay: TimeInterval = 0.25
+    var pendingQuery: DispatchWorkItem?
+    static let settleDelay: TimeInterval = 0.25
 
     /// True between `regionWillChange` and `regionDidChange` — i.e. while a
     /// zoom/pan is animating. The cluster layout depends on the zoom level, so
@@ -379,7 +381,7 @@ final class MapsViewController: UIViewController {
     var isRegionTransitioning = false
     /// A diff folded into the model during a transition still owes a layout;
     /// this asks the settle to run one.
-    private var layoutPending = false
+    var layoutPending = false
     /// The SNAPPED zoom the last settle-driven reconcile ran at, and when it
     /// ran. Together they tell a pure pan from a zoom.
     ///
@@ -390,16 +392,16 @@ final class MapsViewController: UIViewController {
     /// and read as "the optimisation does nothing" rather than "the predicate is
     /// broken". Snapped zoom is also the engine's ACTUAL input, so this asks the
     /// question that decides the layout instead of a proxy for it.
-    private var lastSettleSnappedZoom: Double?
-    private var lastSettleReconcileAt: CFTimeInterval = 0
-    private var trailingSettleReconcile: DispatchWorkItem?
+    var lastSettleSnappedZoom: Double?
+    var lastSettleReconcileAt: CFTimeInterval = 0
+    var trailingSettleReconcile: DispatchWorkItem?
     /// The floor between two settle-driven reconciles during a pure pan.
     /// 100 ms bounds the staleness at six frames, and a pure pan cannot change
     /// the layout anyway — see `reconcileClustersForSettle`.
-    private static let panReconcileInterval: CFTimeInterval = 0.1
+    static let panReconcileInterval: CFTimeInterval = 0.1
     #if DEBUG
     /// Cheap "did the corpus move" probe for the churn readout only.
-    private var lastReconciledPinFingerprint = 0
+    var lastReconciledPinFingerprint = 0
     #endif
     /// The annotations THIS reconcile put on the map, awaiting their views.
     ///
@@ -408,7 +410,7 @@ final class MapsViewController: UIViewController {
     /// back from a push — so popping in whatever it hands over meant the entire
     /// map scale-and-faded in again on every return, with nothing having
     /// changed. Only what this screen actually added is an arrival.
-    private var pendingPopIn: Set<ObjectIdentifier> = []
+    var pendingPopIn: Set<ObjectIdentifier> = []
 
     /// A sensible default until location permission / deep-linking lands: central
     /// Paris at neighbourhood zoom (also where the mock dataset seeds its pins).
@@ -562,7 +564,7 @@ final class MapsViewController: UIViewController {
 
     /// Re-pins the filter bars to the CURRENT safe area, but only while no hero
     /// flight is in progress — see `barsBottomConstraint` for why that matters.
-    private func syncBarsPosition() {
+    func syncBarsPosition() {
         guard activeTransition == nil else { return }
         let target = -(view.safeAreaInsets.bottom + Spacing.sm)
         // Guarded: assigning inside a layout pass schedules another one.
@@ -861,1528 +863,8 @@ final class MapsViewController: UIViewController {
         configureCountries()
     }
 
-    // MARK: - Countries
-
-    /// The world's borders, and picking a LOCKED country: a tap lifts it at
-    /// once, then the map flies to it and its offer rises. An unlocked
-    /// country does nothing under a tap — the map stays the map.
-    private func configureCountries() {
-        countryLayer.access = countryAccess
-        countryLayer.onMapTapped = { [weak self] country in self?.mapTapped(country) }
-        countryLayer.onTouchDown = { [weak self] in self?.cancelPendingOffer() }
-        countryLayer.onMapGesture = { [weak self] in self?.mapMovedByUser() }
-        countryLayer.onLockedCountryTapped = { [weak self] country in self?.offer(country) }
-        countryLayer.onCountryTapped = { [weak self] country in self?.showCountry(country.code) }
-        countryLayer.install(on: mapView)
-        NotificationCenter.default.addObserver(
-            self, selector: #selector(countryAccessChanged), name: .countryAccessDidChange, object: nil
-        )
-        NotificationCenter.default.addObserver(
-            self, selector: #selector(currentCountryChanged), name: .currentCountryDidChange, object: nil
-        )
-        updateGuestLock(animated: false)
-        updateLocationControls()
-        #if DEBUG
-        runDebugCountryHooks()
-        #endif
-    }
-
-    /// The Shop, PUSHED over the map — the QA hooks' way in since the
-    /// Explore header lost its storefront (#1494): the Rewards sheet's Shop
-    /// tile and the stake menu are the Shop's doors. A row takes you to its
-    /// country: back to the map, then there.
-    func presentCountryShop() {
-        guard let countryAccess, presentedViewController == nil, let navigationController,
-              navigationController.topViewController === self, transitionCoordinator == nil else { return }
-        let media = ShopMedia(images: imagePipeline, videos: videoPool)
-        let shop = CountryShopViewController.storefront(
-            access: countryAccess, stakePacks: stakePacks, profileItems: profileItems, media: media
-        ) {
-            [weak self] code in
-            guard let self, let navigationController = self.navigationController else { return }
-            CATransaction.begin()
-            CATransaction.setCompletionBlock { [weak self] in self?.showCountry(code) }
-            navigationController.popToViewController(self, animated: true)
-            CATransaction.commit()
-        }
-        navigationController.pushViewController(shop, animated: true)
-    }
-
-    #if DEBUG
-    /// `-maps-offer-country <CC>` (#1600): a country's offer, as the shop opens
-    /// it — once, a beat after the map first appears.
-    private func debugOfferCountryIfRequested() {
-        guard !didDebugOfferCountry, let index = ProcessInfo.processInfo.arguments.firstIndex(of: "-maps-offer-country"),
-              index + 1 < ProcessInfo.processInfo.arguments.count else { return }
-        didDebugOfferCountry = true
-        let code = ProcessInfo.processInfo.arguments[index + 1].uppercased()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.showCountry(code) }
-    }
-    #endif
-
-    /// Goes to a country from the shop: lifted and framed, and a locked one
-    /// makes its offer (framed above the sheet).
-    private func showCountry(_ code: String) {
-        guard let country = CountryAtlas.shared.country(code: code) else { return }
-        if let countryAccess, !countryAccess.isUnlocked(code) {
-            offer(country)
-            return
-        }
-        countryLayer.select(code)
-        frame(country, bottomInset: 0)
-    }
-
-    /// Frames a country's mainland in the part of the map left visible
-    /// between the header and `bottomInset` from the bottom.
-    private func frame(_ country: CountryAtlas.Country, bottomInset: CGFloat) {
-        let box = country.mainlandBounds
-        let corner = MKMapPoint(CLLocationCoordinate2D(latitude: box.maxLat, longitude: box.minLon))
-        let opposite = MKMapPoint(CLLocationCoordinate2D(latitude: box.minLat, longitude: box.maxLon))
-        let rect = MKMapRect(
-            x: min(corner.x, opposite.x), y: min(corner.y, opposite.y),
-            width: abs(opposite.x - corner.x), height: abs(opposite.y - corner.y)
-        )
-        let insets = UIEdgeInsets(
-            top: view.safeAreaInsets.top + Spacing.xxl, left: Spacing.xxl,
-            bottom: max(bottomInset, view.safeAreaInsets.bottom) + Spacing.xl, right: Spacing.xxl
-        )
-        // ⚠️ NOT `setVisibleMapRect(_:edgePadding:)`: with the sheet's tall
-        // bottom padding it zoomed out ~3.7x too far (Spain above its offer
-        // came out a third of the band it was given). The visible rect is
-        // worked out here instead: the scale that fits the country in the
-        // band, and the band's centre on the country's.
-        let size = mapView.bounds.size
-        let band = CGSize(
-            width: max(size.width - insets.left - insets.right, 1),
-            height: max(size.height - insets.top - insets.bottom, 1)
-        )
-        let scale = max(rect.width / band.width, rect.height / band.height)
-        let visible = MKMapRect(
-            x: rect.midX - (insets.left + band.width / 2) * scale,
-            y: rect.midY - (insets.top + band.height / 2) * scale,
-            width: size.width * scale, height: size.height * scale
-        )
-        mapView.setVisibleMapRect(visible, animated: true)
-    }
-
-    /// A tap on the map, not on a marker.
-    ///
-    /// - With an offer open, the tap closes it and the map goes back to where
-    ///   it was: tapping away is "no thanks".
-    /// - On a locked country: it lifts NOW, like a marker's selection, and the
-    ///   flight and the offer follow `offerDelay` later unless another finger
-    ///   lands first (`cancelPendingOffer`): the second tap of a double-tap
-    ///   zoom, or the start of a pan, undoes the pick.
-    /// - Anywhere else: whatever is lifted lowers.
-    private func mapTapped(_ country: CountryAtlas.Country?) {
-        if offerSheet != nil {
-            closeOffer(returning: true)
-            return
-        }
-        guard let country, let countryAccess, !countryAccess.isUnlocked(country.code) else {
-            countryLayer.select(nil)
-            return
-        }
-        countryLayer.select(country.code)
-        let pending = DispatchWorkItem { [weak self] in
-            self?.pendingOffer = nil
-            self?.offer(country)
-        }
-        pendingOffer = pending
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.offerDelay, execute: pending)
-    }
-
-    /// Long enough for a double tap's second touch to land, short enough to
-    /// read as one gesture: the lift is instant, the flight follows.
-    private static let offerDelay: TimeInterval = 0.3
-
-    /// A finger landed while a pick waited for its flight: it was the start
-    /// of something else (a double-tap zoom, a pan). The pick is undone.
-    private func cancelPendingOffer() {
-        guard let pendingOffer else { return }
-        pendingOffer.cancel()
-        self.pendingOffer = nil
-        countryLayer.select(nil)
-    }
-
-    /// The user moved the map. A waiting pick is dropped, and an open offer
-    /// closes WHERE THE USER TOOK THE MAP: no flight back to the camera it
-    /// left from, since the user has just chosen another place to look.
-    private func mapMovedByUser() {
-        cancelPendingOffer()
-        if offerSheet != nil { closeOffer(returning: false) }
-    }
-
-    /// Lifts a locked country, flies the map to it above its sheet, and
-    /// presents what unlocking it would open. The camera it left from is kept:
-    /// closing the offer flies back to it.
-    private func offer(_ country: CountryAtlas.Country) {
-        // ⚠️ FROM ONE LOCKED COUNTRY STRAIGHT TO ANOTHER (#760): the open
-        // offer takes the new country in place — outline, camera, sheet — and
-        // the camera it left from stays the first one's, so closing returns
-        // home. It used to bail here, and MapKit's own selection then closed
-        // the first offer: the second tap only reached neutral.
-        if let open = offerSheet, !open.isLeaving {
-            switchOffer(open, to: country)
-            return
-        }
-        guard let countryAccess, presentedViewController == nil else { return }
-        offerState.opening(from: { mapView.camera.copy() as? MKMapCamera })
-        countryLayer.select(country.code)
-        let sheet = CountryUnlockSheetViewController(country: country, access: countryAccess)
-        // Wrapped BEFORE its view loads: the measure counts its toolbar.
-        let presented = sheet.wrappedInSheet()
-        // The country being sold stands ABOVE the sheet, not under it.
-        sheet.loadViewIfNeeded()
-        frame(country, bottomInset: offerBottomInset(sheet))
-        bindOffer(sheet)
-        offerSheet = sheet
-        present(presented, animated: true)
-    }
-
-    /// The open offer's callbacks, for the country it shows NOW — read off
-    /// the sheet, so a switch (`switchOffer`) never leaves them on the first.
-    private func bindOffer(_ sheet: CountryUnlockSheetViewController) {
-        sheet.onClosing = { [weak self, weak sheet] in
-            guard let sheet else { return }
-            self?.offerClosing(sheet.country)
-        }
-        sheet.onCloseCancelled = { [weak self, weak sheet] in
-            guard let sheet else { return }
-            self?.offerCloseCancelled(sheet.country, sheet: sheet)
-        }
-        sheet.onDismissed = { [weak self, weak sheet] in
-            guard let sheet else { return }
-            self?.offerDidClose(sheet.country)
-        }
-    }
-
-    /// The open offer moves to `country` without closing (#760).
-    private func switchOffer(_ sheet: CountryUnlockSheetViewController, to country: CountryAtlas.Country) {
-        guard country.code != sheet.country.code else { return }
-        #if DEBUG
-        OfferLog.note("switch \(sheet.country.code) -> \(country.code)")
-        #endif
-        countryLayer.select(country.code)
-        sheet.show(country)
-        frame(country, bottomInset: offerBottomInset(sheet))
-    }
-
-    /// The band left above an offer's sheet, where its country is framed.
-    private func offerBottomInset(_ sheet: CountryUnlockSheetViewController) -> CGFloat {
-        sheet.sheetHeight + view.safeAreaInsets.bottom
-    }
-
-    /// Closes the open offer. `returning`: whether the map flies back to the
-    /// camera it had before the offer.
-    private func closeOffer(returning: Bool) {
-        // Already on its way down (and the map already on its way back): a
-        // tap or a pan now is the user's, not a second close.
-        guard let offerSheet, !offerSheet.isLeaving else { return }
-        offerState.closeRequested(returning: returning)
-        #if DEBUG
-        OfferLog.note("close requested returning=\(returning)")
-        #endif
-        offerSheet.closePresentation()
-    }
-
-    /// The offer is closing — by a tap or a pan on the map, a swipe on its
-    /// sheet, or an unlock — and the sheet has only just started down
-    /// (`OfferCloseFlight`): what the map does runs alongside it.
-    ///
-    /// - Unlocked: nothing yet. The map stays on the country, whose posts are
-    ///   the reward (`offerDidClose`).
-    /// - Otherwise the country lowers, and the map flies back to where it was
-    ///   (unless the user moved it away from the offer themselves).
-    private func offerClosing(_ country: CountryAtlas.Country) {
-        guard !(countryAccess?.isUnlocked(country.code) ?? false) else { return }
-        countryLayer.select(nil)
-        let home = offerState.closing()
-        #if DEBUG
-        OfferLog.note("closing: flying back=\(home != nil)")
-        #endif
-        guard let home else { return }
-        mapView.setCamera(home, animated: true)
-    }
-
-    /// A close went out and the sheet came back up (`OfferCloseFlight`):
-    /// the country lifts again, framed above it if the map had left.
-    private func offerCloseCancelled(_ country: CountryAtlas.Country, sheet: CountryUnlockSheetViewController) {
-        let reframes = offerState.closeCancelled()
-        #if DEBUG
-        OfferLog.note("close cancelled: reframing=\(reframes)")
-        #endif
-        countryLayer.select(country.code)
-        if reframes { frame(country, bottomInset: offerBottomInset(sheet)) }
-    }
-
-    /// The offer is gone. Whatever the map does about it began at
-    /// `offerClosing`; an unlocked country's lift fades once its posts have
-    /// had a moment on screen.
-    private func offerDidClose(_ country: CountryAtlas.Country) {
-        offerSheet = nil
-        offerState.closed()
-        guard countryAccess?.isUnlocked(country.code) ?? false else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
-            guard self?.countryLayer.selectedCode == country.code else { return }
-            self?.countryLayer.select(nil)
-        }
-    }
-
-    @objc private func countryAccessChanged() {
-        countryLayer.refreshStyles()
-        reconcileClusters()
-        updateLocationControls()
-    }
-
-    // MARK: - Location (guest mode §3.1)
-
-    /// The card while nothing is open and location isn't allowed — the one
-    /// thing that would open a country; the locate button otherwise.
-    private func updateLocationControls() {
-        locationControls.apply(Self.locationControlsFace(
-            permission: locator?.permission, guestLocked: isGuestLocked,
-            hasNoOpenCountry: countryAccess?.hasNoOpenCountry
-        ))
-    }
-
-    /// The controls' face. The guest without location's way out is the bar's
-    /// "Allow location" now (#1907, `GuestLocationOffering`): no card for
-    /// them; a member with no open country keeps it. Pure, for tests.
-    static func locationControlsFace(
-        permission: LocationPermission?, guestLocked: Bool, hasNoOpenCountry: Bool?
-    ) -> MapLocationControlsView.Face {
-        guard let permission, !guestLocked, let hasNoOpenCountry else { return .none }
-        return hasNoOpenCountry && permission != .allowed ? .card(permission) : .button(permission)
-    }
-
-    /// Asks in context — the only place location is ever asked for — or, once
-    /// denied, sends the person to Settings, the only place it can change.
-    private func locationControlTapped(_ permission: LocationPermission) {
-        switch permission {
-        case .denied:
-            guard let settings = URL(string: UIApplication.openSettingsURLString) else { return }
-            UIApplication.shared.open(settings)
-        case .notAsked:
-            fliesToCurrentCountry = true
-            locator?.requestPermission()
-        case .allowed:
-            if let code = locator?.currentCountry {
-                showCountry(code)
-            } else {
-                // No fix yet (#1775): the button waits with the loader until
-                // the country is known, and says so if it never is.
-                fliesToCurrentCountry = true
-                waitForFix()
-            }
-            locator?.requestPermission()
-        }
-    }
-
-    /// Whether a viewer sees the locked guest showcase: a guest whose location
-    /// is not allowed. Members are never locked, and neither is a map with no
-    /// locator (`permission` nil): without the card there would be no way out.
-    /// Pure, for tests.
-    static func guestLocationLocked(isMember: Bool, permission: LocationPermission?) -> Bool {
-        guard !isMember, let permission else { return false }
-        return permission != .allowed
-    }
-
-    /// The map's interaction: only an open transition makes it inert. The
-    /// guest without location moves it too since #1907, within the country
-    /// band (`MapDepthClamp`). Pure, for tests.
-    static func mapIsInteractive(inert: Bool, guestLocked: Bool) -> Bool {
-        !inert
-    }
-
-    /// Re-reads the lock and applies it: the veil, the world view, the map's
-    /// interaction, the pills and the compass. Unlocking fades the veil out
-    /// and flies to the current country once it is known.
-    private func updateGuestLock(animated: Bool) {
-        let locked = Self.guestLocationLocked(isMember: isMember(), permission: locator?.permission)
-        // The ceiling, whatever else changed (#1907): a guest without location
-        // roams the world at country level; everyone else is unlocked.
-        depthClamp.ceiling = locked ? .country : .unlocked
-        guard locked != isGuestLocked else { return }
-        let wasLocked = isGuestLocked
-        isGuestLocked = locked
-        applyMapInteraction()
-        // The guest moves the map now (#1907): the compass follows it.
-        mapView.showsCompass = true
-        // They filter posts the guest cannot see.
-        filterBar.isHidden = locked
-        updateTextBubble(animated: view.window != nil)
-        if locked {
-            subFilterBar.isHidden = true
-            pendingQuery?.cancel()
-            needsWorldView = true
-            frameWorldIfNeeded()
-        }
-        updateLocationControls()
-        onGuestLocationOfferChange?(locked)
-        guard wasLocked, !locked else { return }
-        // Unlocked: to the viewer's country, as the card promised.
-        if let code = locator?.currentCountry {
-            fliesToCurrentCountry = false
-            showCountry(code)
-        } else {
-            fliesToCurrentCountry = true
-            scheduleQuery()
-        }
-    }
-
-    /// The whole world, without animation — on the first frame, so a locked
-    /// map never flashes Paris first.
-    private func frameWorldIfNeeded() {
-        guard needsWorldView, isGuestLocked, mapView.bounds.width > 0 else { return }
-        needsWorldView = false
-        mapView.setVisibleMapRect(.world, animated: false)
-    }
-
-    @objc private func currentCountryChanged() {
-        updateGuestLock(animated: true)
-        updateLocationControls()
-        // The country left behind closes again (decision 10): it no longer
-        // stands selected as if it were open — unless its offer is up.
-        if let selected = countryLayer.selectedCode, selected != locator?.currentCountry,
-           countryAccess?.isUnlocked(selected) == false, presentedViewController == nil {
-            countryLayer.select(nil)
-        }
-        guard fliesToCurrentCountry, let code = locator?.currentCountry else { return }
-        fliesToCurrentCountry = false
-        locationControls.setLocating(false)
-        showCountry(code)
-    }
-
-    /// The locate button waits for the first fix; past `takingLonger` the
-    /// wait ends and the viewer is told (the controls' `LoadingClock`).
-    private func waitForFix() {
-        locationControls.setLocating(true) { [weak self] in
-            guard let self else { return }
-            fliesToCurrentCountry = false
-            Feedback.failure(Self.noFixMessage, from: self)
-        }
-    }
-
-    static let noFixMessage = "Couldn't find where you are. Try again."
-
-
-    /// Whether `pin`'s post is OPEN to the viewer: its country is unlocked (or
-    /// there is nothing locked at all). A pin just offshore is its coast's
-    /// (`CountryAtlas.country(owning:)`); one on the open sea is open.
-    ///
-    /// A post in a locked country is still on the map — its country's markers
-    /// wear its busiest posts, darkened under a lock — but it never opens.
-    private func isInUnlockedCountry(_ pin: MapPin) -> Bool {
-        guard let countryAccess else { return true }
-        let code = countryCode(of: pin)
-        return code.isEmpty || countryAccess.isUnlocked(code)
-    }
-
-    /// The country `pin`'s post stands in (ISO alpha-2), "" at sea. Cached per
-    /// post: the point-in-polygon walk is the expensive half of the question,
-    /// and a reconcile asks it of every pin.
-    private func countryCode(of pin: MapPin) -> String {
-        if let cached = pinCountries[pin.postID] { return cached }
-        let coordinate = CLLocationCoordinate2D(latitude: pin.latitude, longitude: pin.longitude)
-        let code = CountryAtlas.shared.country(owning: coordinate)?.code ?? ""
-        pinCountries[pin.postID] = code
-        return code
-    }
-
-    /// The country `annotation`'s marker speaks for (ISO alpha-2, "" at sea):
-    /// its REPRESENTATIVE's — a city's is its country's, as its flag border.
-    private func countryCode(of annotation: any MKAnnotation) -> String {
-        let cluster = annotation as? MapComputedCluster
-        guard let pin = cluster?.representative ?? (annotation as? MapAnnotation)?.pin else { return "" }
-        return countryCode(of: pin)
-    }
-
-    /// What `annotation`'s marker wears around its face: the flag border and
-    /// badge of the place it speaks for, and the lock of a locked country —
-    /// see `MapMarkerDress`. The country is the REPRESENTATIVE's: a city's
-    /// border wears its country's flag, and every member of a locked marker is
-    /// locked (`reconcileClusters` never lays out open and locked posts
-    /// together).
-    private func dress(for annotation: any MKAnnotation) -> MapMarkerDress {
-        let cluster = annotation as? MapComputedCluster
-        guard let pin = cluster?.representative ?? (annotation as? MapAnnotation)?.pin else { return .neutral }
-        let code = countryCode(of: pin)
-        return MapMarkerDress.resolve(
-            kind: Self.dressKind(of: annotation),
-            countryCode: code,
-            isLocked: !isInUnlockedCountry(pin)
-        )
-    }
-
-    /// The hierarchy depth `annotation`'s dress speaks for, or nil for a
-    /// local marker. A band's group of one (a lone `MapAnnotation`) speaks
-    /// for its place exactly like a band cluster: at a band, every marker
-    /// wears a place's dress — at the country band only countries, at the
-    /// city band only cities.
-    static func dressKind(of annotation: any MKAnnotation) -> MapPlace.Kind? {
-        hierarchyPlace(of: annotation)?.kind
-    }
-
-    /// The city or country `annotation`'s marker IS, or nil for a local one —
-    /// the ONE answer both presentations (`openAnnotation`'s reveal and
-    /// `presentSnapFeed`'s hero) and the dress ask, so "does this marker have
-    /// a place page" and "does it wear a place's dress" can never disagree.
-    ///
-    /// ⚠️ A BAND'S GROUP OF ONE COUNTS. Both routes used to ask
-    /// `annotation as? MapComputedCluster` alone, so a country or city with a
-    /// single post in view — dressed as its place, the mock world's ninety-four
-    /// one-post countries among them — opened as a plain pin, and its vertical
-    /// dismissal landed on the map where Paris's lands on its page.
-    static func hierarchyPlace(of annotation: any MKAnnotation) -> MapPlace? {
-        switch annotation {
-        case let cluster as MapComputedCluster: cluster.hierarchyPlace
-        case let single as MapAnnotation: single.hierarchyPlace
-        default: nil
-        }
-    }
-
-    /// What a tap on a marker does: open its posts, or — for a locked
-    /// country's — offer the country. Pure, so the routing is pinned without
-    /// a live map.
-    enum MarkerTap: Equatable {
-        case open
-        case offer(countryCode: String)
-    }
-
-    static func markerTap(for dress: MapMarkerDress, countryCode: String) -> MarkerTap {
-        dress.isLocked && !countryCode.isEmpty ? .offer(countryCode: countryCode) : .open
-    }
-
-    private func configureFilterBar() {
-        barsStack.axis = .vertical
-        barsStack.spacing = Spacing.xs
-        barsStack.clipsToBounds = false
-        view.addSubview(barsStack)
-        barsStack.translatesAutoresizingMaskIntoConstraints = false
-        // Pinned to the view's RAW bottom with a constant this screen owns, not to
-        // `safeAreaLayoutGuide.bottomAnchor`. The safe area animates through a pop
-        // — measured here climbing 34 -> 64 -> 76.33 before settling at 83 — and
-        // anything tied to it rides that animation and then corrects, which showed
-        // up as the bars landing at 741.67 and snapping to 735.00. `syncBarsPosition`
-        // tracks the safe area only while nothing is flying, so the constant in
-        // force during a gesture is always a resting measurement. The resting
-        // geometry is unchanged: the safe-area bottom still sits above the floating
-        // tab bar, which is what rests the pills directly over it.
-        barsBottomConstraint = barsStack.bottomAnchor.constraint(
-            equalTo: view.bottomAnchor, constant: -Spacing.sm
-        )
-        NSLayoutConstraint.activate([
-            barsStack.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            barsStack.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            barsBottomConstraint,
-            subFilterBar.heightAnchor.constraint(equalToConstant: MapSubFilterBarView.barHeight),
-            filterBar.heightAnchor.constraint(equalToConstant: MapFilterBarView.barHeight)
-        ])
-        barsStack.addArrangedSubview(locationControls)
-        barsStack.addArrangedSubview(subFilterBar)
-        barsStack.addArrangedSubview(filterBar)
-        locationControls.onTap = { [weak self] permission in self?.locationControlTapped(permission) }
-        // Resting state: no refinement row until a primary that has one.
-        subFilterBar.isHidden = true
-        subFilterBar.alpha = 0
-
-        filterBar.onFilterChanged = { [weak self] filter in
-            self?.viewModel.filterChanged(filter)
-            self?.updateSubFilterBar(for: filter)
-        }
-        subFilterBar.imagePipeline = imagePipeline
-        subFilterBar.onSubFiltersChanged = { [weak self] subFilters in
-            self?.viewModel.subFiltersChanged(subFilters)
-        }
-        subFilterBar.onExpandTapped = { [weak self] in
-            self?.presentSubFilterSheet()
-        }
-        // The pill long-press menu. Every destination is resolved here — the
-        // bar reports which verb was chosen and knows nothing beyond that.
-        subFilterBar.onViewProfile = { [weak self] favorite in
-            self?.openProfile(favorite)
-        }
-        // The thread opens titled with the favourite (#1860), as its profile
-        // does with its stub.
-        subFilterBar.onSendMessage = { [weak self] favorite in
-            self?.openConversation(favorite.profileID, Self.stub(of: favorite))
-        }
-        subFilterBar.isMuted = { [weak self] profileID in
-            self?.subFilterMemory.isMuted(profileID) ?? false
-        }
-        subFilterBar.onToggleMute = { [weak self] favorite in
-            self?.subFilterMemory.toggleMute(favorite.profileID)
-        }
-        subFilterBar.onViewDetails = { [weak self] category in
-            self?.isolateSubFilter(.placeCategory(category))
-        }
-        subFilterBar.onShare = { [weak self] option in
-            self?.presentShareSheet(for: option)
-        }
-        subFilterBar.onUnpinSubFilter = { [weak self] subFilter in
-            self?.removeSubFilterFromRow(subFilter)
-        }
-    }
-
-    // MARK: - Sub-filter row
-
-    /// Warms the people cache once at screen load (both lists in parallel),
-    /// so the first Friends/Following tap already has its row in memory.
-    private func prefetchPeople() {
-        guard isMember() else { return }
-        let repository = favoritesRepository
-        // The viewer the lists are read for, captured BEFORE the fetch.
-        let writer = peopleCache?.viewer
-        Task { [weak self] in
-            async let friends = repository.friends()
-            async let following = repository.following()
-            let (friendsList, followingList) = await (friends, following)
-            guard let self else { return }
-            self.subFilterMemory.catalogue[.friends] = friendsList
-            self.subFilterMemory.catalogue[.following] = followingList
-            // The rows themselves may be curated subsets; resolve them from
-            // the same lists rather than assuming the graph IS the row.
-            let friendsRow = await self.people(for: .friends)
-            self.subFilterMemory.people[.friends] = friendsRow
-            let followingRow = await self.people(for: .following)
-            self.subFilterMemory.people[.following] = followingRow
-            self.storePeople(primary: .friends, row: friendsRow, catalogue: friendsList, as: writer)
-            self.storePeople(primary: .following, row: followingRow, catalogue: followingList, as: writer)
-        }
-    }
-
-    /// The last people of the dock and both rows (#1776), on the first frame:
-    /// the dock's pills and a primary's first tap need no network. The fetches
-    /// that follow revalidate them in place. Never after a viewer change:
-    /// that path goes straight to the network (the wipe may not have run).
-    private func restorePeople() {
-        guard isMember(), let peopleCache else { return }
-        if let dock = peopleCache.people(.dock), !dock.isEmpty {
-            currentFavorites = dock
-            filterBar.setFavorites(dock)
-        }
-        for primary in [MapFilter.friends, .following] {
-            if let slot = MapPeopleLocalCache.Slot.row(primary), let row = peopleCache.people(slot) {
-                subFilterMemory.people[primary] = row
-            }
-            if let slot = MapPeopleLocalCache.Slot.catalogue(primary), let catalogue = peopleCache.people(slot) {
-                subFilterMemory.catalogue[primary] = catalogue
-            }
-        }
-    }
-
-    private func storePeople(
-        primary: MapFilter, row: [MapFavorite], catalogue: [MapFavorite], as writer: LocalStoreViewer?
-    ) {
-        guard let peopleCache, let rowSlot = MapPeopleLocalCache.Slot.row(primary),
-              let catalogueSlot = MapPeopleLocalCache.Slot.catalogue(primary) else { return }
-        peopleCache.store(row, in: rowSlot, as: writer)
-        peopleCache.store(catalogue, in: catalogueSlot, as: writer)
-    }
-
-    /// Repopulates (or hides) the refinement row for a newly selected
-    /// primary. UI first, data second: the row renders SYNCHRONOUSLY from
-    /// the session cache (0ms — never awaiting the network), then a
-    /// background refresh re-renders only if the list actually changed and
-    /// the selection hasn't moved on.
-    private func updateSubFilterBar(for filter: MapFilter?) {
-        subFilterLoadTask?.cancel()
-        switch filter {
-        case .friends, .following:
-            guard let primary = filter else { return } // matched .some above
-            // 1) Instant, and ALWAYS applied — not only when the cache has
-            // something. Whatever is on screen belongs to the primary the
-            // viewer just LEFT, so an empty target has to clear it rather than
-            // inherit it. (It did inherit it: switching to an empty rail left
-            // the previous primary's pills up.)
-            applyPeopleRow(subFilterMemory.people[primary] ?? [], for: primary)
-            // A guest follows no one: the row stays empty, nothing is fetched.
-            guard isMember() else { return }
-            // 2) Refresh behind it (also the cold path pre-prefetch, where
-            // the row fills in when data lands).
-            let repository = favoritesRepository
-            let writer = peopleCache?.viewer
-            subFilterLoadTask = Task { [weak self] in
-                guard let people = await self?.people(for: primary) else { return }
-                let catalogue = primary == .friends
-                    ? await repository.friends()
-                    : await repository.following()
-                guard let self, !Task.isCancelled else { return }
-                self.subFilterMemory.catalogue[primary] = catalogue
-                self.subFilterMemory.people[primary] = people
-                self.storePeople(primary: primary, row: people, catalogue: catalogue, as: writer)
-                guard self.filterBar.selectedFilter == primary else { return }
-                self.applyPeopleRow(people, for: primary)
-            }
-        case .pinned:
-            renderedSubFilterRow = nil
-            showSubFilterRow(MapSubFilterOption.placeCategories)
-        default:
-            // All / a favorite: no refinement dimension.
-            renderedSubFilterRow = nil
-            currentSubFilterOptions = []
-            setSubFilterBar(visible: false)
-        }
-    }
-
-    /// Renders a people row for `primary`, or retires it — skipping only when
-    /// the row is ALREADY showing exactly this.
-    ///
-    /// The comparison is against what is rendered, never against a cache: see
-    /// `MapSubFilterRowUpdate` for the switch-to-an-empty-primary bug that
-    /// distinction exists to prevent.
-    private func applyPeopleRow(_ people: [MapFavorite], for primary: MapFilter) {
-        let incoming = subFilterMemory.rowState(primary: primary, people: people)
-        let update = MapSubFilterRowUpdate.resolve(rendered: renderedSubFilterRow, incoming: incoming)
-        #if DEBUG
-        // Which path a row edit took is invisible in a screenshot — a diff and
-        // a cross-dissolve land on the same pixels and differ only in how they
-        // got there. Printed alongside the toggle hook that provokes it.
-        let arguments = ProcessInfo.processInfo.arguments
-        if arguments.contains("-maps-toggle-subfilter") || arguments.contains("-maps-subfilter-remove") {
-            let style = switch update {
-            case .show(let options, let style): "show(\(options.count) pills, \(style))"
-            case .hide: "hide"
-            case .unchanged: "unchanged"
-            }
-            print("[maps] sub-filter row update: \(style) at \(CACurrentMediaTime())")
-        }
-        #endif
-        switch update {
-        case .unchanged:
-            return
-        case .hide:
-            renderedSubFilterRow = incoming
-            currentSubFilterOptions = []
-            setSubFilterBar(visible: false)
-        case .show(let options, let style):
-            renderedSubFilterRow = incoming
-            showSubFilterRow(options, style: style)
-        }
-    }
-
-    /// One entry point for populating the row, choosing the right
-    /// transition: hidden → set content and fade the bar in; already
-    /// visible → cross-dissolve the pills in place (a hard swap while
-    /// on-screen reads as a snap).
-    private func showSubFilterRow(
-        _ options: [MapSubFilterOption], style: MapSubFilterRowUpdate.Style = .swap
-    ) {
-        let options = subFilterMemory.ordered(options, for: filterBar.selectedFilter)
-        currentSubFilterOptions = options
-        guard isSubFilterBarVisible else {
-            subFilterBar.setOptions(options)
-            setSubFilterBar(visible: true)
-            return
-        }
-        switch style {
-        case .swap:
-            // A different primary's list: one surface out, one in.
-            subFilterBar.transition(to: options)
-        case .diff:
-            // The SAME list, edited — someone was added or removed from this
-            // rail while the viewer was looking at it. Only the pills that
-            // changed may move: cross-dissolving the row for a one-pill edit
-            // is a flash, and it takes the scroll position and the selection
-            // with it. `restack` is the animated diffable apply the organize
-            // sheet already commits through.
-            subFilterBar.restack(to: options)
-            pruneSubFilterSelection(to: options)
-        }
-    }
-
-    /// Drops any applied refinement whose pill just left the row. A selection
-    /// can't outlive its pill: the map would stay filtered by someone the
-    /// viewer can no longer see or unselect.
-    ///
-    /// Only the diff path needs this — a swap resets the selection with the
-    /// content, and the organize sheet prunes as it commits.
-    private func pruneSubFilterSelection(to options: [MapSubFilterOption]) {
-        let surviving = Set(options.map(\.subFilter))
-        let stillApplied = subFilterBar.selectedSubFilters.intersection(surviving)
-        guard stillApplied != subFilterBar.selectedSubFilters else { return }
-        subFilterBar.setSelectedSubFilters(stillApplied)
-        viewModel.subFiltersChanged(stillApplied)
-    }
-
-    /// The header's organize button: the row's full contents as a searchable
-    /// native bottom sheet, purely for arranging what the row carries. It
-    /// applies nothing — the sheet edits a buffer and hands back a list on
-    /// Done, or hands back nothing at all on Cancel.
-    private func presentSubFilterSheet() {
-        // Gated on the CATALOGUE, not on the row: an empty row is exactly when
-        // the sheet matters most (the "+" is the only way back), and the only
-        // sheet worth refusing is one with nothing in either section.
-        guard !subFilterMemory.catalogueOptions(for: filterBar.selectedFilter).isEmpty else { return }
-        // Only the primaries that HAVE a refinement dimension get a sheet —
-        // and the primary's own name is the sheet's title.
-        guard let title = MapSubFilterRowMemory.title(for: filterBar.selectedFilter) else { return }
-        let sheet = MapSubFilterSheetViewController.makeSheet(
-            title: title,
-            // The sheet shows the whole catalogue split in two: what the bar
-            // carries, and everything else this primary could offer.
-            all: subFilterMemory.catalogueOptions(for: filterBar.selectedFilter),
-            activeSubFilters: currentSubFilterOptions.map(\.subFilter),
-            // People rows hold a full rail (12); category rows hold 6.
-            maxActive: MapSubFilterSections.maxActive(for: filterBar.selectedFilter),
-            imagePipeline: imagePipeline,
-            rowActions: MapSubFilterSheetViewController.RowActions(
-                openProfile: { [weak self] favorite in self?.openProfile(favorite) },
-                toggleMute: { [weak self] favorite in
-                    self?.subFilterMemory.toggleMute(favorite.profileID)
-                },
-                isMuted: { [weak self] id in self?.subFilterMemory.isMuted(id) ?? false }
-            ),
-            onOptionsChanged: { [weak self] options in
-                self?.adoptSubFilterOptions(options)
-            }
-        )
-        present(sheet, animated: true)
-    }
-
-    /// The sheet's Profile swipe. Maps stays navigation-agnostic (the tab
-    /// coordinator owns routing), so this hands the shell an id plus the
-    /// identity it already has on screen — the destination renders its header
-    /// from the stub instead of flashing empty while the profile loads.
-    private func openProfile(_ favorite: MapFavorite) {
-        openProfile(favorite.profileID, Self.stub(of: favorite))
-    }
-
-    /// What the pill shows of a favourite — a person the viewer follows —
-    /// for the destination it opens (#1860): its name, handle and face.
-    static func stub(of favorite: MapFavorite) -> ProfileIdentityStub {
-        ProfileIdentityStub(
-            handle: favorite.handle, displayName: favorite.title, isFollowing: true, avatarURL: favorite.avatarURL
-        )
-    }
-
-    // MARK: - Pill menu destinations
-
-    /// "Remove from Sub-filters": drop the refinement from the row, routed
-    /// through the SAME adopt path the organize sheet commits on. That is what
-    /// keeps one removal consistent everywhere — the hidden set is recomputed
-    /// (so the next background refresh can't resurrect it), the order memory
-    /// is rewritten, an applied refinement whose pill just left is dropped
-    /// from the selection, and an emptied row retires itself.
-    private func removeSubFilterFromRow(_ subFilter: MapSubFilter) {
-        let remaining = currentSubFilterOptions.filter { $0.subFilter != subFilter }
-        guard remaining.count != currentSubFilterOptions.count else { return }
-        adoptSubFilterOptions(remaining)
-    }
-
-    /// "View Details" on a place category. There is no place-detail screen in
-    /// the app — place categories are client-side vocabulary, not entities the
-    /// BFF can describe — so this does the most honest thing the surface can:
-    /// isolates that category on the map, dropping every other refinement.
-    /// Swap the body for a push once a real destination exists.
-    private func isolateSubFilter(_ subFilter: MapSubFilter) {
-        let only: Set<MapSubFilter> = [subFilter]
-        guard subFilterBar.selectedSubFilters != only else { return }
-        subFilterBar.setSelectedSubFilters(only, reveal: subFilter)
-        viewModel.subFiltersChanged(only)
-    }
-
-    /// "Share". Like the snap feed's share, this offers what the model
-    /// actually carries: no canonical web URL for a profile or a place
-    /// category exists on the wire yet, so the display name (and a person's
-    /// `@handle`) stand in until one does.
-    private func presentShareSheet(for option: MapSubFilterOption) {
-        var items: [Any] = [option.sheetTitle]
-        if let subtitle = option.sheetSubtitle { items.append(subtitle) }
-        let activity = UIActivityViewController(activityItems: items, applicationActivities: nil)
-        activity.popoverPresentationController?.sourceView = subFilterBar
-        present(activity, animated: true)
-    }
-
-    /// The sheet's committed arrangement, landing once when the viewer taps
-    /// Done. The horizontal row restacks as the sheet slides away, so what is
-    /// revealed is already right, and the edits are remembered for this
-    /// primary so a later Friends → Places → Friends round trip doesn't
-    /// silently rebuild the repository's list over the viewer's.
-    /// Session-scoped and in memory: these are viewing preferences, not state
-    /// the backend knows about. Cancel never reaches here at all.
-    private func adoptSubFilterOptions(_ options: [MapSubFilterOption]) {
-        let surviving = Set(options.map(\.subFilter))
-        currentSubFilterOptions = options
-
-        if let primary = filterBar.selectedFilter {
-            // Its order, and what is in the catalogue but not in the row
-            // (see `MapSubFilterRowMemory.adopt`).
-            subFilterMemory.adopt(options, for: primary)
-            // ...and for a PEOPLE row the arrangement is now curation, not a
-            // session preference: the same list the profile's star writes.
-            // Persisting it here is what makes "+ → add → Done" survive the
-            // next launch, and what keeps the two editors from disagreeing.
-            if let category = MapSubFilterRowMemory.railCategory(for: primary) {
-                let ids = options.compactMap(\.favorite?.profileID)
-                pinService.setCuratedList(ids, in: category)
-            }
-        }
-        // A refinement can't outlive its pill: any applied refinement whose
-        // row left the bar is dropped from the selection.
-        let stillApplied = subFilterBar.selectedSubFilters.intersection(surviving)
-        if stillApplied != subFilterBar.selectedSubFilters {
-            subFilterBar.setSelectedSubFilters(stillApplied)
-            viewModel.subFiltersChanged(stillApplied)
-        }
-        // Emptying the row leaves the "+" standing rather than retiring the
-        // bar: the viewer has just curated everyone off, and the one thing
-        // they will want next is a way to put someone back.
-        subFilterBar.restack(to: options)
-        setSubFilterBar(visible: true)
-        // ⚠️ RECORD what was just rendered — do not clear it.
-        //
-        // Clearing looked harmless ("let the next refresh apply whatever it
-        // finds") and was the flash: every edit here writes the rail, the
-        // store's change notification re-runs the refresh, and a nil yardstick
-        // makes that refresh a `.swap` — so the pill the viewer removed
-        // animated out politely and the whole row cross-dissolved on top of
-        // it. With the state recorded, the refresh resolves to `.unchanged`
-        // (or at worst a `.diff`), and the removal is the only thing that
-        // moves.
-        renderedSubFilterRow = filterBar.selectedFilter.flatMap { primary in
-            MapSubFilterRowMemory.railCategory(for: primary) == nil
-                ? nil // Places: not a people row, so it has no state to compare
-                : subFilterMemory.rowState(primary: primary, people: options.compactMap(\.favorite))
-        }
-    }
-
-    /// Pin/unpin a person pill. The rule — including materializing the
-    /// never-curated fallback on the first write — belongs to
-    /// `MapProfilePinService`, which the profile screen's pin button shares;
-    /// the rail then refreshes off the store's change notification rather than
-    /// here, so a pin made anywhere lands the same way.
-    private func togglePinnedFavorite(_ favorite: MapFavorite) {
-        let pinService = pinService
-        let id = favorite.profileID
-        // These pills ARE the dock, so that is the rail this toggles — the
-        // sub-filter rows are edited from the row itself (and from a profile's
-        // star), not from here.
-        Task {
-            var categories = await pinService.categories(for: id)
-            if categories.contains(.dock) {
-                categories.remove(.dock)
-            } else {
-                categories.insert(.dock)
-            }
-            await pinService.setCategories(categories, for: id)
-        }
-    }
-
-    /// Pure cross-dissolve show/hide. Structure (`isHidden`, stack layout)
-    /// always lands OUTSIDE animation blocks: animating `isHidden` on the
-    /// arranged subview made the stack interpolate the freshly-laid-out
-    /// pills from zero frames — the accordion unfold. The main bar never
-    /// moves either way (the stack's BOTTOM is pinned; the row grows upward
-    /// into free map space), so nothing but opacity needs animating.
-    private func setSubFilterBar(visible: Bool) {
-        guard visible != isSubFilterBarVisible else { return }
-        isSubFilterBarVisible = visible
-        if visible {
-            // Un-collapse and lay out at full width while still transparent…
-            UIView.performWithoutAnimation {
-                subFilterBar.isHidden = false
-                barsStack.layoutIfNeeded()
-            }
-            // …then fade the finished row in, in place (spring-settled,
-            // zero bounce — opacity never overshoots).
-            UIView.mapBarFade { self.subFilterBar.alpha = 1 }
-        } else {
-            UIView.mapBarFade(
-                { self.subFilterBar.alpha = 0 },
-                completion: { _ in
-                    // Collapse only after the fade settles — and only if a
-                    // re-show didn't land while the fade-out was in flight.
-                    guard !self.isSubFilterBarVisible else { return }
-                    self.subFilterBar.isHidden = true
-                }
-            )
-        }
-    }
-
-    /// Loads the DOCK: the carousel of people pills in the main bar, visible
-    /// whatever primary is selected. The curated `.dock` list when there is
-    /// one, else the followed profiles — what this carousel has always shown.
-    /// Fail-open: an empty result leaves the bar with just its primaries.
-    ///
-    /// Deliberately NOT scoped to the active primary. The dock is the
-    /// top-level filter, and a top-level filter that changes contents when you
-    /// pick a primary is a different control wearing the same pills. The two
-    /// sub-filter ROWS are where a primary's own people live — see
-    /// `people(for:)`.
-    /// How long the dock waits before asking for its people again after a
-    /// failed read.
-    static let favoritesRetryDelay: TimeInterval = 5
-    static let favoritesRetryLimit = 3
-    private var favoritesRetries = 0
-
-    private func loadFavorites() {
-        #if DEBUG
-        // Which surface a write woke is the whole question when the complaint
-        // is "the other bar flashed", and it is invisible in a screenshot.
-        let arguments = ProcessInfo.processInfo.arguments
-        if arguments.contains("-maps-toggle-subfilter") || arguments.contains("-maps-subfilter-remove")
-            || arguments.contains("-maps-pin-favorite") {
-            print("[maps] dock reload requested")
-        }
-        #endif
-        favoritesTask?.cancel()
-        guard isMember() else {
-            currentFavorites = []
-            filterBar.setFavorites([])
-            return
-        }
-        let repository = favoritesRepository
-        let curated = pinService.curatedProfileIDs(in: .dock)
-        let writer = peopleCache?.viewer
-        favoritesTask = Task { [weak self] in
-            let people = if let curated {
-                await repository.profiles(for: curated)
-            } else {
-                await repository.followingIfReachable()
-            }
-            guard let self, !Task.isCancelled else { return }
-            // ⚠️ A FAILURE IS NOT "NO ONE" (#1767): it read as an empty dock,
-            // the pills gone. The pills on show stay, and the dock asks again
-            // a little later.
-            guard let people else {
-                // A few times, not forever: offline for good, the next reload
-                // (a tab return, a filter change) asks again.
-                guard self.favoritesRetries < Self.favoritesRetryLimit else { return }
-                self.favoritesRetries += 1
-                DispatchQueue.main.asyncAfter(deadline: .now() + Self.favoritesRetryDelay) { [weak self] in
-                    self?.loadFavorites()
-                }
-                return
-            }
-            self.favoritesRetries = 0
-            self.currentFavorites = people
-            self.filterBar.setFavorites(people)
-            self.peopleCache?.store(people, in: .dock, as: writer)
-        }
-    }
-
-    /// The people a primary's sub-filter row shows: the viewer's curated list
-    /// for that row when they have one, else the graph behind it.
-    ///
-    /// The Friends row additionally INTERSECTS with the live mutual set, so
-    /// someone who stops following back leaves the row even though the viewer
-    /// once put them there — the row means "friends", and it keeps meaning
-    /// that. Their dock pill and their Following row entry are untouched, and
-    /// they come back here if they follow back again (the stored list is never
-    /// edited for this — see `MapProfilePinService`).
-    private func people(for primary: MapFilter) async -> [MapFavorite] {
-        let repository = favoritesRepository
-        guard let curated = pinService.curatedProfileIDs(in: primary == .friends ? .friends : .following)
-        else {
-            return primary == .friends ? await repository.friends() : await repository.following()
-        }
-        let people = await repository.profiles(for: curated)
-        guard primary == .friends else { return people }
-        let mutuals = Set(await repository.friends().map(\.profileID))
-        return people.filter { mutuals.contains($0.profileID) }
-    }
-
-    /// Fades both filter bars with the tab bar around the snap-feed flight:
-    /// they belong to the map's resting chrome, and lingering pills under a
-    /// flying hero card read as debris. Mirrors the manual tab-bar
-    /// choreography (hide at lift-off, restore only on the completed pop).
-    private func setFilterBar(hidden: Bool) {
-        UIView.animate(withDuration: 0.2) { [barsStack] in
-            barsStack.alpha = hidden ? 0 : 1
-        }
-    }
-
-    private func bindViewModel() {
-        viewModel.onDiff = { [weak self] diff in self?.handleDiff(diff) }
-        // Queries failing in a row (#798): the pins stay, the toast says the
-        // map is not up to date. The view model says it once per run.
-        // `Feedback` puts it on the topmost presented screen: a sheet over the
-        // map (a marker preview, the sub-filter sheet) would otherwise cover it.
-        viewModel.onRepeatedQueryFailure = { [weak self] message in
-            guard let self else { return }
-            Feedback.failure(message, from: self)
-        }
-        // `onTileCount` is a "zoom in for more" hint hook; wired to UI later.
-    }
-
-    /// Folds a diff into the raw model, then re-lays-out the markers — unless a
-    /// region change is animating, in which case the layout waits for the
-    /// settle (`regionDidChange`), so markers are never restacked mid-flight.
-    private func handleDiff(_ diff: MapAnnotationDiff) {
-        for pin in diff.removed { pins[pin.postID] = nil }
-        for pin in diff.added { pins[pin.postID] = pin }
-        for pin in diff.updated { pins[pin.postID] = pin }
-        if isRegionTransitioning {
-            layoutPending = true
-        } else {
-            #if DEBUG
-            MapChurnCounters.fromDiff += 1
-            #endif
-            reconcileClusters()
-        }
-    }
-
-    /// The settle path's reconcile, throttled while the camera is purely panning.
-    ///
-    /// A pan at an unchanged span cannot change the layout: `MapClusterEngine`
-    /// grids on ABSOLUTE `MKMapPoint`s with `cell = cellPoints / zoomScale`, so
-    /// the viewport centre is not one of its inputs. Measured under
-    /// `-maps-nav-drag` (60 Hz stepped pan, the cadence a finger produces):
-    /// **55.6 reconciles/s producing 0 arrivals and 0 rebinds, costing 65 ms/s
-    /// of main thread** — 6.5%, against 0.67% under `-maps-nav-sweep`, which
-    /// calls `setRegion(animated:)` and so fires this delegate once per gesture
-    /// instead of once per frame. The scripted sweep could not see this at all,
-    /// and the first version of this analysis concluded there was nothing here.
-    ///
-    /// ⚠️ It DEFERS, it never drops. The trailing item always runs, so the
-    /// layout converges even if the camera stops between two callbacks — a
-    /// throttle that skipped the last callback would leave the map permanently
-    /// wrong wherever the finger happened to lift.
-    ///
-    /// A zoom is never throttled. A changed span is exactly the case where the
-    /// layout does move, and it is also the case the user is watching.
-    private func reconcileClustersForSettle() {
-        // The trailing item can land mid-flight, which the settle path never
-        // could — `regionDidChangeAnimated` has just cleared the flag when it
-        // calls in. Restacking mid-flight is exactly what `isRegionTransitioning`
-        // exists to prevent, so hand it to the settle the same way a mid-flight
-        // diff is handed over.
-        if isRegionTransitioning {
-            layoutPending = true
-            return
-        }
-        // ⚠️ OFF BY DEFAULT — it is a MEASURED REGRESSION, kept only so the
-        // experiment stays reproducible. `-maps-reconcile-throttle` enables it.
-        //
-        // It does exactly what it claims: 3 paired 60-second runs, fresh launch
-        // per arm, under `-maps-nav-drag`.
-        //
-        //            reconcile/s   ms/s    cpu    frame    p95   hitches
-        //   control       37.21   48.83  48.5%   21.13  38.58     20.87
-        //   throttled      7.82   13.30  46.4%   22.01  40.46     28.23
-        //
-        // 79% of reconciles and 73% of their main-thread time removed — tight
-        // across all three reps — and the frame, the p95 and the hitches all got
-        // WORSE, every throttled rep above the control's mean. Removing work
-        // from the main thread made the map stutter more.
-        //
-        // The likely mechanism is WHEN, not how much: the inline reconciles ran
-        // synchronously inside the region-change callback, a moment the frame
-        // had already conceded, while the trailing `asyncAfter` lands at an
-        // arbitrary point that can be mid-frame. At 1.3 ms a piece, scheduling
-        // dominates volume.
-        //
-        // ⚠️ A single earlier pair showed hitches 30.9 -> 17.2 and nearly shipped
-        // as a 44% win. The control arm alone swings 17.4-27.7 between runs.
-        // One pair could not have told these apart.
-        guard Self.reconcileThrottleEnabled else {
-            #if DEBUG
-            MapChurnCounters.fromSettle += 1
-            #endif
-            reconcileClusters()
-            return
-        }
-        let zoom = currentZoomScale
-        guard zoom > 0 else { reconcileClusters(); return }
-        let snapped = MapClusterEngine.snapZoom(zoom)
-        let now = CACurrentMediaTime()
-        let isPurePan = lastSettleSnappedZoom == snapped
-        if isPurePan, now - lastSettleReconcileAt < Self.panReconcileInterval {
-            #if DEBUG
-            MapChurnCounters.settleThrottled += 1
-            #endif
-            // ⚠️ ARM ONCE. Cancel-and-reschedule is a DEBOUNCE, and a debounce
-            // waits for quiet — under a 60 Hz pan the item is cancelled every
-            // 16 ms and never fires at all. The first version did exactly that
-            // and emptied the map: the opening reconcile ran before the first
-            // query returned, every later one was starved, and the readout said
-            // `markers 0.0` while every performance column improved. A throttle
-            // arms on the first deferred call and lets it land.
-            guard trailingSettleReconcile == nil else { return }
-            let work = DispatchWorkItem { [weak self] in
-                self?.trailingSettleReconcile = nil
-                self?.reconcileClustersForSettle()
-            }
-            trailingSettleReconcile = work
-            DispatchQueue.main.asyncAfter(
-                deadline: .now() + (Self.panReconcileInterval - (now - lastSettleReconcileAt)),
-                execute: work
-            )
-            return
-        }
-        trailingSettleReconcile?.cancel()
-        trailingSettleReconcile = nil
-        lastSettleSnappedZoom = snapped
-        lastSettleReconcileAt = now
-        #if DEBUG
-        MapChurnCounters.fromSettle += 1
-        #endif
-        reconcileClusters()
-    }
-
-    private func flushPendingDiffs() {
-        guard layoutPending else { return }
-        layoutPending = false
-        #if DEBUG
-        MapChurnCounters.fromFlush += 1
-        #endif
-        reconcileClusters()
-    }
-
-    // MARK: - Querying
-
-    private func scheduleQuery() {
-        pendingQuery?.cancel()
-        // Nothing to fetch for the guest without location: they roam the
-        // countries' own layer (#564, #1907). Unlocking flies somewhere, and
-        // that settle queries.
-        guard !isGuestLocked else { return }
-        let work = DispatchWorkItem { [weak self] in self?.runQuery() }
-        pendingQuery = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.settleDelay, execute: work)
-    }
-
-    private func runQuery() {
-        let region = mapView.region
-        let viewport = MapViewport.make(
-            centerLat: region.center.latitude,
-            centerLng: region.center.longitude,
-            latitudeSpan: region.span.latitudeDelta,
-            longitudeSpan: region.span.longitudeDelta
-        )
-        viewModel.viewportChanged(viewport)
-    }
-
-    // MARK: - Clustering
-
-    /// Re-lays-out the map from the current pin model: `MapClusterEngine`
-    /// decides the markers (a `MapAnnotation` per lone pin, a
-    /// `MapComputedCluster` per group), and this reconciles them against
-    /// what's on screen — updating a surviving marker in place, adding the new,
-    /// removing the gone.
-    ///
-    /// This replaces `MKMapView`'s own clustering, which degrades irreparably
-    /// across pan+zoom (see `MapClusterEngine`): the map is handed finished
-    /// markers with no `clusteringIdentifier`, so MapKit never runs the pass
-    /// that breaks — it just draws each one where we place it.
-    ///
-    /// Stable markers are LEFT ON THE MAP and updated in place — never removed
-    /// and re-added — so they don't flicker. Singles key off their post id
-    /// (stable by nature); clusters are matched to the marker they most overlap
-    /// (`MapClusterTracker`), because a cluster's representative churns as the
-    /// Top-K set shifts and keying off it would fade a settled cluster out and a
-    /// near-identical one back in.
-    private func reconcileClusters() {
-        #if DEBUG
-        MapChurnCounters.reconciles += 1
-        let reconcileStart = DispatchTime.now().uptimeNanoseconds
-        let pinFingerprint = pins.count &* 31 &+ (pins.keys.first?.rawValue.hashValue ?? 0)
-        if pinFingerprint == lastReconciledPinFingerprint { MapChurnCounters.withUnchangedPins += 1 }
-        lastReconciledPinFingerprint = pinFingerprint
-        defer {
-            MapChurnCounters.recordReconcile(
-                micros: Int((DispatchTime.now().uptimeNanoseconds - reconcileStart) / 1_000)
-            )
-        }
-        #endif
-        // ⚠️ A ZERO SCALE IS NOT A ZOOM, IT IS A NOT-YET. The engine's own
-        // degenerate path ships EVERY pin as an unclustered single, and this
-        // runs from `regionDidChangeAnimated`, which fires when the map is
-        // re-attached — so one reconcile against a rect that has not resolved
-        // exploded the whole map to member coordinates and re-collapsed a frame
-        // later. Deferred instead: `layoutPending` is what the next real
-        // layout drains.
-        guard currentZoomScale > 0 else {
-            layoutPending = true
-            return
-        }
-        #if DEBUG
-        // `-maps-no-clustering`: every pin becomes its own marker.
-        //
-        // ⚠️ It exists because the SHIPPING map cannot produce its own designed
-        // worst case. `MapClusterEngine`'s proximity merge recomputes each
-        // cluster's centroid, so merges CHAIN and a dense uniform field
-        // collapses instead of packing the 64pt lattice — measured invariant at
-        // 19 markers whether the corpus is fed 5x, 15x or 40x. The 128-marker
-        // figure every budget in this feature is sized against is a GEOMETRIC
-        // bound, and this flag is the only way to stand a field of that size in
-        // front of the real renderer.
-        //
-        // It is not a product mode and must never become one: without the merge
-        // the map has no answer for a dense city.
-        let unclustered = ProcessInfo.processInfo.arguments.contains("-maps-no-clustering")
-        #else
-        let unclustered = false
-        #endif
-
-        // ⚠️ SORTED, because the proximity merge downstream is order-dependent
-        // (see `proximityCluster`). A dictionary's values re-order whenever it is mutated, and
-        // every return to this screen re-queries — so the markers moved on a map
-        // nobody had panned.
-        let ordered = pins.values.sorted { $0.postID.rawValue < $1.postID.rawValue }
-        // ⚠️ OPEN AND LOCKED POSTS ARE NEVER GROUPED TOGETHER.
-        //
-        // A locked country's posts are on the map — its markers wear its
-        // busiest posts, darkened under a lock — but a marker is ONE tap: it
-        // opens every post it holds, or it offers a country. A group mixing
-        // the two would either open locked posts or lock open ones. The engine
-        // groups each side apart (`isOpen`); at a hierarchy band it also
-        // decides their collisions — the open marker stays, the locked one is
-        // hidden — and below the bands MapKit does (`MapMarkerDress
-        // .lockedPriority`).
-        let items = layOut(ordered, unclustered: unclustered)
-        // A country whose marker is HIDDEN behind a stronger neighbour still
-        // has posts: it is not an empty country, so it wears no flag disc.
-        reportCountriesWithMarkers(items + bandOcclusion.hiddenItems)
-        reconcile(items)
-    }
-
-    /// Tells the country layer which countries a post marker now stands for —
-    /// every member's, so a country whose posts merged into a neighbour's
-    /// marker does not also wear an empty country's disc.
-    private func reportCountriesWithMarkers(_ items: [MapClusterEngine.Item]) {
-        var codes = Set<String>()
-        for item in items {
-            for id in item.memberIDs {
-                guard let pin = pins[id] else { continue }
-                let code = countryCode(of: pin)
-                if !code.isEmpty { codes.insert(code) }
-            }
-        }
-        countryLayer.setCountriesWithMarkers(codes)
-    }
-
-    /// Reconciles `items` — the engine's layout — against the markers on the
-    /// map. See `reconcileClusters`.
-    private func reconcile(_ items: [MapClusterEngine.Item]) {
-        var target = Set<String>()
-        target.reserveCapacity(items.count)
-        var toAdd: [MKAnnotation] = []
-
-        // Singles: one pin, one identity — reuse or reclaim by post id.
-        for item in items where !item.isCluster {
-            let id = Self.singleIdentity(item.representative.postID)
-            target.insert(id)
-            if let existing = displayed[id] {
-                update(existing, to: item)
-            } else if let reclaimed = popChoreographer.reclaim(id) {
-                update(reclaimed, to: item)
-                displayed[id] = reclaimed
-            } else {
-                let annotation = Self.makeAnnotation(for: item)
-                displayed[id] = annotation
-                toAdd.append(annotation)
-            }
-        }
-
-        // Clusters: match by shared membership so a marker persists through the
-        // representative churn. Candidates are the shown clusters PLUS the ones
-        // still fading out — matching a returning cluster to a departing marker
-        // reclaims it instead of stacking a duplicate.
-        let clusterItems = items.filter(\.isCluster)
-        var candidates: [MapClusterTracker.Candidate] = []
-        var candidateIsDeparting: [String: Bool] = [:]
-        for (key, annotation) in displayed {
-            guard let cluster = annotation as? MapComputedCluster else { continue }
-            candidates.append(.init(key: key, members: Set(cluster.memberIDs)))
-            candidateIsDeparting[key] = false
-        }
-        for (key, annotation) in popChoreographer.departingMarkers {
-            guard let cluster = annotation as? MapComputedCluster else { continue }
-            candidates.append(.init(key: key, members: Set(cluster.memberIDs)))
-            candidateIsDeparting[key] = true
-        }
-        // ⚠️ SORTED BEFORE THE ASSIGN. `MapClusterTracker.assign` documents a
-        // tie-break on the CANDIDATE INDEX — which is only deterministic if
-        // the caller supplies a defined one, and both loops above walk
-        // dictionaries.
-        candidates.sort { $0.key < $1.key }
-
-        let matches = MapClusterTracker.assign(
-            incoming: clusterItems.map { Set($0.memberIDs) }, candidates: candidates
-        )
-        for (item, matchedKey) in zip(clusterItems, matches) {
-            if let key = matchedKey {
-                target.insert(key)
-                if candidateIsDeparting[key] == true, let reclaimed = popChoreographer.reclaim(key) {
-                    update(reclaimed, to: item)
-                    displayed[key] = reclaimed
-                } else if let existing = displayed[key] {
-                    update(existing, to: item)
-                }
-            } else {
-                clusterMarkerSeq += 1
-                let key = "c:\(clusterMarkerSeq)"
-                let annotation = Self.makeAnnotation(for: item)
-                displayed[key] = annotation
-                toAdd.append(annotation)
-                target.insert(key)
-            }
-        }
-
-        // Departures: the still-shown markers no target claimed. Hand them to
-        // the choreographer to scale-and-fade out (mirroring the arrival),
-        // which removes them from the map when the animation ends. They leave
-        // `displayed` now — the choreographer is their sole owner until then.
-        let departing = displayed.filter { !target.contains($0.key) }
-        for id in departing.keys { displayed[id] = nil }
-        // A marker that leaves before its view was ever realized is no longer
-        // an arrival, and its identifier would otherwise sit in the set for the
-        // life of the screen.
-        for annotation in departing.values {
-            pendingPopIn.remove(ObjectIdentifier(annotation as AnyObject))
-        }
-        popChoreographer.popOut(departing.map { (id: $0.key, annotation: $0.value) })
-
-        #if DEBUG
-        MapChurnCounters.added += toAdd.count
-        MapChurnCounters.departed += departing.count
-        #endif
-        if !toAdd.isEmpty {
-            pendingPopIn.formUnion(toAdd.map { ObjectIdentifier($0 as AnyObject) })
-            mapView.addAnnotations(toAdd)
-        }
-        refreshVideoPlayback()
-    }
-
-    /// The engine's layout of `ordered` (see `reconcileClusters`).
-    /// Singles go through the SAME reconciliation, so what
-    /// `-maps-no-clustering` measures is the real marker lifecycle and not a
-    /// parallel code path that happens to look similar.
-    private func layOut(_ ordered: [MapPin], unclustered: Bool) -> [MapClusterEngine.Item] {
-        // Nothing goes through the band: nothing is hidden behind anything.
-        if ordered.isEmpty || unclustered { bandOcclusion = MapClusterEngine.Occlusion() }
-        guard !ordered.isEmpty else { return [] }
-        // The ceiling reads the bands from the same spans (#1907).
-        depthClamp.spans = MapClusterEngine.spansByKind(of: ordered)
-        return unclustered
-            ? ordered.map {
-                MapClusterEngine.Item(
-                    representative: $0, memberIDs: [$0.postID],
-                    latitude: $0.latitude, longitude: $0.longitude, place: $0.place
-                )
-            }
-            : MapClusterEngine.cluster(
-                ordered,
-                // Snapped, so an epsilon in the viewport cannot move every grid
-                // line at once — see `MapClusterEngine.snapZoom`.
-                zoomScale: MapClusterEngine.snapZoom(currentZoomScale),
-                cellPoints: Double(Self.clusterCellPoints),
-                // The semantic pre-pass's two banding inputs: the zoom level is
-                // the FALLBACK for an H3-less corpus; the viewport diagonal
-                // drives the dynamic cell-span rule (`MapHierarchyBanding`)
-                // whenever the ladder carries H3 indexes.
-                zoomLevel: MapViewport.zoomLevel(
-                    forLongitudeSpan: mapView.region.span.longitudeDelta
-                ),
-                viewportDiagonalKm: currentViewportDiagonalKm,
-                isOpen: { self.isInUnlockedCountry($0) },
-                occlusion: &bandOcclusion
-            )
-    }
-
-    private static func singleIdentity(_ postID: PostID) -> String { "p:" + postID.rawValue }
-
-    /// The marker a FRESH engine item becomes — a group's cluster, or a lone
-    /// pin carrying its band's place when it is one (`hierarchyPlace`).
-    /// Static so the tests build markers the way the map does, and route them
-    /// through the same `hierarchyPlace(of:)` a tap asks.
-    static func makeAnnotation(for item: MapClusterEngine.Item) -> any MKAnnotation {
-        item.isCluster
-            ? MapComputedCluster(item)
-            : MapAnnotation(pin: item.representative, hierarchyPlace: item.hierarchyPlace)
-    }
-
-    /// Splits a batch of realized views into the ones that are ARRIVING and the
-    /// ones that are merely being drawn again.
-    ///
-    /// Pure and static for the same reason `stack(_:inserting:beneath:)` is:
-    /// the rule needs no live `MKMapView`, and getting it wrong is invisible in
-    /// a screenshot — it only shows up as a map that re-lands every time the
-    /// viewer comes back to it.
-    static func popPartition<View>(
-        _ views: [View], pending: Set<ObjectIdentifier>,
-        identity: (View) -> ObjectIdentifier?
-    ) -> (arriving: [View], settled: [View]) {
-        var arriving: [View] = []
-        var settled: [View] = []
-        for view in views {
-            if let id = identity(view), pending.contains(id) {
-                arriving.append(view)
-            } else {
-                settled.append(view)
-            }
-        }
-        return (arriving, settled)
-    }
-
-    /// The place page's way home: a closure producing a FRESH flight source
-    /// for `annotation`'s marker, resolved when the page stages its own
-    /// dismissal — the marker's face, ring and even presence can all have
-    /// changed since the tap, so nothing is captured beyond the annotation's
-    /// identity. `nil` when the marker has left the map entirely, which is
-    /// the page's cue to keep the plain slide (the fallback dismissal).
-    /// `departureStill` draws the screen the flight is leaving — see the seam's
-    /// own doc. Asked at STAGING, so it costs one render on the first frame of
-    /// the gesture and nothing at all when the flight never happens.
-    private func makeMapReturnSource(
-        for annotation: any MKAnnotation
-    ) -> (@escaping () -> UIImage?) -> (any ZoomTransitionSource)? {
-        { [weak self, weak box = annotation as AnyObject] departureStill in
-            guard let self, let box, let annotation = box as? any MKAnnotation,
-                  self.mapView.annotations.contains(where: { ($0 as AnyObject) === box })
-            else { return nil }
-            let view = self.mapView.view(for: annotation)
-            let thumbnail = (view as? MapClusterAnnotationView)?.heroImage
-                ?? (view as? MapAnnotationView)?.heroImage
-            let cluster = annotation as? MapComputedCluster
-            return MapPinZoomSource(
-                mapView: self.mapView,
-                annotation: annotation,
-                thumbnail: thumbnail,
-                face: Self.face(of: annotation),
-                dress: self.dress(for: annotation),
-                // ⚠️ THE WHOLE DEPARTING SCREEN, not a post's cover. Every other
-                // departure on this source is one post leaving another; here a
-                // GRID is collapsing into an icon, and without an operand the
-                // card wore that icon from the first frame — a full-screen page
-                // cutting straight to a 44pt disc with nothing carried across.
-                //
-                // Resolved through the same channel a post's picture uses, so
-                // the blend does not learn a second shape.
-                departureCover: { departureStill().map { .picture($0) } ?? .none }
-            )
-        }
-    }
-
-    /// The place page's way home as a WINDOW onto the marker — the close a
-    /// text post opened from that marker already takes (`markerRevealOrigin`).
-    ///
-    /// ⚠️ NOT THE HERO. The page used to fly home through `MapPinZoomSource`,
-    /// whose card is the MARKER's face: under a grab the page was hidden
-    /// outright and a marker-shaped sliver of it rode the finger over a black
-    /// screen (filmed, 26 September 2026). A window keeps the page itself
-    /// under the finger, shrinks it as it is dragged, and closes it onto the
-    /// marker with the reveal's crossfade — "prendre le contenu de la fenêtre
-    /// de lieu actuelle et au release faire notre hero transition habituelle".
-    ///
-    /// Asked at close time, so the marker's rect is where the map shows it
-    /// now; nil once the marker is gone, which keeps the plain slide.
-    private func makeMarkerClose(
-        for annotation: any MKAnnotation
-    ) -> (UIViewController) -> RevealGeometry? {
-        { [weak self, weak box = annotation as AnyObject] page in
-            guard let self, let box, let annotation = box as? any MKAnnotation,
-                  self.mapView.annotations.contains(where: { ($0 as AnyObject) === box })
-            else { return nil }
-            // No "will close" chrome work: unlike a feed, the place page
-            // SHOWS the dock (`concealsAppTabBar == false`), so there is
-            // nothing to hide ahead of the window and nothing to bring back.
-            return self.makeRevealGeometry(page, self.markerRevealOrigin(for: annotation), nil)
-        }
-    }
+    // MARK: - Pill menu destinations — state here, behaviour in `MapsViewController+PillMenu.swift`
+    var favoritesRetries = 0
 
     // MARK: - The picture the viewer is leaving
 
@@ -2394,7 +876,7 @@ final class MapsViewController: UIViewController {
     /// feed was seeded in. The map never substitutes: the marker the viewer
     /// tapped has not moved and is what they expect to fall back onto, so what
     /// adapts is the card's departure face, never its landing.
-    private func returnCover(
+    func returnCover(
         to annotation: any MKAnnotation, leaving feed: UIViewController?
     ) -> MapReturnCover {
         let settled = feed as? any SnapFeedSettleReporting
@@ -2464,7 +946,7 @@ final class MapsViewController: UIViewController {
     /// paging into one and dismissing is precisely the case that comes back
     /// empty. Reports at most once, and only if it actually got a picture, so
     /// the flight's own `none` stands when this comes back with nothing.
-    private func awaitReturnCover(
+    func awaitReturnCover(
         to annotation: any MKAnnotation,
         leaving feed: UIViewController?,
         then report: @escaping (MapReturnCover) -> Void
@@ -2481,7 +963,7 @@ final class MapsViewController: UIViewController {
     }
 
     /// Re-points and re-faces a marker already on the map for a recomputed item.
-    private func update(_ annotation: any MKAnnotation, to item: MapClusterEngine.Item) {
+    func update(_ annotation: any MKAnnotation, to item: MapClusterEngine.Item) {
         if let cluster = annotation as? MapComputedCluster {
             cluster.apply(item)
             (mapView.view(for: cluster) as? MapClusterAnnotationView)?
@@ -2504,7 +986,7 @@ final class MapsViewController: UIViewController {
     /// Screen points per map point at the current region — the projection the
     /// engine grids in. Guarded so a zero-width rect (before first layout)
     /// can't divide by zero.
-    private var currentZoomScale: Double {
+    var currentZoomScale: Double {
         let mapWidth = mapView.visibleMapRect.size.width
         guard mapWidth > 0 else { return 0 }
         return Double(mapView.bounds.width) / mapWidth
@@ -2514,1227 +996,10 @@ final class MapsViewController: UIViewController {
     /// banding compares H3 cell spans against. Flat-earth arithmetic (111 km
     /// per degree, longitude scaled by the latitude's cosine) is exact
     /// enough at banding scales.
-    private var currentViewportDiagonalKm: Double {
+    var currentViewportDiagonalKm: Double {
         MapDepthClamp.diagonalKm(of: mapView.region)
     }
 
-    // MARK: - Live previews
-
-    /// Recomputes the ≤3 video pins to autoplay: the on-screen, video-capable,
-    /// LONE pins (a clustered post isn't its own marker), ranked by closeness
-    /// to the viewport center.
-    private func refreshVideoPlayback() {
-        // The same moments decide the one preroll (#654): markers arrived, the
-        // map settled, came back into view.
-        scheduleIdlePreroll()
-        let center = mapView.centerCoordinate
-        let visibleRect = mapView.visibleMapRect
-        var scored: [(distance: Double, candidate: MapVideoPlaybackCoordinator.Candidate)] = []
-        for annotation in displayed.values {
-            // The pin a marker SPEAKS FOR: itself when it is a lone pin, its
-            // representative when it is a cluster.
-            //
-            // A cluster's face is one of its members' posts and representatives
-            // are kind-neutral, so a video post leading a group is ordinary. It
-            // could never play before, because the candidate's view was typed
-            // to the lone-pin class — and on the mock corpus that meant nothing
-            // ever played at all: every video pin in the default viewport was
-            // inside a cluster.
-            var spokenPin: MapPin?
-            var host: (any MapVideoHost)?
-            if let single = annotation as? MapAnnotation {
-                spokenPin = single.pin
-                host = mapView.view(for: single) as? MapAnnotationView
-            } else if let group = annotation as? MapComputedCluster {
-                spokenPin = group.representative
-                host = mapView.view(for: group) as? MapClusterAnnotationView
-            }
-            // A locked country's marker plays nothing: it is a teaser, darkened,
-            // and its post is not the viewer's to watch.
-            guard let pin = spokenPin, let host,
-                  isInUnlockedCountry(pin),
-                  pin.kind == .video,
-                  let url = pin.previewVideoURL,
-                  visibleRect.contains(MKMapPoint(annotation.coordinate))
-            else { continue }
-            let candidate = MapVideoPlaybackCoordinator.Candidate(
-                id: pin.postID, url: url, host: host
-            )
-            scored.append((Self.squaredDistance(annotation.coordinate, center), candidate))
-        }
-        let ranked = scored.sorted { $0.distance < $1.distance }.map(\.candidate)
-        #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-map-icon-hud-log") {
-            let lone = displayed.values.compactMap { $0 as? MapAnnotation }
-            let groups = displayed.values.compactMap { $0 as? MapComputedCluster }
-            print("MAPVIDEO lone=\(lone.count) clusters=\(groups.count) "
-                  + "loneVideo=\(lone.count { $0.pin.kind == .video }) "
-                  + "clusterVideo=\(groups.count { $0.representative.kind == .video }) "
-                  + "onScreen=\(scored.count) chosen=\(ranked.count)")
-        }
-        #endif
-        videoCoordinator.update(candidates: ranked)
-    }
-
-    private static func squaredDistance(_ a: CLLocationCoordinate2D, _ b: CLLocationCoordinate2D) -> Double {
-        let dLat = a.latitude - b.latitude
-        let dLng = a.longitude - b.longitude
-        return dLat * dLat + dLng * dLng
-    }
-
-    // MARK: - Predictive prefetch
-
-    /// Warms the full post behind every visible annotation — the first member for
-    /// a cluster — so a tap opens the snap feed from cache with no metadata
-    /// desync. Bounded by clustering (a handful of annotations) and capped;
-    /// cancels the prior sweep so a fast pan never piles up speculative fetches.
-    /// The ONLY place in this feature that writes the map's interaction.
-    ///
-    /// ⚠️ ONE WRITE, NOT FOUR FLAGS. `isUserInteractionEnabled` covers both
-    /// halves at once — MapKit's own pan/pinch/rotate AND every marker's
-    /// instant-tap recognizer, which is attached to the annotation VIEW.
-    /// Hit-testing never descends into a view that is not interactive, so one
-    /// write starves both; `isScrollEnabled` and friends would leave the marker
-    /// recognizers live, which is exactly the "a second post opened over the
-    /// first" case. Programmatic `selectAnnotation` is unaffected, so the DEBUG
-    /// openers and any deep link still work.
-    ///
-    /// The map's own bar items go with it: they sit ABOVE the transition
-    /// container, so neither the hero's shield nor the reveal's host covers
-    /// them, and the bell pushes onto the very stack the flight is animating.
-    private func applyMapInteraction() {
-        let inert = openGate.mapIsInert
-        // The guest lock rides the SAME write (#564): two writers of one
-        // property would undo each other.
-        mapView.isUserInteractionEnabled = Self.mapIsInteractive(inert: inert, guestLocked: isGuestLocked)
-        navigationItem.leftBarButtonItems?.forEach { $0.isEnabled = !inert }
-        navigationItem.rightBarButtonItems?.forEach { $0.isEnabled = !inert }
-    }
-
-    private func prewarmVisiblePosts() {
-        let visible = mapView.annotations(in: mapView.visibleMapRect)
-        var ids: [PostID] = []
-        var seen = Set<PostID>()
-        func add(_ id: PostID) { if seen.insert(id).inserted { ids.append(id) } }
-        for element in visible {
-            // A locked marker never opens, so there is nothing to warm.
-            if let pin = element as? MapAnnotation, isInUnlockedCountry(pin.pin) {
-                add(pin.pin.postID)
-            } else if let cluster = element as? MapComputedCluster, isInUnlockedCountry(cluster.representative) {
-                cluster.memberIDs.forEach(add)
-            }
-        }
-        guard !ids.isEmpty else { return }
-
-        let batch = Array(ids.prefix(Self.prewarmCap))
-        prewarmTask?.cancel()
-        let prewarm = prewarm
-        prewarmTask = Task { await prewarm(batch) }
-    }
-}
-
-// MARK: - MKMapViewDelegate
-
-extension MapsViewController: MKMapViewDelegate {
-    func mapView(_ mapView: MKMapView, rendererFor overlay: any MKOverlay) -> MKOverlayRenderer {
-        countryLayer.renderer(for: overlay) ?? MKOverlayRenderer(overlay: overlay)
-    }
-
-    func mapView(_ mapView: MKMapView, regionWillChangeAnimated animated: Bool) {
-        // A zoom/pan started: hold annotation mutations until it settles.
-        isRegionTransitioning = true
-        idlePrerollWork?.cancel()
-        textBubbleRegionWillChange()
-        #if DEBUG
-        OfferLog.note("region will change")
-        #endif
-    }
-
-    func mapView(_ mapView: MKMapView, regionDidChangeAnimated animated: Bool) {
-        // Settled. The zoom level changed, so re-lay-out the clusters now (with
-        // the settled projection), fold in anything a mid-flight diff staged,
-        // then request the next page.
-        isRegionTransitioning = false
-        #if DEBUG
-        logSettledCamera()
-        #endif
-        // The ceiling's camera distance, re-read at rest (#1907).
-        depthClamp.calibrate()
-        reconcileClustersForSettle()
-        flushPendingDiffs()
-        scheduleQuery()
-        idlePrerollRested = false
-        idlePrerollRetries = 0
-        scheduleIdlePreroll()
-        textBubbleRegionSettled()
-    }
-
-    func mapView(_ mapView: MKMapView, didAdd views: [MKAnnotationView]) {
-        // Land the ARRIVALS: scale-and-fade in, staggered across the batch.
-        // This still fires for pins panning into the rendered region, not only
-        // for a fresh query — which is what makes the map feel populated rather
-        // than stamped.
-        //
-        // ⚠️ BUT NOT FOR EVERY VIEW MapKit HANDS OVER. It realizes the whole
-        // visible set when the map comes back from a push, so popping the batch
-        // meant the entire map re-landed on every return with nothing having
-        // changed. The others are settled instead — explicitly, because a
-        // recycled view can still be carrying a cancelled pop's alpha.
-        let batch = Self.popPartition(views, pending: pendingPopIn) { view in
-            view.annotation.map { ObjectIdentifier($0 as AnyObject) }
-        }
-        for view in batch.arriving {
-            view.annotation.map { pendingPopIn.remove(ObjectIdentifier($0 as AnyObject)) }
-        }
-        // ⚠️ ONLY WHAT HAS SOMETHING TO SHOW LANDS. The map adds annotations
-        // first and fetches their pictures second, never awaited, so popping
-        // the whole batch lands bare squares that fill in afterwards. A marker
-        // that is not dressed yet is held at zero and let in by its own report
-        // — see `MapMarkerDressing` and `MapAnnotationPop.hold`.
-        let dressed = batch.arriving.filter { ($0 as? any MapMarkerDressing)?.isDressed ?? true }
-        let undressed = batch.arriving.filter { !(($0 as? any MapMarkerDressing)?.isDressed ?? true) }
-        popChoreographer.popIn(dressed)
-        popChoreographer.hold(undressed)
-        popChoreographer.settle(batch.settled)
-        // Annotation views now exist (clustering is current) → bind autoplay and
-        // warm the visible posts so a tap opens instantly.
-        refreshVideoPlayback()
-        prewarmVisiblePosts()
-        textBubbleViewsAdded(views)
-        #if DEBUG
-        debugOpenFirstPinIfRequested(among: views)
-        debugOpenFirstClusterIfRequested(among: views)
-        #endif
-    }
-
-    func mapView(_ mapView: MKMapView, viewFor annotation: any MKAnnotation) -> MKAnnotationView? {
-        #if DEBUG
-        MapChurnCounters.viewFor += 1
-        #endif
-        if let flag = annotation as? CountryFlagAnnotation {
-            return countryLayer.view(for: flag, in: mapView)
-        }
-        if let cluster = annotation as? MapComputedCluster {
-            let view = mapView.dequeueReusableAnnotationView(
-                withIdentifier: MapClusterAnnotationView.reuseIdentifier,
-                for: annotation
-            ) as? MapClusterAnnotationView
-            view?.configure(
-                with: cluster, dress: dress(for: cluster), imagePipeline: imagePipeline,
-                iconCatalog: iconCatalog, previewCatalog: previewCatalog
-            )
-            // Instant tap — bypasses MapKit's ~0.3s selection delay.
-            view?.onSelect = { [weak self, weak view] in
-                self?.noteInstantTap(on: cluster)
-                self?.openAnnotation(cluster, thumbnail: view?.heroImage)
-            }
-            view?.onDressed = { [weak self, weak view] in
-                guard let self, let view else { return }
-                popChoreographer.release(view)
-            }
-            // Back from a flight: reclaim the place a flag disc took while
-            // the marker was hidden (see `MapAnnotationView.onReappear`).
-            view?.onReappear = { [weak self] view in self?.countryLayer.giveWay(to: view.frame) }
-            return view
-        }
-        guard let pinAnnotation = annotation as? MapAnnotation else { return nil }
-        let view = mapView.dequeueReusableAnnotationView(
-            withIdentifier: MapAnnotationView.reuseIdentifier,
-            for: annotation
-        ) as? MapAnnotationView
-        view?.configure(
-            with: pinAnnotation.pin, dress: dress(for: pinAnnotation), imagePipeline: imagePipeline,
-            iconCatalog: iconCatalog, previewCatalog: previewCatalog
-        )
-        view?.onSelect = { [weak self, weak view] in
-            self?.noteInstantTap(on: pinAnnotation)
-            self?.openAnnotation(pinAnnotation, thumbnail: view?.heroImage)
-        }
-        view?.onTouchDown = { [weak self] in self?.beginPlaybackWarm(for: pinAnnotation) }
-        view?.onTouchEnd = { [weak self] cancelled in self?.touchEnded(on: pinAnnotation, cancelled: cancelled) }
-        view?.onDressed = { [weak self, weak view] in
-            guard let self, let view else { return }
-            popChoreographer.release(view)
-            // Its preview sheet is on now: a candidate for the preroll (#654).
-            scheduleIdlePreroll()
-        }
-        view?.onReappear = { [weak self] view in self?.countryLayer.giveWay(to: view.frame) }
-        return view
-    }
-
-
-    /// Opens a tapped marker's post(s) with the hero transition — a single pin
-    /// opens its post, a cluster opens all its members (their ids are already
-    /// held locally, no extra round-trip). The re-entrancy guard makes this
-    /// safe to call from both the instant tap recognizer and MapKit's own
-    /// `didSelect` (the fallback): whichever lands first wins, the other is a
-    /// no-op while the flight is alive.
-    // MARK: - Touch-down warm (#646)
-
-    /// A finger landed on a lone marker: start its post's page player
-    /// now, at the clip time its sheet shows plus the decode, so the page that
-    /// opens on touch-up joins a running player instead of starting one.
-    ///
-    /// ⚠️ INTENT, NOT PROXIMITY. No player is started for a marker nobody
-    /// touches, and this one belongs to the post's page, not to the marker
-    /// (`GeoDiscoveryRepository.previewVideoURL`'s rule stands).
-    /// Whether a marker tap only closes the open offer and opens nothing
-    /// (#686). Pure, for tests.
-    static func markerTapClosesOffer(offerOpen: Bool) -> Bool { offerOpen }
-
-    /// What a marker tap does while an offer is up (#760): another locked
-    /// country's teaser moves the offer straight to that country; its own
-    /// teaser leaves it be; any other marker closes it (#686).
-    enum TapUnderOffer: Equatable { case switchTo(String), keep, close }
-
-    static func tapUnderOffer(teaserCountry: String?, offeredCountry: String?) -> TapUnderOffer {
-        guard let teaserCountry else { return .close }
-        return teaserCountry == offeredCountry ? .keep : .switchTo(teaserCountry)
-    }
-
-    private func noteInstantTap(on annotation: any MKAnnotation) {
-        instantTap = (ObjectIdentifier(annotation as AnyObject), CACurrentMediaTime())
-    }
-
-    /// Whether `didSelect` for `annotation` is the echo of an instant tap
-    /// already handled. ⚠️ (#760) The echo used to reach `openAnnotation`
-    /// with the offer the tap had just opened, and CLOSE it: the map zoomed
-    /// in and straight back out.
-    private func isEchoOfInstantTap(_ annotation: any MKAnnotation) -> Bool {
-        guard let instantTap, instantTap.annotation == ObjectIdentifier(annotation as AnyObject) else { return false }
-        return Self.isSelectionEcho(tappedAt: instantTap.at, now: CACurrentMediaTime())
-    }
-
-    /// MapKit selects ~0.3 s after the touch; a second deliberate tap on the
-    /// same marker comes later than this. Pure, for tests.
-    static func isSelectionEcho(tappedAt: CFTimeInterval, now: CFTimeInterval) -> Bool {
-        now - tappedAt < 1.0
-    }
-
-    /// The locked country `annotation` is a teaser for, if it is one.
-    private func lockedTeaserCountry(of annotation: any MKAnnotation) -> String? {
-        guard let pin = (annotation as? MapComputedCluster)?.representative ?? (annotation as? MapAnnotation)?.pin,
-              case .offer(let code) = Self.markerTap(for: dress(for: annotation), countryCode: countryCode(of: pin))
-        else { return nil }
-        return code
-    }
-
-    private func beginPlaybackWarm(for annotation: MapAnnotation) {
-        // ⚠️ NOT `pin.kind == .video`: production classifies every media pin
-        // `.photo` (`GeoDiscoveryRepository.kind(for:)`), sheet-wearing ones
-        // included. Whether there is a clip to warm is the POST's answer, and
-        // the feed gives it (`FlightPlaybackWarm.warmableClip`).
-        // No warm under an open offer: the tap will only close it (#686).
-        guard offerSheet == nil, openGate.canOpen, playbackWarm?.postID != annotation.pin.postID else { return }
-        endPlaybackWarm(opened: false)
-        let time = warmMediaTime(for: annotation)
-        // The marker the map prerolled: its player is already decoded and
-        // paused — it plays on from the moment the marker shows now (#654).
-        if promoteIdlePreroll(for: annotation.pin.postID, at: time) { return }
-        // ONE player: a touch elsewhere spends the preroll's.
-        endIdlePreroll()
-        guard let warm = warmPlayback(annotation.pin.postID, time) else {
-            #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
-                print("[zoom-live] touch-down warm: nothing to warm for \(annotation.pin.postID.rawValue)")
-            }
-            #endif
-            return
-        }
-        playbackWarm = (annotation.pin.postID, warm)
-        #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
-            print(String(format: "[zoom-live] %.3f touch-down warm %@ at %@", CACurrentMediaTime(),
-                         annotation.pin.postID.rawValue, time.map { String(format: "%.2fs", $0) } ?? "start"))
-        }
-        #endif
-    }
-
-    /// The touch is over. A cancelled one (the map took it) lets go now; one
-    /// that ended gives the tap its turn to open the post first.
-    private func touchEnded(on annotation: MapAnnotation, cancelled: Bool) {
-        guard let warm = playbackWarm, warm.postID == annotation.pin.postID else { return }
-        guard !cancelled else { return endPlaybackWarm(opened: false) }
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.warmOpenWindow) { [weak self] in
-            guard let self, let current = playbackWarm, current.warm === warm.warm else { return }
-            endPlaybackWarm(opened: false)
-        }
-    }
-
-    private func endPlaybackWarm(opened: Bool) {
-        guard let warm = playbackWarm else { return }
-        playbackWarm = nil
-        warm.warm.end(opened: opened)
-    }
-
-    /// The clip time a warm for this marker should play from: the frame its
-    /// sheet shows, plus the player's start-up.
-    private func warmMediaTime(for annotation: MapAnnotation) -> TimeInterval? {
-        guard case .sheet(let sheet)? = mapView.wornPreview(for: annotation)?.art,
-              let frame = mapView.wornPreviewFrame(for: annotation) else { return nil }
-        return MapPinZoomSource.flightMediaTime(sheet: sheet, displayedFrame: frame,
-                                                lead: MapPinZoomSource.warmMediaLead)
-    }
-
-    // MARK: - Idle preroll (#654)
-
-    /// The map came to rest: in `idlePrerollDelay`, preroll the player of the
-    /// marker nearest the centre. A pan starting first cancels it.
-    private func scheduleIdlePreroll() {
-        idlePrerollWork?.cancel()
-        let work = DispatchWorkItem { [weak self] in self?.updateIdlePreroll() }
-        idlePrerollWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.idlePrerollDelay, execute: work)
-    }
-
-    /// ⚠️ ONE PLAYER, AND IT IS THE PAGE'S. The owner's call (2026-10-07):
-    /// the marker nearest the centre gets its post's page player decoded to
-    /// its first frame and paused, so a tap of any length flies live video
-    /// from take-off. Nothing plays behind a marker
-    /// (`GeoDiscoveryRepository.previewVideoURL`'s rule stands), and a paused
-    /// player decodes nothing at rest.
-    private func updateIdlePreroll() {
-        guard !idlePrerollRested else { return }
-        guard view.window != nil, activeTransition == nil, playbackWarm == nil, !isRegionTransitioning,
-              offerSheet == nil,
-              UIApplication.shared.applicationState == .active else {
-            #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
-                print("[zoom-live] idle preroll: not now (window=\(view.window != nil) transition=\(activeTransition != nil) "
-                      + "warm=\(playbackWarm != nil) moving=\(isRegionTransitioning) "
-                      + "active=\(UIApplication.shared.applicationState == .active))")
-            }
-            #endif
-            return endIdlePreroll()
-        }
-        let visible = mapView.visibleMapRect
-        let candidates: [(id: PostID, point: MKMapPoint, annotation: MapAnnotation)] = mapView.annotations
-            .compactMap { $0 as? MapAnnotation }
-            .compactMap { annotation in
-                let point = MKMapPoint(annotation.coordinate)
-                guard visible.contains(point), mapView.view(for: annotation) != nil,
-                      case .sheet? = mapView.wornPreview(for: annotation)?.art,
-                      Self.markerTap(for: dress(for: annotation), countryCode: countryCode(of: annotation.pin)) == .open
-                else { return nil }
-                return (annotation.pin.postID, point, annotation)
-            }
-        let center = MKMapPoint(mapView.centerCoordinate)
-        guard let chosen = Self.prerollCandidate(center: center, pins: candidates.map { ($0.id, $0.point) }),
-              let annotation = candidates.first(where: { $0.id == chosen })?.annotation else {
-            #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
-                print("[zoom-live] idle preroll: no sheet-wearing marker in view")
-            }
-            #endif
-            return endIdlePreroll()
-        }
-        guard idlePreroll?.postID != chosen else { return }
-        endIdlePreroll()
-        guard let warm = prerollPlayback(chosen, warmMediaTime(for: annotation)) else {
-            guard idlePrerollRetries < Self.idlePrerollRetryLimit else { return }
-            idlePrerollRetries += 1
-            let retry = DispatchWorkItem { [weak self] in self?.updateIdlePreroll() }
-            idlePrerollWork = retry
-            DispatchQueue.main.asyncAfter(deadline: .now() + Self.idlePrerollRetryDelay, execute: retry)
-            return
-        }
-        idlePreroll = (chosen, warm)
-        let expiry = DispatchWorkItem { [weak self] in
-            guard let self, idlePreroll?.warm === warm else { return }
-            endIdlePreroll()
-            idlePrerollRested = true
-            #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
-                print("[zoom-live] idle preroll \(chosen.rawValue) let go: the map rested \(Int(Self.idlePrerollLifetime)) s")
-            }
-            #endif
-        }
-        idlePrerollExpiry = expiry
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.idlePrerollLifetime, execute: expiry)
-        #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
-            print("[zoom-live] idle preroll \(chosen.rawValue) of \(candidates.count) candidate(s)")
-        }
-        #endif
-    }
-
-    /// Hands the prerolled player to a touch or an open of its marker:
-    /// playing on from `time`. False when the preroll is another marker's.
-    private func promoteIdlePreroll(for postID: PostID, at time: TimeInterval?) -> Bool {
-        guard let preroll = idlePreroll, preroll.postID == postID else { return false }
-        idlePreroll = nil
-        idlePrerollExpiry?.cancel()
-        idlePrerollExpiry = nil
-        preroll.warm.resume(at: time)
-        playbackWarm = preroll
-        #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
-            print("[zoom-live] preroll promoted \(postID.rawValue) at \(time.map { String(format: "%.2fs", $0) } ?? "-")")
-        }
-        #endif
-        return true
-    }
-
-    private func endIdlePreroll() {
-        idlePrerollWork?.cancel()
-        idlePrerollWork = nil
-        idlePrerollExpiry?.cancel()
-        idlePrerollExpiry = nil
-        guard let preroll = idlePreroll else { return }
-        idlePreroll = nil
-        preroll.warm.end(opened: false)
-    }
-
-    /// The marker a preroll goes to: the one nearest the centre. Pure, for tests.
-    static func prerollCandidate(center: MKMapPoint, pins: [(id: PostID, point: MKMapPoint)]) -> PostID? {
-        pins.min { center.distance(to: $0.point) < center.distance(to: $1.point) }?.id
-    }
-
-    func openAnnotation(_ annotation: any MKAnnotation, thumbnail: UIImage?) {
-        // ⚠️ AN OPEN OFFER SWALLOWS THE TAP (#686), as a tap on the map does:
-        // tapping away is "no thanks". Here, ahead of everything, so the
-        // instant tap, MapKit's `didSelect`, VoiceOver and the DEBUG hooks all
-        // meet it. A sheet already on its way down still swallows it — a fast
-        // second tap must not open a post during the descent.
-        if Self.markerTapClosesOffer(offerOpen: offerSheet != nil) {
-            switch Self.tapUnderOffer(
-                teaserCountry: lockedTeaserCountry(of: annotation), offeredCountry: offerSheet?.country.code
-            ) {
-            case .switchTo(let code):
-                if let country = CountryAtlas.shared.country(code: code) { offer(country) }
-            case .keep:
-                break
-            case .close:
-                closeOffer(returning: true)
-            }
-            return
-        }
-        guard openGate.canOpen else { return }
-        let postIDs = Self.postIDs(of: annotation)
-        guard !postIDs.isEmpty else { return }
-        // A locked country's marker is a teaser, not a door: it offers the
-        // country — what the old locked badge did — and opens nothing.
-        if let pin = (annotation as? MapComputedCluster)?.representative ?? (annotation as? MapAnnotation)?.pin,
-           case .offer(let code) = Self.markerTap(for: dress(for: annotation), countryCode: countryCode(of: pin)) {
-            if let country = CountryAtlas.shared.country(code: code) { offer(country) }
-            return
-        }
-        let face = Self.face(of: annotation)
-        #if DEBUG
-        // Which face a tapped marker wears decides its TRANSITION
-        // (`MapMarkerPresentation`: media flies, everything else slides in,
-        // #2015). Without this line, "the present animation is wrong" and
-        // "this marker is not the face you think" are indistinguishable from
-        // outside.
-        print("[maps] tap face=\(face) presentation=\(MapMarkerPresentation(face: face)) "
-              + "posts=\(postIDs.count) first=\(postIDs.first?.rawValue ?? "-")")
-        #endif
-        switch MapMarkerPresentation(face: face, reducesMotion: HeroMotionPolicy.prefersNativePush) {
-        case .plainPush where navigationController != nil:
-            // ⚠️ EVERY NON-MEDIA MARKER (#2015, the owner 2026-11-01): a text
-            // post — a text marker, an avatar, an emote, a GIF — opens with
-            // the platform's own slide, and closes with it (the plain push
-            // pins its native close). It opened as a window growing out of
-            // the disc since #125. Through the feed's shared plain-push seam
-            // so this screen gets the same swipe-back it gets everywhere.
-            //
-            // The map's own chrome is left alone on purpose: the filter bars
-            // live in this view and slide out WITH it, where the flight has to
-            // hide them because the map stays visible under the card. The tab
-            // bar is hidden and restored by the seam, and previews stop and
-            // resume through the ordinary appearance callbacks — all of which
-            // are keyed on `activeTransition == nil`, which is exactly what
-            // this path is. The marker stays on the map under the push.
-            guard openGate.openBegan(.plainPush) else { return }
-            // A HIERARCHY marker always offers its place page, whatever face
-            // it wears (a city or country is a place before it is a
-            // photograph): the same builder the hero's Case B uses, handed
-            // through the seam so the DOWNWARD dismissal lands on it — the
-            // rightward one is the plain slide back to the map. Same
-            // criterion as the hero path — `isHierarchyMarker` — and a band's
-            // group of one is its place's marker too (`hierarchyPlace(of:)`).
-            let hierarchyPlace = Self.hierarchyPlace(of: annotation)
-            let placePage: ((UIViewController) -> UIViewController)? = hierarchyPlace.map { place in
-                let mapReturn = makeMapReturnSource(for: annotation)
-                let markerClose = makeMarkerClose(for: annotation)
-                let country = countryCode(of: annotation)
-                let centre = annotation.coordinate
-                return { [makeClusterGallery] feed in
-                    makeClusterGallery(postIDs, place, country, centre, feed, mapReturn, markerClose)
-                }
-            }
-            #if DEBUG
-            // `-maps-open-place`: pushes the place page ON ITS OWN.
-            //
-            // ⚠️ THIS SCREEN HAD NO SCRIPTED ROUTE AT ALL. It is inserted under
-            // the cluster feed and uncovered by a vertical dismissal — a gesture
-            // no harness can inject, and the nearest arguments all land
-            // somewhere else (`-snap-auto-dismiss` pops past it to the map, the
-            // vertical grab opens the comments). So its layout could only ever
-            // be judged by hand, and a change to it could only be verified by
-            // asking someone to go and look.
-            //
-            // Pushed directly here it is the same controller with the same
-            // content; what it does NOT exercise is the dismissal that normally
-            // uncovers it, which keeps its own arguments.
-            if ProcessInfo.processInfo.arguments.contains("-maps-open-place"),
-               let placePage {
-                navigationController?.pushViewController(placePage(UIViewController()), animated: true)
-                return
-            }
-            #endif
-            pushPlainSnapFeed(postIDs, self, placePage)
-        case .plainPush, .hero:
-            // No stack to push onto: the window has nowhere to open, so the
-            // feed is presented instead — the same concession the plain push
-            // already made.
-            presentSnapFeed(postIDs: postIDs, from: annotation, thumbnail: thumbnail)
-        }
-    }
-
-    /// Whether MapKit's selection of `annotation` opens it: never a country's
-    /// flag disc, whose own recognizer took the tap (#760).
-    static func mapSelectionOpens(_ annotation: any MKAnnotation) -> Bool {
-        !(annotation is CountryFlagAnnotation)
-    }
-
-    func mapView(_ mapView: MKMapView, didSelect view: MKAnnotationView) {
-        // Deselect immediately so the pin can be tapped again after dismissal.
-        // The instant-tap recognizer normally fires first; this is the fallback
-        // (and clears MapKit's own selection either way).
-        guard let annotation = view.annotation else { return }
-        mapView.deselectAnnotation(annotation, animated: false)
-        // ⚠️ A COUNTRY'S FLAG DISC HAS TAKEN ITS TAP ALREADY (#760): its own
-        // recognizer offered the country; MapKit's selection, landing a beat
-        // later, read as a tap under the open offer and CLOSED it — the zoom
-        // in and straight back out.
-        guard Self.mapSelectionOpens(annotation), !isEchoOfInstantTap(annotation) else { return }
-
-        let thumbnail = (view as? MapAnnotationView)?.heroImage
-            ?? (view as? MapClusterAnnotationView)?.heroImage
-        openAnnotation(annotation, thumbnail: thumbnail)
-    }
-
-    /// Everything the tapped marker stands for, in the order the feed should
-    /// page through it: one post for a lone pin, the WHOLE group for a cluster
-    /// with its representative first.
-    ///
-    /// The same answer whatever the posts are. A cluster's members are already
-    /// held client-side (`MapClusterEngine` folded them), so a text post, a
-    /// photo and a video that happen to sit on the same corner all travel
-    /// together into one swipeable feed — the presentation differs (see
-    /// `MapMarkerPresentation`), never the corpus.
-    ///
-    /// Pure and static so the passthrough can be tested without a live
-    /// `MKMapView`: dropping members here would be invisible on screen — the
-    /// feed would simply end early — which is exactly the kind of silent
-    /// truncation a test has to pin.
-    static func postIDs(of annotation: any MKAnnotation) -> [PostID] {
-        switch annotation {
-        case let pin as MapAnnotation: [pin.pin.postID]
-        case let cluster as MapComputedCluster: cluster.memberIDs
-        default: []
-        }
-    }
-
-    /// The MARKER's window, asked for at close time.
-    ///
-    /// Identical to the arguments the text-pin route already passes, so the two
-    /// routes' windows are the same window — a marker opened as a hero and a
-    /// marker opened as a reveal close the same way. The extra `dismissalDidEnd`
-    /// is the close-out the hero's own `onSourceReturned` performs and a card
-    /// close never reaches; the concealment is paid back by the animator.
-    private func markerRevealOrigin(for annotation: any MKAnnotation) -> TextRevealOrigin {
-        MapPinRevealSource.origin(
-            mapView: mapView,
-            annotation: annotation,
-            face: Self.face(of: annotation),
-            dress: dress(for: annotation),
-            concealMarker: { [weak mapView] concealed in
-                mapView?.view(for: annotation)?.isHidden = concealed
-            },
-            depthView: { [weak self] in self?.view },
-            dismissalDidEnd: { [weak self] committed in
-                guard let self else { return }
-                // ⚠️ REPORTED WHATEVER THE OUTCOME. This is the reveal route's
-                // ONLY terminal signal, and the gate needs the cancelled case
-                // as much as the committed one.
-                openGate.dismissalBegan()
-                openGate.dismissalEnded(committed: committed)
-                guard committed else { return }
-                // A BACKSTOP — the close's commit has normally shown the dock.
-                // A card close finished the flight's pop: the session's
-                // close-out, the gate already settled above.
-                activeSession?.close(.abandoned)
-            }
-        )
-    }
-
-    /// Which screen a card close is aiming at.
-    ///
-    /// ⚠️ THE POP'S DESTINATION DECIDES, not the post. A vertical grab lands on
-    /// the place page and closes onto its Activity row; everything else — the
-    /// chevron, a horizontal grab, and both axes when there is no place page at all —
-    /// lands on the MAP, so it closes onto the marker whatever post the viewer
-    /// paged to. Aiming a card at a screen the pop is not going to is how a
-    /// close ends up with no animation at all.
-    enum MapCardCloseTarget: Equatable { case marker, placeCard }
-
-    static func closeTarget(axis: ZoomDismissAxis, hasLanding: Bool) -> MapCardCloseTarget {
-        // Down onto the place page; right and up (the end of the list,
-        // #761) onto the marker.
-        axis.landsBeneath && hasLanding ? .placeCard : .marker
-    }
-
-    /// Where a place page goes when a vertical dismissal commits: beneath the
-    /// feed it is landing from.
-    ///
-    /// Pure, and separate from the navigation call for the same reason
-    /// `postIDs(of:)` is: the rule needs no live `MKMapView`, and a wrong
-    /// answer here is invisible on screen until someone presses back.
-    /// Nil means "nothing to do" — already inserted, or no feed to insert under.
-    static func stack(
-        _ current: [UIViewController], inserting landing: UIViewController,
-        beneath feed: UIViewController
-    ) -> [UIViewController]? {
-        guard !current.contains(landing),
-              let index = current.firstIndex(of: feed) else { return nil }
-        var next = current
-        next.insert(landing, at: index)
-        return next
-    }
-
-    /// …and back out again when that dismissal is abandoned.
-    static func stack(
-        _ current: [UIViewController], removing landing: UIViewController
-    ) -> [UIViewController]? {
-        guard current.contains(landing) else { return nil }
-        return current.filter { $0 !== landing }
-    }
-
-    /// The face the tapped marker is wearing, so the flight card takes off as
-    /// its twin — a symbol pin must not fly as an empty square.
-    /// Internal (not private) only for the +QA hooks.
-    static func face(of annotation: any MKAnnotation) -> PinCardView.Face {
-        let pin = (annotation as? MapAnnotation)?.pin
-            ?? (annotation as? MapComputedCluster)?.representative
-        return pin.map(PinCardView.Face.of) ?? .media
-    }
-
-    private func presentSnapFeed(postIDs: [PostID], from annotation: any MKAnnotation, thumbnail: UIImage?) {
-        // The page about to open joins the player its touch-down started
-        // (#646); any other post's warm has nothing to hand over. One with a
-        // picture already FLIES: the card carries it from its first frame.
-        // An open with no touch-down (VoiceOver, a programmatic select) still
-        // takes the marker's preroll (#654); any other post's goes.
-        if playbackWarm == nil, let pin = annotation as? MapAnnotation {
-            _ = promoteIdlePreroll(for: pin.pin.postID, at: warmMediaTime(for: pin))
-        }
-        endIdlePreroll()
-        let warm = playbackWarm.flatMap { postIDs.first == $0.postID ? $0.warm : nil }
-        let warmFlies = warm?.hasPicture ?? false
-        endPlaybackWarm(opened: warm != nil)
-        #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
-            print("[zoom-live] open: warm=\(warm == nil ? "none" : (warmFlies ? "flies" : "no picture yet"))")
-        }
-        #endif
-        let feedVC = makeSnapFeed(postIDs)
-        guard let nav = navigationController,
-              let destination = feedVC as? any ZoomTransitionDestination else {
-            // ⚠️ THE DEFENSIVE BRANCH TAKES THE LOCK TOO. It set neither flag,
-            // so two taps could `present` twice — and presenting over a
-            // presentation raises rather than degrades.
-            guard openGate.openBegan(.modalFallback) else { return }
-            // Defensive: without the hero seam (or a stack), show it plainly.
-            if let nav = navigationController {
-                feedVC.hidesBottomBarWhenPushed = true
-                nav.pushViewController(feedVC, animated: true)
-            } else {
-                present(feedVC, animated: true)
-            }
-            return
-        }
-        // A live-previewing pin flies live: its pooled player is mirrored onto
-        // the flight card's own render surface (same player → same frame), so
-        // the flight never freezes the preview mid-loop.
-        let tappedID = (annotation as? MapAnnotation)?.pin.postID
-        let coordinator = videoCoordinator
-        let source = MapPinZoomSource(
-            mapView: mapView,
-            annotation: annotation,
-            thumbnail: thumbnail,
-            face: Self.face(of: annotation),
-            // The marker's flag border and badge ride the flight, so the card
-            // is the tapped marker's twin down to its furniture — neutral for
-            // anything that isn't the active band's own marker.
-            dress: dress(for: annotation),
-
-            // A touch-down warm with a picture is the page's own player, live
-            // (#646): the card flies it from take-off — no sheet, no fade —
-            // and the page, told so, joins it rather than starting its own.
-            mirrorLive: warmFlies ? warm.map { warm in { renderView in warm.mirror(onto: renderView) } }
-                : tappedID.map { id in
-                { renderView in coordinator.mirrorLivePreview(of: id, to: renderView) }
-            },
-            // Asked while this transition is being constructed — before the
-            // freeze three dozen lines below, which is what makes the answer
-            // hold for the whole flight.
-            isLivePreviewing: warmFlies ? { true } : tappedID.map { id in
-                { coordinator.isLivePreviewing(id) }
-            },
-            // Asked at DISMISSAL staging, so it reports where the viewer
-            // actually stopped rather than where they started. The card lands
-            // on this marker either way; only its departure face adapts.
-            departureCover: { [weak self, weak feedVC] in
-                self?.returnCover(to: annotation, leaving: feedVC) ?? .none
-            },
-            awaitDepartureCover: { [weak self, weak feedVC] report in
-                self?.awaitReturnCover(to: annotation, leaving: feedVC, then: report)
-            }
-        )
-        // A *push*, not a modal: the feed joins this tab's stack, so the one
-        // navigation bar cross-fades the map's items into the feed's back item
-        // + author capsule natively — no second bar to pop in over the first.
-        // The transition object is the stack's delegate for the feed's
-        // lifetime.
-        guard openGate.openBegan(.hero) else { return }
-        let session = HeroPushSession(source: source, destination: destination, on: nav)
-        let transition = session.controller
-        activeSession = session
-
-        // CASE B (cluster-gallery milestone): a HIERARCHY marker — the active
-        // band's own city or country cluster — carries a place page beneath
-        // its feed. The page joins the stack invisibly in the same
-        // transaction as the feed (UIKit animates a stack whose last element
-        // is new exactly like a push, and never even loads the mid
-        // controller's view), and the VERTICAL grab closes the active post
-        // onto the page's Activity row instead of back to the pin — as the
-        // card close beside this flight (`attachCardCloseAlongsideFlight`),
-        // for EVERY post: the page refuses a hero (`zoomLandingAcceptsHero`),
-        // so the vertical flight driver below stays armed only to decline.
-        // ORDINARY clusters
-        // — proximity groups, even ones whose members happen to share a leaf
-        // place — and local single pins skip all of this: only a city or a
-        // country has a place page (product call, 2026-08-31). A band's group
-        // of ONE is a city or a country, and gets it (`hierarchyPlace(of:)`).
-        var gallery: UIViewController?
-        if let place = Self.hierarchyPlace(of: annotation) {
-            let built = makeClusterGallery(
-                postIDs, place, countryCode(of: annotation), annotation.coordinate, feedVC,
-                makeMapReturnSource(for: annotation),
-                makeMarkerClose(for: annotation)
-            )
-            gallery = built
-            if let gallerySource = built as? any ZoomTransitionSource {
-                transition.setDismissSource(gallerySource, for: built)
-                // ⚠️ NOT UPWARD (#761): the end of the list closes to the map,
-                // through the marker driver below.
-                transition.attachInteractiveDismissal(
-                    to: feedVC.view, axes: [.vertical], armsUpward: false, towards: gallerySource
-                ) { [built, weak nav, weak feedVC] in
-                    // ⚠️ THE PAGE JOINS THE STACK HERE, at the last moment
-                    // before the pop that lands on it — the mirror of the
-                    // reveal route's own splice. `built` is captured STRONGLY:
-                    // the dismiss target holds it weakly, so until this runs
-                    // this closure chain is the page's only owner.
-                    //
-                    // A plain stack transaction with nothing transitioning,
-                    // which is the one condition under which it is reliable.
-                    if let nav, let feedVC,
-                       let plan = Self.stack(
-                           nav.viewControllers, inserting: built, beneath: feedVC
-                       ) {
-                        nav.setViewControllers(plan, animated: false)
-                    }
-                    // Nothing about the dock here: this pop lands on the place
-                    // page, and the feed brings the bar back through UIKit once
-                    // the release commits. The filter bars are invisible under
-                    // the gallery either way.
-                    #if DEBUG
-                    if ProcessInfo.processInfo.arguments.contains("-grab-log") {
-                        print("[caseb] splice+pop delegate=\(nav?.delegate.map { "\(type(of: $0))" } ?? "nil")"
-                              + " stack=\(nav?.viewControllers.map { "\(type(of: $0))" } ?? [])")
-                    }
-                    #endif
-                    feedVC?.closeScreen(whenBusy: .drop)
-                }
-            }
-            // Its landing is the session's `.toIntermediate` ending (below).
-        }
-
-        // ONE close-out per ending (`HeroPushSession.Ending`). The session has
-        // already ended its leases on the stack's delegate slot; a place page
-        // that leased it on top keeps it.
-        //
-        // ⚠️ `.reversed` is the flight caught mid-air and thrown back, which
-        // once had no handler here at all: the latch stayed set and every
-        // marker tap for the rest of the session did nothing.
-        session.onClose = { [weak self, source] ending in
-            guard let self else { return }
-            self.activeSession = nil
-            self.barsStack.alpha = 1
-            switch ending {
-            case .toIntermediate:
-                // The gallery is the screen now, an ordinary one; the map's
-                // chrome settles silently beneath it (invisible until the
-                // gallery pops, when `viewWillAppear` resumes previews). The
-                // present flight hid the tapped marker, and nothing on the
-                // gallery path would ever restore it.
-                self.openGate.dismissedToIntermediate()
-                source.setZoomSourceHidden(false)
-                return
-            case .reversed:
-                self.openGate.presentationCancelled()
-                // The card close armed beside the flight serves a feed that
-                // never showed; released a turn later, as the closing callbacks
-                // of these objects may still be unwinding.
-                let abandonedClose = self.cardClose
-                self.cardClose = nil
-                DispatchQueue.main.async { withExtendedLifetime(abandonedClose) {} }
-            case .returned:
-                self.openGate.dismissalBegan()
-                self.openGate.dismissalEnded(committed: true)
-            case .abandoned:
-                break // whoever ended it settled the gate
-            }
-            self.tabBarController?.showTabBarNativelyNextTurn()
-            self.videoCoordinator.setSurfaceVisible(true)
-            self.idlePrerollRested = false
-            self.refreshVideoPlayback()
-            self.scheduleIdlePreroll()
-            // The flight froze the bars' inset (`syncBarsPosition` stands down
-            // while one is up); the screen is at rest again.
-            self.syncBarsPosition()
-        }
-
-        var didLand = false
-        transition.onDestinationShown = { [weak self, weak transition] in
-            // Landed (fires again if a detail above the feed pops back — the
-            // flight-scoped work must run once): release the donor player.
-            guard !didLand else { return }
-            didLand = true
-            self?.openGate.destinationShown()
-            self?.videoCoordinator.stopAll()
-
-            #if DEBUG
-            // `[delay]`, for the reason its two siblings grew one: a run that
-            // PAGES the feed first cannot be scripted against a hard-coded
-            // 1.5s, and the vertical dismissal onto a place page is only
-            // interesting once the viewer has moved off the post the cluster
-            // opened on.
-            if let position = ProcessInfo.processInfo.arguments
-                .firstIndex(of: "-maps-demo-grab") {
-                let arguments = ProcessInfo.processInfo.arguments
-                let delay = position + 1 < arguments.count
-                    ? (Double(arguments[position + 1]) ?? 1.5) : 1.5
-                DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-                    transition?.debugScriptedGrab()
-                }
-            }
-            #endif
-        }
-        // ⚠️ THE BAR IS NOT THE FLIGHT'S, and nothing here writes its alpha.
-        // UIKit shows it once the close is committed (`viewWillAppear`'s
-        // policy, and the feed's own close); this is the backstop. See
-        // `TabBarRevealPolicy`.
-        transition.onDismissalCancelled = { [weak self, gallery, weak nav, weak feedVC] in
-            // The feed is STAYING, so the gate does not reopen — it goes back to
-            // `.open`, which is what `committed: false` means.
-            self?.openGate.dismissalBegan()
-            self?.openGate.dismissalEnded(committed: false)
-            // The feed is staying up: the filter bars go back down behind it.
-            // The dock was never raised — it waits for a COMMITTED release.
-            self?.barsStack.alpha = 0
-            // ⚠️ THE UNDO IS NOW A REMOVAL, and it used to be an insertion.
-            //
-            // With the page off the stack at rest, an abandoned VERTICAL grab
-            // is a page that was spliced in and never landed on — so this takes
-            // it back out, and the back button and the horizontal close keep
-            // their map landing. `gallery` is captured STRONGLY on purpose:
-            // between the splice and this cancel, this closure chain is the
-            // only thing keeping it alive.
-            //
-            // Deferred one runloop turn, and that hop is load-bearing: this
-            // callback fires inside `completeTransition(false)`'s own call
-            // stack, and a `setViewControllers` issued there is silently
-            // swallowed by UIKit's post-cancel bookkeeping — measured in-sim.
-            DispatchQueue.main.async { [weak nav] in
-                guard let nav, let gallery,
-                      let plan = Self.stack(nav.viewControllers, removing: gallery)
-                else { return }
-                nav.setViewControllers(plan, animated: false)
-            }
-        }
-        // Accessing `view` loads it so the grab-to-dismiss pan can attach.
-        if let clusterGallery = gallery {
-            // Case B's HORIZONTAL escape: straight back to the map.
-            //
-            // ⚠️ IT NO LONGER DROPS ANYTHING, because there is nothing on the
-            // stack to drop — the page is spliced in by the vertical grab
-            // alone. This used to reorder the stack first (a scrubbed multi-pop
-            // is not an option: UIKit commits a popTo's mutation at begin and a
-            // cancel does not restore it, see `InteractivePopToStackTests`), and
-            // keeping a now-redundant removal would hide a regression of the
-            // new invariant rather than expose it. What is left is the
-            // ordinary, fully cancellable single pop the pin grab has always
-            // been, landing on the map so the default (pin) source flies the
-            // card home. Axes stay disjoint with the gallery driver above:
-            // exactly one of the two ever claims a drag.
-            _ = clusterGallery
-            // Right, and up past the end of the list (#761): both to the map.
-            transition.attachInteractiveDismissal(to: feedVC.view, axes: [.horizontal, .upward]) {
-                [weak feedVC] in
-                // The bottom chrome comes back from `viewWillAppear`, which
-                // this pop runs — see the pin grab below.
-                feedVC?.closeScreen(whenBusy: .drop)
-            }
-        } else {
-            // Case A (single pin / generic cluster): both axes fly home to
-            // the pin.
-            transition.attachInteractiveDismissal(to: feedVC.view) { [weak feedVC] in
-                // ⚠️ NOTHING ABOUT THE DOCK AT GRAB-BEGIN any more. It used to
-                // put the bar's state back here at alpha 0 and show it at the
-                // landing. A grab is a question until it is released: the pop
-                // below runs this screen's `viewWillAppear`, which restores the
-                // filter bars and hands the dock to `TabBarRevealPolicy` —
-                // UIKit shows it when the release commits.
-                feedVC?.closeScreen(whenBusy: .drop)
-            }
-        }
-        // Map is covered by the feed → stop its previews, except the tapped
-        // pin's, which the flight card is still rendering. Set *before* the
-        // push so the map's viewWillDisappear sweep is a no-op that can't
-        // touch the donor.
-        videoCoordinator.setSurfaceVisible(false, keeping: tappedID)
-        // Tab bar managed by hand, NOT hidesBottomBarWhenPushed: that flag's
-        // bottom-bar choreography doesn't scrub with a custom interactive pop
-        // (the bar snaps in at pop-begin and flashes over the feed when a grab
-        // cancels). By hand — through UIKit's API, on UIKit's animation — it
-        // leaves with the lift-off, stays hidden through cancelled grabs,
-        // and comes back once a close is committed. Constraint: a
-        // programmatic cross-tab route while the feed is pushed would find the
-        // bar hidden — today no such route fires from inside the feed.
-        tabBarController?.hideTabBarNatively()
-        setFilterBar(hidden: true)
-        session.takeDelegateSlot()
-        // ⚠️ NOT pre-paying the destination's layout here, and the empty space
-        // is deliberate.
-        //
-        // For You calls `zoomPrepareForPresentation` before its own push, and
-        // the same call was added here for parity. It is the wrong trade on
-        // this screen: the map builds a FRESH feed on every tap
-        // (`makeSnapFeed`), so the layout it pre-pays is a cold one, and it
-        // runs synchronously — plus a `CATransaction.flush` — between the
-        // finger coming up and the flight starting. Reported as a long pause
-        // between tapping a marker and the animation beginning, which is worse
-        // than the frame pacing it was buying: a stall the viewer is waiting
-        // through beats one they are watching an animation through.
-        //
-        // The seam is left in place (`ZoomTransitionDestination`), because the
-        // measurement that would justify calling it — a cold feed laid out off
-        // the tap's critical path — is the thing to take before trying again.
-        // ⚠️ AN ORDINARY PUSH, WHATEVER CASE THIS IS — and the place page is
-        // NOT in it.
-        //
-        // It used to join the stack in the same transaction as the feed, on the
-        // reasoning that the gallery is never SEEN. True, and beside the point:
-        // a stack is not only what is drawn, it is what BACK means. With the
-        // page sitting under the feed, the chevron's single pop landed on a
-        // place page the viewer had never asked for and had no way to predict
-        // — filmed twice, from a country marker and from a city one.
-        //
-        // The reveal route reached this conclusion first and states it in its
-        // own words (`FeedFeatureBuilder.pushWithoutFlight`): the page is
-        // INSERTED for a committed vertical dismissal and taken out again if
-        // that dismissal is abandoned, "so the back button and the horizontal
-        // close keep their map landing". Two routes, one rule, and only one of
-        // them had it.
-        nav.pushViewController(feedVC, animated: true)
-        // ⚠️ UNCONDITIONALLY, INCLUDING CASE A. A single pin had no slide
-        // driver at all, so its chevron fell through to UIKit's native pop —
-        // the hero declines a `.card` close outright, and nothing else was
-        // listening. `arbitratesWithHeroGrab` keeps the two grabs disjoint and
-        // the `.hero` forward happens before any geometry is read, so a media
-        // post's close is still the flight.
-        attachCardCloseAlongsideFlight(
-            feed: feedVC, gallery: gallery,
-            markerOrigin: markerRevealOrigin(for: annotation), on: nav
-        )
-    }
-
-    /// A dismissal for the posts this flight cannot carry.
-    ///
-    /// ⚠️ THE FEED IS A PAGER AND THE PRESENTATION WAS CHOSEN AT THE TAP. A
-    /// media-faced marker opens with a hero; swipe to a TEXT post and there is
-    /// no media left for that hero to fly. Both zoom grabs then refuse —
-    /// `ZoomDismissInteractionController` gates on `zoomDismissalKind != .card`
-    /// BEFORE it looks at the axis, so the horizontal one refuses too — and
-    /// the native edge pop is already disclaimed. Measured: on that page the
-    /// drag did nothing at all, on either axis, and the back chevron was the
-    /// only way out.
-    ///
-    /// For You hit this first and answered it with exactly this driver
-    /// (`attachCardCloseAlongsideFlight`); Case B never received the
-    /// equivalent. `arbitratesWithHeroGrab` is what divides the work: each
-    /// side refuses the other's kind, so exactly one claims any grab.
-    private func attachCardCloseAlongsideFlight(
-        feed: UIViewController, gallery: UIViewController?,
-        markerOrigin: TextRevealOrigin, on nav: UINavigationController
-    ) {
-        // Optional now: the MARKER landing needs no place page, so the driver
-        // must exist even when there is none to land on.
-        let landing = gallery as? any CardCloseLanding
-        let slide = InteractiveSlideDismissal()
-        cardClose = slide
-        // It holds the stack's slot on the flight's behalf.
-        activeSession?.registerForwarder(slide)
-        #if DEBUG
-        print("[card-close] map armed placePage=\(landing != nil)")
-        #endif
-        // ⚠️ FIRST, because arming resets the driver — every setter below
-        // (`fallbackSlideAxis` among them) has to land after it.
-        armCardClose(slide, feed: feed, landing: landing, markerOrigin: markerOrigin)
-        // ⚠️ DOWNWARD ONTO A PLACE PAGE, EVERY POST IS THIS DRIVER'S — media
-        // included. After the arming above, which resets it.
-        //
-        // The page's landing is its ACTIVITY row, with the post the viewer is
-        // on moved to the top (`PlaceProfileViewController.cardCloseGeometry`):
-        // the close a TEXT marker's feed has always had, and the one filmed as
-        // right (Paris). A media marker's feed used to hand a photograph's
-        // downward close to the hero instead, which flew it onto a DISCOVER
-        // tile — the tab chosen by the kind of post the marker wore (Lyon).
-        // The page now refuses a flight (`zoomLandingAcceptsHero`), and this
-        // asks that same answer, so the vertical hero grab and this driver
-        // cannot both decline — or both claim — one drag. Rightward, and with
-        // no page at all, the hero keeps every photograph it had.
-        let gallerySource = gallery as? any ZoomTransitionSource
-        slide.heroClaimsAxis = { [weak gallerySource] axis in
-            !axis.landsBeneath || gallerySource?.zoomLandingAcceptsHero != false
-        }
-        // ⚠️ THE DEFAULT AXES, deliberately restored. Restricting the window
-        // to `[.vertical]` made a horizontal grab a percent-driven SLIDE, and
-        // the chevron a plain one — which is the fallback that was filmed. Both
-        // now close as a window onto the marker; `fallbackSlideAxis` stays as
-        // the floor for the case where no geometry could be staged at all.
-        slide.fallbackSlideAxis = .horizontal
-        // The bottom chrome is NOT the closing window's: the filter bars come
-        // back from `viewWillAppear` and the dock through UIKit once the close
-        // is committed (the feed's own close, and `viewWillAppear`'s policy),
-        // with the marker origin's `dismissalDidEnd` as the landing's
-        // backstop — exactly as the hero's own return does.
-        slide.onWillBeginPop = { [weak nav, weak feed, gallery] axis in
-            guard axis.landsBeneath, let gallery, let nav, let feed,
-                  let plan = Self.stack(
-                      nav.viewControllers, inserting: gallery, beneath: feed
-                  )
-            else { return }
-            nav.setViewControllers(plan, animated: false)
-            // ⚠️ AND OUT AGAIN FOR AN ABANDONED SWIPE — the removal the hero's
-            // own vertical grab has in `onDismissalCancelled`, which this
-            // driver now needs for every post rather than only text ones:
-            // left spliced, the back button that follows lands on a place page
-            // the viewer never asked for. Both hops are load-bearing, for the
-            // reasons `FeedFeatureBuilder.pushWithoutFlight` measured: the
-            // coordinator exists only once the pop has begun (next turn), and
-            // a `setViewControllers` inside `completeTransition(false)`'s call
-            // stack is silently swallowed.
-            DispatchQueue.main.async { [weak nav, weak feed] in
-                guard let coordinator = feed?.transitionCoordinator else { return }
-                coordinator.animate(alongsideTransition: nil) { context in
-                    guard context.isCancelled else { return }
-                    DispatchQueue.main.async { [weak nav, weak feed] in
-                        guard let nav, let feed, nav.topViewController === feed,
-                              let plan = Self.stack(nav.viewControllers, removing: gallery)
-                        else { return }
-                        nav.setViewControllers(plan, animated: false)
-                    }
-                }
-            }
-        }
-        // The backstop: whatever animated the close, no tile stays hidden. The
-        // staging above conceals one, and only the reveal's own completion
-        // pays that back — a pop finished by anything else would leave a hole
-        // in the mosaic for good.
-        slide.onFeedPopped = { [weak self, weak landing, weak nav, gallery] _ in
-            landing?.clearLandingConcealment()
-            // Idempotent, and only where there is a page: a card close that was
-            // armed and then abandoned leaves it spliced in, and the back
-            // button must still find the map. Case A never had one.
-            if let gallery, let nav,
-               let plan = Self.stack(nav.viewControllers, removing: gallery),
-               nav.topViewController !== gallery {
-                nav.setViewControllers(plan, animated: false)
-            }
-            self?.cardClose = nil
-        }
-        // AFTER the push, so the flight controller is what `install` captures
-        // and a `.hero` pop forwards straight back to it.
-        slide.install(on: nav)
-        #if DEBUG
-        debugScriptCardCloseIfRequested(slide)
-        #endif
-    }
-
-    /// The map's two landings, armed through the SHARED helper
-    /// (`armAsCardCloseAlongsideFlight`) — the close For You, a profile and
-    /// the place page's own tiles make.
-    ///
-    /// What the helper brings is the shared rules: both axes, arbitrated
-    /// against the hero grab, the reset, and a staging asked ONLY for a close
-    /// that carries a card. What stays here is only the landing: the marker's
-    /// window, or the place page's card.
-    ///
-    /// ⚠️ RESTAGED ON EVERY ATTEMPT (`restagesOnEveryAttempt`), not once.
-    /// The helper's latch assumes one landing per presentation; this screen
-    /// has two, chosen by the AXIS. Latched, a vertical grab abandoned
-    /// half-way would leave the place card's geometry armed for the chevron
-    /// that follows, and the window would shrink onto a tile that is not on
-    /// screen. So each landing keeps its own rule inside the staging:
-    ///
-    /// * the MARKER is rebuilt at every ask — a pure build whose rect and
-    ///   stand-in are resolved at ask time (`MapPinRevealSource.origin`), so a
-    ///   recycled or moved marker view is found again on the next attempt;
-    /// * the PLACE CARD is staged once and remembered, because its staging
-    ///   ADOPTS a tile (a move that undoes itself if repeated) — and handed
-    ///   back on a later vertical attempt, even after a marker attempt
-    ///   replaced it in between.
-    private func armCardClose(
-        _ slide: InteractiveSlideDismissal, feed: UIViewController,
-        landing: (any CardCloseLanding)?, markerOrigin: TextRevealOrigin
-    ) {
-        var placeCardGeometry: RevealGeometry?
-        // ⚠️ `slide` WEAKLY: the driver owns this closure and the closure
-        // writes back through the driver, so a strong capture is a retain
-        // cycle — every card close ever staged would keep its driver alive
-        // for the life of the process, one per opened post, and invisible to
-        // every census, because what leaks is a DRIVER and nothing counts
-        // those. `cardClose = nil` cannot help: the cycle holds the object
-        // whether or not this controller still points at it.
-        slide.armAsCardCloseAlongsideFlight(
-            on: feed, restagesOnEveryAttempt: true
-        ) { [weak self, weak landing, weak slide] feed, axis in
-            guard let self, let slide else { return false }
-            switch Self.closeTarget(axis: axis, hasLanding: landing != nil) {
-            case .marker:
-                slide.revealGeometry = self.makeRevealGeometry(feed, markerOrigin, nil)
-            case .placeCard:
-                if placeCardGeometry == nil {
-                    placeCardGeometry = landing?.cardCloseGeometry(dismissing: feed)
-                }
-                // Nil (no card to aim at yet) leaves the plain slide, and the
-                // next attempt asks again.
-                slide.revealGeometry = placeCardGeometry
-            }
-            #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-grab-log") {
-                print("[card-close] stage axis=\(axis)"
-                      + " geometry=\(slide.revealGeometry != nil)")
-            }
-            #endif
-            return slide.revealGeometry != nil
-        }
-    }
 }
 
 extension MapsViewController {
