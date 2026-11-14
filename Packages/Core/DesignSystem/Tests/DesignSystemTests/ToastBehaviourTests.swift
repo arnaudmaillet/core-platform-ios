@@ -10,7 +10,7 @@ import UIKit
 /// (`ToastClock.current`, Reduce Motion's defaults, the assistive-technology
 /// probe) is set and put back synchronously, with no `await` in between.
 @MainActor
-@Suite(.serialized)
+@Suite(.serialized, .ownsToastClock)
 struct ToastBehaviourTests {
 
     /// A toast in a visible window, on a manual clock; all taken down within
