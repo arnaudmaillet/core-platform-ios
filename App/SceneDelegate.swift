@@ -31,6 +31,9 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         // obey it too — an appearance default only reaches views created after
         // it is set.
         ScrollIndicatorStyle.hideAppWide()
+        // Every switch's on track in the primary: a `UISwitch` ignores the
+        // window's tint below (#2435).
+        SwitchStyle.tintAppWide()
 
         #if DEBUG
         // Shake for the debug dashboard (#2131, #2132; the mock network's

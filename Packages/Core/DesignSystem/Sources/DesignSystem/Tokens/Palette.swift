@@ -39,8 +39,9 @@ import UIKit
 ///   buttons, chips, the segmented selection and in-text mentions (#1168).
 /// - **The primary marks what matters**: a screen's one primary action, the
 ///   system controls (the app's tint — `AccentColor`, the window's
-///   `tintColor` — so switches, the cursor and selection follow without
-///   per-site code), the hearts and every unread mark (`counter`). The
+///   `tintColor` — so the cursor and selection follow without per-site
+///   code; switches through one appearance rule, `SwitchStyle`, #2435), the
+///   hearts and every unread mark (`counter`). The
 ///   system red is for errors and destruction only.
 /// - **Every pill and badge is the solid primary** (the owner, 2026-11-02):
 ///   never a gradient, under a white count.
@@ -65,6 +66,9 @@ public enum Palette {
     // MARK: - Primary: FF1358
 
     /// Interactive glyphs, text buttons, switches, selection: the app's tint.
+    /// ⚠️ A switch does not take it from the window's `tintColor`: its on
+    /// track reads `onTintColor` only, which `SwitchStyle.tintAppWide()` sets
+    /// to this at launch (#2435).
     /// The same `FF1358` in both appearances (3.83:1 on white, 5.49:1 on
     /// black, past a glyph's 3:1); Increased Contrast takes it past 6:1 on
     /// either.
