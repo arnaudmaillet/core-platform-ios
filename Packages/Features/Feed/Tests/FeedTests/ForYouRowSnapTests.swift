@@ -37,10 +37,6 @@ struct ForYouRowSnapTests {
             Row(viewport: viewport, itemWidth: Metrics.cardSize(forWidth: viewport).width, count: count)
         }
 
-        static func stories(_ viewport: CGFloat, count: Int = 12) -> Row {
-            Row(viewport: viewport, itemWidth: Metrics.storySize(forWidth: viewport).width, count: count)
-        }
-
         func snap(_ projected: CGFloat, _ direction: ForYouRowSnap.Direction?) -> CGFloat {
             ForYouRowSnap.target(
                 projected: projected, direction: direction, items: items,
@@ -94,12 +90,12 @@ struct ForYouRowSnapTests {
         #expect(Metrics.itemGap >= Metrics.sideMargin)
     }
 
-    /// On every phone width and in both rows, the start shows nothing on the
+    /// On every phone width, the start shows nothing on the
     /// left and an item cropped on the right, and a rest flush right shows
     /// nothing on the right and an item cropped on the left.
     @Test(arguments: widths)
     func bothRowsCropOneSideAndEmptyTheOther(width: CGFloat) {
-        for (name, row) in [("cards", Row.cards(width)), ("stories", Row.stories(width))] {
+        for (name, row) in [("cards", Row.cards(width))] {
             #expect(row.isLeadingAligned(0) && row.isEmptyOnLeft(0), "\(name)@\(width): the start")
             #expect(row.isCroppedOnRight(0), "\(name)@\(width): an item peeks on the right at the start")
 
@@ -115,16 +111,11 @@ struct ForYouRowSnapTests {
         }
     }
 
-    /// Following stays about 2.3 cards wide; Friends shows four faces and a
-    /// fifth cropped, on every width.
+    /// Following stays about 2.3 cards wide, on every width.
     @Test(arguments: widths)
     func theRowsShowTheirCounts(width: CGFloat) {
         let cards = Row.cards(width).onScreen(at: 0).filter { $0.lowerBound < width }
         #expect(cards.count == 3, "two cards and a third peeking at \(width)")
-        let stories = Row.stories(width).onScreen(at: 0).filter { $0.lowerBound < width }
-        #expect(stories.count == 5, "four faces and a fifth peeking at \(width)")
-        let face = ForYouStoryCell.Metrics.faceDiameter(discSide: Metrics.storySize(forWidth: width).width)
-        #expect((50...80).contains(face), "a face \(face) across at \(width)")
     }
 
     // MARK: - The target
@@ -162,7 +153,7 @@ struct ForYouRowSnapTests {
 
     /// The ends: never past either, and the end is flush right.
     @Test func theEndsAreTheRowsOwn() {
-        let row = Row.stories(402)
+        let row = Row.cards(402, count: 12)
         #expect(row.snap(-50, .backward) == 0)
         #expect(row.snap(10_000, .forward) == row.offsets.upperBound)
         #expect(row.isTrailingAligned(row.offsets.upperBound))
@@ -234,9 +225,7 @@ struct ForYouRowSnapTests {
     @Test func theFollowingRowSnapsThroughItsDelegate() throws {
         let lead = ForYouLeadFixture(pipeline: ImagePipeline(fetcher: SilentFetcher()), videoPlayback: nil)
         lead.stack.frame = CGRect(x: 0, y: 0, width: 393, height: 800)
-        var state = ForYouViewModel.Rails()
-        state.following = (0..<8).map { post("c\($0)") }
-        lead.render(state)
+        lead.render(following: (0..<8).map { post("c\($0)") })
         lead.stack.layoutIfNeeded()
         let row = lead.shelf.mediaView
         row.layoutIfNeeded()

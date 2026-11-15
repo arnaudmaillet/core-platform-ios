@@ -52,51 +52,6 @@ struct DiscoverListPageTests {
         page.subviews.compactMap { $0 as? UICollectionView }.first!
     }
 
-    // MARK: - The single page
-
-    /// The snapshot hands each surface its OWN corpus: Discover everyone, the
-    /// mosaic Discover's media, the pushed lists the people followed.
-    @Test func eachSurfaceIsHandedItsOwnCorpus() async {
-        let all = corpus(9)
-        let model = ForYouViewModel(repository: DiscoverStubProvider(posts: all))
-        var latest: ForYouViewModel.Snapshot?
-        model.onSnapshotChange = { latest = $0 }
-        model.viewDidLoad()
-        for _ in 0..<40 where model.discoverPosts.isEmpty {
-            try? await Task.sleep(for: .milliseconds(5))
-        }
-        #expect(latest?.discover == .content(all))
-        #expect(latest?.media == .content(all.filter { $0.kind != .text }))
-    }
-
-    /// Discover is everyone: an author unfollowed from the screen leaves
-    /// Following and stays in Discover's state — list and mosaic both — and
-    /// an empty Discover speaks Discover's words.
-    @Test func discoverIsEveryoneFollowingIsTheFollowed() async {
-        let posts = corpus(6).enumerated().map { index, post in
-            GalleryPost(
-                id: post.id, kind: post.kind, isRepost: false, pages: post.pages,
-                caption: post.caption, publishedAtMS: post.publishedAtMS,
-                authorID: ProfileID(index.isMultiple(of: 2) ? "followed" : "stranger")
-            )
-        }
-        let model = ForYouViewModel(repository: DiscoverStubProvider(posts: posts))
-        var latest: ForYouViewModel.Snapshot?
-        model.onSnapshotChange = { latest = $0 }
-        model.viewDidLoad()
-        for _ in 0..<40 where model.discoverPosts.isEmpty {
-            try? await Task.sleep(for: .milliseconds(5))
-        }
-        model.removeAuthor(ProfileID("stranger"))
-
-        #expect(latest?.discover == .content(posts))
-        #expect(model.followingPosts.allSatisfy { $0.authorID == ProfileID("followed") })
-        #expect(model.discoverPosts.contains { $0.authorID == ProfileID("stranger") })
-
-        let empty = ForYouViewModel.discoverEmptyState(source: .trending)
-        #expect(empty.title.contains("discover"))
-    }
-
     // MARK: - Stretches, sections, cells
 
     /// The page shows exactly the planner's list, flattened in display order.
@@ -569,14 +524,5 @@ struct DiscoverGalleryTests {
         #expect(window.cornerRadius == ChaoticSliceLayout.harmonisedCornerRadius)
         #expect(window.rowFrame(gallery.view) != nil)
         #expect(window.makeDismissStandIn(nil) is PostGridTileStandInView)
-    }
-}
-
-private final class DiscoverStubProvider: ForYouProviding, @unchecked Sendable {
-    private let posts: [GalleryPost]
-    init(posts: [GalleryPost]) { self.posts = posts }
-    func firstPage() async throws -> ForYouPage { ForYouPage(posts: posts, nextPageToken: nil) }
-    func page(after token: String) async throws -> ForYouPage {
-        ForYouPage(posts: [], nextPageToken: nil)
     }
 }

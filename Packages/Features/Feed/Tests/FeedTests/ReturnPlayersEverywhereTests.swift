@@ -399,35 +399,6 @@ struct ReturnPlayersEverywhereTests {
         #expect(origin.textReveal != nil, "no window for a close from a text page")
     }
 
-    @Test func forYousFollowingCardsKeepTheTileContract() async throws {
-        let posts = Self.videos(4, prefix: "f")
-        var opened: SnapFeedHeroOrigin?
-        let screen = ForYouViewController(
-            viewModel: ForYouViewModel(repository: EmptyForYouProvider()),
-            imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
-            videoPlayback: Self.makePool(),
-            makeSnapFeed: { _, _ in UIViewController() },
-            openPostHero: { _, origin, _ in opened = origin },
-            prewarm: { _ in }
-        )
-        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
-        window.rootViewController = UINavigationController(rootViewController: screen)
-        window.makeKeyAndVisible()
-        defer { window.isHidden = true }
-        var rows = ForYouViewModel.Rails()
-        rows.following = posts
-        await Self.settle {
-            // Re-asserted each turn: the view model's own first load renders
-            // the (empty) rails after the screen appears.
-            if screen.debugShelf.cards != posts { screen.debugShelf.render(posts) }
-            window.layoutIfNeeded()
-            screen.openCard(at: 0)
-            return opened != nil
-        }
-        try Self.expectShelfTileContract(opened)
-        #expect(opened?.post.id == posts[0].id)
-    }
-
     @Test func thePlacePagesPopularCardsKeepTheTileContract() async throws {
         let posts = Self.videos(12, prefix: "p")
         var opened: SnapFeedHeroOrigin?

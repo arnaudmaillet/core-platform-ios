@@ -22,13 +22,12 @@ struct ClearHeaderEdgeTests {
     }
 
     /// ⚠️ AND THE ROWS' OWN SCROLLERS. For You's list is led by horizontal
-    /// rows (`ForYouLeadFixture`: Friends, then its shelf's media and text
-    /// rows); a row is a scroll view under the same header, and its effect
+    /// rows (`ForYouLeadFixture`: its shelf's media and text rows); a row is a scroll view under the same header, and its effect
     /// would draw a band across the header too.
     @Test func theForYouRowsHideTheirEffectToo() throws {
         let lead = ForYouLeadFixture(pipeline: pipeline(), videoPlayback: nil)
-        let rows = (lead.friends.subviews + lead.shelf.subviews).compactMap { $0 as? UIScrollView }
-        #expect(rows.count == 3)
+        let rows = lead.shelf.subviews.compactMap { $0 as? UIScrollView }
+        #expect(rows.count == 2)
         #expect(rows.allSatisfy { $0.topEdgeEffect.isHidden })
     }
 }

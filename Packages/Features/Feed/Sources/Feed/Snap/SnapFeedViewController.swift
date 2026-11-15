@@ -1972,8 +1972,6 @@ final class SnapFeedViewController: UIViewController {
     /// (`TabBarRevealPolicy`). A placeholder toolbar in its place was tried
     /// and dropped the same day.
     private func applyForYouRootTabBar() {
-        // The sector does not page under the open comments (#1703).
-        (parent as? ForYouSectorViewController)?.setPagingEnabled(!engagedChromeOnBar)
         guard isForYouRoot, let tabBarController, view.window != nil,
               tabBarController.isTabBarHidden else { return }
         tabBarController.showTabBarNatively()
@@ -3774,7 +3772,6 @@ final class SnapFeedViewController: UIViewController {
             SnapCommentsSheetViewController.prepare(detail, commentCount: modelsByID[id]?.cardMetrics?.comments)
         }
         collectionView.isScrollEnabled = false
-        (parent as? ForYouSectorViewController)?.setPagingEnabled(false)
         // The balance moves to the sheet's bar (the page's leaves with its
         // bar): a badge of its own, kept current with the page's.
         let sheetBadge = walletBadgeItem != nil ? WalletBadgeButton() : nil
@@ -3790,7 +3787,6 @@ final class SnapFeedViewController: UIViewController {
             guard let self else { return }
             commentsSheet = nil
             collectionView.isScrollEnabled = true
-            (parent as? ForYouSectorViewController)?.setPagingEnabled(true)
             // Reopening is as cheap as opening — warmed once the screen is
             // still, never in the close's own turn: ~100 ms of panel build
             // there held the first frames of whatever the finger did next
@@ -8559,24 +8555,6 @@ extension SnapFeedViewController: ContentPopGating {
     public func allowsContentPop(beginningAt point: CGPoint, in view: UIView) -> Bool {
         !(sideList?.isEngaged ?? false) && !(sideList?.isOpen ?? false)
     }
-}
-
-// MARK: - The For You root's header (#1681)
-
-// MARK: - The For You sector's page (#1703)
-
-extension SnapFeedViewController: ForYouSectorPage {
-    /// In front, the feed lends its bars their style again; behind, it hands
-    /// them back to Feed.
-    func sectorPageDidChangeActivity(_ isActive: Bool) {
-        guard isActive else { return releaseChromeTheme() }
-        hasHandedChromeBack = false
-        if let model = activeModel ?? arrivalModel { applyChromeTheme(hasMedia: model.mediaURL != nil) }
-    }
-
-    /// UIKit gives the feed its safe area in the sector: nothing to take.
-    func sectorSafeAreaDidChange(_ insets: UIEdgeInsets) {}
-
 }
 
 extension SnapFeedViewController: HorizontalDragClaiming {

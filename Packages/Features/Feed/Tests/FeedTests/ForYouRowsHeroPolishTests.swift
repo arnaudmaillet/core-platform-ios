@@ -421,9 +421,7 @@ struct ForYouRowsHeroPolishTests {
             let pipeline = ImagePipeline(fetcher: SilentFetcher())
             lead = ForYouLeadFixture(pipeline: pipeline, videoPlayback: nil)
             page = ForYouGridPage(imagePipeline: pipeline, style: .discover, videoPlayback: nil)
-            var model = ForYouViewModel.Rails()
-            model.following = cards
-            lead.render(model)
+            lead.render(following: cards)
             window.rootViewController = host
             window.isHidden = false
             page.frame = host.view.bounds

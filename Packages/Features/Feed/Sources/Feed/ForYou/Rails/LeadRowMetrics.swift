@@ -23,11 +23,6 @@ enum LeadRowMetrics {
     /// Cards per screen width, counted from the left margin: two whole,
     /// and a third peeking to say the row goes on.
     static let cardsPerWidth: CGFloat = 2.3
-    /// Faces per screen width, the same way: four whole and a fifth
-    /// cropped by the right edge — on every width, which is why the face
-    /// is sized from the width rather than fixed (at this gap, no one size
-    /// leaves a crop on 375, 402 and 440 alike).
-    static let storiesPerWidth: CGFloat = 4.4
     /// Height over width: portrait, tall enough that two lines of caption
     /// sit over the picture without burying it.
     static let cardAspect: CGFloat = 4.0 / 3.0
@@ -58,11 +53,5 @@ enum LeadRowMetrics {
     static func cardSize(forWidth width: CGFloat) -> CGSize {
         let cardWidth = itemWidth(forWidth: width, perWidth: cardsPerWidth)
         return CGSize(width: cardWidth, height: (cardWidth * cardAspect).rounded())
-    }
-
-    /// A story cell at `width`: the disc (face and ring), and the name
-    /// under it no wider than the disc.
-    static func storySize(forWidth width: CGFloat) -> CGSize {
-        ForYouStoryCell.Metrics.size(discSide: itemWidth(forWidth: width, perWidth: storiesPerWidth))
     }
 }

@@ -8,7 +8,7 @@ import Testing
 import UIKit
 @testable import Feed
 
-/// How For You's Friends and Following rows CLOSE (2026-09-29, after #312).
+/// How the Following shelf's cards CLOSE (2026-09-29, after #312).
 ///
 /// Three reported defects, each pinned here at the seam that decides it:
 ///
@@ -46,54 +46,6 @@ struct ForYouRowsCloseTests {
             for: fixture.host, origin: origin, pipeline: nil, dock: { $0 }
         )
         #expect(landing is RowCardCloseLanding, "no card close would be armed beside the flight")
-    }
-
-    /// The same for a friend's story, whatever their first post is: a face
-    /// opening onto a photograph closes onto the face from a text page too.
-    @Test(arguments: [GalleryPost.Kind.photo, .text])
-    func everyStoryCarriesTheWindowItsCloseNeeds(first kind: GalleryPost.Kind) throws {
-        let story = Self.story("pal", posts: [Self.post("s1", kind: kind), Self.post("s2", kind: .text)])
-        let fixture = Fixture(stories: [story])
-        let origin = try #require(ForYouRowOrigins.story(
-            story, friends: fixture.lead.friends, page: fixture.page, host: fixture.host.view
-        ))
-
-        // Never a flight (#1356): a face is the friend's avatar, not their
-        // post's picture, and the window opens whatever the first post is.
-        #expect(!origin.hasHero, "a story flew the avatar into the post's media")
-        #expect(origin.textReveal != nil)
-        #expect(FeedFeatureBuilder.cardCloseLanding(
-            for: fixture.host, origin: origin, pipeline: nil, dock: { $0 }
-        ) is RowCardCloseLanding)
-    }
-
-    /// The window opens from the face — the page riding in over it — and
-    /// closes onto the avatar's own picture, the sharper one once it has
-    /// loaded (#1356): never a render of the cell, whose initials fill showed
-    /// as a light rim.
-    @Test func aStoryOpensOntoThePostAndClosesOntoTheAvatarPicture() throws {
-        let story = Self.story("pal", posts: [Self.post("s1", kind: .photo)])
-        let fixture = Fixture(stories: [story])
-        let sharp = UIGraphicsImageRenderer(size: CGSize(width: 512, height: 512)).image { context in
-            UIColor.systemPink.setFill()
-            context.fill(CGRect(x: 0, y: 0, width: 512, height: 512))
-        }
-        var deliver: (@MainActor (UIImage) -> Void)?
-        let origin = try #require(ForYouRowOrigins.story(
-            story, friends: fixture.lead.friends, page: fixture.page, host: fixture.host.view,
-            largerFace: { deliver = $0 }
-        ))
-        let reveal = try #require(origin.textReveal)
-        // The face opens the window as well, under the page: the page rides
-        // whole and fades in over it, rather than keyholing through the face.
-        let opening = try #require(reveal.makePresentStandIn() as? UIImageView, "the window opened with no face")
-        #expect(opening.layer.cornerRadius == fixture.lead.friends.storyFaceCornerRadius)
-
-        let hand = try #require(deliver)
-        hand(sharp)
-        let standIn = try #require(reveal.makeDismissStandIn(nil) as? UIImageView)
-        #expect(standIn.image === sharp, "the close landed on something other than the avatar's picture")
-        #expect(standIn.layer.cornerRadius == fixture.lead.friends.storyFaceCornerRadius)
     }
 
     /// The window a MEDIA card's close lands as is that card — its picture on
@@ -277,13 +229,6 @@ struct ForYouRowsCloseTests {
         )
     }
 
-    private static func story(_ handle: String, posts: [GalleryPost]) -> ForYouViewModel.FriendStory {
-        ForYouViewModel.FriendStory(
-            authorID: ProfileID(handle), name: handle.capitalized, handle: handle,
-            avatarURL: nil, posts: posts, hasUnseen: true
-        )
-    }
-
     /// ⚠️ BY THE SYMBOL'S NAME, `system: play…`. A bare "play" also matches
     /// every symbol's trait dump ("DisplayScale"), which failed this for the
     /// count's glyph — and a probe that fires on any symbol proves nothing.
@@ -316,15 +261,12 @@ struct ForYouRowsCloseTests {
         let lead: ForYouLeadFixture
         let page: ForYouGridPage
 
-        init(cards: [GalleryPost] = [], stories: [ForYouViewModel.FriendStory] = []) {
+        init(cards: [GalleryPost] = []) {
             let pipeline = ImagePipeline(fetcher: SilentFetcher())
             lead = ForYouLeadFixture(pipeline: pipeline, videoPlayback: nil)
             page = ForYouGridPage(imagePipeline: pipeline, style: .discover, videoPlayback: nil)
             // Rendered before it has a window, so the rows apply unanimated.
-            var model = ForYouViewModel.Rails()
-            model.following = cards
-            model.friends = stories
-            lead.render(model)
+            lead.render(following: cards)
             window.rootViewController = host
             window.isHidden = false
             page.frame = host.view.bounds

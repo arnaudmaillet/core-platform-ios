@@ -24,7 +24,6 @@ struct DirectPipelineReadGuardTests {
         "FeedFeatureBuilder.swift": "the launch warm-up of the first post's picture (#1765)",
         "SnapAuthorIdentityView.swift": "warms the next author's face into the pipeline",
         "SnapFeedViewController.swift": "the lock screen's now-playing artwork",
-        "ForYouViewController.swift": "a story ring's larger face, handed to a flight",
         "ForYouGridPage.swift": "a flight's stand-in and the landing cover's warm-up",
         "PostShelfSection.swift": "the autoplay's cache probe: is the cover drawn yet",
         "SnapSideListAutoplay.swift": "the autoplay's cache probe",

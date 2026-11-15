@@ -17,12 +17,10 @@ struct StackScreenGuardTests {
     static let neverPushed: [String: String] = [
         // A tab's or the drawer's root.
         "MapsViewController": "Explore's root",
-        "ForYouSectorViewController": "For You's root",
         "MessagesInboxViewController": "Messages' root",
         "GuestSignInViewController": "Messages' root for a guest",
         "NotificationsViewController": "the drawer's root",
         // A child page or a container, never on a stack of its own.
-        "ForYouViewController": "a page of For You's sector",
         "ConversationListViewController": "a page of the inbox",
         "SuggestionsViewController": "a page of the inbox",
         "InboxSearchResultsViewController": "the inbox search's results controller",

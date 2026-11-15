@@ -67,16 +67,8 @@ struct GalleryTileInfoTests {
 
     // MARK: - On by default
 
-    /// No flag: For You's Discover list and its pushed gallery both ask for
-    /// the words, out of the box.
-    @Test func forYousSurfacesWearTheWordsByDefault() {
-        let screen = ForYouViewController(
-            viewModel: ForYouViewModel(repository: EmptyProvider()),
-            imagePipeline: pipeline(),
-            makeSnapFeed: { _, _ in UIViewController() },
-            prewarm: { _ in }
-        )
-        #expect(screen.debugShowsTileInfo)
+    /// No flag: the Discover gallery asks for the words, out of the box.
+    @Test func theGalleryWearsTheWordsByDefault() {
         let gallery = DiscoverGalleryViewController(
             imagePipeline: pipeline(), videoPlayback: nil,
             header: PushedScreenHeader(wallet: nil, makeWalletSheet: nil, router: nil),

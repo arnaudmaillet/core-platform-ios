@@ -17,7 +17,6 @@ import Testing
 struct ScreenSkeletonGateGuardTests {
     /// Files whose skeleton is not a screen's load, and why.
     static let allowed: [String: String] = [
-        "FriendsStoriesRow.swift": "an avatar's bone: a picture slot, on the media ladder's timing",
         "PinCardView.swift": "an avatar's bone: a picture slot, on the media ladder's timing",
         "RestingCommentsPlaceholderView.swift": "the comments' shape during a hero flight, not a load",
         "SettingsSkeletonRowCell.swift": "the row skeleton itself, worn by the screens",
