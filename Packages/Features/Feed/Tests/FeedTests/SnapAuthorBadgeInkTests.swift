@@ -29,7 +29,8 @@ struct SnapAuthorBadgeInkTests {
 
     /// The owner's inks (#1197): the "+" a black disc with a white mark; a
     /// FOLLOWED check and a PENDING clock a grey disc with a pink mark; FRIENDS
-    /// a pink disc with a white mark — fixed, the same in either appearance.
+    /// a black disc with a mint mark (#2440), its disc a very dark grey in the
+    /// dark. Each ink is read under the appearance it is drawn in.
     @Test(arguments: [Badge.follow, .following, .friends, .pending],
           [UIUserInterfaceStyle.light, .dark])
     func eachBadgeWearsItsInks(_ badge: Badge, _ style: UIUserInterfaceStyle) throws {
@@ -45,20 +46,23 @@ struct SnapAuthorBadgeInkTests {
         let (discInk, markInk): (UIColor, UIColor) = switch badge {
         case .follow: (.black, .white)
         case .following, .pending: (PersonPillBadgeInks.quietDisc, PersonPillBadgeInks.accent)
-        case .friends: (PersonPillBadgeInks.accent, .white)
+        case .friends: (PersonPillBadgeInks.friendsDisc, PersonPillBadgeInks.friendsGlyph)
         case .none, .loading: (.clear, .clear)
         }
         let mode = style == .dark ? "dark" : "light"
+        let traits = UITraitCollection(userInterfaceStyle: style)
         let badgePixels = try Self.opaquePixels(of: [glyph], style: style)
         #expect(badgePixels.count > 50, "the badge draws nothing")
-        let disc = badgePixels.filter { Self.near($0, discInk) }.count
-        let mark = badgePixels.filter { Self.near($0, markInk) }.count
+        let disc = badgePixels.filter { Self.near($0, discInk.resolvedColor(with: traits)) }.count
+        let mark = badgePixels.filter { Self.near($0, markInk.resolvedColor(with: traits)) }.count
         #expect(disc > mark, "the \(badge) badge does not read as its disc ink in \(mode) mode")
         #expect(mark > 10, "the \(badge) mark is not its ink in \(mode) mode")
     }
 
-    /// The same badge, pixel for pixel, in light and dark mode.
-    @Test(arguments: [Badge.follow, .following, .friends, .pending])
+    /// The same badge, pixel for pixel, in light and dark mode — all but
+    /// Friends, whose disc turns a very dark grey in the dark so it keeps its
+    /// outline on the black page (#2440).
+    @Test(arguments: [Badge.follow, .following, .pending])
     func theBadgeIsTheSameInEitherAppearance(_ badge: Badge) throws {
         let pill = SnapAuthorIdentityView()
         pill.setFollowBadge(badge)
@@ -107,12 +111,23 @@ struct SnapAuthorBadgeInkTests {
         format.scale = 3
         format.opaque = false
         let side = 16.0
+        // In a window of that appearance, as on screen: the badge's image
+        // carries the traits it was made under (light), and only an image
+        // view in a window draws it again under its own, so a dynamic palette
+        // ink (Friends' disc, #2440) stayed black in the dark outside one.
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: side, height: side))
+        window.overrideUserInterfaceStyle = style
+        window.isHidden = false
+        defer { window.isHidden = true }
         let views = layers.map { layer in
-            let view = UIImageView(image: layer)
+            let view = UIImageView()
             view.frame = CGRect(x: 0, y: 0, width: side, height: side)
             view.contentMode = .center
             view.tintColor = .systemRed
-            view.overrideUserInterfaceStyle = style
+            window.addSubview(view)
+            view.image = layer
+            view.layoutIfNeeded()
+            view.layer.displayIfNeeded()
             return view
         }
         let rendered = UIGraphicsImageRenderer(size: CGSize(width: side, height: side), format: format).image { context in

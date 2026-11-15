@@ -542,8 +542,9 @@ public final class PersonPill: UIView {
     #endif
 }
 
-/// The person pill badge's fixed inks (#968, #1197): one value in either
-/// appearance — black disc and white glyph at rest.
+/// The person pill badge's inks (#968, #1197): one value in either
+/// appearance — black disc and white glyph at rest — except Friends' disc,
+/// which takes a very dark grey in the dark (#2440).
 public enum PersonPillBadgeInks {
     public static let restingDisc = UIColor.black
     public static let glyph = UIColor.white
@@ -554,4 +555,9 @@ public enum PersonPillBadgeInks {
     /// A quiet grey disc: the avatar's own fixed ground (#2051), the one
     /// grey a loading face and this disc share.
     public static let quietDisc = Surface.avatarGround
+    /// Friends (#2440): a black disc (`2C2C2E` in the dark) under a mint
+    /// glyph — no longer the pink disc that made both relations wear the
+    /// primary.
+    public static let friendsDisc = Palette.friendsBadgeDisc
+    public static let friendsGlyph = Palette.friendsBadgeGlyph
 }

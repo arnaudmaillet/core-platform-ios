@@ -183,6 +183,12 @@ public enum BrandNeutrals {
     /// The grouped page's light grey (`systemGroupedBackground` in the
     /// light), where the brand's contrast is measured.
     public static let pageLight: UInt32 = 0xF2F2F7
+
+    /// The Friends badge's disc (#2440): black in the light, a very dark
+    /// grey in the dark (where black would lose its outline on the black
+    /// page), the same with Increased Contrast. Read by
+    /// `Palette.friendsBadgeDisc`.
+    public static let friendsBadgeDisc = BrandTheme.Shade(0x000000, 0x2C2C2E)
 }
 
 /// The avatar frames' sweeps (#943): COSMETICS, not the theme — the same

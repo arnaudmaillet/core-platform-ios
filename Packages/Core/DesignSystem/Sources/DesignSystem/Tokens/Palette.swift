@@ -23,6 +23,8 @@ import UIKit
 ///   brandGradient       7235FF 0 · 16FFCB 1   (IC: 7235FF · 009E7B, 3.05 on F2F2F7)
 ///   storyRingGradient   the signature, with its IC stops
 ///   (theme.accent       009E7B     16FFCB     008567     16FFCB     no role: not a UI colour, #2282 § 3)
+///   friendsBadgeDisc    000000     2C2C2E     (the same with Increased Contrast, #2440)
+///   friendsBadgeGlyph   16FFCB     16FFCB     (the mint as an ink, its one use, #2440)
 /// ```
 ///
 /// The rules the owner settled (#1124, #1169, #1178, #1190; #2062 on
@@ -49,8 +51,10 @@ import UIKit
 /// - **The mint is the brand's second colour, not a UI colour** (#2282
 ///   § 3): the icon (and the launch picture, its render) and the
 ///   signature's end. The theme
-///   holds it (`accent`, with a deep mint for light grounds) but no role
-///   reads it. The violet appears only inside the signature gradient
+///   holds it (`accent`, with a deep mint for light grounds) and one role
+///   reads it: the Friends badge's glyph on its black disc
+///   (`friendsBadgeGlyph`, #2440), a passive mark, never a control or
+///   text. The violet appears only inside the signature gradient
 ///   (#2071: the gems wear the crown's yellow — `gem`, `gemText`,
 ///   `gemGround`). Links, mentions and hashtags are a neutral grey
 ///   (`entityInk`).
@@ -260,6 +264,20 @@ public enum Palette {
     /// space.
     public static let brandGradientStart = CGPoint(x: 0, y: 1)
     public static let brandGradientEnd = CGPoint(x: 1, y: 0)
+
+    // MARK: - The Friends badge (#2440)
+
+    /// The Friends badge's disc (the owner, 2026-11-14): black in the light;
+    /// in the dark a very dark grey, `2C2C2E`, where a black disc would lose
+    /// its outline on the black page and over dark photos. The same with
+    /// Increased Contrast: the glyph already passes by far on it.
+    public static let friendsBadgeDisc = dynamic(BrandNeutrals.friendsBadgeDisc)
+    /// The Friends badge's glyph: the mint itself, `16FFCB`, in both
+    /// appearances (16.2:1 on the black disc, 10.8:1 on `2C2C2E`).
+    /// ⚠️ The mint's one use as an ink (#2282 § 3 keeps it off the UI): a
+    /// passive mark on its own dark disc, never a control, a text or a
+    /// ground. It reads the theme's mint (`accent`'s dark value).
+    public static let friendsBadgeGlyph = dynamic(light: theme.accent.dark, dark: theme.accent.dark)
 
     // MARK: - Avatar frames (#943)
 
