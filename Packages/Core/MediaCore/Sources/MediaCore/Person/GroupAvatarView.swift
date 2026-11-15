@@ -143,7 +143,7 @@ public nonisolated enum GroupAvatarLayout {
     public static let maximumFaces = 4
 
     /// ⚠️ THE GAP BETWEEN FACES, IN POINTS, AT EVERY SIZE (#2233): about
-    /// 2 pt at the row's 48 pt. A fraction of the disc would vanish on the
+    /// 2 pt at the row's 56 pt (#2420). A fraction of the disc would vanish on the
     /// pill's 36 pt and gape on the info screen's 96 pt.
     public static let gap: CGFloat = 2
 

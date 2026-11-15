@@ -188,7 +188,7 @@ final class ConversationRowView: UIView {
     }
 
     /// ⚠️ THE "+" IS ASKED FIRST. Its touch area (grown by 8 pt) reaches past
-    /// the 48 pt disc, and past the stack the disc is laid out in, which
+    /// the 56 pt disc, and past the stack the disc is laid out in, which
     /// would refuse the touch before the badge saw it. Within the row, a
     /// touch on the "+" is the badge's; everything else stays the row's (its
     /// tap, swipe actions and context menu).
@@ -224,15 +224,35 @@ final class ConversationRowView: UIView {
     /// Unread rows carry weight and full-strength colour; read rows recede.
     /// Only the fonts and colours change — nothing moves — so a row switching
     /// state can't shift the rows around it.
+    ///
+    /// ⚠️ THE NAME IS REGULAR ON A READ ROW, SEMIBOLD WITH UNREAD (#2420, the
+    /// owner after Instagram's and TikTok's inboxes): it was `headline`
+    /// (semibold) read and bold unread, so the two differed by one step of
+    /// weight. The channel's megaphone takes the name's weight.
     private func applyUnreadStyle(_ isUnread: Bool) {
-        titleLabel.font = isUnread
-            ? .preferredFont(forTextStyle: .headline, weight: .bold)
-            : .appFont(forTextStyle: .headline)
+        titleLabel.font = Self.nameFont(isUnread: isUnread)
         previewLabel.font = isUnread
-            ? .preferredFont(forTextStyle: .subheadline, weight: .semibold)
+            ? .scaledFont(forTextStyle: .subheadline, weight: .semibold)
             : .appFont(forTextStyle: .subheadline)
         previewLabel.textColor = isUnread ? .label : .secondaryLabel
         timeLabel.textColor = isUnread ? .label : .secondaryLabel
+        channelBadge.preferredSymbolConfiguration = UIImage.SymbolConfiguration(textStyle: .caption1)
+            .applying(UIImage.SymbolConfiguration(weight: isUnread ? .semibold : .regular))
+    }
+
+    /// The name's weight (#2420): regular read, semibold unread — a step
+    /// heavier each with Bold Text on, as the app's type scale does.
+    static func nameWeight(isUnread: Bool, boldText: Bool = AppTypeScale.boldText) -> UIFont.Weight {
+        switch (isUnread, boldText) {
+        case (false, false): .regular
+        case (true, false), (false, true): .semibold
+        case (true, true): .bold
+        }
+    }
+
+    /// The name at `headline`'s size (the app's scale) and `nameWeight`.
+    static func nameFont(isUnread: Bool) -> UIFont {
+        .scaledFont(forTextStyle: .headline, weight: nameWeight(isUnread: isUnread))
     }
 
     /// Resolves the peer's avatar URL, then hands it to the avatar, which
@@ -361,7 +381,8 @@ final class ConversationRowView: UIView {
         row.alignment = .center
         row.spacing = Spacing.md
         // The disc is the tallest thing here — a title over a preview does not
-        // clear 48pt — so it is what the row is padded around. Both hosts get
+        // clear the 56 pt disc — so it is what the row is padded around, 8 pt
+        // above and below at the default size (#2420). Both hosts get
         // this number, which is what makes their heights identical.
         let inset = PersonRowMetrics.verticalInset(
             forContentHeight: MonogramAvatarView.rowDiameter
@@ -401,22 +422,14 @@ extension ConversationRowView {
     var debugPreviewText: String? { previewLabel.attributedText?.string ?? previewLabel.text }
     /// Whether the channel's megaphone shows (#2215, #2230). Tests.
     var debugShowsChannelBadge: Bool { !channelBadge.isHidden }
-    /// Whether the row wears the unread treatment — the bold title, the
+    /// The name's font. Tests.
+    var debugTitleFont: UIFont { titleLabel.font }
+    /// Whether the row wears the unread treatment — the semibold name, the
     /// full-strength preview and time — which every unread row keeps,
     /// whatever its count's ink (#2292). Tests.
     var debugWearsUnreadStyle: Bool {
-        titleLabel.font.fontName == UIFont.preferredFont(forTextStyle: .headline, weight: .bold).fontName
+        titleLabel.font.fontName == Self.nameFont(isUnread: true).fontName
             && previewLabel.textColor == .label && timeLabel.textColor == .label
     }
 }
 #endif
-
-private extension UIFont {
-    static func preferredFont(forTextStyle style: TextStyle, weight: Weight) -> UIFont {
-        let metrics = UIFontMetrics(forTextStyle: style)
-        // The DEFAULT-size baseline: `preferredFont(forTextStyle:)` is already
-        // scaled, and the metrics would scale it a second time (#482).
-        let base = UIFont.systemFont(ofSize: UIFont.defaultPointSize(for: style), weight: weight)
-        return metrics.scaledFont(for: base)
-    }
-}

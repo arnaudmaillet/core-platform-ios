@@ -5,7 +5,7 @@ import UIKit
 ///
 /// **Why a shared calculation rather than a shared constant.** Six cells now
 /// sit at this height and no two of them reach it the same way: a hand-built
-/// text column, a `UIListContentConfiguration`, a row with a 48pt disc and two
+/// text column, a `UIListContentConfiguration`, a row with a 56pt disc and two
 /// action buttons, a row with three lines of type. Copying one cell's margin
 /// into another was tried and produced a row 2.4pt short, because matching the
 /// INPUT does not match the OUTPUT when the content in between differs. Every
@@ -17,7 +17,7 @@ public enum PersonRowMetrics {
 
     /// What to inset above and below `contentHeight` to land on `rowHeight`.
     ///
-    /// `contentHeight` is the tallest thing the row actually contains — a 48pt
+    /// `contentHeight` is the tallest thing the row actually contains — a 56pt
     /// identity disc, or a stack of type if that is taller. A row whose
     /// content already exceeds the target keeps `minimum` and is simply
     /// taller: this compacts rows, it never crops them.

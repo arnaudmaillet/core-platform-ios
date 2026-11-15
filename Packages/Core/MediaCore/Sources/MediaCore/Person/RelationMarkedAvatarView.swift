@@ -8,7 +8,7 @@ import UIKit
 /// 2026-11-03): the badge alone.
 ///
 /// Shared since #2300: the inbox rows and the message requests (Chat, at
-/// 48 pt), a text page's caption row (Feed, at the row's Dynamic-Type
+/// 56 pt since #2420), a text page's caption row (Feed, at the row's Dynamic-Type
 /// side) and a list card's author band (PostGrid, at 40 pt) are this view.
 /// A new face with a relation adopts it; nobody assembles the mark by hand.
 ///
@@ -48,7 +48,7 @@ public final class RelationMarkedAvatarView: UIView {
 
     /// - Parameters:
     ///   - diameter: the face's side; `setDiameter` changes it later. The
-    ///     inbox row's 48 pt by default.
+    ///     inbox row's 56 pt by default (#2420).
     ///   - size: the bucket the picture is decoded at.
     public init(diameter: CGFloat = MonogramAvatarView.rowDiameter, size: ImageBucket = .avatar) {
         metrics = RelationMarkMetrics(faceDiameter: diameter)

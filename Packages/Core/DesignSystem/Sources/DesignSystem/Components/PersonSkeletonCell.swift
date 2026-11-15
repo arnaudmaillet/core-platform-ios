@@ -18,14 +18,21 @@ import UIKit
 public final class PersonSkeletonCell: UICollectionViewListCell {
     private enum Metrics {
         /// `MonogramAvatarView.rowDiameter` (copied, not referenced: this
-        /// nonisolated constant can't read a main-actor one).
-        static let avatarSize: CGFloat = 48
+        /// nonisolated constant can't read a main-actor one). 56 since #2420,
+        /// so a loading row stands on the loaded row's 72 pt pitch.
+        static let avatarSize: CGFloat = 56
         static let nameHeight: CGFloat = 13
         static let handleHeight: CGFloat = 11
         /// What one row occupies, used to work out how many it takes to reach
         /// the bottom of the screen.
         static let rowHeight: CGFloat = avatarSize + Spacing.sm * 2
     }
+
+    #if DEBUG
+    /// The face's side and a row's pitch (#2420). Tests.
+    public static var debugAvatarSize: CGFloat { Metrics.avatarSize }
+    public static var debugRowHeight: CGFloat { Metrics.rowHeight }
+    #endif
 
     /// How many rows of this height it takes to fill `height`, rounded up so
     /// the last one runs past the bottom edge instead of leaving a gap.

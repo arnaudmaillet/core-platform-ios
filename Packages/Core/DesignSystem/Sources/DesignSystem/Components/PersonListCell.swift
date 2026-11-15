@@ -41,13 +41,16 @@ public final class PersonListCell: UICollectionViewListCell {
     /// a constant would clip the text at the larger sizes.
     /// The height EVERY row of this cell takes, everywhere.
     ///
-    /// **The row is TEXT-bound, which is the whole subtlety.** A person's row
-    /// is two lines and a remembered query's is one, so identical margins
-    /// leave them ~16pt apart and the shorter rows read as a denser list. The
-    /// disc does not save it either — 48pt fits inside both — so the height is
-    /// settled by type, and the only lever that reaches a one-line row is its
-    /// own margin. `configure` computes that margin PER ROW: whatever it takes
-    /// to land here.
+    /// ⚠️ **THE FACE PLUS 8 PT ABOVE AND BELOW, OR THE TEXT IF IT IS TALLER
+    /// (#2420).** At the default text size that is 72 pt round the 56 pt face,
+    /// Instagram's and TikTok's pitch; at the larger sizes two lines of type
+    /// outgrow it and the row grows with them, as it always has.
+    ///
+    /// **Every row lands on it, whatever it holds.** A person's row is two
+    /// lines and a remembered query's is one, so identical margins leave them
+    /// ~16pt apart and the shorter rows read as a denser list. The only lever
+    /// that reaches a one-line row is its own margin. `configure` computes
+    /// that margin PER ROW: whatever it takes to land here.
     ///
     /// ⚠️ Three things that look like the fix and are not, all tried: a `>=`
     /// height constraint on `contentView` (the cell owns that frame and
@@ -66,12 +69,27 @@ public final class PersonListCell: UICollectionViewListCell {
     /// `UIListContentConfiguration`, and leaving it out of this sum quietly
     /// shortened every row by exactly that gap.
     public static var comfortableRowHeight: CGFloat {
-        ceil(twoLineTextHeight + Metrics.lineSpacing + Metrics.verticalMargin * 2)
+        rowHeight(compatibleWith: nil)
+    }
+
+    /// `comfortableRowHeight` at `traits`' text size (nil: the app's).
+    static func rowHeight(compatibleWith traits: UITraitCollection?) -> CGFloat {
+        max(faceRowHeight, ceil(textHeight(compatibleWith: traits) + Metrics.lineSpacing + Metrics.verticalMargin * 2))
+    }
+
+    /// The face's own pitch: the 56 pt disc and its air above and below.
+    static var faceRowHeight: CGFloat {
+        MonogramAvatarView.rowDiameter + Metrics.faceAir * 2
     }
 
     private static var twoLineTextHeight: CGFloat {
-        UIFont.appFont(forTextStyle: .headline).lineHeight
-            + UIFont.appFont(forTextStyle: .subheadline).lineHeight
+        textHeight(compatibleWith: nil)
+    }
+
+    private static func textHeight(compatibleWith traits: UITraitCollection?) -> CGFloat {
+        let name = UIFont.appFont(forTextStyle: .headline, compatibleWith: traits).lineHeight
+        let handle = UIFont.appFont(forTextStyle: .subheadline, compatibleWith: traits).lineHeight
+        return name + handle
     }
 
     /// Fires when the trailing ✕ is tapped. Passed to `configure` rather than
@@ -210,6 +228,8 @@ public final class PersonListCell: UICollectionViewListCell {
     private enum Metrics {
         /// Above and below the text column.
         static let verticalMargin = Spacing.md
+        /// Above and below the face (#2420): Instagram's and TikTok's 8 pt.
+        static let faceAir = Spacing.sm
         /// Between the name and the handle line.
         ///
         /// Tighter than the `Spacing` scale's smallest step on purpose: these

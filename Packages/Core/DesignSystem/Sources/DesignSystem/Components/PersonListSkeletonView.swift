@@ -78,11 +78,11 @@ public final class PersonListSkeletonView: UIView {
     private var builtRowCount = 0
 
     /// - Parameters:
-    ///   - avatarSize: the disc the real row draws (48 for a person row, 40
+    ///   - avatarSize: the disc the real row draws (56 for a person row, 40
     ///     for an activity row).
     ///   - showsTrailingBone: a short bone at the trailing edge of the first
     ///     line, for rows that carry a time or a count there.
-    public convenience init(avatarSize: CGFloat = 48, showsTrailingBone: Bool = false) {
+    public convenience init(avatarSize: CGFloat = MonogramAvatarView.rowDiameter, showsTrailingBone: Bool = false) {
         self.init(avatarSize: avatarSize, trailing: showsTrailingBone ? .timeBone : .none)
     }
 
@@ -91,7 +91,7 @@ public final class PersonListSkeletonView: UIView {
     ///   - trailing: the real row's trailing furniture (#1774).
     ///   - lines: the two lines' rhythm (#1769).
     ///   - header: the list's section heading over the rows (#1774).
-    public init(avatarSize: CGFloat = 48, trailing: Trailing, lines: Lines = .person, header: SectionHeader? = nil) {
+    public init(avatarSize: CGFloat = MonogramAvatarView.rowDiameter, trailing: Trailing, lines: Lines = .person, header: SectionHeader? = nil) {
         self.avatarSize = avatarSize
         self.trailing = trailing
         self.lines = lines

@@ -3,7 +3,7 @@ import Testing
 import UIKit
 @testable import MediaCore
 
-/// THE ONE MARKED FACE, AT ANY DIAMETER (#2300): the inbox row's 48 pt, a
+/// THE ONE MARKED FACE, AT ANY DIAMETER (#2300): the inbox row's 56 pt, a
 /// list card's 40 pt author band, a text page's caption row (its side
 /// follows Dynamic Type) — the badge's side always from
 /// `RelationMarkMetrics`, never assumed.
@@ -43,7 +43,7 @@ struct RelationMarkedAvatarViewTests {
         #expect(face.faceIsCutOut)
     }
 
-    /// The inbox's face is still 48 pt by default — Chat unchanged.
+    /// The inbox's face is the people row's, 56 pt since #2420.
     @Test func theDefaultFaceIsTheInboxRows() {
         let face = RelationMarkedAvatarView()
         #expect(face.metrics == RelationMarkMetrics(faceDiameter: MonogramAvatarView.rowDiameter))
