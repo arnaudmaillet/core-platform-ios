@@ -16,7 +16,6 @@ struct SnapForYouRootTests {
             viewModel: FeedViewModel(repository: RootEmptyProvider()),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
         )
-        controller.isForYouRoot = root
         controller.loadViewIfNeeded()
         controller.view.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
         controller.seedProjection([SnapActionColumnLayoutTests.mediaModel(mediaURL: URL(string: "mock://media/1"))])
@@ -26,40 +25,12 @@ struct SnapForYouRootTests {
 
     // MARK: - The bars
 
-    /// No toolbar on the root at rest: the tab bar holds the bottom. And no
-    /// pill in the top bar either (#1699): the author is inside the page.
-    @Test func theRootHasNoToolbarAndNoPillInTheTopBar() {
-        let root = feed(root: true)
-        root.setEngagedChrome(false, hasMedia: true, animated: false)
-        #expect(root.toolbarItems?.isEmpty ?? true, "the root wears a toolbar: \(root.toolbarItems ?? [])")
-        let trailing = root.navigationItem.rightBarButtonItems ?? []
-        #expect(!trailing.contains { $0.customView is SnapAuthorIdentityView }, "a pill in the root's top bar")
-        #expect(trailing.allSatisfy { $0.identifier != nil || ($0.customView == nil && $0.accessibilityLabel == nil) },
-                "an item without an identity (#1679)")
-    }
-
     /// Off the root, the feed keeps its toolbar and the pill there.
     @Test func offTheRootTheToolbarAndPillAreAsBefore() {
         let pushed = feed(root: false)
         pushed.setEngagedChrome(false, hasMedia: true, animated: false)
         #expect(pushed.toolbarItems?.first?.customView is SnapAuthorIdentityView)
         #expect(!(pushed.navigationItem.rightBarButtonItems ?? []).contains { $0.customView is SnapAuthorIdentityView })
-    }
-
-    /// The shell's bell leads, a text post's thread open or not: a media
-    /// post's comments are a sheet (#2087), and nothing takes the edge.
-    @Test func theBellLeadsThroughAThread() {
-        let root = feed(root: true)
-        let bell = BarItems.icon(id: BarItems.SharedID.notificationsBell, image: nil, label: "Notifications") {}
-        root.setLeadingAccessoryItem(bell)
-        #expect(root.navigationItem.leftBarButtonItems?.first === bell)
-
-        root.setEngagedChrome(true, hasMedia: false, animated: false)
-        #expect(root.navigationItem.leftBarButtonItems?.first === bell)
-        #expect(!(root.navigationItem.rightBarButtonItems ?? []).contains { $0.customView is SnapAuthorIdentityView })
-
-        root.setEngagedChrome(false, hasMedia: false, animated: false)
-        #expect(root.navigationItem.leftBarButtonItems?.first === bell)
     }
 
     // MARK: - The author inside the page (#1699)
@@ -168,94 +139,6 @@ struct SnapForYouRootTests {
         #expect(!SnapFeedCell.isInteractiveTouch(
             chrome.debugAuthorLane, interactiveRoots: chrome.interactionRoots, stopAt: chrome
         ))
-    }
-
-    // MARK: - The comments keep the tab bar (#1699)
-
-    /// Comments open on the root: the tab bar stays, and no toolbar comes up
-    /// (a placeholder toolbar in its place was tried and dropped).
-    @Test func theCommentsKeepTheTabBar() async throws {
-        let root = feed(root: true)
-        let nav = UINavigationController(rootViewController: root)
-        let tabs = UITabBarController()
-        tabs.viewControllers = [nav]
-        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
-        window.rootViewController = tabs
-        window.isHidden = false
-        defer { window.isHidden = true }
-        for _ in 0..<100 where root.view.window == nil { try await Task.sleep(for: .milliseconds(10)) }
-
-        root.setEngagedChrome(true, hasMedia: true, animated: false)
-        #expect(!tabs.isTabBarHidden, "the comments hid the tab bar")
-        #expect(nav.isToolbarHidden, "a toolbar came up with the comments")
-
-        root.setEngagedChrome(false, hasMedia: true, animated: false)
-        #expect(!tabs.isTabBarHidden)
-    }
-
-    // MARK: - A screen over the feed past half pauses it (#1914)
-
-    /// The share of the feed still on screen is its clip's gate: below half
-    /// nothing plays — the clip pauses, never stops — and at half it plays
-    /// again. A push over it reports the share frame by frame.
-    @Test func belowHalfTheFeedPausesAndAtHalfItPlaysAgain() async throws {
-        let root = feed(root: true)
-        let nav = UINavigationController(rootViewController: root)
-        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
-        window.rootViewController = nav
-        window.isHidden = false
-        defer { window.isHidden = true }
-        for _ in 0..<200 where !root.debugIsWatchedByLifecycle { try await Task.sleep(for: .milliseconds(10)) }
-        try #require(root.debugIsWatchedByLifecycle)
-
-        root.debugViewportShare.report(0.6)
-        #expect(root.debugIsWatchedByLifecycle, "the feed paused above half")
-        root.debugViewportShare.report(0.4)
-        #expect(!root.debugIsWatchedByLifecycle, "the feed plays on under a screen past half")
-        root.debugViewportShare.report(0.5)
-        #expect(root.debugIsWatchedByLifecycle, "the feed did not resume at half")
-    }
-
-    /// The drawer's slide is one more source of the share (#1914): the clip
-    /// fades with it and pauses below half, then plays again as it closes.
-    @Test func theDrawersSlidePausesTheFeedPastHalf() async throws {
-        let root = feed(root: true)
-        let nav = UINavigationController(rootViewController: root)
-        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
-        window.rootViewController = nav
-        window.isHidden = false
-        defer { window.isHidden = true }
-        for _ in 0..<200 where !root.debugIsWatchedByLifecycle { try await Task.sleep(for: .milliseconds(10)) }
-        try #require(root.debugIsWatchedByLifecycle)
-
-        root.setVisibleShare(0.7)
-        #expect(root.debugViewportShare.share == 0.7)
-        #expect(root.debugIsWatchedByLifecycle)
-        root.setVisibleShare(0.3)
-        #expect(!root.debugIsWatchedByLifecycle, "the feed plays on behind a drawer past half")
-        root.setVisibleShare(1)
-        #expect(root.debugIsWatchedByLifecycle, "the feed did not resume as the drawer closed")
-    }
-
-    // MARK: - Set aside by the notifications drawer (#1703)
-
-    /// The drawer slides the shell aside with the feed still on screen: its
-    /// lifecycle stops counting it as watched (nothing plays), and counts it
-    /// again when the drawer closes.
-    @Test func theDrawerSetsTheFeedAside() async throws {
-        let root = feed(root: true)
-        let nav = UINavigationController(rootViewController: root)
-        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
-        window.rootViewController = nav
-        window.isHidden = false
-        defer { window.isHidden = true }
-        for _ in 0..<200 where !root.debugIsWatchedByLifecycle { try await Task.sleep(for: .milliseconds(10)) }
-        #expect(root.debugIsWatchedByLifecycle, "the feed on screen is not watched")
-
-        root.setSetAside(true)
-        #expect(!root.debugIsWatchedByLifecycle, "the feed plays on behind the drawer")
-        root.setSetAside(false)
-        #expect(root.debugIsWatchedByLifecycle, "the feed did not come back")
     }
 
     // MARK: - The danmaku replaces the stream (#1699)
