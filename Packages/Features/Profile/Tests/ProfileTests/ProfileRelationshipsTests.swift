@@ -983,7 +983,7 @@ struct RelationshipSkeletonLayoutTests {
         let cells = list.collectionView.visibleCells.compactMap { $0 as? PersonSkeletonCell }
         try #require(!cells.isEmpty, "no skeleton rows")
         for cell in cells {
-            #expect(abs(cell.bounds.height - 64) < 1, "row height \(cell.bounds.height)")
+            #expect(abs(cell.bounds.height - PersonRowMetrics.rowHeight) < 1, "row height \(cell.bounds.height), the pitch \(PersonRowMetrics.rowHeight)")
             #expect(cell.debugBoneWidths.allSatisfy { $0 > 0 }, "bones \(cell.debugBoneWidths)")
             #expect(cell.debugBoneWidths.count == 4, "avatar, name, handle and the Follow pill")
         }
