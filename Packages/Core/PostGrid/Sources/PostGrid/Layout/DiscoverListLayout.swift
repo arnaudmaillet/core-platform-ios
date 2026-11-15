@@ -14,7 +14,7 @@ import UIKit
 /// ORDINAL, which the page's model already carries, so the section provider
 /// is handed the finished chunk rather than having to derive a seed from an
 /// index it is not given. The cost — `IndexPath`s that span sections — stays
-/// inside `ForYouGridPage`, which already translated between flat indices and
+/// inside `PostGridPageView`, which already translated between flat indices and
 /// index paths for its "New"/"Recent" split.
 ///
 /// A chunk section is a single custom group: the chunk's own frames, at the

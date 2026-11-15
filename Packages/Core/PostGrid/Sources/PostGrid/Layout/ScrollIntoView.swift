@@ -106,7 +106,7 @@ public enum ScrollIntoView {
     ///
     /// Kept rather than deleted because the arithmetic is sound and a surface
     /// may yet want it; do not reach for it on a landing without reading the
-    /// note on `ForYouGridPage.revealPost` first.
+    /// note on `PostGridPageView.revealPost` first.
     ///
     /// Clamped like its sibling, so a post near either end of the content
     /// settles as close to the middle as the content allows rather than

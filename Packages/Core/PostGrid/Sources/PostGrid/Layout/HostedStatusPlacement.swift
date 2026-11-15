@@ -2,7 +2,7 @@ import CoreGraphics
 
 /// Where a page hosted under a floating header puts its empty or failed
 /// state: in the room between the header and the chrome at the screen's foot
-/// — shared by every hosted page through `ForYouGridPage` (#1273), the
+/// — shared by every hosted page through `PostGridPageView` (#1273), the
 /// profile's rule (`ProfileEmptyStatePlacement`).
 public enum HostedStatusPlacement {
     /// The block's centre, in the page's own coordinates.

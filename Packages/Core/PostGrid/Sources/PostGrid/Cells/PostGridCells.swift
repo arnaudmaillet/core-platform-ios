@@ -1124,7 +1124,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     }
 
     // MARK: - The dress: a list's row, or a shelf's card — state here, behaviour in `PostGridListRowCell+Dress.swift`
-    /// How this cell draws — set by its host (`ForYouGridPage` sets `.row`
+    /// How this cell draws — set by its host (`PostGridPageView` sets `.row`
     /// on its lists' rows).
     ///
     /// ⚠️ THE DRESS CHANGES THE GROUND, AND THE TWO TRAILING ENDS. The

@@ -36,8 +36,8 @@ struct DiscoverListPageTests {
         }
     }
 
-    private func page(_ posts: [GalleryPost], complete: Bool = true) -> ForYouGridPage {
-        let page = ForYouGridPage(imagePipeline: pipeline(), style: .discover)
+    private func page(_ posts: [GalleryPost], complete: Bool = true) -> PostGridPageView {
+        let page = PostGridPageView(imagePipeline: pipeline(), style: .discover)
         // TALL, so the first run of cards AND the first chunk are realized:
         // three media cards alone can outgrow a phone's height, and the hero
         // questions below read realized cells.
@@ -48,7 +48,7 @@ struct DiscoverListPageTests {
         return page
     }
 
-    private func collectionView(of page: ForYouGridPage) -> UICollectionView {
+    private func collectionView(of page: PostGridPageView) -> UICollectionView {
         page.subviews.compactMap { $0 as? UICollectionView }.first!
     }
 
@@ -295,8 +295,8 @@ struct DiscoverListPageTests {
         }
     }
 
-    private func pairedPage(_ posts: [GalleryPost]) -> ForYouGridPage {
-        let page = ForYouGridPage(imagePipeline: pipeline(), style: .discover)
+    private func pairedPage(_ posts: [GalleryPost]) -> PostGridPageView {
+        let page = PostGridPageView(imagePipeline: pipeline(), style: .discover)
         page.frame = CGRect(x: 0, y: 0, width: 393, height: 6000)
         page.setCorpusComplete(true)
         page.render(.content(posts))
@@ -377,7 +377,7 @@ struct DiscoverListPageTests {
         let slot = try #require(page.rowFrame(for: paired.id, in: page))
         #expect(hero.frame == slot, "the flight leaves from the whole card")
         #expect(page.tileCornerRadius(for: paired.id) == PostShelfMediaCardCell.cornerRadius)
-        #expect(page.restingOverlay(for: paired.id) is ForYouCardCaptionOverlay)
+        #expect(page.restingOverlay(for: paired.id) is PostCardCaptionOverlay)
         #expect(page.restingOverlay(for: fullCard.id) == nil, "a list card has no overlay to wear")
         let standIn = try #require(page.makeDismissStandIn(for: paired.id))
         #expect(!(standIn is PostGridTileStandInView) && !(standIn is RevealDismissCardView),
@@ -389,7 +389,7 @@ struct DiscoverListPageTests {
     /// Landings stay inserts with blocks in the list.
     @Test func pairedPagesLandAsInserts() {
         let posts = verticalCorpus(90)
-        let page = ForYouGridPage(imagePipeline: pipeline(), style: .discover)
+        let page = PostGridPageView(imagePipeline: pipeline(), style: .discover)
         page.frame = CGRect(x: 0, y: 0, width: 393, height: 3000)
         page.setCorpusComplete(false)
         page.render(.content(Array(posts[..<25])))

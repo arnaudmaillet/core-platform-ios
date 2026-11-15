@@ -74,7 +74,7 @@ public final class PostLikeReadoutView: UIView, PostCardLikeReadout {
     public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     /// The readout's size for what it shows now — for a host that lays it
-    /// out by frames (`ForYouCardCaptionOverlay`). Zero with no count: the
+    /// out by frames (`PostCardCaptionOverlay`). Zero with no count: the
     /// readout is absent, never an asserted zero (`PostMetricLabel`).
     public var fittedSize: CGSize {
         guard count != nil else { return .zero }

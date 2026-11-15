@@ -528,7 +528,7 @@ public protocol ZoomTransitionDestination: AnyObject {
     /// A hero flies a piece of MEDIA between two places that both have it. A
     /// card-shaped close carries a whole row instead, which is what a text post
     /// needs — it has no media, and the note on
-    /// `ForYouGridPage.heroAppearance` records what happened the five times a
+    /// `PostGridPageView.heroAppearance` records what happened the five times a
     /// card tried to impersonate a page of comments.
     ///
     /// The kind was decided when the post was OPENED, and that was right while

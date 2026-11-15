@@ -10,7 +10,7 @@ import UIKit
 /// **The screen provides**: its sections (identifier, title, optional count)
 /// and their tops in its scroll view, at every scroll (`update`) — or, for a
 /// list that already works out its own pinned section because it names it
-/// to several hosts (`ForYouGridPage`, the inbox's pages), that section
+/// to several hosts (`PostGridPageView`, the inbox's pages), that section
 /// (`show(pinned:)`); and what a tap does (`onSelect`, handed the section's
 /// index).
 ///

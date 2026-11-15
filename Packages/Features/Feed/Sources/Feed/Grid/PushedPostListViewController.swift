@@ -1,0 +1,435 @@
+import CoreModels
+import CoreNavigation
+import DesignSystem
+import FeedInterface
+import MediaCore
+import MediaPlayback
+import PostGrid
+import UIKit
+
+/// A row's whole list, pushed from its header: the people the viewer FOLLOWS,
+/// or their FRIENDS (2026-09-29).
+///
+/// # What it is
+///
+/// A list of posts: the profile's Activity tab without the profile — the same
+/// timeline rows (`PostGridListRowCell`) on the same list layout, through a
+/// `PostGridPageView` in its `.list` style, no mosaic chunks. Driven by
+/// `ForYouViewController`, which forwards each snapshot, the paging spinner
+/// and the refresh while this screen is on the stack — one view model, so the
+/// row, its badge and this list never disagree about what is loaded. Friends
+/// is the same screen over the friends' posts.
+///
+/// # Its sections
+///
+/// "New" over what the viewer has not seen, "Recent" over the rest — the
+/// Messages inbox's split, with its headers: a large title in the flow that
+/// leaves as it reaches the bar, the section then named IN the bar after the
+/// back chevron (#1378, the inbox's #1301; tap to scroll to the section). "New" carries its count — secondary text
+/// after the title, `New 8` (`SectionTitleView`) — the number the For You
+/// header this list was pushed from carries, and the same one by
+/// construction: both are the size of the set the view model hands over
+/// (`Snapshot.followingNew` for Following, `.friendsUnseen` for Friends).
+/// #313 had made this list one plain run; the sections came back on
+/// 2026-09-29 by product call, on BOTH lists because they are one screen
+/// whose header counts answer the same question.
+///
+/// A section with nothing in it is not drawn, and — unlike the inbox — a lone
+/// section keeps its title (2026-09-30): nothing new is "Recent" alone, titled;
+/// nothing but new is "New" alone, counted. Friends is usually the first case,
+/// and #316's untitled run made it read as a different screen from Following
+/// (`PostGridPageView.titlesEverySection`).
+///
+/// # How it opens posts
+///
+/// Through `presentSnapFeedHero` — the builder's shared flight, the one the
+/// place page, the search results and Discover's mosaic use — for the reason
+/// `DiscoverGalleryViewController` gives: For You's own `openFeed` is keyed to
+/// For You's page and its appearance, and this screen covers both. A media
+/// row flies; a text row opens with the native push and closes with its pop
+/// (#2243). A flight-opened feed paged onto words closes through a window
+/// (`textRowReveal`) onto the row the viewer opened, order untouched — the
+/// product rule for a list.
+///
+/// # Its chrome
+///
+/// No tab bar (`hidesBottomBarWhenPushed`) and no title: `[‹] ——
+/// [points][search]`, the header every screen For You pushes wears
+/// (`PushedScreenHeader`; #323's large titles were taken back on 2026-09-30).
+/// The pinned section is a leading item of that bar, `[‹][New · 3]`
+/// (`applyPinnedSection`), never a capsule under it.
+///
+/// # Holding still under a post
+///
+/// ⚠️ The list's inset is PINNED from the tap until the list is back on
+/// screen (`PostGridPageView.beginHeroFreeze` / `viewDidAppear`). This list
+/// adds the safe area to its inset, and that safe area is not the list's
+/// while a post covers it — the view leaves the window, and the pop settles
+/// the chrome only after a close has ended. Every change of it drags
+/// `contentOffset` with it, so a list left to track it came back from a post
+/// shifted, a jump the viewer saw the moment the card landed (filmed on
+/// Following, Friends and the mosaic, 2026-09-30 — under #323's large titles,
+/// which made it a bar's height, but the covered safe area moves without
+/// them too). For You never showed it: its own flight pins the same inset
+/// (`GridZoomSource`).
+@MainActor
+final class PushedPostListViewController: UIViewController {
+    /// Which row this list is the whole of.
+    enum Kind: String {
+        case following
+        case friends
+        /// A place's posts by popularity (the place page's Popular title):
+        /// one run, titled "Popular".
+        case popular
+    }
+
+    let kind: Kind
+    private let page: PostGridPageView
+    /// The page's warm of its visible posts' first comments (#2002).
+    var postOpenWarm: PostOpenWarm? {
+        get { page.postOpenWarm }
+        set { page.postOpenWarm = newValue }
+    }
+    private let header: PushedScreenHeader
+    /// Opens a post WITH a flight — see the type's note. Nil leaves a tap
+    /// doing nothing, which is only the case in a test.
+    private let openPost: ((UIViewController, SnapFeedHeroOrigin, [PostID]) -> Void)?
+
+    /// The page scrolled near its end: the host fetches the next page.
+    var onNearEnd: (() -> Void)?
+    /// See `PostGridPageView.onWillDisplayPost`.
+    var onWillDisplayPost: ((PostID) -> Void)? {
+        didSet { page.onWillDisplayPost = onWillDisplayPost }
+    }
+    /// Pull to refresh.
+    var onRefresh: (() -> Void)?
+    /// A row's author was tapped.
+    var onAuthorTapped: ((GalleryPost) -> Void)?
+    /// A row's author was tapped where the host opens the profile card
+    /// (#2145, #2300) — `PostGridPageView.onAuthorCardTapped`; the hold is then
+    /// `onAuthorTapped`. Nil: a tap is `onAuthorTapped`.
+    var onAuthorCardTapped: ((GalleryPost) -> Void)? {
+        didSet { page.onAuthorCardTapped = onAuthorCardTapped }
+    }
+    /// The rows' author bands' relation mark and "+" (#2300).
+    var authorMarks: PostAuthorMarks? {
+        get { page.authorMarks }
+        set { page.authorMarks = newValue }
+    }
+    /// What a row's "..." offers — the host's, so this screen offers exactly
+    /// what For You's own list does.
+    var authorMenuActions: ((PostGridPageView.AuthorMenuContext) -> [PostCardMenuAction])? {
+        didSet { page.authorMenuActions = authorMenuActions }
+    }
+    /// Whether an author is the viewer — see `PostGridPageView.isViewer`.
+    var isViewer: ((ProfileID) -> Bool)? {
+        didSet { page.isViewer = isViewer }
+    }
+    /// What is on screen and worth warming — see `PostGridPageView.onWarmRequested`.
+    var onWarmRequested: (([GalleryPost]) -> Void)? {
+        didSet { page.onWarmRequested = onWarmRequested }
+    }
+
+    /// How many posts follow the tapped one into the feed — For You's number.
+    private static let seedWindow = 40
+
+    /// Whether the host has another page past what it rendered — set by the
+    /// host, read by a feed opened from here to know when to stop (#638).
+    var hasMore: () -> Bool = { false }
+    /// The answer to a feed opened from one of these posts (#638).
+    private lazy var feedContinuation = GridFeedContinuation(
+        ids: { [weak self] in self?.page.posts.map(\.id) ?? [] },
+        hasMore: { [weak self] in self?.hasMore() ?? false },
+        askMore: { [weak self] in self?.onNearEnd?() }
+    )
+
+    /// The ids after `id` in this list's order, for a feed opened from it —
+    /// see `GridFeedContinuation`.
+    func postIDs(after id: PostID) async -> [PostID]? {
+        await feedContinuation.postIDs(after: id)
+    }
+
+    init(
+        kind: Kind,
+        imagePipeline: ImagePipeline,
+        videoPlayback: VideoPlaybackController?,
+        staking: PostCardStaking?,
+        header: PushedScreenHeader,
+        openPost: ((UIViewController, SnapFeedHeroOrigin, [PostID]) -> Void)?
+    ) {
+        self.kind = kind
+        page = PostGridPageView(imagePipeline: imagePipeline, style: .list, videoPlayback: videoPlayback)
+        self.header = header
+        self.openPost = openPost
+        super.init(nibName: nil, bundle: nil)
+        // The like chips stake from the same wallet For You's list does — one
+        // surface, one undo window (`PostCardStaking`).
+        page.staking = staking
+        // Both lists title every section, a lone "Recent" included — see the
+        // type's note.
+        page.titlesEverySection = true
+        if kind == .popular { page.earlierSectionTitle = "Popular" }
+        // UIKit takes the bar down with the push and brings it back with the
+        // pop; a post opened from here finds no dock to give back
+        // (`showsAppTabBar(for:)` reads this flag).
+        hidesBottomBarWhenPushed = true
+        header.install(on: self)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        // The plain page the post lists lie on (#2243) — see `Surface`.
+        view.backgroundColor = Surface.plainPage
+        page.pin(to: view)
+        page.onItemTapped = { [weak self] index in self?.openRow(at: index) }
+        page.onItemCommentsTapped = { [weak self] index in self?.openRow(at: index, showingComments: true) }
+        page.onNearEnd = { [weak self] in self?.onNearEnd?() }
+        page.onRefresh = { [weak self] in self?.onRefresh?() }
+        page.onAuthorTapped = { [weak self] post in self?.onAuthorTapped?(post) }
+        // The pinned section in the bar, after the back chevron (#1378), through
+        // the one contract (#1573).
+        let binding = PinnedSectionBarBinding(
+            viewController: self, placement: .leading, scope: "postList.\(kind.rawValue)", countNoun: "new"
+        )
+        binding.onSelect = { [weak self] _ in self?.page.scrollToPinnedSection() }
+        sectionBinding = binding
+        page.onPinnedSectionChanged = { [weak binding] section in
+            binding?.show(pinned: section.map { ($0.index, .init(id: $0.title, title: $0.title, count: $0.count)) })
+        }
+    }
+
+    // MARK: - The pinned section (#1378)
+
+    /// The section the list has scrolled into, named after the back chevron
+    /// — the Messages inbox's item (#1301), one look (`SectionBarItem`):
+    /// `[‹][New · 3] … [points][search]`, nothing back at the top, and no
+    /// capsule pinned under the bar (the headers leave as they pin). Minted,
+    /// placed once per turn and held past a push by the contract
+    /// (`PinnedSectionBarBinding`, #1573). Only the leading group, after the
+    /// chevron.
+    private var sectionBinding: PinnedSectionBarBinding?
+
+    #if DEBUG
+    /// The bar's section item while it is shown — what a test reads.
+    var debugSectionItem: UIBarButtonItem? {
+        guard let sectionItem = sectionBinding?.item,
+              navigationItem.leftBarButtonItems?.contains(where: { $0 === sectionItem }) == true
+        else { return nil }
+        return sectionItem
+    }
+
+    var debugPage: PostGridPageView { page }
+    #endif
+
+    // MARK: - Content, from the host
+
+    /// `newPosts` are the rows headed "New" — the SAME set the For You
+    /// header's badge counts, handed over rather than re-derived, so the "New"
+    /// count and the number on the header the viewer came from are one answer.
+    func render(_ state: GridPageState, newPosts: Set<PostID>) {
+        loadViewIfNeeded()
+        page.setNewPosts(newPosts)
+        page.render(state)
+        feedContinuation.answered()
+    }
+
+    func setPaging(_ paging: Bool) {
+        page.setPaging(paging)
+        if !paging { feedContinuation.answered() }
+    }
+
+    func endRefreshing() {
+        page.endRefreshing()
+    }
+
+    /// The next delivery is a re-derived corpus, not an extended one — see
+    /// `ForYouViewModel.onCorpusReset`.
+    func invalidateIncrementalUpdates() {
+        page.invalidateIncrementalUpdates()
+    }
+
+    /// The posts on screen, in display order — what a test and a debug hook
+    /// read.
+    var posts: [GalleryPost] { page.posts }
+
+    #if DEBUG
+    /// How many rows sit under the "New" header — zero for an untitled list.
+    var debugNewSectionCount: Int { page.debugArrivalsRunLength }
+    /// The headers on screen, top to bottom — see
+    /// `PostGridPageView.debugSectionHeaders`.
+    func debugSectionHeaders() -> [(title: String?, count: Int)] { page.debugSectionHeaders() }
+    #endif
+
+    // MARK: - Appearance
+
+    // NO DOCK REVEAL on the way back from a post: there is no bar on this
+    // screen to give back (`hidesBottomBarWhenPushed`).
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        #if DEBUG
+        PushedListJumpTrace.begin("\(kind.rawValue) will-appear", page: page, host: view)
+        #endif
+        // Pushed in, or a plain screen popping off it (#1914): the clips start
+        // once half of the screen is on display. Otherwise from
+        // `viewDidAppear`, as before.
+        _ = viewportShare.screenWillAppear(self)
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        // Back: the inset tracks the safe area again, offset carried across,
+        // so nothing moves — see the type's note.
+        page.endHeroFreeze()
+        #if DEBUG
+        PushedListJumpTrace.mark("\(kind.rawValue) did-appear", page: page, host: view)
+        #endif
+        // Nothing floats over this list's foot but the home indicator's band.
+        page.footChromeCover = view.safeAreaInsets.bottom
+        // Nothing on this screen may be invisible once it is back, whoever
+        // finished the close — the sweep `ForYouViewController.viewDidAppear`
+        // makes, for the same reason.
+        page.clearRevealConcealment()
+        page.clearHeroConcealment()
+        page.endPlaybackHandoff()
+        viewportShare.report(1)
+        page.setAutoplayActive(true)
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        // Covered by a post: no claim on the shared pool, at once. The tapped
+        // row's player is exempt — it is in the handoff scope, flying. Popped,
+        // or under a plain screen: once half of it is gone (#1914).
+        if viewportShare.screenWillDisappear(self) == .flight {
+            page.setAutoplayActive(false)
+        }
+    }
+
+    /// The share of this screen on screen (#1914): its clips play at half and
+    /// above — from half way through the push that brings it in, until half
+    /// way through the pop that takes it off or a plain screen pushed over it.
+    private lazy var viewportShare: ViewportShare = {
+        let share = ViewportShare(host: view)
+        share.onPlaysChange = { [weak self] plays in self?.page.setAutoplayActive(plays) }
+        return share
+    }()
+
+    /// The share now, for tests.
+    var debugViewportShare: ViewportShare { viewportShare }
+
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        // The tapped row, settled clear of the chrome now that a post covers
+        // the list — before a close reads its rect.
+        page.applyPendingReveal()
+    }
+
+    // MARK: - Opening a row
+
+    /// What covers this list: the navigation bar above, the home indicator's
+    /// band below. Its content insets are exactly that chrome, so the page's
+    /// own default would do — stated for the window's landing, which asks.
+    private var landingOcclusion: UIEdgeInsets {
+        UIEdgeInsets(top: view.safeAreaInsets.top, left: 0, bottom: view.safeAreaInsets.bottom, right: 0)
+    }
+
+    /// The departure, described for the shared flight — the place page's
+    /// `openTile` for a page that is only ever a list.
+    private func openRow(at index: Int, showingComments: Bool = false) {
+        let posts = page.posts
+        guard posts.indices.contains(index), let openPost,
+              navigationController?.topViewController === self,
+              navigationController?.transitionCoordinator == nil
+        else { return }
+        let tapped = posts[index]
+        let stream = Array(posts[index...].prefix(Self.seedWindow))
+        #if DEBUG
+        PushedListJumpTrace.mark("\(kind.rawValue) open", page: page, host: view)
+        #endif
+        let origin = page.heroOrigin(
+            opening: tapped, stream: stream, in: view,
+            textReveal: textRowReveal(for: tapped),
+            // A TEXT post's page IS its thread — see `opensComments`.
+            opensComments: showingComments && tapped.kind != .text,
+            // On past the window into the list's next posts, then the
+            // timeline's next page (#638).
+            continuation: { [weak self] after in await self?.postIDs(after: after) }
+        )
+        page.openHoldingStill(from: self) { openPost(self, origin, stream.map(\.id)) }
+    }
+
+    /// The window a row closes through once the feed is on a text page, or
+    /// nil for a row the list cannot find, the plain slide then being the
+    /// honest floor. A MEDIA row's: a row of words opens with the native push
+    /// and closes with its pop (#2243), which never read this window.
+    ///
+    /// ⚠️ OFFERED FOR MEDIA ROWS TOO. `hasHero` decides the opening; this
+    /// decides whether a close that has nothing to fly has anywhere to go. A
+    /// photograph opened by a flight and paged onto a text post leaves both
+    /// zoom grabs refusing and the chevron's hero failing, unless the origin
+    /// carries a window for `RowCardCloseLanding` to arm — the profile's rule
+    /// ("Offered for EVERY post") and For You's rows' (`RowOrigins`).
+    ///
+    /// ⚠️ MARKER-SHAPED: the feed is a PAGER, so the row and the page are only
+    /// the same post until the first swipe. The window therefore does not
+    /// align the page to the row's caption; it holds the page still and
+    /// closes onto the row it opened from.
+    private func textRowReveal(for post: GalleryPost) -> TextRevealOrigin? {
+        let anchor = post.id
+        return page.closeWindow(
+            for: post,
+            // Held still, the card opening over it: the feed is a pager, so
+            // the row and the page are the same post only until the first swipe.
+            alignsPageToSource: false,
+            // The row may have scrolled under the open post; bring it back, and
+            // pin the inset before the landing is measured.
+            willStageDismissal: { [weak self] in
+                guard let self else { return }
+                view.layoutIfNeeded()
+                page.beginHeroFreeze()
+                page.revealPost(anchor, clearing: landingOcclusion)
+                view.layoutIfNeeded()
+            },
+            // ⚠️ NO THAW HERE — `viewDidAppear` hands the inset back. The
+            // window's close ends BEFORE the pop has settled the chrome: the
+            // safe area read then was mid-flight (t146 / b68 against a resting
+            // t168 / b34), the list re-adjusted to it, and UIKit dragged the
+            // offset by the 22pt it still had to travel — the list sat 22pt
+            // low at `viewDidAppear` and slid back a moment later. Measured
+            // with `-list-jump-trace` on a Following text row, 2026-09-30. A
+            // cancelled close leaves the list covered, and pinned, as well.
+            dismissalDidEnd: { [weak page] committed in
+                if !committed { page?.clearRevealConcealment() }
+            }
+        )
+    }
+
+    #if DEBUG
+    /// Taps row `index` through the page's own selection path.
+    func debugOpenRow(at index: Int) -> Bool {
+        page.debugSelectItem(at: index)
+    }
+
+    /// Scrolls `offset` points into the content — `-foryou-pushed-scroll`.
+    func debugScroll(to offset: CGFloat) {
+        page.setVerticalOffset(offset)
+    }
+
+    /// Whether row `index` is loaded and has what it would fly.
+    func debugRowIsReady(at index: Int) -> Bool {
+        guard page.posts.indices.contains(index) else { return false }
+        let post = page.posts[index]
+        return post.kind == .text || page.heroAppearance(for: post.id)?.cover != nil
+    }
+    #endif
+}
+
+// MARK: - How it is left (#1144)
+
+extension PushedPostListViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}

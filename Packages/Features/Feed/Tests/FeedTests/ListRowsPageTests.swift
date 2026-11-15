@@ -33,8 +33,8 @@ struct ListRowsPageTests {
         }
     }
 
-    private func page(_ posts: [GalleryPost], style: ForYouGridPage.Style = .discover) -> ForYouGridPage {
-        let page = ForYouGridPage(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: style)
+    private func page(_ posts: [GalleryPost], style: PostGridPageView.Style = .discover) -> PostGridPageView {
+        let page = PostGridPageView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: style)
         page.frame = CGRect(x: 0, y: 0, width: 393, height: 3000)
         page.setCorpusComplete(true)
         page.render(.content(posts))
@@ -42,7 +42,7 @@ struct ListRowsPageTests {
         return page
     }
 
-    private func collectionView(of page: ForYouGridPage) -> UICollectionView {
+    private func collectionView(of page: PostGridPageView) -> UICollectionView {
         page.subviews.compactMap { $0 as? UICollectionView }.first!
     }
 

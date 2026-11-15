@@ -1643,9 +1643,9 @@ final class AppContainer {
     /// The search screen's trending section, served off the SAME feed
     /// repository the timeline and For You read — so one hydration path, one
     /// cache, and a post opened from a trending tile is already warm in the
-    /// snap feed it opens into. See `ForYouExploreAdapter`.
-    private lazy var exploreRepository = ForYouExploreAdapter(
-        forYou: ForYouRepository(
+    /// snap feed it opens into. See `DiscoverExploreAdapter`.
+    private lazy var exploreRepository = DiscoverExploreAdapter(
+        forYou: DiscoverRepository(
             feed: feedRepository,
             counterClient: Counter_V1_CounterServiceClient(client: authenticatedRPCClient),
             discovery: discoveryRepository

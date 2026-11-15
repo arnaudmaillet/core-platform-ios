@@ -65,8 +65,8 @@ struct ProfileReturnPlaybackTests {
 
     /// The page the profile draws its media on (#1273): For You's, with the
     /// app's pool.
-    private func forYouGallery(pool: VideoPlaybackController? = nil) -> (ForYouGridPage, [GalleryPost]) {
-        let page = ForYouGridPage(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .grid, videoPlayback: pool)
+    private func forYouGallery(pool: VideoPlaybackController? = nil) -> (PostGridPageView, [GalleryPost]) {
+        let page = PostGridPageView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .grid, videoPlayback: pool)
         page.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
         page.setCorpusComplete(true)
         let posts = videos()

@@ -18,7 +18,7 @@ struct UnsizedImageDecodesGuardTests {
     /// `File.swift` → why its unsized decodes are wanted at full size.
     static let allowed: [String: String] = [
         "MapsViewController.swift": "the pin cover a marker's hero flies from",
-        "ForYouGridPage.swift": "For You's grid covers and their warm-up, hero sources",
+        "PostGridPageView.swift": "For You's grid covers and their warm-up, hero sources",
         "PostShelfSection.swift": "rail covers, hero sources",
         "SnapFeedViewController.swift": "the lock-screen artwork of the post playing",
     ]

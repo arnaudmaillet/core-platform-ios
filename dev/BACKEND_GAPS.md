@@ -495,7 +495,7 @@ second is a different medium. There is no ranking, trending, topic, or
 "suggested for you" endpoint anywhere in the generated contracts (checked
 across all 20 services in `Packages/Kit/CoreContracts/Sources/CoreContracts/Generated/`).
 
-**What the client does meanwhile.** `ForYouRepository` reads
+**What the client does meanwhile.** `DiscoverRepository` reads
 `GetFollowingFeed` through the existing `FeedRepository`, and the tab's source
 filter (Trending / Recent) is two **orderings of that one corpus**, applied
 client-side: `.recent` sorts by `published_at`, `.trending` by the like

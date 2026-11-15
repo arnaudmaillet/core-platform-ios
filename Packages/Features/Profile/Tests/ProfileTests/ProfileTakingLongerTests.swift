@@ -69,7 +69,7 @@ struct ProfileTakingLongerTests {
             viewModel: viewModel, imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             makeGridPage: { style, saves in
                 let page = make(style, saves)
-                (page as? ForYouGridPage)?.skeletonClock = time.clock
+                (page as? PostGridPageView)?.skeletonClock = time.clock
                 return page
             },
             onLogout: nil

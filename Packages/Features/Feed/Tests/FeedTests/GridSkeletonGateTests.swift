@@ -37,8 +37,8 @@ struct GridSkeletonGateTests {
         return nil
     }
 
-    private func page(_ time: ManualClock) -> ForYouGridPage {
-        let page = ForYouGridPage(imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()), style: .grid, videoPlayback: nil)
+    private func page(_ time: ManualClock) -> PostGridPageView {
+        let page = PostGridPageView(imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()), style: .grid, videoPlayback: nil)
         page.skeletonClock = time.clock
         page.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
         page.layoutIfNeeded()
@@ -132,7 +132,7 @@ struct GridSkeletonGateTests {
     /// History's titled groups end the load too.
     @Test func hostSectionsEndTheLoad() {
         let time = ManualClock()
-        let page = ForYouGridPage(imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()), style: .discover, videoPlayback: nil)
+        let page = PostGridPageView(imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()), style: .discover, videoPlayback: nil)
         page.skeletonClock = time.clock
         page.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
         page.layoutIfNeeded()

@@ -19,7 +19,7 @@ private struct InstantFetcher: ImageFetching {
 }
 
 /// The app's callers, reproduced in their exact shape: a UIKit subclass —
-/// main-actor by INFERENCE, like `ForYouGridPage` — calling the pipeline's
+/// main-actor by INFERENCE, like `PostGridPageView` — calling the pipeline's
 /// synchronous API from the main thread (a list's `ImageLookahead`, #970,
 /// and every cover gate's `cachedImage`).
 private final class PrefetchingView: UIView {

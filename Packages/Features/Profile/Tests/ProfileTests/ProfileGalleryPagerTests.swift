@@ -373,7 +373,7 @@ struct ProfileGalleryPullTests {
         pager.layoutIfNeeded()
         var offsets: [CGFloat] = []
         pager.onVerticalScroll = { offsets.append($0) }
-        let page = try #require(pager.activePage as? ForYouGridPage)
+        let page = try #require(pager.activePage as? PostGridPageView)
         #expect(!page.debugHasRefreshControl, "the page kept the stock control under the header")
 
         page.setVerticalOffset(-90, animated: false)
@@ -455,7 +455,7 @@ struct ProfileGalleryLatePagesTests {
         #expect(built == 2)
         #expect(pager.builtPage(for: .reactions) == nil, "a tab never shown built its page")
 
-        let saved = try #require(pager.builtPage(for: .saved) as? ForYouGridPage)
+        let saved = try #require(pager.builtPage(for: .saved) as? PostGridPageView)
         pager.layoutIfNeeded()
         saved.layoutIfNeeded()
         #expect(saved.debugStatusFrame != nil, "the late page was not shown Saved's empty state")

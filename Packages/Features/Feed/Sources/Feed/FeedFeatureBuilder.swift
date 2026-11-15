@@ -268,12 +268,12 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                 if let entry { found[id] = entry }
             }
         }
-        return found.mapValues(ForYouRepository.galleryPost(from:))
+        return found.mapValues(DiscoverRepository.galleryPost(from:))
     }
 
     @MainActor
     public func heldGalleryPost(_ id: PostID) -> GalleryPost? {
-        guard var post = heldEntry(id).map(ForYouRepository.galleryPost(from:)) else { return nil }
+        guard var post = heldEntry(id).map(DiscoverRepository.galleryPost(from:)) else { return nil }
         // A like count the store does not know is the card's unknown state,
         // not a zero (#1863): the hydration's counter read fills it.
         if repository.peekPost(id) == nil, entities.post(id)?.likeCount == nil { post.reactionCount = nil }
@@ -684,7 +684,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             postOpenWarm: postOpenWarm
         )
         // A card's author band wears its relation mark (#2300).
-        (page as? ForYouGridPage)?.authorMarks = authorMarks
+        (page as? PostGridPageView)?.authorMarks = authorMarks
         return page
     }
 
@@ -708,7 +708,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                 let provider = FixedPostsFeedProvider(base: base, ids: ids)
                 // A post deleted in this session is no result, whatever the
                 // index still answers (#896).
-                guard let hydrated = try? await ForYouRepository(feed: provider).firstPage().posts
+                guard let hydrated = try? await DiscoverRepository(feed: provider).firstPage().posts
                 else { return [] }
                 let posts = hydrated.filter { !entities.isDeleted($0.id) }
                 guard let counterClient else { return posts }
@@ -859,7 +859,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             presentSnapFeedHero(postIDs: ids, from: presenter, origin: origin)
         }
         gallery.makePostList = { [self] in
-            let list = ForYouPostListViewController(
+            let list = PushedPostListViewController(
                 kind: .popular, imagePipeline: imagePipeline, videoPlayback: videoPlayback,
                 staking: staking,
                 header: PushedScreenHeader(wallet: balanceWallet, makeWalletSheet: makeWalletSheet, router: router),
@@ -899,7 +899,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         _ ids: [PostID], base: any FeedProviding, counterClient: (any Counter_V1_CounterServiceClientInterface)?
     ) async throws -> [GalleryPost] {
         let provider = FixedPostsFeedProvider(base: base, ids: ids)
-        var members = try await ForYouRepository(feed: provider).firstPage().posts
+        var members = try await DiscoverRepository(feed: provider).firstPage().posts
         if let counterClient {
             let byPostID = await PostCounterReader.counters(forPostIDs: members.map(\.id.rawValue), using: counterClient)
             if !byPostID.isEmpty {
@@ -1615,7 +1615,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             openFeedHero: { [self] ids, presenter, origin in
                 presentSnapFeedHero(postIDs: ids, from: presenter, origin: origin)
             },
-            galleryPost: { [self] id in heldEntry(id).map(ForYouRepository.galleryPost(from:)) },
+            galleryPost: { [self] id in heldEntry(id).map(DiscoverRepository.galleryPost(from:)) },
             // …and the posts the grid lists from outside the feed: loaded into
             // the same cache, which `galleryPost` then answers from.
             prewarmPosts: { ids in await repository.prewarm(ids) }

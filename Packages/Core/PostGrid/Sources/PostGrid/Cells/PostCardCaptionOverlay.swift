@@ -7,8 +7,8 @@ import UIKit
 /// The foot of a compact card: who posted, and the first lines of what they
 /// said — over a scrim on a picture, straight on the card for words.
 ///
-/// Born as the Following card's overlay (`PostShelfMediaCardCell`, which
-/// still calls it `ForYouCardCaptionOverlay`), and shared since 2026-10-03 with
+/// Born as the Following card's overlay (`PostShelfMediaCardCell`), and
+/// shared since 2026-10-03 with
 /// the mosaic's LARGE tiles (`PostGridTileCell.showsInfo`) — one arrangement,
 /// so a tile and a Following card read as the same furniture at different
 /// sizes. The words-on-the-card placement (`.onCard`) now only dresses a text
@@ -92,7 +92,7 @@ public final class PostCardCaptionOverlay: UIView {
     /// post is about, not so much that the picture is covered.
     nonisolated public static let mediaCaptionLines = 2
     /// A text post's words fill the card — the long press's preview of one
-    /// (`ForYouPostPreviewViewController`), the only `.onCard` left since the
+    /// (`PostPreviewViewController`), the only `.onCard` left since the
     /// Following row's text cards became the list's own card (2026-10-03).
     nonisolated public static let textCaptionLines = 7
 

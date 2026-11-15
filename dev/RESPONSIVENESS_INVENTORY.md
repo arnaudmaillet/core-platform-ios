@@ -52,10 +52,10 @@ Columns: area | screen | element | gesture | response | handler (async note) | h
 - foryou | ForYouViewController | friend face | long press | context menu (View Profile, Unfollow) | `storyMenuElements` `:1144-1159`; `FriendsStoriesRow.swift:397` | (no arg)
 - foryou | ForYouViewController | Following shelf card | tap | hero | `shelf.onOpen` `:386` → `presentCard` `:2304` | `-foryou-open-card N`
 - foryou | ForYouViewController | shelf card author | tap | push profile | `:394` → `openAuthor` `:608` | –
-- foryou | ForYouViewController | Friends row title / shelf "View all" | tap | push ForYouPostListViewController | `:387-388` → `pushList` `:2346` | `-foryou-push-list friends\|following`, then `-foryou-list-open N`
+- foryou | ForYouViewController | Friends row title / shelf "View all" | tap | push PushedPostListViewController | `:387-388` → `pushList` `:2346` | `-foryou-push-list friends\|following`, then `-foryou-list-open N`
 - foryou | ForYouViewController | Discover title / "View all" | tap | push DiscoverGalleryViewController | `:390`, `:500` → `pushDiscoverGallery` `:1272` | `-foryou-view-all`, `-foryou-gallery-open N`
 - foryou | ForYouViewController | card author band | tap | push profile | `:440` → `openAuthor` | –
-- foryou | ForYouViewController | card "…" / long press | menu (PostCardMenu) | `ForYouGridPage.swift:3972-3996`; `PostAuthorBandView.swift:279` | `-post-menu-audit` (prints)
+- foryou | ForYouViewController | card "…" / long press | menu (PostCardMenu) | `PostGridPageView.swift:3972-3996`; `PostAuthorBandView.swift:279` | `-post-menu-audit` (prints)
 - foryou | menu | Hide (Not interested) | tap | optimistic hide + undo toast | `hidePost` `:1030`, sync | –
 - foryou | menu | Mute author | tap | **non-optimistic:** PendingFeedback (250 ms grace), `await moderation.setPostsMuted`, then hide | `mute` `:1042-1062` | –
 - foryou | menu | Block | tap | action sheet, then **non-optimistic** PendingFeedback + `await moderation.block` | `confirmBlock` `:1077`, `block` `:1095-1116` | –

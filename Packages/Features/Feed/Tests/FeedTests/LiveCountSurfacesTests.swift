@@ -87,9 +87,9 @@ struct LiveCountSurfacesTests {
     /// the live count — a like made in the feed it opened included.
     @Test func aFollowingCardsFlightAndStandInsDrawTheLiveCount() {
         let entities = EntityStore()
-        let lead = ForYouLeadFixture(pipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()), videoPlayback: nil)
+        let lead = ShelfLeadFixture(pipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()), videoPlayback: nil)
         lead.shelf.staking = PostCardStaking(wallet: Self.wallet(), entities: entities)
-        let page = ForYouGridPage(imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()), style: .discover, videoPlayback: nil)
+        let page = PostGridPageView(imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()), style: .discover, videoPlayback: nil)
         let card = Self.post("c1", likes: 123)
         entities.mergeCounts([card.id: PostCounts(likes: 123)])
 

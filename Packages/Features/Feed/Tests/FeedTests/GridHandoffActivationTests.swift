@@ -24,8 +24,8 @@ struct GridHandoffActivationTests {
         }
     }
 
-    private static func page() -> ForYouGridPage {
-        ForYouGridPage(
+    private static func page() -> PostGridPageView {
+        PostGridPageView(
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             style: .discover,
             videoPlayback: VideoPlaybackController(source: FixedVideoSource())

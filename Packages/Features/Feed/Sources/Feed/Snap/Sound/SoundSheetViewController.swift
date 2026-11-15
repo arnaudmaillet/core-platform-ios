@@ -2033,7 +2033,7 @@ final class SoundSheetViewController: UIViewController {
 
     private var isAutoplayScheduled = false
     /// The lift a committed long press opens from, while the flight takes
-    /// off (#1543) — the grid's rule (`ForYouGridPage.previewLaunch`).
+    /// off (#1543) — the grid's rule (`PostGridPageView.previewLaunch`).
     var previewLaunch: PreviewLaunch?
 
     /// The tile, described for the shared flight (`presentSnapFeedHero`): its
@@ -2134,7 +2134,7 @@ final class SoundSheetViewController: UIViewController {
                 return screenAutoplay()?.playback.tileFlightSurface(for: id, url: videoURL, cell: cell())
             },
             // ⚠️ EVERY TILE, and For You's Following cards are why
-            // (`ForYouRowOrigins`): a TEXT post opens as a window out of its
+            // (`RowOrigins`): a TEXT post opens as a window out of its
             // tile and closes back onto it — it used to open with the plain
             // push — and a MEDIA post, which opens with its flight, closes
             // through the same window once the viewer has paged onto words,
@@ -2325,7 +2325,7 @@ extension SoundSheetViewController: UICollectionViewDelegate {
     // MARK: - The native preview (#1318)
 
     /// ⚠️ THE SOUND SHEET'S TILES LIFT TOO (the owner, 2026-10-17: every
-    /// tile). The lift is the grid's (`ForYouPostPreviewViewController`, the
+    /// tile). The lift is the grid's (`PostPreviewViewController`, the
     /// clip playing inside it); the menu is the post's own rows (#1498 §3),
     /// with no author rows — the sheet has no road to a profile, and it is a
     /// sheet over the post, where the post itself carries them.
@@ -2345,7 +2345,7 @@ extension SoundSheetViewController: UICollectionViewDelegate {
         return UIContextMenuConfiguration(
             identifier: id.rawValue as NSString,
             previewProvider: {
-                ForYouPostPreviewViewController(post: post, imagePipeline: pipeline, width: width, videoPlayback: pool)
+                PostPreviewViewController(post: post, imagePipeline: pipeline, width: width, videoPlayback: pool)
             },
             actionProvider: { [weak self, weak collectionView] _ in
                 // The post's own rows (#1498 §3). No author submenu: the sheet

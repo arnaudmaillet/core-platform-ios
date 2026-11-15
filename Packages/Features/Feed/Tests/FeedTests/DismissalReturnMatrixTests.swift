@@ -52,9 +52,9 @@ struct DismissalReturnMatrixTests {
     }
 
     private func page(
-        style: ForYouGridPage.Style, count: Int = 30, height: CGFloat = 852
-    ) -> ForYouGridPage {
-        let page = ForYouGridPage(
+        style: PostGridPageView.Style, count: Int = 30, height: CGFloat = 852
+    ) -> PostGridPageView {
+        let page = PostGridPageView(
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: style
         )
         page.frame = CGRect(x: 0, y: 0, width: 393, height: height)
@@ -67,10 +67,10 @@ struct DismissalReturnMatrixTests {
     /// builds, tell it the feed settled on `landed`, and let it stage.
     @discardableResult
     private func stageDismissal(
-        on page: ForYouGridPage, tapped: PostID, landed: PostID?,
+        on page: PostGridPageView, tapped: PostID, landed: PostID?,
         activeMediaPage: (() -> Int?)? = nil
-    ) -> ForYouGridZoomSource {
-        let source = ForYouGridZoomSource(
+    ) -> GridZoomSource {
+        let source = GridZoomSource(
             page: page, tappedID: tapped, activePostID: { landed },
             activeMediaPage: activeMediaPage, depthView: nil
         )
@@ -80,7 +80,7 @@ struct DismissalReturnMatrixTests {
 
     /// Where a close anchored to `id` lands: its media, its text row, or its
     /// row — the answers `zoomHeroFrame` tries in turn.
-    private func landingRect(of id: PostID, in page: ForYouGridPage) -> CGRect? {
+    private func landingRect(of id: PostID, in page: PostGridPageView) -> CGRect? {
         page.hero(for: id, in: page)?.frame ?? page.rowFrame(for: id, in: page)
     }
 
@@ -89,8 +89,8 @@ struct DismissalReturnMatrixTests {
     /// ⚠️ THE MATRIX: every shape × what the post being closed IS × how far the
     /// viewer paged. The grid holds still, and the close lands on the tile
     /// that was tapped — never on the post the viewer ended on.
-    @Test(arguments: [ForYouGridPage.Style.discover, .grid, .list], [0, 1, 2])
-    func aCloseAlwaysComesHomeToTheTappedTile(style: ForYouGridPage.Style, landingKind: Int) {
+    @Test(arguments: [PostGridPageView.Style.discover, .grid, .list], [0, 1, 2])
+    func aCloseAlwaysComesHomeToTheTappedTile(style: PostGridPageView.Style, landingKind: Int) {
         for distance in [0, 3, 24] {
             let page = page(style: style)
             let before = page.posts.map(\.id)
@@ -114,7 +114,7 @@ struct DismissalReturnMatrixTests {
         let page = page(style: .grid, count: 8)
         let before = page.posts.map(\.id)
         var landed = before[5]
-        let source = ForYouGridZoomSource(
+        let source = GridZoomSource(
             page: page, tappedID: before[1], activePostID: { landed }, depthView: nil
         )
         source.zoomSourceWillStageDismissal()
@@ -159,7 +159,7 @@ struct DismissalReturnMatrixTests {
     /// A feed that has not answered yet is asked this too — a pop can beat the
     /// first page in — and nothing breaks.
     @Test func anEmptyFeedRefusesQuietly() {
-        let page = ForYouGridPage(
+        let page = PostGridPageView(
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .list
         )
         page.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
@@ -175,7 +175,7 @@ struct DismissalReturnMatrixTests {
     /// The end state, not the calls: a row hidden by a driver that never got to
     /// put it back looks exactly like a row nobody ever hid, and only the
     /// pixels tell them apart.
-    private func expectNothingConcealed(_ page: ForYouGridPage, _ comment: Comment) {
+    private func expectNothingConcealed(_ page: PostGridPageView, _ comment: Comment) {
         let collection = page.subviews.compactMap { $0 as? UICollectionView }.first
         for cell in collection?.visibleCells ?? [] {
             #expect(cell.isHidden == false, comment)
@@ -192,12 +192,12 @@ struct DismissalReturnMatrixTests {
     /// its own hide back) or another driver finishes the close and the screen's
     /// own return sweep does.
     private func roundTrip(
-        on page: ForYouGridPage,
+        on page: PostGridPageView,
         tapped: PostID,
         landed: PostID,
         flightLands: Bool
     ) {
-        let source = ForYouGridZoomSource(
+        let source = GridZoomSource(
             page: page, tappedID: tapped, activePostID: { landed }, depthView: nil
         )
         source.setZoomSourceHidden(true)
@@ -219,8 +219,8 @@ struct DismissalReturnMatrixTests {
     /// nothing about a hide it did not make. The row came back with its caption
     /// and a blank where its photograph was, and stayed that way: one more row
     /// per round trip, which is why it was reported "after several iterations".
-    @Test(arguments: [ForYouGridPage.Style.grid, .list])
-    func aCloseFinishedByAnotherDriverStillGivesTheRowBack(style: ForYouGridPage.Style) {
+    @Test(arguments: [PostGridPageView.Style.grid, .list])
+    func aCloseFinishedByAnotherDriverStillGivesTheRowBack(style: PostGridPageView.Style) {
         let page = page(style: style)
         let tapped = page.posts[1].id
 
@@ -230,8 +230,8 @@ struct DismissalReturnMatrixTests {
     }
 
     /// And the ordinary case, where the flight does land, is unchanged.
-    @Test(arguments: [ForYouGridPage.Style.grid, .list])
-    func aFlightThatLandsGivesTheRowBackItself(style: ForYouGridPage.Style) {
+    @Test(arguments: [PostGridPageView.Style.grid, .list])
+    func aFlightThatLandsGivesTheRowBackItself(style: PostGridPageView.Style) {
         let page = page(style: style)
 
         roundTrip(
@@ -303,7 +303,7 @@ struct DismissalReturnMatrixTests {
     /// The hero channel beside it has always switched on the cell; this one was
     /// written when only list surfaces opened windows and never caught up.
     @Test func aGridsLandingIsConcealedLikeARows() {
-        for style in [ForYouGridPage.Style.grid, .list] {
+        for style in [PostGridPageView.Style.grid, .list] {
             let page = page(style: style)
             let target = page.posts[1].id
             #expect(page.isPostVisible(target), "precondition: it is on screen to begin with")
@@ -360,7 +360,7 @@ struct DismissalReturnMatrixTests {
 
         // A window opened from this text post: the anchor stays here whatever
         // the viewer paged to.
-        let source = ForYouGridZoomSource(
+        let source = GridZoomSource(
             page: page, tappedID: text, activePostID: { PostID("gone") }, depthView: nil
         )
         source.zoomSourceWillStageDismissal()
@@ -377,7 +377,7 @@ struct DismissalReturnMatrixTests {
     /// Read off the cells rather than off a flag, because "which flag is set"
     /// and "which card the viewer cannot see" came apart, and only the second
     /// one is the bug.
-    private func concealedPosts(in page: ForYouGridPage) -> Set<PostID> {
+    private func concealedPosts(in page: PostGridPageView) -> Set<PostID> {
         page.concealedPosts()
     }
 

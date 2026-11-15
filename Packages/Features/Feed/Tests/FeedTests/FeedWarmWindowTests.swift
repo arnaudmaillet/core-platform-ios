@@ -27,8 +27,8 @@ struct FeedWarmWindowTests {
         }
     }
 
-    private func page() -> ForYouGridPage {
-        let page = ForYouGridPage(
+    private func page() -> PostGridPageView {
+        let page = PostGridPageView(
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .list
         )
         page.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
@@ -76,7 +76,7 @@ struct FeedWarmWindowTests {
     /// A page still showing skeletons has nothing on screen but the shape of
     /// what is coming, and no post to name.
     @Test func aSkeletonPageWarmsNothing() {
-        let page = ForYouGridPage(
+        let page = PostGridPageView(
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .list
         )
         page.frame = CGRect(x: 0, y: 0, width: 393, height: 852)

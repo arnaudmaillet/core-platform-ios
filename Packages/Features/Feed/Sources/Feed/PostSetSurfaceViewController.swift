@@ -7,20 +7,20 @@ import PostGrid
 import MediaCore
 import UIKit
 
-/// A `ForYouGridPage` over an arbitrary set of post ids, vended across the
+/// A `PostGridPageView` over an arbitrary set of post ids, vended across the
 /// feature seam.
 ///
 /// # Why this is thin
 ///
-/// Everything it does already existed. `ForYouGridPage` is the component both
+/// Everything it does already existed. `PostGridPageView` is the component both
 /// For You tabs are — one type, two styles — and `PlaceProfileViewController`
 /// already drives it over a fixed id set with `render(.content(posts))` and no
 /// `ForYouViewModel` anywhere. The hydration is the same one the place profile
-/// runs: a fixed-set provider through `ForYouRepository`, then one batched
+/// runs: a fixed-set provider through `DiscoverRepository`, then one batched
 /// counter read, so every member is a cache hit against what the feed already
 /// holds.
 ///
-/// ⚠️ IT PLAYS, AND IT DID NOT. `ForYouGridPage` takes an optional
+/// ⚠️ IT PLAYS, AND IT DID NOT. `PostGridPageView` takes an optional
 /// `VideoPlaybackController`, and this passed `nil` on the argument that the
 /// player pool is app-wide, that its budget is the tightest thing the hero
 /// suite measures, and that one tab of a pushed screen is not where the
@@ -44,7 +44,7 @@ import UIKit
 final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
     var viewController: UIViewController { self }
 
-    private let page: ForYouGridPage
+    private let page: PostGridPageView
     /// The page's warm of its visible posts' first comments (#2002).
     var postOpenWarm: PostOpenWarm? {
         get { page.postOpenWarm }
@@ -139,7 +139,7 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
         hydrate: @escaping ([PostID]) async -> [GalleryPost]
     ) {
         self.held = held
-        page = ForYouGridPage(
+        page = PostGridPageView(
             imagePipeline: imagePipeline,
             style: Self.pageStyle(for: style),
             videoPlayback: videoPlayback
@@ -179,7 +179,7 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     /// The page each surface style is. Pure, for tests.
-    nonisolated static func pageStyle(for style: PostSetSurfaceStyle) -> ForYouGridPage.Style {
+    nonisolated static func pageStyle(for style: PostSetSurfaceStyle) -> PostGridPageView.Style {
         switch style {
         case .cards: .list
         case .gallery: .grid
@@ -225,7 +225,7 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
     /// For You's coupling of its rows and its list, verbatim in shape
     /// (`ForYouViewController.viewDidLoad`): the header's taps, the cards'
     /// flights, and ONE player budget the two share — the list leaves the
-    /// players the row has claimed (`ForYouGridPage.playerReserve`).
+    /// players the row has claimed (`PostGridPageView.playerReserve`).
     private func wireDiscover() {
         guard let shelf, let lead else { return }
         shelf.visibleBand = { [weak self] in self?.visibleBand() }
@@ -356,7 +356,7 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
     }
 
     /// A lead-row card opens the way For You's Following cards do
-    /// (`ForYouViewController.openCard`, `ForYouRowOrigins.card`).
+    /// (`ForYouViewController.openCard`, `RowOrigins.card`).
     ///
     /// ⚠️ **PINNED FROM THE TAP, AND HANDED BACK ONLY IN `viewDidAppear`
     /// (#924)** — the arrangement `openTile` got in #883, which this door
@@ -446,7 +446,7 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
     /// slots are what the feed needs.
     ///
     /// ⚠️ **THE INSET IS PINNED FROM THE TAP UNTIL THIS SCREEN IS BACK (#883)**
-    /// — `ForYouGridPage.openHoldingStill`, Discover's gallery's arrangement.
+    /// — `PostGridPageView.openHoldingStill`, Discover's gallery's arrangement.
     /// This grid adds the safe area to its inset, and a close reinstalls it
     /// under the flight's depth recede — the page scaled to 0.95 about its
     /// centre — while the pop brings the screen's chrome back. The safe area
@@ -457,7 +457,7 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
     /// through that drift, the card came down 22pt above the tile, and the
     /// tile dropped into place once the screen was back. For You's
     /// own grid never did this — its flight source pins the page as the close
-    /// stages (`ForYouGridZoomSource.zoomSourceWillStageDismissal`).
+    /// stages (`GridZoomSource.zoomSourceWillStageDismissal`).
     ///
     /// ⚠️ **A TEXT POST OPENS AS A WINDOW (#924)**, and it did not: this
     /// origin carried no `textReveal`, a text row has no picture to fly
@@ -492,7 +492,7 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
     /// `textReveal`), since these are For You's own rows: the close carries
     /// the post home (`RevealDismissCardView`) onto the row it opened from. A
     /// TILE (a mosaic brick, a paired card) answers with its own window
-    /// (`ForYouGridPage.tileWindow`), which a tile of words also OPENS
+    /// (`PostGridPageView.tileWindow`), which a tile of words also OPENS
     /// through: its shape and ground, nothing to align. Nil for a row the page
     /// cannot find, the plain push then being the honest floor.
     ///
@@ -500,12 +500,12 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
     /// closes with its pop (#2243). A MEDIA row's flight-opened feed does:
     /// `hasHero` decides the opening; this decides whether a close that has
     /// nothing left to fly has anywhere to go (`RowCardCloseLanding`) — the
-    /// rows' rule (`ForYouRowOrigins`).
+    /// rows' rule (`RowOrigins`).
     ///
     /// ⚠️ NO THAW HERE: `viewDidAppear` hands the inset back. A window's close
     /// ends before the pop has settled the chrome, and a thaw then re-bases
     /// the list on a mid-flight inset
-    /// (`ForYouPostListViewController.textRowReveal`).
+    /// (`PushedPostListViewController.textRowReveal`).
     private func textReveal(for post: GalleryPost) -> TextRevealOrigin? {
         let anchor = post.id
         let staged: () -> Void = { [weak self] in
@@ -616,7 +616,7 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
     }
 
     /// ⚠️ THE PAGE PLAYS NOTHING UNTIL IT IS TOLD IT IS VISIBLE, and handing it
-    /// the pool is not that. `ForYouGridPage` gates its whole autoplay
+    /// the pool is not that. `PostGridPageView` gates its whole autoplay
     /// reconcile behind `setAutoplayActive` — measured before this existed: the
     /// grids had the pool, sat on screen, and every clip was a still, because
     /// nothing had ever said they were being looked at. For You drives the same

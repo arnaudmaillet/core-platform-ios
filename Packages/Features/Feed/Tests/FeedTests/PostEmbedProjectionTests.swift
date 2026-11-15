@@ -49,7 +49,7 @@ struct PostEmbedProjectionTests {
 
     @Test func theGridTileCarriesItAndStaysText() {
         let post = FeedRepository.makePost(from: view(withEmbed: true))
-        let tile = ForYouRepository.galleryPost(from: entry(post))
+        let tile = DiscoverRepository.galleryPost(from: entry(post))
         #expect(tile.embed == embed)
         #expect(tile.kind == .text)
         #expect(tile.pages.isEmpty)

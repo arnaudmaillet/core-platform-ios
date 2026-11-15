@@ -549,7 +549,7 @@ struct SoundSheetTests {
         let post = Self.galleryPost("p1", kind: .photo)
         let origin = controller.heroOrigin(for: Self.tile(for: post), post: post, stream: [post], source: .sheet(.recent))
 
-        let preview = ForYouPostPreviewViewController(
+        let preview = PostPreviewViewController(
             post: post, imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()), width: 361
         )
         let lift = CGRect(x: 24, y: 180, width: 345, height: 460)

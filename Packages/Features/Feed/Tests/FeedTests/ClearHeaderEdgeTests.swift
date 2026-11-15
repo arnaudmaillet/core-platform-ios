@@ -14,18 +14,18 @@ import UIKit
 struct ClearHeaderEdgeTests {
     private func pipeline() -> ImagePipeline { ImagePipeline(fetcher: PlaceholderImageFetcher()) }
 
-    @Test(arguments: [ForYouGridPage.Style.grid, .list, .discover])
-    func aForYouPageHidesTheEffectUnderTheHeader(style: ForYouGridPage.Style) throws {
-        let page = ForYouGridPage(imagePipeline: pipeline(), style: style)
+    @Test(arguments: [PostGridPageView.Style.grid, .list, .discover])
+    func aForYouPageHidesTheEffectUnderTheHeader(style: PostGridPageView.Style) throws {
+        let page = PostGridPageView(imagePipeline: pipeline(), style: style)
         let list = try #require(page.subviews.compactMap { $0 as? UICollectionView }.first)
         #expect(list.topEdgeEffect.isHidden)
     }
 
     /// ⚠️ AND THE ROWS' OWN SCROLLERS. For You's list is led by horizontal
-    /// rows (`ForYouLeadFixture`: its shelf's media and text rows); a row is a scroll view under the same header, and its effect
+    /// rows (`ShelfLeadFixture`: its shelf's media and text rows); a row is a scroll view under the same header, and its effect
     /// would draw a band across the header too.
     @Test func theForYouRowsHideTheirEffectToo() throws {
-        let lead = ForYouLeadFixture(pipeline: pipeline(), videoPlayback: nil)
+        let lead = ShelfLeadFixture(pipeline: pipeline(), videoPlayback: nil)
         let rows = lead.shelf.subviews.compactMap { $0 as? UIScrollView }
         #expect(rows.count == 2)
         #expect(rows.allSatisfy { $0.topEdgeEffect.isHidden })

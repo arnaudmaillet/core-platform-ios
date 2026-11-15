@@ -85,8 +85,8 @@ struct ProfileTileCloseLandingTests {
     }
 
     /// The page the profile draws on (#1273): For You's.
-    private func page(_ style: ForYouGridPage.Style, posts: [GalleryPost]) -> ForYouGridPage {
-        let page = ForYouGridPage(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: style)
+    private func page(_ style: PostGridPageView.Style, posts: [GalleryPost]) -> PostGridPageView {
+        let page = PostGridPageView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: style)
         page.showsTileInfo = true
         page.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
         page.layoutIfNeeded()
@@ -98,7 +98,7 @@ struct ProfileTileCloseLandingTests {
     }
 
     /// Brings `id`'s cell on screen, as the tap that opens it would have.
-    private func realize(_ id: PostID, on page: ForYouGridPage) throws {
+    private func realize(_ id: PostID, on page: PostGridPageView) throws {
         let index = try #require(page.posts.firstIndex { $0.id == id })
         let path = page.indexPath(for: index)
         page.collectionView.scrollToItem(at: path, at: .top, animated: false)
@@ -107,7 +107,7 @@ struct ProfileTileCloseLandingTests {
 
     /// Opens `post` from `page` through the profile's real open, and returns
     /// the origin it hands the feed — the description the close lands by.
-    private func origin(opening post: GalleryPost, from page: ForYouGridPage) throws -> SnapFeedHeroOrigin {
+    private func origin(opening post: GalleryPost, from page: PostGridPageView) throws -> SnapFeedHeroOrigin {
         let screen = ProfileViewController(
             viewModel: ProfileViewModel(repository: NoProfiles(), gallery: NoGallery(), source: .currentUser),
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
@@ -193,7 +193,7 @@ struct ProfileTileCloseLandingTests {
     // MARK: - The words a media close carries home (#910)
 
     /// The cell `id` is drawn in — a tile, for every caller below.
-    private func tileCell(_ id: PostID, on page: ForYouGridPage) throws -> PostGridTileCell {
+    private func tileCell(_ id: PostID, on page: PostGridPageView) throws -> PostGridTileCell {
         try #require(page.debugCell(for: id) as? PostGridTileCell)
     }
 

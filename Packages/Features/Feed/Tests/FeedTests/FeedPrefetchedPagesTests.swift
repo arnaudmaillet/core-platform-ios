@@ -77,7 +77,7 @@ final class FeedPrefetchedPagesTests {
         let cache = try makeCache()
         let discover = FixedFeed(first: page(["d1", "d2"], next: "dc1"), next: ["dc1": page(["d3", "d4"], next: "dc2")])
         let following = FixedFeed(first: page(["f1"], next: "fc1"), next: ["fc1": page(["f2", "f3"], next: nil)])
-        let repository = ForYouRepository(feed: following, discovery: discover, localCache: cache)
+        let repository = DiscoverRepository(feed: following, discovery: discover, localCache: cache)
         _ = try await repository.discoveryFirstPage()
         _ = try await repository.firstPage()
         #expect(speculativeBytes(cache) == 0, "a first page is retained")
@@ -134,13 +134,13 @@ final class FeedPrefetchedPagesTests {
 /// The grid page says which post it is about to display: For You's hook for
 /// promoting a page fetched ahead (#970).
 @MainActor
-struct ForYouGridPageDisplayTests {
+struct GridPageDisplayTests {
     private struct SilentFetcher: ImageFetching {
         func fetchImageData(for url: URL) async throws -> Data { Data() }
     }
 
     @Test func aCellAboutToDisplayNamesItsPost() {
-        let page = ForYouGridPage(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .grid)
+        let page = PostGridPageView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .grid)
         page.frame = CGRect(x: 0, y: 0, width: 393, height: 1200)
         let posts = (0..<6).map { index in
             GalleryPost(

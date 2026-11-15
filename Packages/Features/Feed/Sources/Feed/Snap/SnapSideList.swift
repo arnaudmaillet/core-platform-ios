@@ -597,7 +597,7 @@ final class SnapSideListView: UIView, UICollectionViewDataSource, UICollectionVi
         guard let autoplay, let index = entries.firstIndex(where: { $0.post.id == id }),
               let cell = collection.cellForItem(at: IndexPath(item: index, section: 0)) as? PostGridTileCell,
               let surface = cell.loadedVideoRenderView,
-              let url = ForYouRepository.galleryPost(from: entries[index]).videoURL,
+              let url = DiscoverRepository.galleryPost(from: entries[index]).videoURL,
               let seconds = autoplay.playheadSeconds(in: surface) else { return nil }
         return (url, seconds)
     }
@@ -608,7 +608,7 @@ final class SnapSideListView: UIView, UICollectionViewDataSource, UICollectionVi
         let items = collection.indexPathsForVisibleItems.compactMap { path -> SnapSideListAutoplay.Item? in
             guard entries.indices.contains(path.item),
                   let cell = collection.cellForItem(at: path) as? PostGridTileCell else { return nil }
-            return .init(post: ForYouRepository.galleryPost(from: entries[path.item]), cell: cell)
+            return .init(post: DiscoverRepository.galleryPost(from: entries[path.item]), cell: cell)
         }
         autoplay.reconcile(items, in: collection)
     }
@@ -728,7 +728,7 @@ final class SnapSideListView: UIView, UICollectionViewDataSource, UICollectionVi
             let entry = entries[indexPath.item]
             // A text post's tile is its words; a picture speaks for itself.
             tile.configure(
-                with: ForYouRepository.galleryPost(from: entry), imagePipeline: imagePipeline,
+                with: DiscoverRepository.galleryPost(from: entry), imagePipeline: imagePipeline,
                 showsInfo: entry.post.attachments.isEmpty
             )
             // A cover landing late is when a still tile may start. Its wait is

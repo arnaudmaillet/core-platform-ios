@@ -43,8 +43,8 @@ struct GalleryTileInfoTests {
         }
     }
 
-    private func page(style: ForYouGridPage.Style, showsInfo: Bool) -> ForYouGridPage {
-        let page = ForYouGridPage(imagePipeline: pipeline(), style: style)
+    private func page(style: PostGridPageView.Style, showsInfo: Bool) -> PostGridPageView {
+        let page = PostGridPageView(imagePipeline: pipeline(), style: style)
         page.showsTileInfo = showsInfo
         page.frame = CGRect(x: 0, y: 0, width: 393, height: 6000)
         page.setCorpusComplete(true)
@@ -54,12 +54,12 @@ struct GalleryTileInfoTests {
         return page
     }
 
-    private func collectionView(of page: ForYouGridPage) -> UICollectionView {
+    private func collectionView(of page: PostGridPageView) -> UICollectionView {
         page.subviews.compactMap { $0 as? UICollectionView }.first!
     }
 
     /// Every realized mosaic tile on `page`.
-    private func tiles(on page: ForYouGridPage) -> [(post: GalleryPost, cell: PostGridTileCell)] {
+    private func tiles(on page: PostGridPageView) -> [(post: GalleryPost, cell: PostGridTileCell)] {
         page.posts.compactMap { post in
             (page.debugCell(for: post.id) as? PostGridTileCell).map { (post, $0) }
         }
@@ -97,7 +97,7 @@ struct GalleryTileInfoTests {
     /// and the mosaic genuinely holds both kinds (some tiles carry words, some
     /// stay pictures).
     @Test func eachTileWearsWhatItsSizeEarns() {
-        for style in [ForYouGridPage.Style.discover, .grid] {
+        for style in [PostGridPageView.Style.discover, .grid] {
             let page = page(style: style, showsInfo: true)
             let tiles = tiles(on: page)
             #expect(tiles.isEmpty == false)
@@ -119,8 +119,8 @@ struct GalleryTileInfoTests {
     @Test func pairedCardsAndCardsAreUntouched() throws {
         let page = page(style: .discover, showsInfo: true)
         let paired = try #require(page.segments.first(where: \.isPairs)?.posts.first)
-        let overlay = try #require(page.restingOverlay(for: paired.id) as? ForYouCardCaptionOverlay)
-        #expect(overlay.debugCaptionLineLimit == ForYouCardCaptionOverlay.mediaCaptionLines)
+        let overlay = try #require(page.restingOverlay(for: paired.id) as? PostCardCaptionOverlay)
+        #expect(overlay.debugCaptionLineLimit == PostCardCaptionOverlay.mediaCaptionLines)
         #expect(overlay.debugUsesLayerShadows, "the Following card's own overlay, as it was")
         let card = try #require(page.segments.first(where: { $0.chunk == nil && !$0.isPairs })?.posts.first)
         #expect(page.restingOverlay(for: card.id) == nil)
@@ -147,7 +147,7 @@ struct GalleryTileInfoTests {
         }
     }
 
-    /// For You's own flight (`ForYouGridZoomSource`): on a CLOSE the card
+    /// For You's own flight (`GridZoomSource`): on a CLOSE the card
     /// wears the words in its RESTING CHROME — the channel the flight fades in
     /// as the card shrinks home — and drops its corner count, so it flies one
     /// heart, the author line's, as the tile wears it.
@@ -158,7 +158,7 @@ struct GalleryTileInfoTests {
         let page = page(style: .discover, showsInfo: true)
         let worded = try #require(tiles(on: page).first { $0.cell.infoVariant != .none },
                                   "precondition: a chunk tile large enough for words")
-        let source = ForYouGridZoomSource(
+        let source = GridZoomSource(
             page: page, tappedID: worded.post.id, activePostID: { worded.post.id }, depthView: nil
         )
         let opening = try #require(source.makeZoomFlightCard() as? PostGridFlightCard)
@@ -171,7 +171,7 @@ struct GalleryTileInfoTests {
 
         // A tile with no words flies as it always did: its count, no overlay.
         if let bare = tiles(on: page).first(where: { $0.cell.infoVariant == .none }) {
-            let plain = ForYouGridZoomSource(
+            let plain = GridZoomSource(
                 page: page, tappedID: bare.post.id, activePostID: { bare.post.id }, depthView: nil
             )
             plain.zoomSourceWillStageDismissal()
@@ -248,7 +248,7 @@ struct GalleryTileInfoTests {
 }
 
 /// Pages nothing — the default needs the screen, not its content.
-private final class EmptyProvider: ForYouProviding, @unchecked Sendable {
-    func firstPage() async throws -> ForYouPage { ForYouPage(posts: [], nextPageToken: nil) }
-    func page(after token: String) async throws -> ForYouPage { ForYouPage(posts: [], nextPageToken: nil) }
+private final class EmptyProvider: DiscoverProviding, @unchecked Sendable {
+    func firstPage() async throws -> DiscoverPage { DiscoverPage(posts: [], nextPageToken: nil) }
+    func page(after token: String) async throws -> DiscoverPage { DiscoverPage(posts: [], nextPageToken: nil) }
 }
