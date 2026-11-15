@@ -1,4 +1,5 @@
 
+import LaunchArguments
 import UIKit
 
 /// Drives the *non-interactive* legs of the hero/zoom transition with a
@@ -187,14 +188,14 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         using context: any UIViewControllerContextTransitioning
     ) -> any UIViewImplicitlyAnimating {
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-zoom-profile") {
+        if LaunchArgument.zoomProfile.isPassed() {
             print("[anim] asked presenting=\(isPresenting) cached=\(interruptible != nil)"
                   + " sameCtx=\(interruptibleContext === (context as AnyObject))"
                   + " superseded=\(isSupersededByInteractiveDriver)")
         }
         #endif
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+        if LaunchArgument.zoomLiveLog.isPassed() {
             print("[zoom-live] interruptibleAnimator asked presenting=\(isPresenting) cached=\(interruptible != nil) sameCtx=\(interruptibleContext === (context as AnyObject))")
         }
         #endif
@@ -223,7 +224,7 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
 
     private func present(_ context: any UIViewControllerContextTransitioning) -> UIViewPropertyAnimator {
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+        if LaunchArgument.zoomLiveLog.isPassed() {
             print("[zoom-live] BUILD present flight (presenting=\(isPresenting))")
         }
         #endif
@@ -449,7 +450,7 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         animator.addAnimations({ dim.alpha = 1 }, delayFactor: 0.35)
         animator.addCompletion { _ in
             #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-zoom-profile") {
+            if LaunchArgument.zoomProfile.isPassed() {
                 print(String(format: "[zoom] present completion at +%.1f ms",
                              ZoomFlightProfiler.shared.elapsedMilliseconds))
             }
@@ -490,7 +491,7 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
                 // screen whose controls still took taps.
                 self.destination?.setZoomContentHidden(false)
                 #if DEBUG
-                if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+                if LaunchArgument.zoomLiveLog.isPassed() {
                     print("[zoom-live] present REVERSED, source restored")
                 }
                 #endif
@@ -585,7 +586,7 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
                 }
             }
             #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-zoom-profile") {
+            if LaunchArgument.zoomProfile.isPassed() {
                 ZoomFlightProfiler.shared.note("transition completed")
                 let d = self.destination
                 print(String(format:
@@ -618,7 +619,7 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
                                let surface = cover.zoomLiveMediaSurface?.layer
                                guard !ZoomPresentSettlement.liveSurfaceIsArriving(surface) else {
                                    #if DEBUG
-                                   if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+                                   if LaunchArgument.zoomLiveLog.isPassed() {
                                        print(String(format: "[zoom-live] %.3f cover held: its surface is fading up (shown %.2f)",
                                                     CACurrentMediaTime(), surface?.presentation()?.opacity ?? -1))
                                    }
@@ -639,7 +640,7 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
                     return
                 }
                 #if DEBUG
-                if ProcessInfo.processInfo.arguments.contains("-zoom-profile") {
+                if LaunchArgument.zoomProfile.isPassed() {
                     print(String(format: "[zoom] cover dropped at +%.1f ms",
                                  ZoomFlightProfiler.shared.elapsedMilliseconds))
                 }
@@ -716,7 +717,7 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             return
         }
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+        if LaunchArgument.zoomLiveLog.isPassed() {
             print(String(format: "[zoom-live] %.3f gate holding (minTicks=%d ready=%@)",
                          CACurrentMediaTime(), minimumTicks, condition() ? "yes" : "no"))
         }
@@ -754,7 +755,7 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             fired = true
             link.invalidate()
             #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            if LaunchArgument.zoomLiveLog.isPassed() {
                 print(String(format: "[zoom-live] %.3f gate released t%d%@",
                              CACurrentMediaTime(), ticks, timedOut ? " (TIMEOUT)" : ""))
             }
@@ -773,7 +774,7 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
     /// from the moment the animation is scheduled — so this reads the
     /// presentation layer, which is what is actually on screen.
     static func debugTrackFlightGeometry(card: any ZoomFlightCard) {
-        guard ProcessInfo.processInfo.arguments.contains("-zoom-live-log") else { return }
+        guard LaunchArgument.zoomLiveLog.isPassed() else { return }
         let surface = card.zoomLiveMediaSurface
         let probe = GeometryProbe(card: card, surface: surface,
                                   deadline: CACurrentMediaTime() + ZoomFlight.springDuration)
@@ -826,7 +827,7 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         // expose it. The hold therefore always runs, spans a minimum number of
         // frames, and only then starts asking.
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+        if LaunchArgument.zoomLiveLog.isPassed() {
             // Which dismissal is being held. The two paths are separate
             // implementations, and a measurement of one says nothing about the
             // other — worth naming rather than inferring from a harness flag.
@@ -963,7 +964,7 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             // A hold over a card UIKit has already removed protects nothing,
             // and its duration would look perfectly healthy in a log.
             if frames == 1 || frames == 3,
-               ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+               LaunchArgument.zoomLiveLog.isPassed() {
                 // `drawing=NO` is the answer that explains a pop while every
                 // other signal reads healthy: the card is present and opaque,
                 // but its cover is what is on screen.
@@ -996,7 +997,7 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             guard settling || condition(), CACurrentMediaTime() < deadline else {
                 link.invalidate()
                 #if DEBUG
-                if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+                if LaunchArgument.zoomLiveLog.isPassed() {
                     let timedOut = CACurrentMediaTime() >= deadline
                     print(String(format: "[zoom-live] %.3f landing hold END%@",
                                  CACurrentMediaTime(), timedOut ? " (TIMEOUT)" : ""))
@@ -1018,7 +1019,7 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
     /// the source is gone and the card has nothing to show yet. Under
     /// `-zoom-live-log`, and on both legs, because the race is symmetric.
     private static func logFirstFrameHandoff(_ leg: String, card: any ZoomFlightCard) {
-        guard ProcessInfo.processInfo.arguments.contains("-zoom-live-log") else { return }
+        guard LaunchArgument.zoomLiveLog.isPassed() else { return }
         print(String(format: "[zoom-live] %.3f %@ hide-source drawing=%@ %@",
                      CACurrentMediaTime(), leg,
                      card.zoomLiveMediaIsDrawing ? "yes" : "NO",
@@ -1035,7 +1036,7 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         _ stage: String, context: any UIViewControllerContextTransitioning,
         card: any ZoomFlightCard, fromView: UIView
     ) {
-        guard ProcessInfo.processInfo.arguments.contains("-zoom-live-log") else { return }
+        guard LaunchArgument.zoomLiveLog.isPassed() else { return }
         print(String(format: "[zoom-live] teardown %@ cancelled=%@ card=%@ cardFrame=%@ fromView=%@",
                      stage,
                      context.transitionWasCancelled ? "yes" : "no",
@@ -1047,7 +1048,7 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
 
     private func dismiss(_ context: any UIViewControllerContextTransitioning) -> UIViewPropertyAnimator {
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+        if LaunchArgument.zoomLiveLog.isPassed() {
             print("[zoom-live] BUILD dismiss flight (presenting=\(isPresenting))")
         }
         #endif
@@ -1453,7 +1454,7 @@ final class ZoomFlightProfiler: NSObject {
     private var generation = 0
 
     private var isEnabled: Bool {
-        ProcessInfo.processInfo.arguments.contains("-zoom-profile")
+        LaunchArgument.zoomProfile.isPassed()
     }
 
     func flightWillBuild(presenting: Bool) {

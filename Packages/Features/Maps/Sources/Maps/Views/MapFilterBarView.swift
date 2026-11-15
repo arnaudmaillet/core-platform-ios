@@ -1,5 +1,6 @@
 import CoreModels
 import DesignSystem
+import LaunchArguments
 import UIKit
 
 /// The filter bar floating above the tab bar on the map — one horizontally
@@ -281,8 +282,8 @@ final class MapFilterBarView: UIView {
         let update = FavoritesUpdate.resolve(rendered: renderedFavorites, incoming: favorites)
         #if DEBUG
         let arguments = ProcessInfo.processInfo.arguments
-        if arguments.contains("-maps-toggle-subfilter") || arguments.contains("-maps-subfilter-remove")
-            || arguments.contains("-maps-pin-favorite") {
+        if LaunchArgument.mapsToggleSubfilter.isPassed(in: arguments) || LaunchArgument.mapsSubfilterRemove.isPassed(in: arguments)
+            || LaunchArgument.mapsPinFavorite.isPassed(in: arguments) {
             print("[maps] dock update: \(update) (\(favorites.count) pills)")
         }
         #endif

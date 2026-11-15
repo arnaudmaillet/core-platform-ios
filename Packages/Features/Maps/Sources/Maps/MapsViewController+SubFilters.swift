@@ -2,6 +2,7 @@ import CoreModels
 import CoreNavigation
 import DesignSystem
 import FeedInterface
+import LaunchArguments
 import LocalStore
 import MapKit
 import MapsInterface
@@ -127,7 +128,7 @@ extension MapsViewController {
         // a cross-dissolve land on the same pixels and differ only in how they
         // got there. Printed alongside the toggle hook that provokes it.
         let arguments = ProcessInfo.processInfo.arguments
-        if arguments.contains("-maps-toggle-subfilter") || arguments.contains("-maps-subfilter-remove") {
+        if LaunchArgument.mapsToggleSubfilter.isPassed(in: arguments) || LaunchArgument.mapsSubfilterRemove.isPassed(in: arguments) {
             let style = switch update {
             case .show(let options, let style): "show(\(options.count) pills, \(style))"
             case .hide: "hide"

@@ -1,6 +1,7 @@
 import CoreModels
 import CoreNetworking
 import Foundation
+import LaunchArguments
 
 /// Owns the map's pin state and turns each settled viewport into the minimal
 /// annotation diff the view controller applies. The view controller stays a
@@ -213,7 +214,7 @@ public final class MapsViewModel {
             // (the mock's whole-corpus walk included) and the place
             // decoration, on the main actor — against how many pins came back.
             // To stderr: unbuffered, so a detached `--stderr` sink is live.
-            if ProcessInfo.processInfo.arguments.contains("-maps-query-log") {
+            if LaunchArgument.mapsQueryLog.isPassed() {
                 let ms = { (duration: Duration) in
                     Double(duration.components.attoseconds) / 1e15 + Double(duration.components.seconds) * 1000
                 }

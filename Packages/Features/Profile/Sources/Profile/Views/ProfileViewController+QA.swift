@@ -3,6 +3,7 @@ import CoreModels
 import CoreNavigation
 import DesignSystem
 import FeedInterface
+import LaunchArguments
 import MapsInterface
 import MediaCore
 import MediaPlayback
@@ -82,10 +83,7 @@ extension ProfileViewController {
         // A value after the flag drives the MUTUAL's path — the menu rows,
         // which a simulator cannot open (no taps, and `UIMenu` needs one).
         // Bare, it is the plain follower's tap.
-        let arguments = ProcessInfo.processInfo.arguments
-        let choice = arguments.firstIndex(of: "-profile-map-pin-demo")
-            .map { $0 + 1 }
-            .flatMap { $0 < arguments.count ? arguments[$0] : nil }
+        let choice = LaunchArgument.profileMapPinDemo.value()
             .flatMap { value -> Set<MapFavoriteCategory>? in
                 switch value {
                 case "dock": [.dock]
@@ -222,7 +220,7 @@ extension ProfileViewController {
     /// screen is evidence rather than a second opinion. See the For You side,
     /// which prints the same line for the surface that does offer Unfollow.
     func auditPostMenu(_ snapshot: ProfileViewModel.GallerySnapshot) {
-        guard ProcessInfo.processInfo.arguments.contains("-post-menu-audit"),
+        guard LaunchArgument.postMenuAudit.isPassed(),
               case .content(let posts) = snapshot.activity,
               let post = posts.first(where: { $0.authorID != nil }),
               let authorID = post.authorID
@@ -245,7 +243,7 @@ extension ProfileViewController {
     /// "gap" from the very inset the reveal had just applied, so it read clean
     /// whatever the tile did — including while the tile sat under the selector.
     func verifyRevealClearsSelector() {
-        guard ProcessInfo.processInfo.arguments.contains("-profile-verify-reveal") else { return }
+        guard LaunchArgument.profileVerifyReveal.isPassed() else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
             guard let self, let window = view.window else { return }
             guard let tile = galleryPager.debugRevealedTileInWindow() else {

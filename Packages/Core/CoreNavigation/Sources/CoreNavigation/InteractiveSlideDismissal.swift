@@ -1,4 +1,5 @@
 import DesignSystem
+import LaunchArguments
 import UIKit
 
 /// Interactive rightward swipe-to-pop for a screen pushed WITHOUT a hero —
@@ -804,7 +805,7 @@ extension InteractiveSlideDismissal: UINavigationControllerDelegate {
         // are indistinguishable from the outside — the wrong driver answered,
         // the right one answered with no geometry, or the geometry was built
         // for the wrong post — and this names which.
-        if ProcessInfo.processInfo.arguments.contains("-grab-log") {
+        if LaunchArgument.grabLog.isPassed() {
             let kind = (fromVC as? any ZoomTransitionDestination)?.zoomDismissalKind
             print("[pop] kind=\(kind.map(String.init(describing:)) ?? "none")"
                 + " grab=\(revealGrab != nil) geometry=\(revealGeometry != nil)"
@@ -882,7 +883,7 @@ extension InteractiveSlideDismissal: UINavigationControllerDelegate {
         // Before the teardown below, which hands the slot back and forgets who
         // to forward to.
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-grab-log") {
+        if LaunchArgument.grabLog.isPassed() {
             print("[pop] didShow \(type(of: viewController))")
         }
         #endif

@@ -2,6 +2,7 @@ import CoreModels
 import CoreNavigation
 import DesignSystem
 import FeedInterface
+import LaunchArguments
 import LocalStore
 import MapKit
 import MapsInterface
@@ -93,7 +94,7 @@ extension MapsViewController {
         //
         // It is not a product mode and must never become one: without the merge
         // the map has no answer for a dense city.
-        let unclustered = ProcessInfo.processInfo.arguments.contains("-maps-no-clustering")
+        let unclustered = LaunchArgument.mapsNoClustering.isPassed()
         #else
         let unclustered = false
         #endif

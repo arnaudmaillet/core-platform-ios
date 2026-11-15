@@ -2,6 +2,7 @@ import CoreModels
 import CoreNavigation
 import DesignSystem
 import FeedInterface
+import LaunchArguments
 import LocalStore
 import MapKit
 import MapsInterface
@@ -58,7 +59,7 @@ extension MapsViewController {
         }
         let ranked = scored.sorted { $0.distance < $1.distance }.map(\.candidate)
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-map-icon-hud-log") {
+        if LaunchArgument.mapIconHudLog.isPassed() {
             let lone = displayed.values.compactMap { $0 as? MapAnnotation }
             let groups = displayed.values.compactMap { $0 as? MapComputedCluster }
             print("MAPVIDEO lone=\(lone.count) clusters=\(groups.count) "

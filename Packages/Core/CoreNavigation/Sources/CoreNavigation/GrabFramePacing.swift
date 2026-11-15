@@ -1,3 +1,4 @@
+import LaunchArguments
 import QuartzCore
 
 /// A grab's frame pacing (#1915): how long each frame took while the page was
@@ -47,7 +48,7 @@ public struct GrabFramePacing: Equatable, Sendable {
 @MainActor
 final class GrabFramePacer {
     static let shared = GrabFramePacer()
-    static var isOn: Bool { ProcessInfo.processInfo.arguments.contains("-grab-frames") }
+    static var isOn: Bool { LaunchArgument.grabFrames.isPassed() }
 
     private var link: CADisplayLink?
     private var last: CFTimeInterval?

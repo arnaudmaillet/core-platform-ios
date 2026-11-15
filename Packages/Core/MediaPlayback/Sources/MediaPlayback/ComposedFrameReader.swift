@@ -1,6 +1,7 @@
 import AVFoundation
 import CoreMedia
 import CoreVideo
+import LaunchArguments
 import os
 
 /// An arrangement and the composition that draws it, as the preview needs them.
@@ -314,7 +315,7 @@ final class ComposedFrameReader: @unchecked Sendable {
     /// ⚠️ **A PROBE, RESOLVED ONCE.** Under `-composed-probe` every restart and
     /// every failure is printed with the time it was asked for — "the canvas
     /// froze" has several causes, and the restart pattern tells them apart.
-    static let probes = ProcessInfo.processInfo.arguments.contains("-composed-probe")
+    static let probes = LaunchArgument.composedProbe.isPassed()
 
     private func startReading() {
         let generation = state.withLockUnchecked { $0.generation }

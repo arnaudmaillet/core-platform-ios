@@ -1,4 +1,5 @@
 import Foundation
+import LaunchArguments
 
 /// Which render surface `VideoRenderView` is backed by, for the duration of the
 /// process.
@@ -32,7 +33,7 @@ public enum VideoRenderFlags {
     /// recipes keep meaning what they meant.
     public static let usesSampleBufferLayer: Bool = {
         let info = ProcessInfo.processInfo
-        if info.arguments.contains("-avplayer-render")
+        if LaunchArgument.avplayerRender.isPassed(in: info.arguments)
             || info.environment["AVSBDL_RENDER"] == "0" {
             return false
         }
@@ -44,5 +45,5 @@ public enum VideoRenderFlags {
     /// traces a flight — these two answer different questions and mixing them
     /// buried the signal last time.
     static let logsFrameDispatch: Bool =
-        ProcessInfo.processInfo.arguments.contains("-avsbdl-log")
+        LaunchArgument.avsbdlLog.isPassed()
 }

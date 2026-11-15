@@ -2,6 +2,7 @@ import CoreModels
 import CoreNavigation
 import DesignSystem
 import FeedInterface
+import LaunchArguments
 import LocalStore
 import MapKit
 import MapsInterface
@@ -63,10 +64,9 @@ extension MapsViewController {
     /// `-maps-offer-country <CC>` (#1600): a country's offer, as the shop opens
     /// it — once, a beat after the map first appears.
     func debugOfferCountryIfRequested() {
-        guard !didDebugOfferCountry, let index = ProcessInfo.processInfo.arguments.firstIndex(of: "-maps-offer-country"),
-              index + 1 < ProcessInfo.processInfo.arguments.count else { return }
+        guard !didDebugOfferCountry, let offered = LaunchArgument.mapsOfferCountry.value() else { return }
         didDebugOfferCountry = true
-        let code = ProcessInfo.processInfo.arguments[index + 1].uppercased()
+        let code = offered.uppercased()
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.showCountry(code) }
     }
     #endif

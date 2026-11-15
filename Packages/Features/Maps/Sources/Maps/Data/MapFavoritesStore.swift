@@ -1,6 +1,7 @@
 import CoreModels
 import CoreStorage
 import Foundation
+import LaunchArguments
 import MapsInterface
 
 /// Client-side persistence for the filter bar's favorites — the profiles the
@@ -51,7 +52,7 @@ public final class MapFavoritesStore: @unchecked Sendable {
         #if DEBUG
         // `-maps-reset-favorites`: deterministic QA — wipe the curated lists
         // so a scripted launch always starts from the graph fallback.
-        if ProcessInfo.processInfo.arguments.contains("-maps-reset-favorites") {
+        if LaunchArgument.mapsResetFavorites.isPassed() {
             for category in MapFavoriteCategory.allCases {
                 defaults.removeObject(forKey: key(for: category))
             }

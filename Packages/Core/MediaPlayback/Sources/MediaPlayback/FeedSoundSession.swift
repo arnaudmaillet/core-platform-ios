@@ -2,6 +2,7 @@ import CoreModels
 import AudioToolbox
 import AVFoundation
 import Foundation
+import LaunchArguments
 import QuartzCore
 
 /// THE FEED'S SOUND (#1931, the owner 2026-10-30): Instagram's model, with no
@@ -347,7 +348,7 @@ public enum RingerProbe {
             let elapsed = CACurrentMediaTime() - start
             Task { @MainActor in
                 #if DEBUG
-                if ProcessInfo.processInfo.arguments.contains("-sound-log") {
+                if LaunchArgument.soundLog.isPassed() {
                     print(String(format: "[sound] ringer check %.3f s → %@", elapsed, elapsed < skippedBelow ? "silent" : "ringing"))
                 }
                 #endif

@@ -2,6 +2,7 @@ import CoreNavigation
 import CoreNetworking
 import CoreStorage
 import DesignSystem
+import LaunchArguments
 import MediaCore
 import UIKit
 
@@ -534,11 +535,8 @@ extension FamilyAndTeensViewController {
     /// age and the list are in — the rows take no simulated touch. With
     /// `-open-settings familyAndTeens`.
     private func openSupervisionForQA() {
-        let arguments = ProcessInfo.processInfo.arguments
-        guard !didOpenSupervisionForQA, let index = arguments.firstIndex(of: "-supervision-open"),
-              index + 1 < arguments.count else { return }
+        guard !didOpenSupervisionForQA, let target = LaunchArgument.supervisionOpen.value() else { return }
         didOpenSupervisionForQA = true
-        let target = arguments[index + 1]
         QAWait.until("supervision-open", { [weak self] in
             guard let self, let navigation = navigationController else { return false }
             guard case .loaded = supervisionList?.phase else { return false }

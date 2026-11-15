@@ -1,4 +1,5 @@
 
+import LaunchArguments
 import UIKit
 
 /// Wires the hero/zoom transition to a *navigation push*: it acts as the
@@ -91,7 +92,7 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
     #if DEBUG
     deinit {
         ZoomDebugCensus.decrement(ZoomDebugCensus.Key.controller)
-        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+        if LaunchArgument.zoomLiveLog.isPassed() {
             print("[zoom-live] ZoomTransitionController deinit")
         }
     }
@@ -216,7 +217,7 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
     /// VERTICAL grab (from the first post) instead of the horizontal one.
     public func debugScriptedGrab() {
         debugScriptedGrab(
-            axis: ProcessInfo.processInfo.arguments.contains("-zoom-demo-grab-vertical")
+            axis: LaunchArgument.zoomDemoGrabVertical.isPassed()
                 ? .vertical : .horizontal
         )
     }
@@ -410,7 +411,7 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
         // orphaned.
         releaseFlightInterruptor()
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-grab-log") {
+        if LaunchArgument.grabLog.isPassed() {
             print("[zoom] didShow \(type(of: viewController))"
                   + " isFeed=\(viewController === feedViewController ? "Y" : "n")"
                   + " registered=\(dismissTargets.contains { $0.target === viewController } ? "Y" : "n")"

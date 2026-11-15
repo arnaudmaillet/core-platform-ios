@@ -1,4 +1,5 @@
 import DesignSystem
+import LaunchArguments
 import UIKit
 
 /// Whether a post opens with a hero (or a reveal window) at all.
@@ -24,7 +25,7 @@ public enum HeroMotionPolicy {
     public static var reducesMotion: () -> Bool = {
         #if DEBUG
         // `-hero-reduce-motion`: the same route without toggling the setting.
-        if ProcessInfo.processInfo.arguments.contains("-hero-reduce-motion") { return true }
+        if LaunchArgument.heroReduceMotion.isPassed() { return true }
         #endif
         return MotionPreference.reducesMotion
     }

@@ -3,6 +3,7 @@ import CoreModels
 import CoreNetworking
 import CoreStorage
 import Foundation
+import LaunchArguments
 import ProfileSettings
 import UIKit
 
@@ -207,7 +208,7 @@ public final class SavedPostsSync: PostSaveSyncing {
         #if DEBUG
         // The pile's QA hooks (`PostBookmarkStore`): a seeded pile is pushed
         // like an upgrading install's, so the list keeps it.
-        if ProcessInfo.processInfo.arguments.contains("-seed-bookmarks") {
+        if LaunchArgument.seedBookmarks.isPassed() {
             defaults.removeObject(forKey: Self.reconciledKey)
         }
         #endif

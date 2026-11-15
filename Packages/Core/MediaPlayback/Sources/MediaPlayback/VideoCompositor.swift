@@ -3,6 +3,7 @@ import CoreImage
 import CoreImage.CIFilterBuiltins
 import CoreMedia
 import CoreVideo
+import LaunchArguments
 import Synchronization
 
 /// What one stretch of an arrangement draws.
@@ -136,7 +137,7 @@ final class VideoCompositor: NSObject, AVVideoCompositing, @unchecked Sendable {
     /// picture's values pass through and a blend is a blend of what is encoded
     /// — and the output buffers are tagged Rec. 709, which is what they hold.
     /// ⚠️ **A PROBE, RESOLVED ONCE** — `-composed-probe` also times the render.
-    static let probes = ProcessInfo.processInfo.arguments.contains("-composed-probe")
+    static let probes = LaunchArgument.composedProbe.isPassed()
     private static let costs = Mutex<(count: Int, seconds: Double, reported: CFTimeInterval)>((0, 0, 0))
 
     /// Averages the render's cost and prints it once a second.

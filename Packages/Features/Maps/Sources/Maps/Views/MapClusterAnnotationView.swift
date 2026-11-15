@@ -1,5 +1,6 @@
 import CoreModels
 import DesignSystem
+import LaunchArguments
 import MapKit
 import MediaCore
 import MediaPlayback
@@ -260,7 +261,7 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerD
         // `-maps-log-sheets`: the last link. A cluster wears its
         // REPRESENTATIVE's sheet, so a group full of video can still show none
         // if the member it elected has no baked clip.
-        if ProcessInfo.processInfo.arguments.contains("-maps-log-sheets") {
+        if LaunchArgument.mapsLogSheets.isPassed() {
             print("[cluster] rep=\(cluster.representative.postID.rawValue)"
                   + " face=\(face) sheet=\(preview ?? "nil")"
                   + " catalog=\(previewCatalog == nil ? "nil" : "ok")"
