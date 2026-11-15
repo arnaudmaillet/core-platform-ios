@@ -90,10 +90,15 @@ public enum PlayPauseGlyph {
 
     /// How small a glyph is when it leaves, and when the next one starts.
     public static let swapScale: CGFloat = 0.4
-    static let leaveDuration: TimeInterval = 0.16
-    static let arriveDuration: TimeInterval = 0.42
-    static let arriveDelay: TimeInterval = 0.06
-    static let arriveDamping: CGFloat = 0.55
+    /// The scale and fade's timings — public so that what swaps beside a
+    /// glyph swaps on them, read, never copied (#2414: the voice panel's
+    /// timer ⇄ speed words, which turned on a clock of their own).
+    /// The leaving glyph: eased in.
+    public static let leaveDuration: TimeInterval = 0.16
+    /// The arriving one: a spring, after a beat.
+    public static let arriveDuration: TimeInterval = 0.42
+    public static let arriveDelay: TimeInterval = 0.06
+    public static let arriveDamping: CGFloat = 0.55
     /// Reduce Motion's cross-fade: the old glyph dissolves into the new one
     /// in place, nothing scales or moves.
     public static let crossFadeDuration: TimeInterval = 0.2

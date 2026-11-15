@@ -106,7 +106,7 @@ struct ThreadVoiceViewTests {
         #expect(view.debugGlyph == AppSymbol.play.rawValue)
         #expect(view.accessibilityLabel?.hasSuffix(", played") == true)
 
-        state.playback = .loading
+        state.playback = .loading(progress: 0.25)
         view.update(state)
         #expect(view.debugGlyph == AppSymbol.pause.rawValue, "the glyph turns on the tap, not when the audio is ready")
         #expect(!view.debugShowsLoader)

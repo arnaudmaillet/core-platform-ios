@@ -101,6 +101,12 @@ public final class AVPlayerEngine: VoicePlaybackEngine {
 ///   applied to whatever plays.
 /// - **The position is told at the display's rate while it plays**
 ///   (`onChange`), for the row's waveform and timer.
+/// - **Fast taps follow the last one (#2414).** A tap while the audio is on
+///   its way pauses it (the start is cancelled, the place kept); a voice
+///   already loaded is never loaded again, so the place never moves back.
+/// - **A pause keeps the session a moment (`releaseGrace`)**: a resume
+///   inside it plays at once. A call, Siri, headphones out, another take or
+///   the background release at once.
 @MainActor
 public final class VoicePlayer {
     public enum State: Equatable, Sendable {
@@ -149,16 +155,38 @@ public final class VoicePlayer {
     /// A seek asked before the file said its length: applied once it does.
     private var pendingFraction: Double?
 
+    /// ⚠️ HOW LONG A PAUSE KEEPS THE SESSION AND THE FOCUS (#2414). Each
+    /// pause gave the session back and each resume took it again, a wait
+    /// every time: at several taps a second, every tap was a deactivate /
+    /// activate round, and the feed's video took the sound back between
+    /// two taps. Inside the grace a resume plays at once, with no
+    /// activation; past it the session goes back and the video's sound
+    /// returns, as before. A release the system asks for never waits.
+    public static let releaseGrace: TimeInterval = 1.5
+    /// Counts `releaseGrace` after a pause (a timer in the app, a manual
+    /// ticker in tests).
+    private let graceTimer: any VoiceTicking
+    /// A release waiting out the grace.
+    public private(set) var releasePending = false
+    /// The session is ours: taken, and not given back since. A start then
+    /// plays at once.
+    private var sessionTaken = false
+    /// Counts the releases: an activation answered after one doesn't count
+    /// as the session taken.
+    private var releaseCount = 0
+
     public init(
         session: any VoiceAudioSessionControlling = AVAudioSession.sharedInstance(),
         makeEngine: @escaping () -> any VoicePlaybackEngine = { AVPlayerEngine() },
         defaults: UserDefaults = .standard,
-        notifications: NotificationCenter = .default
+        notifications: NotificationCenter = .default,
+        graceTimer: any VoiceTicking = TimerTicker()
     ) {
         self.session = session
         self.makeEngine = makeEngine
         self.defaults = defaults
         self.notifications = notifications
+        self.graceTimer = graceTimer
         speed = VoicePlaybackSpeed(rawValue: defaults.double(forKey: Self.speedKey)) ?? .normal
         observeInterruptions()
     }
@@ -166,8 +194,16 @@ public final class VoicePlayer {
     /// Plays message `id` from `url` — from where it was paused when it is
     /// the one paused, from `fraction` of it otherwise (a message left
     /// mid-way and come back to), stopping any other.
+    ///
+    /// ⚠️ A VOICE ALREADY LOADED IS NEVER LOADED AGAIN (#2414). From
+    /// `.loading` a play made a new engine and loaded the file again, from
+    /// `fraction` — a place remembered at an older pause, or none — and the
+    /// voice jumped back, to 0 at worst (the owner's recording). Loaded
+    /// (`.loading`, `.paused`, `.playing`), it goes on from where it is and
+    /// `fraction` is not read. A new engine only for another voice, after a
+    /// failure, the end or `stop`.
     public func play(_ id: String, url: URL, from fraction: Double? = nil) {
-        if id == messageID, let engine, state == .paused || state == .playing {
+        if id == messageID, let engine, state == .paused || state == .playing || state == .loading {
             if state == .paused { start(engine) }
             return
         }
@@ -183,18 +219,23 @@ public final class VoicePlayer {
         start(engine)
     }
 
-    public func pause() {
+    /// Silent at once, where it is. A start still waiting on the session is
+    /// cancelled. The session and the focus go back after `releaseGrace`, or
+    /// at once with `releaseAtOnce` (the app going to the background).
+    public func pause(releaseAtOnce: Bool = false) {
         guard state == .playing || state == .loading, let engine else { return }
         cancelStart()
         engine.pause()
         stopLink()
-        releaseFocus()
+        if releaseAtOnce { releaseFocus() } else { releaseAfterGrace() }
         set(.paused)
     }
 
-    /// Plays or pauses message `id`.
+    /// Plays or pauses message `id`. ⚠️ ON THE INTENT, NOT THE SOUND (#2414):
+    /// a voice on its way (`.loading`) is a voice playing, so a tap then
+    /// pauses it — it used to start it again.
     public func toggle(_ id: String, url: URL) {
-        if id == messageID, state == .playing { pause() } else { play(id, url: url) }
+        if id == messageID, state == .playing || state == .loading { pause() } else { play(id, url: url) }
     }
 
     /// Moves the message on show to `fraction` of its length.
@@ -249,20 +290,34 @@ public final class VoicePlayer {
         takeFocus()
         startToken += 1
         let token = startToken
+        // Still ours, a pause's grace not run out (#2414): it plays at once.
+        if sessionTaken {
+            waitingStart = nil
+            playNow(engine)
+            return
+        }
         waitingStart = token
+        let releases = releaseCount
         session.activate(.listening) { [weak self] error in
-            guard let self, token == startToken, waitingStart == token, let engine = self.engine else { return }
+            guard let self else { return }
+            if error == nil, releases == releaseCount { sessionTaken = true }
+            guard token == startToken, waitingStart == token, let engine = self.engine else { return }
             waitingStart = nil
             if error != nil {
                 failed()
                 return
             }
-            engine.play(rate: Float(speed.rawValue))
-            set(.playing)
-            startLink()
+            playNow(engine)
         }
         // Still waiting: a resume shows it is on its way.
         if waitingStart == token, state == .paused { set(.loading) }
+    }
+
+    /// Sounds, at the speed, from where it is.
+    private func playNow(_ engine: any VoicePlaybackEngine) {
+        engine.play(rate: Float(speed.rawValue))
+        set(.playing)
+        startLink()
     }
 
     /// No start waiting on the session plays any more.
@@ -293,16 +348,50 @@ public final class VoicePlayer {
     // MARK: - Focus
 
     private func takeFocus() {
+        // A resume inside a pause's grace keeps what it holds.
+        if releasePending {
+            graceTimer.stop()
+            releasePending = false
+        }
         guard !holdsFocus else { return }
         holdsFocus = true
         notifications.post(name: VoiceAudioFocus.didTake, object: self)
     }
 
+    /// Gives the session and the focus back now, a grace waiting or not.
     private func releaseFocus() {
+        if releasePending {
+            graceTimer.stop()
+            releasePending = false
+        }
         guard holdsFocus else { return }
         holdsFocus = false
+        sessionTaken = false
+        releaseCount += 1
         session.deactivate()
         notifications.post(name: VoiceAudioFocus.didRelease, object: self)
+    }
+
+    /// Gives them back once `releaseGrace` has passed with no resume.
+    private func releaseAfterGrace() {
+        guard holdsFocus else { return }
+        releasePending = true
+        graceTimer.start(interval: Self.releaseGrace) { [weak self] in
+            guard let self, releasePending else { return }
+            releaseFocus()
+        }
+    }
+
+    /// The system asked (a call, Siri, an alarm, headphones out) or another
+    /// take started: paused if it plays, and released at once — a grace
+    /// under way included, so the next one never finds the session gone
+    /// from under it.
+    private func interrupted() {
+        if state == .playing || state == .loading {
+            pause(releaseAtOnce: true)
+        } else {
+            releaseFocus()
+        }
     }
 
     // MARK: - The position
@@ -343,14 +432,14 @@ public final class VoicePlayer {
                 [weak self] note in
                 let began = (note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt)
                     .flatMap(AVAudioSession.InterruptionType.init) == .began
-                MainActor.assumeIsolated { if began { self?.pause() } }
+                MainActor.assumeIsolated { if began { self?.interrupted() } }
             },
             notifications.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) {
                 [weak self] note in
                 let reason = (note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt)
                     .flatMap(AVAudioSession.RouteChangeReason.init)
                 // Headphones out: never on to the speaker for the room.
-                MainActor.assumeIsolated { if reason == .oldDeviceUnavailable { self?.pause() } }
+                MainActor.assumeIsolated { if reason == .oldDeviceUnavailable { self?.interrupted() } }
             },
             // A take starting pauses the message playing.
             notifications.addObserver(forName: VoiceAudioFocus.didTake, object: nil, queue: .main) {
@@ -358,7 +447,7 @@ public final class VoicePlayer {
                 let taker = (note.object as AnyObject?).map(ObjectIdentifier.init)
                 MainActor.assumeIsolated {
                     guard let self, taker != ObjectIdentifier(self) else { return }
-                    self.pause()
+                    self.interrupted()
                 }
             },
         ]

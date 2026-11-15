@@ -16,13 +16,15 @@ struct VoicePlayerTests {
     }()
     let a = URL(fileURLWithPath: "/tmp/a.m4a")
     let b = URL(fileURLWithPath: "/tmp/b.m4a")
+    /// A pause's grace (#2414), run out when the test says.
+    let grace = ManualTicker()
 
     func player(_ engines: Box) -> VoicePlayer {
         VoicePlayer(session: session, makeEngine: {
             let engine = FakeEngine()
             engines.all.append(engine)
             return engine
-        }, defaults: defaults, notifications: center)
+        }, defaults: defaults, notifications: center, graceTimer: grace)
     }
 
     final class Box { var all: [FakeEngine] = [] }
@@ -54,7 +56,8 @@ struct VoicePlayerTests {
 
     /// ⚠️ The session is taken off the main thread (#2329): a play stays
     /// loading until it is, and only then plays; a pause or another message
-    /// meanwhile, and the late answer plays nothing; a resume waits loading
+    /// meanwhile, and the late answer plays nothing; a resume once the
+    /// session has gone back (past a pause's grace, #2414) waits loading
     /// too.
     @Test func aPlayWaitsForTheSessionWithoutHoldingTheMainThread() {
         let deferred = DeferredSession()
@@ -63,7 +66,7 @@ struct VoicePlayerTests {
             let engine = FakeEngine()
             engines.all.append(engine)
             return engine
-        }, defaults: defaults, notifications: center)
+        }, defaults: defaults, notifications: center, graceTimer: grace)
         player.play("a", url: a)
         #expect(player.state == .loading, "it played before the session was taken")
         #expect(engines.all[0].rates.isEmpty)
@@ -72,6 +75,7 @@ struct VoicePlayerTests {
 
         // Paused while the session is being taken: the answer plays nothing.
         player.pause()
+        grace.fire()
         player.play("a", url: a)
         #expect(player.state == .loading, "a resume waiting on the session says so")
         player.pause()
@@ -79,6 +83,7 @@ struct VoicePlayerTests {
         #expect(player.state == .paused && engines.all[0].rates.count == 1, "a late answer played a paused voice")
 
         // Another message started meanwhile: only its own answer plays it.
+        grace.fire()
         player.play("a", url: a)
         player.play("b", url: b)
         deferred.answer()
