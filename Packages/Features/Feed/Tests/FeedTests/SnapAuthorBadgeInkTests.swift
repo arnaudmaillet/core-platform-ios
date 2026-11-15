@@ -111,12 +111,23 @@ struct SnapAuthorBadgeInkTests {
         format.scale = 3
         format.opaque = false
         let side = 16.0
+        // In a window of that appearance, as on screen: the badge's image
+        // carries the traits it was made under (light), and only an image
+        // view in a window draws it again under its own, so a dynamic palette
+        // ink (Friends' disc, #2440) stayed black in the dark outside one.
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: side, height: side))
+        window.overrideUserInterfaceStyle = style
+        window.isHidden = false
+        defer { window.isHidden = true }
         let views = layers.map { layer in
-            let view = UIImageView(image: layer)
+            let view = UIImageView()
             view.frame = CGRect(x: 0, y: 0, width: side, height: side)
             view.contentMode = .center
             view.tintColor = .systemRed
-            view.overrideUserInterfaceStyle = style
+            window.addSubview(view)
+            view.image = layer
+            view.layoutIfNeeded()
+            view.layer.displayIfNeeded()
             return view
         }
         let rendered = UIGraphicsImageRenderer(size: CGSize(width: side, height: side), format: format).image { context in
