@@ -4,9 +4,8 @@ import PostGrid
 import ThreadKit
 import UIKit
 
-/// Something that draws an author's relation badge: the page's author row,
-/// the bar's pill (#1972), a text page's caption row and a list card's author
-/// band (#2300).
+/// Something that draws an author's relation badge: the bar's pill (#1972),
+/// a text page's caption row and a list card's author band (#2300).
 @MainActor
 protocol AuthorBadgeDrawing: AnyObject {
     /// Draws `badge`; `animated` is the binding's answer to "can it be seen

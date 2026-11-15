@@ -10,11 +10,10 @@ import UIKit
 struct SnapGlassColumnTests {
     private static let face = SnapSoundFace(coverURL: nil, isAvailable: true)
 
-    private func mediaChrome(postActions: Bool) -> SnapChromeView {
+    private func mediaChrome() -> SnapChromeView {
         let chrome = SnapChromeView(frame: SnapActionColumnLayoutTests.screen)
         chrome.setFixedInsets(SnapActionColumnLayoutTests.insets)
         chrome.configure(with: SnapActionColumnLayoutTests.mediaModel())
-        chrome.showsPostActions = postActions
         chrome.setSoundFace(Self.face)
         chrome.layoutIfNeeded()
         return chrome
@@ -22,8 +21,7 @@ struct SnapGlassColumnTests {
 
     /// The media layout: one bubble per station, top to bottom.
     @Test func theMediaLayoutStandsEachStationInItsBubble() {
-        #expect(mediaChrome(postActions: true).debugColumnItems == [["like"], ["actions"], ["sound"]])
-        #expect(mediaChrome(postActions: false).debugColumnItems == [["like"], ["sound"]])
+        #expect(mediaChrome().debugColumnItems == [["like"], ["sound"]])
     }
 
     /// Each item is hosted IN its bubble's glass — the only way a touch
@@ -96,6 +94,6 @@ struct SnapGlassColumnTests {
 
     /// The anchor is the sound: everything is born from it and folds into it.
     @Test func theSoundIsTheAnchor() {
-        #expect(mediaChrome(postActions: true).debugGlassColumn.anchorID == "sound")
+        #expect(mediaChrome().debugGlassColumn.anchorID == "sound")
     }
 }

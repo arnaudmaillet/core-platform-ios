@@ -677,41 +677,12 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// The way back was tapped: the screen scrolls the comments to the top.
     var onRequestSoundReturn: (() -> Void)?
 
-    /// (#1681, the For You root): save and repost upright in
-    /// the column (`SnapPostActionsCapsule`), the star drawn for `saved`.
-    func setPostActions(shown: Bool, saved: Bool) {
-        chrome.showsPostActions = shown
-        chrome.postActions.setSaved(saved)
-    }
     /// A text page's like stands in the screen's footer (#1924): no pill
     /// in its column.
     func setLikeInFooter(_ inFooter: Bool) { chrome.likeInFooter = inFooter }
-    /// Shots' bottom layout: one breath higher, no strip room (#1716).
-    func setSitsOverTabBar(_ sits: Bool) { chrome.sitsOverTabBar = sits }
-    /// The author INSIDE the page, without glass (#1699, the For You root's):
-    /// shown with `model`'s author and the relation `badge`, or hidden.
-    func setAuthorRow(shown: Bool, model: FeedItemDisplayModel, badge: PersonPill.Badge, pipeline: ImagePipeline) {
-        chrome.showsAuthorRow = shown
-        guard shown else { return }
-        chrome.setAuthorRow(model, badge: badge, pipeline: pipeline)
-    }
-    /// The author row: a tap (the card), a hold (the profile), its "+".
-    var onRequestAuthorCard: (() -> Void)?
-    var onRequestAuthorProfile: (() -> Void)?
-    var onRequestAuthorFollow: (() -> Void)?
-    /// The author the row names, for the screen's follow updates.
-    var shownAuthorID: ProfileID? { chrome.showsAuthorRow ? representedAuthorID : nil }
-    private(set) var representedAuthorID: ProfileID?
-    /// The capsule's star for the post on show, after a save anywhere.
-    func setPostSaved(_ saved: Bool) { chrome.postActions.setSaved(saved) }
-    /// The capsule's star was tapped: the screen saves or unsaves the post.
-    var onRequestSave: (() -> Void)?
-    /// The capsule's share was tapped: the screen opens the share sheet (#1710).
+    /// The sound bubble wears the post's Share (#1999) and was tapped: the
+    /// screen opens the share sheet.
     var onRequestShare: (() -> Void)?
-    #if DEBUG
-    /// The column's post actions, for tests (#1681).
-    var debugPostActions: SnapPostActionsCapsule { chrome.postActions }
-    #endif
     /// The anchor's wallet context (affordability + undoable tally) —
     /// pushed at configure and on every wallet change.
     func setBoostContext(balance: Int, undoable: Int, stakeShots: Int = 0) {
@@ -2009,12 +1980,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         chrome.onSoundSheetRequested = { [weak self] in self?.onRequestSoundSheet?() }
         chrome.onSoundReturnRequested = { [weak self] in self?.onRequestSoundReturn?() }
         chrome.onShareRequested = { [weak self] in self?.onRequestShare?() }
-        chrome.postActions.onSave = { [weak self] in self?.onRequestSave?() }
-        chrome.postActions.onShare = { [weak self] in self?.onRequestShare?() }
-        representedAuthorID = model.authorID
-        chrome.onAuthorTapped = { [weak self] in self?.onRequestAuthorCard?() }
-        chrome.onAuthorLongPressed = { [weak self] in self?.onRequestAuthorProfile?() }
-        chrome.onAuthorFollowTapped = { [weak self] in self?.onRequestAuthorFollow?() }
         #if DEBUG
         // Which projection fields are present the moment the page is
         // configured. Everything listed here is supposed to render at 0ms from
@@ -3714,19 +3679,4 @@ extension SnapFeedCell: UIGestureRecognizerDelegate {
         }
         return false
     }
-}
-
-
-/// The author row's badge, as the screen's `AuthorBadgeBinding` draws it
-/// (#1972): bound at configure, redrawn on every answer for its author,
-/// visible or not.
-extension SnapFeedCell: AuthorBadgeDrawing {
-    func drawAuthorBadge(_ badge: PersonPill.Badge, animated: Bool) {
-        chrome.setAuthorRowBadge(badge, animated: animated)
-    }
-
-    var drawsAuthorBadgeOnScreen: Bool { window != nil }
-
-    /// The symbol the author row's badge draws now — nil for none. Tests.
-    var authorRowBadgeSymbol: String? { chrome.authorRow.drawnBadgeSymbol }
 }

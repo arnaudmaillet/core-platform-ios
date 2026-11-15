@@ -1872,30 +1872,9 @@ final class SnapFeedViewController: UIViewController {
                     guard let id = cell?.representedPostID else { return }
                     self?.commentsPanel(for: id)?.scrollToStart(animated: true)
                 }
-                // Save and repost stand in the toolbar, not the column: the
-                // column's pair was Shots' (#1681), gone with it (#2453).
-                cell.setPostActions(shown: false, saved: self.bookmarks.isSaved(id.rawValue))
                 // A text page's like, in the footer when there is one (#1924).
                 cell.setLikeInFooter(self.footerCarriesTextLike)
-                // No tab bar under a pushed page (#1716 was Shots').
-                cell.setSitsOverTabBar(false)
-                // The author is the toolbar's pill; the in-page row was Shots'
-                // (#1699).
-                cell.setAuthorRow(
-                    shown: false, model: model,
-                    badge: self.followStore.badge(for: model.authorID), pipeline: self.imagePipeline
-                )
-                // Bound to its author (#1972): a page configured ahead of
-                // time — prefetched — hears its author's answer too.
-                self.authorBadges.bind(cell, to: nil)
-                let author = model.authorID
-                cell.onRequestAuthorCard = { [weak self] in
-                    guard let self else { return }
-                    self.viewModel.didTapAuthorPill(author, isViewer: self.followStore.relation(for: author) == .viewer)
-                }
-                cell.onRequestAuthorProfile = { [weak self] in self?.viewModel.didTapAuthor(author) }
-                cell.onRequestAuthorFollow = { [weak self] in self?.followAuthor(author) }
-                cell.onRequestSave = { [weak self] in self?.toggleBookmark(for: id) }
+                // The sound bubble's Share (#1999).
                 cell.onRequestShare = { [weak self] in self?.presentShareSheet(for: id) }
             }
             return cell
@@ -2424,8 +2403,8 @@ final class SnapFeedViewController: UIViewController {
 
     // MARK: - Follow
 
-    /// Every pill that shows an author — the page's rows (#1699) and the
-    /// bar's — bound to it in one place (#1972).
+    /// Every pill that shows an author — the bar's and a text page's caption
+    /// row — bound to it in one place (#1972).
     private(set) lazy var authorBadges = AuthorBadgeBinding(store: followStore)
 
     /// The bar's pill, as the binding sees it: whichever pill is shown now.
@@ -2481,12 +2460,12 @@ final class SnapFeedViewController: UIViewController {
     }
 
     /// A TEXT page's author face — its caption's row (#2300) — bound as the
-    /// media page's author row is: one more face of `authorBadges`, redrawn
+    /// bar's pill is: one more face of `authorBadges`, redrawn
     /// on every answer for its author and on a viewer change, a page built
     /// ahead included; the "+" is `followAuthor`'s; the face's tap is the
     /// card and its hold the profile, the author pill's routes (#2145).
     ///
-    /// A media page's caption row is never bound: its author row wears the
+    /// A media page's caption row is never bound: the bar's pill wears the
     /// mark.
     private func bindCaptionAuthor(of content: UIViewController?, for id: PostID) {
         guard let detail = content as? PostDetailViewController else { return }
@@ -3594,14 +3573,7 @@ final class SnapFeedViewController: UIViewController {
             holdArms: slotHoldArmsShare(model)
         )
         detail.setRailSoundFace(face, keepsSlot: face != nil || sharesInSlot)
-        // The composer's column holds no save and repost: they were Shots'
-        // (#1681).
-        detail.setPostActions(
-            shown: false, saved: bookmarks.isSaved(id.rawValue),
-            onSave: { [weak self] in self?.toggleBookmark(for: id) },
-            onShare: { [weak self] in self?.presentShareSheet(for: id) }
-        )
-        // …and the composer on the page's breath (#1716, #1722).
+        // The composer on the page's breath (#1716, #1722).
         detail.setComposerLift(SnapActionColumn.bottomBreath)
         // A remote cover loads in the rail's own slot (#1772).
         // A tap opens the sound sheet — the bubble's (#683). No hold since
@@ -6216,9 +6188,6 @@ extension SnapFeedViewController: UICollectionViewDelegate {
         }
         // A page coming on while the side list is open wears its pose (#1509).
         (cell as? SnapFeedCell)?.setSideListOverlayOffset(sideListOverlayOffset)
-        // …and its author's badge as known now (#1972), whatever it was
-        // configured with.
-        if let snapCell = cell as? SnapFeedCell { authorBadges.reapply(snapCell) }
         // …and the content freeze's state, frozen or not (#1738).
         if let snapCell = cell as? SnapFeedCell {
             carouselFreeze.display(snapCell) { $0.setCarouselScrollEnabled($1) }
@@ -7695,10 +7664,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         let point = collectionView.convert(origin, from: view)
         guard let hit = collectionView.hitTest(point, with: nil) else { return false }
         return sequence(first: hit, next: { $0.superview }).contains {
-            // …and save / share between them (#1710, the owner): a drag born
-            // there opened the side list.
             $0 is SnapShortcutRailView || $0 is SnapWheelGlassView || $0 is SnapRailBoostButton || $0 is SnapSoundBubbleButton
-                || $0 is SnapPostActionsCapsule
         }
     }
 

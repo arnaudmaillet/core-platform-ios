@@ -1155,9 +1155,7 @@ final class PostDetailViewController: UIViewController {
     /// The resting composer's height: its column as it stands — the slot
     /// alone once a media page folds its column (#1923).
     func restingComposerHeight(for category: UIContentSizeCategory) -> CGFloat {
-        CommentsInputBar.restingHeight(
-            for: category, showsStake: composeBar.showsStake, postActions: composeBar.showsPostActions
-        )
+        CommentsInputBar.restingHeight(for: category, showsStake: composeBar.showsStake)
     }
 
     /// Between the resting composer's top and the last row resting above it:
@@ -1634,18 +1632,8 @@ final class PostDetailViewController: UIViewController {
     /// post actions outside the panel: the snap page (#1409).
     var onPostUnavailable: ((PostID) -> Void)?
 
-    /// (#1681, the For You root): save and repost upright in
-    /// the composer's column — drawn on a text page, reserved under a media
-    /// page's (which draws its own) — the star for `saved`.
-    func setPostActions(shown: Bool, saved: Bool, onSave: (() -> Void)?, onShare: (() -> Void)? = nil) {
-        composeBar.showsPostActions = shown
-        composeBar.postActions.setSaved(saved)
-        composeBar.postActions.onSave = onSave
-        composeBar.postActions.onShare = onShare
-    }
-
     /// The composer alone — the avatar, the field and the own bubble, no
-    /// column: no stake, no slot, no post actions (the comments sheet, #2087,
+    /// column: no stake, no slot (the comments sheet, #2087,
     /// the owner 2026-11-03). The row takes the column's width, as it does on
     /// a page with no slot (#1999). The sheet's contract (#2308).
     func setComposerBare() {
@@ -1655,24 +1643,17 @@ final class PostDetailViewController: UIViewController {
         sheet.voice = commentsVoice
         composeBar.configuration = sheet
         composeBar.hostsActionColumn = true
-        setPostActions(shown: false, saved: false, onSave: nil)
         railShareAction = nil
         railShareHoldArms = false
         setRailSoundFace(nil, keepsSlot: false)
-    }
-
-    /// The composer's star after a save anywhere (#1681).
-    func setPostSaved(_ saved: Bool) {
-        composeBar.postActions.setSaved(saved)
     }
 
     /// The snap feed's page draws the action column above this panel (#695):
     /// the composer only reserves its room.
     ///
     /// ⚠️ A MEDIA PAGE FOLDS ITS COLUMN (`foldsIntoSlot`). With the comments
-    /// up, its like and its post's actions fold into the sound bubble
-    /// (#1872): only the slot is left, on the input row's line. Reserving
-    /// the stake and the actions there kept ~110 pt of nothing over the
+    /// up, its like folds into the sound bubble (#1872): only the slot is
+    /// left, on the input row's line. Reserving the stake there kept ~110 pt of nothing over the
     /// field, and the stream, anchored to the bottom, rested that far above
     /// the composer (#1923, the owner's film). The composer keeps the slot
     /// alone, as a conversation's does; a text page's column never folds

@@ -130,12 +130,11 @@ struct ComposerContractTests {
         #expect(bar.configuration.column == .none && bar.configuration.attachments.isEmpty)
         // The sheet's voice is the page's (#2309): none from this source.
         #expect(bar.configuration.voice == controller.commentsVoice)
-        #expect(!bar.showsStake && bar.railFace == .noSlot && !bar.showsPostActions)
+        #expect(!bar.showsStake && bar.railFace == .noSlot)
         // A page's later asks do not bring the column back.
         bar.showsStake = true
         bar.railFace = .repost
-        bar.showsPostActions = true
-        #expect(!bar.showsStake && bar.railFace == .noSlot && !bar.showsPostActions)
+        #expect(!bar.showsStake && bar.railFace == .noSlot)
         controller.view.layoutIfNeeded()
         bar.layoutIfNeeded()
         let bubble = bar.debugRowActionButton.frame
