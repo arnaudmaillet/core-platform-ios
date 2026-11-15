@@ -1,5 +1,6 @@
 import LaunchArguments
 
+#if DEBUG
 /// The launch arguments DebugTools reads (#2374): declared here, read
 /// through `isPassed` or `value`, never as raw strings.
 extension LaunchArgument {
@@ -25,3 +26,4 @@ extension LaunchArgument {
     static let topFadeLab = LaunchArgument("-top-fade-lab")
     static let topFadeLabDark = LaunchArgument("-top-fade-lab-dark")
 }
+#endif

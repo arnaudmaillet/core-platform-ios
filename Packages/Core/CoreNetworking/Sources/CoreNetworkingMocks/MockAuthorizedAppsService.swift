@@ -12,8 +12,10 @@ public final class MockAuthorizedAppsService: @unchecked Sendable {
     private let lock = NSLock()
     private var apps: [Auth_V1_AuthorizedApp]
 
-    public init(seeded: Bool = LaunchArgument.mockAuthorizedApps.isPassed(), now: Date = Date()) {
-        apps = seeded ? Self.demoApps(now: now) : []
+    /// `seeded` nil reads `-mock-authorized-apps`: a public default value may
+    /// not name the package's internal `LaunchArgument`.
+    public init(seeded: Bool? = nil, now: Date = Date()) {
+        apps = (seeded ?? LaunchArgument.mockAuthorizedApps.isPassed()) ? Self.demoApps(now: now) : []
     }
 
     static func demoApps(now: Date) -> [Auth_V1_AuthorizedApp] {
