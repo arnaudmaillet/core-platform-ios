@@ -1,6 +1,7 @@
 import ChatInterface
 import CoreNavigation
 import DesignSystem
+import LaunchArguments
 import UIKit
 
 /// The Messages tab's root: one navigation bar carrying the tab capsule right
@@ -297,8 +298,7 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         // the SAME path a segment tap takes (`setActivePage(animated:)`, which
         // reports fractional progress every frame). Taps can't be injected
         // headlessly, and this is the transition worth recording.
-        if let index = arguments.firstIndex(of: "-inbox-page-to"),
-           let name = arguments.dropFirst(index + 1).first,
+        if let name = LaunchArgument.inboxPageTo.value(in: arguments),
            let category = MessagesCategory(rawValue: name),
            let target = surfaces.firstIndex(where: { $0.category == category }) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
@@ -306,7 +306,7 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
             }
         }
         // `-inbox-search-open`: the same, on the inbox.
-        if arguments.contains("-inbox-search-open") {
+        if LaunchArgument.inboxSearchOpen.isPassed(in: arguments) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
                 self?.presentSearch()
             }
@@ -318,7 +318,7 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         // off leaves the radius reading correct while the bar draws as a
         // rectangle — so a screenshot cannot tell you which one broke, and the
         // context menu's lift is the thing that breaks one of them.
-        if arguments.contains("-tabbar-shape-watch") {
+        if LaunchArgument.tabbarShapeWatch.isPassed(in: arguments) {
             Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
                 guard let self else { return }
                 let shape = categoryBar.debugCapsuleShape
@@ -343,8 +343,7 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     /// unreachable from a view-model call. The simulator's keyboard is not
     /// scriptable, so this is the only way to reach the results layout headlessly.
     private func runSearchDebugSequence(_ arguments: [String]) {
-        guard let index = arguments.firstIndex(of: "-inbox-search-query"),
-              let text = arguments.dropFirst(index + 1).first, !text.hasPrefix("-")
+        guard let text = LaunchArgument.inboxSearchQuery.value(in: arguments), !text.hasPrefix("-")
         else { return }
         // Drives the same path a tap on the field does: present, type, filter.
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
@@ -374,7 +373,7 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
                 let typed: String = self.searchController?.searchBar.text ?? "-"
                 print("[inbox-search] searching=\(searching) focused=\(focused) resultsOnScreen=\(onScreen) sections=\(rows) text=\(typed)")
             }
-            guard arguments.contains("-inbox-search-cancel") else { return }
+            guard LaunchArgument.inboxSearchCancel.isPassed(in: arguments) else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
                 self?.dismissSearch()
             }
@@ -536,7 +535,7 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     /// what it states, and whether it is hosted.
     private func traceSelector(_ moment: String) {
         #if DEBUG
-        guard ProcessInfo.processInfo.arguments.contains("-inbox-selector-trace") else { return }
+        guard LaunchArgument.inboxSelectorTrace.isPassed() else { return }
         let budget = selectorBudget
         let strip = categoryBar
         let line = String(

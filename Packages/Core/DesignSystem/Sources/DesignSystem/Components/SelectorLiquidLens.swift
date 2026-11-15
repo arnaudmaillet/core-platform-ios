@@ -1,3 +1,4 @@
+import LaunchArguments
 import Metal
 import QuartzCore
 import UIKit
@@ -954,7 +955,7 @@ final class SelectorLiquidLens {
     /// - `titles`: each title's shown centre, the lens's own among them;
     /// - `lean`: every ancestor of the strip whose presentation transform is
     ///   not the identity, with its scale and shift.
-    static let traces = ProcessInfo.processInfo.arguments.contains("-lens-trace")
+    static let traces = LaunchArgument.lensTrace.isPassed()
 
     private func trace(lens: CGRect, shown: CGRect, in space: UIView) {
         let model = space.convert(lens, to: glass)

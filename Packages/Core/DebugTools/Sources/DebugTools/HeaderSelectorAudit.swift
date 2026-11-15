@@ -1,5 +1,6 @@
 import CoreNavigation
 import DesignSystem
+import LaunchArguments
 import UIKit
 
 // ⚠️ THE WHOLE FILE, because the whole thing is a DEBUG harness.
@@ -234,7 +235,7 @@ public final class HeaderSelectorAudit {
         // `-header-bar-tree` on the sweep too, not only on the current-surface
         // mode: a bar that fails is read against one that does not, and the
         // comparison is the diagnosis.
-        if ProcessInfo.processInfo.arguments.contains("-header-bar-tree") {
+        if LaunchArgument.headerBarTree.isPassed() {
             print("[bar-tree] ---- \(surface) ----")
             dumpBarTree()
         }

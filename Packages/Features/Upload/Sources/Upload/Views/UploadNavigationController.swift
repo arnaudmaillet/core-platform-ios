@@ -1,4 +1,5 @@
 import CoreNavigation
+import LaunchArguments
 import UIKit
 
 /// The upload flow's stack, with its back-swipe held to the window's leading
@@ -227,7 +228,7 @@ extension UploadNavigationController: UIGestureRecognizerDelegate {
     /// SCREEN. Silence here means the delegate is not on the recogniser that
     /// acts — a different defect from a refusal, and they need opposite fixes.
     func logGate(_ what: @autoclosure () -> String) {
-        guard ProcessInfo.processInfo.arguments.contains("-upload-log-sheet") else { return }
+        guard LaunchArgument.uploadLogSheet.isPassed() else { return }
         let stamp = String(format: "%.3f", ProcessInfo.processInfo.systemUptime)
         FileHandle.standardError.write(Data("[gate] t=\(stamp) \(what())\n".utf8))
     }

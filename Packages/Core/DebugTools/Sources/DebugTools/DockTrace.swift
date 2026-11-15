@@ -1,3 +1,4 @@
+import LaunchArguments
 import UIKit
 
 #if DEBUG
@@ -39,7 +40,7 @@ public final class DockTrace {
     private static var shared: DockTrace?
 
     public static func installIfRequested(tabBarController: UITabBarController) {
-        guard ProcessInfo.processInfo.arguments.contains("-dock-trace"), shared == nil else { return }
+        guard LaunchArgument.dockTrace.isPassed(), shared == nil else { return }
         shared = DockTrace(tabBarController: tabBarController)
     }
 

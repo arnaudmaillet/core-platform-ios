@@ -19,6 +19,8 @@ let package = Package(
     ],
     dependencies: [
         .package(path: "../../Kit/CoreModels"),
+        // Its launch arguments, declared (#2374).
+        .package(path: "../../Kit/LaunchArguments"),
         .package(path: "../DesignSystem"),
         .package(path: "../CoreNavigation"),
         .package(path: "../MediaPlayback"),
@@ -34,7 +36,7 @@ let package = Package(
         .target(
             name: "DebugTools",
             dependencies: [
-                "CoreModels", "DesignSystem", "CoreNavigation", "MediaPlayback", "PostGrid",
+                "CoreModels", "LaunchArguments", "DesignSystem", "CoreNavigation", "MediaPlayback", "PostGrid",
                 .product(name: "CoreNetworkingMocks", package: "CoreNetworking"),
                 "CacheKit", "LocalStore",
                 .product(name: "VoiceKitUI", package: "VoiceKit")

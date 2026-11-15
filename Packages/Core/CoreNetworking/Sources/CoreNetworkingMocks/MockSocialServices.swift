@@ -75,8 +75,7 @@ public final class MockSocialServices: @unchecked Sendable {
     /// Posts moderation removed (#447, backend #688); see `takeDown`.
     private var takenDownPosts: Set<String> = {
         let arguments = ProcessInfo.processInfo.arguments
-        guard let index = arguments.firstIndex(of: "-mock-takedown"), index + 1 < arguments.count else { return [] }
-        return [arguments[index + 1]]
+        return LaunchArgument.mockTakedown.value(in: arguments).map { [$0] } ?? []
     }()
     /// How long a deleted post can be restored.
     public static let restoreWindow: TimeInterval = 30 * 86_400
@@ -156,7 +155,8 @@ public final class MockSocialServices: @unchecked Sendable {
         // feed, taken down while the app runs — what a revalidation then
         // answers not-found for.
         let arguments = ProcessInfo.processInfo.arguments
-        if let index = arguments.firstIndex(of: "-mock-takedown-after"), index + 2 < arguments.count,
+        // Two words follow it: the delay, then the post.
+        if let index = arguments.firstIndex(of: LaunchArgument.mockTakedownAfter.name), index + 2 < arguments.count,
            let delay = Double(arguments[index + 1]) {
             let postID = arguments[index + 2]
             DispatchQueue.global().asyncAfter(deadline: .now() + delay) { [weak self] in self?.takeDown(postID) }
@@ -1191,8 +1191,7 @@ public final class MockSocialServices: @unchecked Sendable {
     static var viewerFrameID: String? {
         #if DEBUG
         let arguments = ProcessInfo.processInfo.arguments
-        guard let index = arguments.firstIndex(of: "-avatar-frame"), index + 1 < arguments.count else { return nil }
-        return arguments[index + 1]
+        return LaunchArgument.avatarFrame.value(in: arguments)
         #else
         nil
         #endif

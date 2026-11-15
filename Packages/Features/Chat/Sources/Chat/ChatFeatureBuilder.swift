@@ -572,9 +572,7 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
     private static var suggestionPageSize: Int {
         #if DEBUG
         let arguments = ProcessInfo.processInfo.arguments
-        if let index = arguments.firstIndex(of: "-new-message-page-size"),
-           index + 1 < arguments.count,
-           let size = Int(arguments[index + 1]), size > 0 {
+        if let size = LaunchArgument.newMessagePageSize.intValue(in: arguments), size > 0 {
             return size
         }
         #endif

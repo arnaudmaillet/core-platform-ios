@@ -1,4 +1,5 @@
 import DesignSystem
+import LaunchArguments
 import UIKit
 
 /// One album, as a page of the picker's pager: a three-column grid of what it
@@ -145,7 +146,7 @@ final class MediaAlbumPageView: UIView {
         // `setItems` un-hides the grid at once and `playReveal` leaves on its
         // guard. The difference between the two runs is the animation's share
         // and nothing else, which is the number to have BEFORE optimising it.
-        if ProcessInfo.processInfo.arguments.contains("-upload-no-reveal") { return false }
+        if LaunchArgument.uploadNoReveal.isPassed() { return false }
         if let debugStagesArrival { return debugStagesArrival }
         #endif
         guard let albumID else { return false }
@@ -391,7 +392,7 @@ final class MediaAlbumPageView: UIView {
     /// flag is absent, which is every run that is not a probe. The flag cannot
     /// change during a process, so it is read once.
     private static let isLoggingReveal =
-        ProcessInfo.processInfo.arguments.contains("-upload-log-sheet")
+        LaunchArgument.uploadLogSheet.isPassed()
 
     private func logReveal(_ what: @autoclosure () -> String) {
         guard Self.isLoggingReveal else { return }

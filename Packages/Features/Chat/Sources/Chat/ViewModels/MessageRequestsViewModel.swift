@@ -1,6 +1,7 @@
 import CoreModels
 import CoreNavigation
 import Foundation
+import LaunchArguments
 
 /// The "Requests" surface's view model: conversations from accounts the viewer
 /// doesn't follow and hasn't answered.
@@ -173,7 +174,7 @@ public final class MessageRequestsViewModel {
     /// for the same reason.
     private static func openingBaseline(_ now: Date) -> Date {
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-inbox-mock-new-activity") {
+        if LaunchArgument.inboxMockNewActivity.isPassed() {
             return .distantPast
         }
         #endif

@@ -1,4 +1,5 @@
 import AVFoundation
+import LaunchArguments
 import MediaPlayback
 import UIKit
 
@@ -109,9 +110,7 @@ extension UploadFeatureBuilder {
     private static func makeSendLibrary() -> any MediaLibraryReading {
         #if DEBUG
         let arguments = ProcessInfo.processInfo.arguments
-        if let flag = arguments.firstIndex(of: "-upload-fake-library"),
-           arguments.count > flag + 1,
-           let count = Int(arguments[flag + 1]) {
+        if let count = LaunchArgument.uploadFakeLibrary.intValue(in: arguments) {
             return DebugMediaLibrary(count: count)
         }
         #endif

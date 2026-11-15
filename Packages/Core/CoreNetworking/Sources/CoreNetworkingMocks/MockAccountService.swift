@@ -1,6 +1,7 @@
 import Connect
 import CoreContracts
 import Foundation
+import LaunchArguments
 import SwiftProtobuf
 
 /// Fake of `account.v1.AccountService` — what Settings → Account reads and
@@ -23,8 +24,7 @@ public final class MockAccountService: @unchecked Sendable {
     /// collected; `-mock-birthdate YYYY-MM-DD` seeds one.
     private var dateOfBirth: String? = {
         let arguments = ProcessInfo.processInfo.arguments
-        guard let index = arguments.firstIndex(of: "-mock-birthdate"), index + 1 < arguments.count else { return nil }
-        return arguments[index + 1]
+        return LaunchArgument.mockBirthdate.value(in: arguments)
     }()
     /// How long the fake export takes to "prepare", so the screen can be seen
     /// in both states within one session.

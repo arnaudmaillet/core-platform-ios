@@ -1,3 +1,4 @@
+import LaunchArguments
 import UIKit
 
 /// Probes points across each visible bar's area — tab bar, its accessory,
@@ -41,7 +42,7 @@ public enum BarTouchAudit {
 
     /// `-bar-touch-audit`: prints every bar's measurement every 3 s.
     public static func startIfRequested(in window: UIWindow) {
-        guard ProcessInfo.processInfo.arguments.contains("-bar-touch-audit"), timer == nil else { return }
+        guard LaunchArgument.barTouchAudit.isPassed(), timer == nil else { return }
         let timer = Timer(timeInterval: 3, repeats: true) { [weak window] _ in
             MainActor.assumeIsolated {
                 guard let window else { return }

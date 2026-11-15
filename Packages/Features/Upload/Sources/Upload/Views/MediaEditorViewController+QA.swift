@@ -1,5 +1,6 @@
 #if DEBUG
 import DesignSystem
+import LaunchArguments
 import MediaPlayback
 import UIKit
 
@@ -37,7 +38,7 @@ extension MediaEditorViewController {
     /// a pixel. These are the numbers that tell them apart: if the CELL spans
     /// the sheet, the bars are painting; if it stops short, the layout is.
     func logCanvas(_ moment: String) {
-        guard ProcessInfo.processInfo.arguments.contains("-upload-log-sheet") else { return }
+        guard LaunchArgument.uploadLogSheet.isPassed() else { return }
         let bar = navigationController?.navigationBar
         let foot = navigationController?.toolbar
         let cell = canvas.cellForItem(at: IndexPath(item: 0, section: 0))
@@ -60,7 +61,7 @@ extension MediaEditorViewController {
         // keyboard and the caption — both reported as broken there — could not be
         // reached in a running app at all. One flag carries the flow the last
         // step, after a beat so the push does not race this appearance.
-        if ProcessInfo.processInfo.arguments.contains("-upload-post"), !hasAutoAdvanced {
+        if LaunchArgument.uploadPost.isPassed(), !hasAutoAdvanced {
             hasAutoAdvanced = true
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
                 self?.debugTapNext()
@@ -107,7 +108,7 @@ extension MediaEditorViewController {
         var pieces = (0..<count).map {
             MediaSegment(start: Double($0) * each, end: Double($0 + 1) * each)
         }
-        if ProcessInfo.processInfo.arguments.contains("-upload-seed-reverse") {
+        if LaunchArgument.uploadSeedReverse.isPassed() {
             pieces.reverse()
         }
         for index in pieces.indices.dropLast() { pieces[index].transitionOut = kind }

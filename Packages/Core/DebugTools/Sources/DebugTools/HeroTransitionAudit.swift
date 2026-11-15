@@ -1,5 +1,6 @@
 #if DEBUG
 import CoreNavigation
+import LaunchArguments
 import MediaPlayback
 import UIKit
 
@@ -41,7 +42,7 @@ public final class HeroTransitionAudit {
 
     /// Installs under `-hero-audit`; a launch without the flag costs nothing.
     public static func installIfRequested(pools: [(label: String, pool: VideoPlaybackController)]) {
-        guard ProcessInfo.processInfo.arguments.contains("-hero-audit"), shared == nil else { return }
+        guard LaunchArgument.heroAudit.isPassed(), shared == nil else { return }
         shared = HeroTransitionAudit(pools: pools)
     }
 

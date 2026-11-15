@@ -1,5 +1,6 @@
 #if DEBUG
 import Foundation
+import LaunchArguments
 import UIKit
 
 /// `-camera-script "<step>,<step>,…"` drives the camera through its own code
@@ -23,9 +24,9 @@ import UIKit
 extension CaptureViewController {
     func runDebugScriptIfAsked() {
         let arguments = ProcessInfo.processInfo.arguments
-        if arguments.contains("-camera-log-frames") { logFrames() }
-        guard let flag = arguments.firstIndex(of: "-camera-script"), arguments.count > flag + 1 else { return }
-        let steps = arguments[flag + 1].split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }
+        if LaunchArgument.cameraLogFrames.isPassed(in: arguments) { logFrames() }
+        guard let script = LaunchArgument.cameraScript.value(in: arguments) else { return }
+        let steps = script.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(1))
             for step in steps {

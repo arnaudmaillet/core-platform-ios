@@ -1,4 +1,5 @@
 import DesignSystem
+import LaunchArguments
 import MediaPlayback
 import UIKit
 
@@ -532,7 +533,7 @@ final class CaptureViewController: UIViewController {
         flipHost.cornerConfiguration = .uniformCorners(radius: .fixed(radius))
         flipHost.clipsToBounds = true
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-camera-log-frames") {
+        if LaunchArgument.cameraLogFrames.isPassed() {
             NSLog("[camera-corners] sheet radius %.2f", radius)
         }
         #endif

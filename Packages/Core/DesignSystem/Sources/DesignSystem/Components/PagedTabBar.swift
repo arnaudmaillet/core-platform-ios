@@ -1,3 +1,4 @@
+import LaunchArguments
 import UIKit
 
 /// A floating Liquid Glass tab capsule that tracks a horizontal pager: a lens
@@ -178,7 +179,7 @@ public final class PagedTabBar: UIControl {
             // avoid the double-bubble. It does not: bar items get a capsule,
             // the title slot gets nothing, and scrolled content showed straight
             // through the titles. See `-foryou-backdrop-off` for the A/B.
-            case .navigationTitle: !ProcessInfo.processInfo.arguments.contains("-foryou-backdrop-off")
+            case .navigationTitle: !LaunchArgument.foryouBackdropOff.isPassed()
             // A flat track, as the native control's.
             case .segmentedControl: false
             }
@@ -1256,7 +1257,7 @@ public final class PagedTabBar: UIControl {
         guard window != nil, style.carriesBackdrop, hosting.drawsBackdrop else { return }
         if capsule.effect == nil {
             #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-tabbar-shape-trace") {
+            if LaunchArgument.tabbarShapeTrace.isPassed() {
                 print(String(format: "[tabshape] materialize h=%.1f r=%.1f laidOut=%@",
                              capsule.bounds.height, capsule.layer.cornerRadius,
                              hasLaidOut ? "true" : "false"))
@@ -1310,7 +1311,7 @@ public final class PagedTabBar: UIControl {
         super.layoutSubviews()
         measurePlatterIfHosted()
         #if DEBUG
-        if !hasLaidOut, ProcessInfo.processInfo.arguments.contains("-tabbar-shape-trace") {
+        if !hasLaidOut, LaunchArgument.tabbarShapeTrace.isPassed() {
             print(String(format: "[tabshape] first layout h=%.1f r=%.1f glass=%@",
                          capsule.bounds.height, capsule.layer.cornerRadius,
                          capsule.effect != nil ? "on" : "off"))
@@ -1321,7 +1322,7 @@ public final class PagedTabBar: UIControl {
         // one-shot trace read a 37×8 bar in a 37×8 wrapper and said nothing.
         let traceKey = "\(bounds.size)-\(String(describing: platterOverhang))"
         if lastTracedKey != traceKey, bounds.width > 0, window != nil,
-           ProcessInfo.processInfo.arguments.contains("-tabbar-shape-trace") {
+           LaunchArgument.tabbarShapeTrace.isPassed() {
             lastTracedKey = traceKey
             var chain: [String] = []
             var view: UIView? = self
@@ -2283,7 +2284,7 @@ public final class PagedTabBar: UIControl {
         )
 
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-tabbar-shape-trace") {
+        if LaunchArgument.tabbarShapeTrace.isPassed() {
             let frames = segments.map { String(format: "%.1f@%.1f", $0.frame.width, $0.frame.minX) }
             let pinned = segments.map { String(format: "%.1f", $0.pinnedWidth) }
             print(String(
@@ -2321,7 +2322,7 @@ public final class PagedTabBar: UIControl {
     /// under the finger by a page change arriving at the same time.
     private func keepLensVisible() {
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-tabbar-shape-trace") {
+        if LaunchArgument.tabbarShapeTrace.isPassed() {
             print(String(format: "[lens-follow] p=%.2f seen=%@ content=%.1f scroller=%.1f "
                          + "capsule=%.1f self=%.1f lens=%.1f@%.1f offset=%.1f dragging=%@",
                          progress,
@@ -2399,7 +2400,7 @@ public final class PagedTabBar: UIControl {
         guard abs(offset - scroller.contentOffset.x) > 0.5 else { return }
         scroller.contentOffset.x = offset
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-tabbar-shape-trace") {
+        if LaunchArgument.tabbarShapeTrace.isPassed() {
             print(String(format: "[lens-follow] REVEAL rect=%.1f…%.1f content=%.1f viewport=%.1f "
                          + "→ offset=%.1f",
                          reveal.minX, reveal.maxX, scroller.contentSize.width,

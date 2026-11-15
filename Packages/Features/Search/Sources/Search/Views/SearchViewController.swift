@@ -2,6 +2,7 @@ import CoreModels
 import CoreNavigation
 import CoreStorage
 import DesignSystem
+import LaunchArguments
 import MediaCore
 import UIKit
 
@@ -143,7 +144,7 @@ final class SearchViewController: UIViewController {
     /// is what the viewer waits through between tapping a magnifier and being
     /// able to type, and an animated push spends its duration inside that wait.
     private func installKeyboardTraceIfRequested() {
-        guard ProcessInfo.processInfo.arguments.contains("-search-layout-trace") else { return }
+        guard LaunchArgument.searchLayoutTrace.isPassed() else { return }
         let start = CACurrentMediaTime()
         for name: Notification.Name in [
             UIResponder.keyboardWillShowNotification,
@@ -293,7 +294,7 @@ final class SearchViewController: UIViewController {
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-search-layout-audit") { dumpBottomChrome() }
+        if LaunchArgument.searchLayoutAudit.isPassed() { dumpBottomChrome() }
         #endif
     }
 
@@ -382,7 +383,7 @@ final class SearchViewController: UIViewController {
         // `-search-layout-audit`: the numbers behind the reservation, since
         // "the field was accounted for" and "the guard bailed out and nothing
         // happened" look identical in a screenshot.
-        if ProcessInfo.processInfo.arguments.contains("-search-layout-audit") {
+        if LaunchArgument.searchLayoutAudit.isPassed() {
             print(String(
                 format: "[search-layout] kbTop=%.1f restingBottom=%.1f safeBottom=%.1f keyboardUp=%@ extraInset=%.1f adjusted=%.1f",
                 keyboardTop, restingBottom, view.safeAreaInsets.bottom,
@@ -537,7 +538,7 @@ final class SearchViewController: UIViewController {
     /// eight frames identical and after the fact.
     private func driveRefineCycleIfRequested() {
         guard case .refine = mode,
-              ProcessInfo.processInfo.arguments.contains("-search-refine-cycle")
+              LaunchArgument.searchRefineCycle.isPassed()
         else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
             self?.cancelSearch()
@@ -1115,20 +1116,16 @@ final class SearchViewController: UIViewController {
         let arguments = ProcessInfo.processInfo.arguments
         // `-search-query <text>` seeds the field on launch, so the typing path
         // is testable without driving the keyboard.
-        guard let index = arguments.firstIndex(of: "-search-query"), index + 1 < arguments.count
-        else { return }
+        guard let seeded = LaunchArgument.searchQuery.value(in: arguments) else { return }
         // `-search-sort <relevance|recency|popularity>` picks the order the
         // filter tray would pick. The tray is a `UIMenu` and the simulator taps
         // nothing, so without this the one thing the tray DOES — change what
         // goes on the wire and therefore what comes back — has no way to be
         // seen offline.
-        if let sortIndex = arguments.firstIndex(of: "-search-sort"),
-           sortIndex + 1 < arguments.count,
-           let order = SearchSortOrder(rawValue: arguments[sortIndex + 1]) {
+        if let order = LaunchArgument.searchSort.value(in: arguments).flatMap({ SearchSortOrder(rawValue: $0) }) {
             viewModel.setSortOrder(order)
         }
 
-        let seeded = arguments[index + 1]
         lastReportedQuery = seeded
         setFieldText(seeded)
         viewModel.queryChanged(seeded)
@@ -1141,15 +1138,13 @@ final class SearchViewController: UIViewController {
         // the view model directly skipped the resign, so the instrument left
         // the keyboard up over results it had just asked for — a state no
         // viewer can reach, filmed as though it were the real one.
-        if arguments.contains("-search-submit") {
+        if LaunchArgument.searchSubmit.isPassed(in: arguments) {
             submitCurrentQuery()
         }
         // `-search-scope <everyone|following>` picks the perimeter the sheet
         // would pick. Applied AFTER the submit, because a scope narrows an
         // answer rather than asking for one.
-        if let index = arguments.firstIndex(of: "-search-scope"),
-           index + 1 < arguments.count,
-           let scope = SearchScope(rawValue: arguments[index + 1]) {
+        if let scope = LaunchArgument.searchScope.value(in: arguments).flatMap({ SearchScope(rawValue: $0) }) {
             viewModel.setScope(scope)
         }
     }

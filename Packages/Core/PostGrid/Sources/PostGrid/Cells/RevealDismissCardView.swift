@@ -1,4 +1,5 @@
 import CoreModels
+import LaunchArguments
 import MediaCore
 import CoreNavigation
 import PostGrid
@@ -170,7 +171,7 @@ public final class RevealDismissCardView: UIView, RevealStandInShaping {
         card.bounds.size = CGSize(width: width, height: cardHeight)
         card.layoutIfNeeded()
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-text-reveal-log") {
+        if LaunchArgument.textRevealLog.isPassed() {
             print("[text-reveal] standIn post=\(post.id.rawValue) w=\(width)"
                 + " rowH=\(height.map { "\($0)" } ?? "-") fittedH=\(fitted.frame.height)"
                 + " used=\(cardHeight) expanded=\(captionExpanded)")

@@ -1,5 +1,6 @@
 #if DEBUG
 import DesignSystem
+import LaunchArguments
 import UIKit
 
 /// `-top-fade-lab`: measures where UIKit's soft top-edge fade really ends
@@ -17,12 +18,12 @@ import UIKit
 /// - `-top-fade-trace` prints the edge-effect views' frames as well.
 @MainActor
 public enum TopFadeLab {
-    public static var isRequested: Bool { ProcessInfo.processInfo.arguments.contains("-top-fade-lab") }
+    public static var isRequested: Bool { LaunchArgument.topFadeLab.isPassed() }
 
     public static func makeRoot() -> UIViewController {
         let lab = TopFadeLabViewController(header: UserDefaults.standard.string(forKey: "top-fade-lab-header") ?? "inline")
         let navigation = UINavigationController(rootViewController: lab)
-        if ProcessInfo.processInfo.arguments.contains("-top-fade-lab-dark") {
+        if LaunchArgument.topFadeLabDark.isPassed() {
             navigation.overrideUserInterfaceStyle = .dark
         }
         return navigation

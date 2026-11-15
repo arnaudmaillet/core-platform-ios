@@ -1,3 +1,4 @@
+import LaunchArguments
 import UIKit
 
 /// The ink of type that stands ON a picture-led header's photograph — a
@@ -122,7 +123,7 @@ public enum HeroInk {
     /// `-hero-blur-trace`: the ground's luminance spread and each ink's worst
     /// contrast over it, for a block called `name`.
     public static func debugTraceGround(_ ground: [SIMD3<Float>], name: String, picked: Tone) {
-        guard ProcessInfo.processInfo.arguments.contains("-hero-blur-trace"), !ground.isEmpty else { return }
+        guard LaunchArgument.heroBlurTrace.isPassed(), !ground.isEmpty else { return }
         let lums = ground.map { luminance([CGFloat($0.x), CGFloat($0.y), CGFloat($0.z)]) }.sorted()
         func at(_ p: Double) -> CGFloat { lums[min(lums.count - 1, Int(Double(lums.count - 1) * p))] }
         let white = contrast(1, lums.last!), black = contrast(0, lums.first!)

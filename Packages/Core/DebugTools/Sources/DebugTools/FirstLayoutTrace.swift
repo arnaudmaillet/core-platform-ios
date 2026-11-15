@@ -1,3 +1,4 @@
+import LaunchArguments
 import ObjectiveC
 import UIKit
 
@@ -54,7 +55,7 @@ public enum FirstLayoutTrace {
     private static var sink: FileHandle?
 
     public static func installIfRequested() {
-        guard ProcessInfo.processInfo.arguments.contains("-first-layout-trace"),
+        guard LaunchArgument.firstLayoutTrace.isPassed(),
               !isInstalled
         else { return }
         isInstalled = true
@@ -82,7 +83,7 @@ public enum FirstLayoutTrace {
     /// animations were attached by the parent's pass, not its own). No report
     /// there means the detector is broken, not the app.
     public static func selfTestIfRequested(in window: UIWindow) {
-        guard ProcessInfo.processInfo.arguments.contains("-first-layout-trace-selftest"),
+        guard LaunchArgument.firstLayoutTraceSelftest.isPassed(),
               isInstalled
         else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) {

@@ -1,4 +1,5 @@
 import Accelerate
+import LaunchArguments
 import UIKit
 
 /// How a picture-led header's banner runs out into the page — a profile's
@@ -1063,7 +1064,7 @@ public final class HeroBannerPictureView: UIView {
     }
 
     #if DEBUG
-    private static let tracesBlur = ProcessInfo.processInfo.arguments.contains("-hero-blur-trace")
+    private static let tracesBlur = LaunchArgument.heroBlurTrace.isPassed()
     private var lastLayoutTrace = ""
 
     /// `-hero-blur-trace`: one line whenever what the levels show changes —
@@ -1088,7 +1089,7 @@ public final class HeroBannerPictureView: UIView {
     /// one `UIVisualEffectView` blur under a gradient mask over the same
     /// climb — in place of the baked levels, for side-by-side screenshots.
     /// Never shipped: its tint is the frost `HeroBannerFade` explains.
-    private static let comparesMaterial = ProcessInfo.processInfo.arguments.contains("-hero-blur-material")
+    private static let comparesMaterial = LaunchArgument.heroBlurMaterial.isPassed()
     private var material: (view: UIVisualEffectView, mask: CAGradientLayer)?
 
     private func layoutMaterialComparison() {
@@ -1211,7 +1212,7 @@ public final class HeroBannerPictureView: UIView {
         debugLastBakeBytes = bake.rows.byteCount + bake.levels.reduce(0) { total, level in
             total + (level.cgImage.map { $0.bytesPerRow * $0.height } ?? 0)
         }
-        if ProcessInfo.processInfo.arguments.contains("-hero-blur-trace") {
+        if LaunchArgument.heroBlurTrace.isPassed() {
             print(String(
                 format: "HERO-BLUR baked %d levels for %.0fx%.0fpt in %.1fms (%@), %.0f KB",
                 bake.levels.count, size.width, size.height, milliseconds,

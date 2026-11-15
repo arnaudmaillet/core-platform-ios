@@ -3,6 +3,7 @@ import CoreContracts
 import CoreModels
 import CoreNetworking
 import Foundation
+import LaunchArguments
 
 /// Fake of geo_discovery.v1.GeoDiscoveryService over the shared dataset. Radar
 /// path only for now (QueryTile) — the Focus path (GetGeoTimeline) arrives with
@@ -435,9 +436,7 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
     /// `-maps-mock-pitch <points>` — see `replicated`.
     static let pitchOverride: Double? = {
         let arguments = ProcessInfo.processInfo.arguments
-        guard let index = arguments.firstIndex(of: "-maps-mock-pitch"),
-              index + 1 < arguments.count, let value = Double(arguments[index + 1])
-        else { return nil }
+        guard let value = LaunchArgument.mapsMockPitch.doubleValue(in: arguments) else { return nil }
         // ⚠️ Floor of 16, not 64. The 64 was a guard against laying pins
         // closer than the cluster engine's merge threshold — sensible while
         // clustering was on, and exactly wrong once `-maps-no-clustering`
@@ -450,9 +449,7 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
 
     static let density: Int = {
         let arguments = ProcessInfo.processInfo.arguments
-        guard let index = arguments.firstIndex(of: "-maps-mock-density"),
-              index + 1 < arguments.count, let value = Int(arguments[index + 1])
-        else { return 1 }
+        guard let value = LaunchArgument.mapsMockDensity.intValue(in: arguments) else { return 1 }
         return max(1, min(value, 40))
     }()
 
@@ -549,7 +546,7 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
         response.nextPageToken = end < ranked.count ? String(end) : ""
         #if DEBUG
         // `-maps-log-place-posts`: each page a place page asks for (#643).
-        if ProcessInfo.processInfo.arguments.contains("-maps-log-place-posts") {
+        if LaunchArgument.mapsLogPlacePosts.isPassed() {
             let place: String = switch request.place {
             case .countryCode(let code)?: "country \(code)"
             case .point(let point)?: "point \(point.lat),\(point.lng)"
@@ -580,7 +577,7 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
         // The window the tile actually answers for. Estimating it from the
         // screen's aspect put two deliberate addresses outside it, and a pin
         // that is filtered here looks exactly like one that was never assigned.
-        if ProcessInfo.processInfo.arguments.contains("-maps-log-pins") {
+        if LaunchArgument.mapsLogPins.isPassed() {
             print(String(format: "[viewport] lat %.4f..%.4f  lng %.4f..%.4f",
                          viewport.swLat, viewport.neLat,
                          viewport.swLng, viewport.neLng))
@@ -598,7 +595,7 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
             else { return nil }
 
             #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-maps-log-pins") {
+            if LaunchArgument.mapsLogPins.isPassed() {
                 let kind = post.media.map {
                     MockMediaFixtures.isVideoURL($0.url) ? "video" : "photo"
                 } ?? "text"

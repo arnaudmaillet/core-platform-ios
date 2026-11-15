@@ -1,5 +1,6 @@
 import CoreModels
 import DesignSystem
+import LaunchArguments
 import MediaCore
 import UIKit
 
@@ -197,9 +198,7 @@ final class SearchPeoplePage: UIViewController {
 
     private func tapRowForQAIfRequested() {
         let arguments = ProcessInfo.processInfo.arguments
-        guard let position = arguments.firstIndex(of: "-search-tap-user"),
-              position + 1 < arguments.count,
-              let row = Int(arguments[position + 1]),
+        guard let row = LaunchArgument.searchTapUser.intValue(in: arguments),
               !didTapForQA
         else { return }
         didTapForQA = true

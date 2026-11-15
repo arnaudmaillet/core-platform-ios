@@ -1,5 +1,6 @@
 import Connect
 import Foundation
+import LaunchArguments
 
 /// The mock network's fault switchboard (#790): one object the BFF, the upload
 /// transport and the realtime server all ask before they answer, so "offline"
@@ -130,7 +131,7 @@ extension MockNetworkFaults {
         _ arguments: [String] = ProcessInfo.processInfo.arguments
     ) -> MockNetworkFaults {
         let faults = MockNetworkFaults()
-        if arguments.contains("-mock-offline") { faults.offline = true }
+        if LaunchArgument.mockOffline.isPassed(in: arguments) { faults.offline = true }
         if let raw = value(after: "-mock-outage", in: arguments) {
             let parts = raw.split(separator: "+").compactMap { Double($0) }
             if parts.count == 2 { faults.scheduleOutage(after: parts[0], lasting: parts[1]) }

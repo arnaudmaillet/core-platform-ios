@@ -2,6 +2,7 @@ import CoreGraphics
 import CoreMedia
 import CoreVideo
 import Foundation
+import LaunchArguments
 import Synchronization
 import UIKit
 
@@ -250,7 +251,7 @@ protocol CaptureSource: AnyObject {
 @MainActor
 func makeCaptureSource() -> any CaptureSource {
     #if DEBUG || targetEnvironment(simulator)
-    if ProcessInfo.processInfo.arguments.contains("-camera-simulated") || !AVCaptureSource.hasAnyCamera {
+    if LaunchArgument.cameraSimulated.isPassed() || !AVCaptureSource.hasAnyCamera {
         return SimulatedCaptureSource()
     }
     #endif
