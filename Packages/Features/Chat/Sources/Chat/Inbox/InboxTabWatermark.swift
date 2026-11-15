@@ -27,9 +27,9 @@ import Foundation
 /// same question asked of the same instant.
 ///
 /// Time comes from the conversation's own `lastActivityAt`, so this is a pure
-/// function of the corpus and a stored watermark — the same shape
-/// `ForYouUnread` uses, and for the same reason: a count that is DERIVED cannot
-/// drift out of step with the rows it counts.
+/// function of the corpus and a stored watermark — the same shape For You's
+/// unread count used (removed in #2453), and for the same reason: a count
+/// that is DERIVED cannot drift out of step with the rows it counts.
 struct InboxTabWatermark: Equatable {
     /// Everything that arrived after this is new: counted on the tab, marked
     /// on its row. Immutable for the life of the watermark — see the type's
@@ -38,7 +38,7 @@ struct InboxTabWatermark: Equatable {
 
     /// Opens at the moment the screen did, so nothing already on
     /// screen when the viewer arrived is announced as new. A first sight is
-    /// never "all new" — the trap `ForYouUnread` documents.
+    /// never "all new" — the trap For You's unread count documented.
     init(openedAt: Date) {
         baseline = openedAt
     }

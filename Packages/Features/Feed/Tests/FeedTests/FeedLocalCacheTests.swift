@@ -129,10 +129,10 @@ final class FeedLocalCacheTests {
         let writer = viewer.viewer
         try makeCache().storeFirstPage(
             entries, counters: [PostID("p2"): PostCounters(likes: 7, comments: 0)],
-            nextCursor: "c1", in: .forYouDiscover, as: writer
+            nextCursor: "c1", in: .gridDiscover, as: writer
         )
         // A cold start: a new store on the same file.
-        let stored = try #require(try makeCache().firstPage(of: .forYouDiscover))
+        let stored = try #require(try makeCache().firstPage(of: .gridDiscover))
         #expect(stored.entries == entries)
         #expect(stored.nextCursor == "c1")
         #expect(stored.counters[PostID("p2")] == PostCounters(likes: 7, comments: 0), "a zero is kept as a zero")
@@ -142,12 +142,12 @@ final class FeedLocalCacheTests {
     @Test func aPostInTwoListsIsOneRowAndBothReadTheFreshestCopy() throws {
         let cache = try makeCache()
         let writer = viewer.viewer
-        cache.storeFirstPage([cachedEntry("shared", likes: 3), cachedEntry("d1")], nextCursor: nil, in: .forYouDiscover, as: writer)
-        cache.storeFirstPage([cachedEntry("shared", likes: 5)], nextCursor: nil, in: .forYouFollowing, as: writer)
+        cache.storeFirstPage([cachedEntry("shared", likes: 3), cachedEntry("d1")], nextCursor: nil, in: .gridDiscover, as: writer)
+        cache.storeFirstPage([cachedEntry("shared", likes: 5)], nextCursor: nil, in: .gridFollowing, as: writer)
         // 2 posts, 1 author, 2 like counters: the shared post is not stored twice.
         #expect(cache.store.usage.count == 5)
-        #expect(cache.firstPage(of: .forYouDiscover)?.entries.first?.likeCount == 5, "Discover reads what Following fetched last")
-        #expect(cache.firstPage(of: .forYouFollowing)?.entries.first?.likeCount == 5)
+        #expect(cache.firstPage(of: .gridDiscover)?.entries.first?.likeCount == 5, "Discover reads what Following fetched last")
+        #expect(cache.firstPage(of: .gridFollowing)?.entries.first?.likeCount == 5)
     }
 
     @Test func nextPagesAreStoredWithTheirCursorAndServedBack() throws {
@@ -296,7 +296,7 @@ final class EntityDeviceBackingTests {
         cache.storeFirstPage(
             [cachedEntry("shared", likes: 3), cachedEntry("d1", author: "author-2", likes: 8)],
             counters: [PostID("shared"): PostCounters(likes: 7, comments: 2)],
-            nextCursor: nil, in: .forYouDiscover, as: writer
+            nextCursor: nil, in: .gridDiscover, as: writer
         )
         cache.storeFirstPage([cachedEntry("f1", likes: 4)], nextCursor: nil, in: .following, as: writer)
     }
@@ -329,7 +329,7 @@ final class EntityDeviceBackingTests {
         // A feed opens on the stored page, whose entry carries the
         // timeline's count (3), as a copy — the way `FeedViewModel` seeds a
         // cached page.
-        let stored = try #require(try makeCache().firstPage(of: .forYouDiscover))
+        let stored = try #require(try makeCache().firstPage(of: .gridDiscover))
         #expect(stored.entries.first?.likeCount == 3)
         entities.upsert(stored.entries, counts: .ifUnknown)
 
@@ -371,7 +371,7 @@ final class EntityDeviceBackingTests {
         backing.waitForPendingWrites()
 
         let relaunched = try makeCache()
-        #expect(relaunched.firstPage(of: .forYouDiscover)?.entries.map(\.post.id.rawValue) == ["d1"])
+        #expect(relaunched.firstPage(of: .gridDiscover)?.entries.map(\.post.id.rawValue) == ["d1"])
         let nextLaunch = EntityStore()
         EntityDeviceBacking(entities: nextLaunch, cache: relaunched).restore()
         #expect(nextLaunch.post(PostID("shared")) == nil)

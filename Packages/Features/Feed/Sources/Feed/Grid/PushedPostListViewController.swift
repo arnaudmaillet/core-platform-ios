@@ -14,11 +14,12 @@ import UIKit
 ///
 /// A list of posts: the profile's Activity tab without the profile — the same
 /// timeline rows (`PostGridListRowCell`) on the same list layout, through a
-/// `PostGridPageView` in its `.list` style, no mosaic chunks. Driven by
-/// `ForYouViewController`, which forwards each snapshot, the paging spinner
-/// and the refresh while this screen is on the stack — one view model, so the
-/// row, its badge and this list never disagree about what is loaded. Friends
-/// is the same screen over the friends' posts.
+/// `PostGridPageView` in its `.list` style, no mosaic chunks. For You drove it
+/// from its own view model (until #2453), forwarding each snapshot, the
+/// paging spinner and the refresh — so the row, its badge and this list never
+/// disagreed about what was loaded. Friends was the same screen over the
+/// friends' posts. Today the place page pushes it for its "Popular" title
+/// (`.popular`) and renders it once.
 ///
 /// # Its sections
 ///
@@ -27,9 +28,9 @@ import UIKit
 /// leaves as it reaches the bar, the section then named IN the bar after the
 /// back chevron (#1378, the inbox's #1301; tap to scroll to the section). "New" carries its count — secondary text
 /// after the title, `New 8` (`SectionTitleView`) — the number the For You
-/// header this list was pushed from carries, and the same one by
-/// construction: both are the size of the set the view model hands over
-/// (`Snapshot.followingNew` for Following, `.friendsUnseen` for Friends).
+/// header this list was pushed from carried, and the same one by
+/// construction: both were the size of the set For You's view model handed
+/// over (`Snapshot.followingNew` for Following, `.friendsUnseen` for Friends).
 /// #313 had made this list one plain run; the sections came back on
 /// 2026-09-29 by product call, on BOTH lists because they are one screen
 /// whose header counts answer the same question.
@@ -44,8 +45,8 @@ import UIKit
 ///
 /// Through `presentSnapFeedHero` — the builder's shared flight, the one the
 /// place page, the search results and Discover's mosaic use — for the reason
-/// `DiscoverGalleryViewController` gives: For You's own `openFeed` is keyed to
-/// For You's page and its appearance, and this screen covers both. A media
+/// `DiscoverGalleryViewController` gives: For You's own `openFeed` was keyed
+/// to For You's page and its appearance, and this screen covered both. A media
 /// row flies; a text row opens with the native push and closes with its pop
 /// (#2243). A flight-opened feed paged onto words closes through a window
 /// (`textRowReveal`) onto the row the viewer opened, order untouched — the
@@ -54,7 +55,7 @@ import UIKit
 /// # Its chrome
 ///
 /// No tab bar (`hidesBottomBarWhenPushed`) and no title: `[‹] ——
-/// [points][search]`, the header every screen For You pushes wears
+/// [points][search]`, the header every pushed post screen wears
 /// (`PushedScreenHeader`; #323's large titles were taken back on 2026-09-30).
 /// The pinned section is a leading item of that bar, `[‹][New · 3]`
 /// (`applyPinnedSection`), never a capsule under it.
@@ -70,7 +71,7 @@ import UIKit
 /// shifted, a jump the viewer saw the moment the card landed (filmed on
 /// Following, Friends and the mosaic, 2026-09-30 — under #323's large titles,
 /// which made it a bar's height, but the covered safe area moves without
-/// them too). For You never showed it: its own flight pins the same inset
+/// them too). For You never showed it: its own flight pinned the same inset
 /// (`GridZoomSource`).
 @MainActor
 final class PushedPostListViewController: UIViewController {
@@ -246,7 +247,7 @@ final class PushedPostListViewController: UIViewController {
     }
 
     /// The next delivery is a re-derived corpus, not an extended one — see
-    /// `ForYouViewModel.onCorpusReset`.
+    /// `PostGridPageView.invalidateIncrementalUpdates`.
     func invalidateIncrementalUpdates() {
         page.invalidateIncrementalUpdates()
     }
@@ -290,8 +291,8 @@ final class PushedPostListViewController: UIViewController {
         // Nothing floats over this list's foot but the home indicator's band.
         page.footChromeCover = view.safeAreaInsets.bottom
         // Nothing on this screen may be invisible once it is back, whoever
-        // finished the close — the sweep `ForYouViewController.viewDidAppear`
-        // makes, for the same reason.
+        // finished the close — the sweep `DiscoverGalleryViewController` makes
+        // on appear, for the reason it gives.
         page.clearRevealConcealment()
         page.clearHeroConcealment()
         page.endPlaybackHandoff()

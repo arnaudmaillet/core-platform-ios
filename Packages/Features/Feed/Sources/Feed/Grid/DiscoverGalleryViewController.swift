@@ -7,29 +7,30 @@ import MediaPlayback
 import PostGrid
 import UIKit
 
-/// Discover's whole mosaic, pushed from a chunk's "View all" or the "For you ›"
-/// heading over the list (`GridLeadStack`): the chaotic grid that WAS the
-/// Discover tab until the tab became a list (2026-09-28), now a screen of its
-/// own with the platform's back button.
+/// Discover's whole mosaic, pushed from a "View all": the chaotic grid that
+/// WAS the Discover tab until the tab became a list (2026-09-28), then For
+/// You's pushed mosaic (until #2453), now a screen of its own with the
+/// platform's back button. The place page pushes it ("Recent" and every
+/// "View all"), and so do the post sets (`PostSetSurfaceViewController`).
 ///
 /// # What it is, and what it borrows
 ///
-/// A `PostGridPageView` in its `.grid` style over For You's own corpus — the
-/// media-only state (`ForYouSnapshot.media`), the same posts the
-/// tab's chunks draw from — driven by `ForYouViewController`, which forwards
-/// each snapshot, the paging spinner and the refresh while this screen is on
-/// the stack. One view model, so the gallery and the list page the same
-/// cursor and never disagree about what is loaded.
+/// A `PostGridPageView` in its `.grid` style over its host's media posts.
+/// For You drove it from its own view model, forwarding each snapshot, the
+/// paging spinner and the refresh. Today the place page renders it once, and
+/// a post set renders it and asks for the next pages as the viewer nears the
+/// end (`onNearEnd`, `hasMore`).
 ///
-/// # Why it opens posts the way the place page does, not the way For You does
+/// # Why it opens posts the way the place page does, not the way For You did
 ///
 /// A tile opens through `presentSnapFeedHero` — the builder's flight, the one
 /// the place page and the search results use — not through For You's own
-/// `openFeed`. For You's machinery is keyed to its PAGER (the pages, the
-/// selector strip, the view's coordinate space, its appearance callbacks), and
-/// this screen covers the pager while it is up; lending it that machinery
-/// would mean either re-plumbing all of it through a second host or keeping
-/// For You's appearance hooks alive for a screen that is not appearing. The
+/// `openFeed` (gone with the tab in #2453). For You's machinery was keyed to
+/// its PAGER (the pages, the selector strip, the view's coordinate space, its
+/// appearance callbacks), and this screen covered the pager while it was up;
+/// lending it that machinery would have meant either re-plumbing all of it
+/// through a second host or keeping For You's appearance hooks alive for a
+/// screen that was not appearing. The
 /// shared flight gives this screen everything a mosaic needs — the hero out of
 /// the tile, a grab and a chevron that fly home to it, the settled post's
 /// picture blended in on the way back, the dock through UIKit — and differs
@@ -41,8 +42,8 @@ import UIKit
 /// # Its chrome
 ///
 /// No tab bar (`hidesBottomBarWhenPushed`, UIKit's own choreography) and no
-/// title: the header is `[‹] ———— [points][search]`, the one every screen For
-/// You pushes wears (`PushedScreenHeader`, product call 2026-09-29; #323's
+/// title: the header is `[‹] ———— [points][search]`, the one every pushed
+/// post screen wears (`PushedScreenHeader`, product call 2026-09-29; #323's
 /// "For you" large title was taken back on 2026-09-30). The back chevron is
 /// how the viewer leaves; the mosaic has the whole screen.
 ///
@@ -188,8 +189,9 @@ final class DiscoverGalleryViewController: UIViewController {
         // `PostGridPageView.footChromeCover`.
         page.footChromeCover = view.safeAreaInsets.bottom
         // Nothing on this screen may be invisible once it is back, whoever
-        // finished the close — see `ForYouViewController.viewDidAppear`, which
-        // makes the same sweep for the same reason.
+        // finished the close: a concealment belongs to a transition, and the
+        // driver that finishes a close is not always the one that applied it.
+        // The same sweep For You's root made on appear (until #2453).
         page.clearRevealConcealment()
         page.clearHeroConcealment()
         // The handoff a tap opened is over: the post is a tile among tiles

@@ -226,33 +226,6 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         )
     }
 
-    public func warmLaunchScreen() {
-        guard let discovery else { return }
-        let pipeline = imagePipeline
-        let videoPlayback = videoPlayback
-        // ⚠️ DETACHED: inheriting the main actor, the warm-up waited for the
-        // shell it was meant to overlap to finish building — it started 0.6 s
-        // late and saved nothing (measured, Release, 2026-10-27).
-        Task.detached(priority: .userInitiated) {
-            guard let first = await MediaOnlyFeedProvider(base: discovery).cachedFirstPage()?.first else { return }
-            let model = FeedDisplayModelBuilder().build(first, now: Date())
-            // The URL the page's media card asks for, at its bucket: the
-            // photograph, or a clip's poster (`SnapFeedCell.configure`).
-            let picture = model.mediaKind == .video ? model.thumbnailURL : model.mediaURL
-            if let picture { _ = try? await pipeline.image(for: picture, size: .full, priority: .visible) }
-            // A clip's PLAYER prepared meanwhile, with no surface yet — the
-            // pool's lookahead (BytePlus' "pre-render", TikTok's first
-            // video): its item resolved, loaded and paused at the start, so
-            // the page's `play` adopts it on its first activation instead of
-            // minting one. Keyed as the page plays it: the clip and its post.
-            if model.mediaKind == .video, let clip = model.mediaURL {
-                let item = VideoLookaheadItem(url: clip, scope: first.post.id.rawValue)
-                await MainActor.run { videoPlayback?.setLookahead(next: item, previous: nil, warmNext: true) }
-            }
-            LaunchTimeline.mark("shots.warmed")
-        }
-    }
-
     public func galleryPosts(_ ids: [PostID]) async -> [PostID: GalleryPost] {
         var found: [PostID: FeedEntry] = [:]
         var missing: [PostID] = []
@@ -446,7 +419,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             .map { $0.seedProjection(SnapFeedViewController.keepingOpeningKind(GalleryPostProjection.seedModels(from: origin.stream))) }
         // The collection's page the source is showing, and the source
         // following the post's carousel back — the same pair For You's own
-        // list hands its feed (`ForYouViewController.openFeed`).
+        // list handed its feed (until #2453).
         if let feed = destination as? SnapFeedViewController {
             if let page = origin.mediaPage { feed.openMediaPage(page, for: origin.post.id) }
             if let follow = origin.followMediaPage { feed.onMediaPageChanged = follow }
@@ -726,10 +699,10 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             }
         )
         // ⚠️ A FLIGHT, NOT A PUSH, and this is what it used to be:
-        // `router.route(to: .post(id))`, the platform's plain slide. These two
-        // pages ARE For You's tabs, so a tap on one of them had every reason to
-        // open the way a tap on the other does — and did not, because the host
-        // was new and nobody had handed it the opener.
+        // `router.route(to: .post(id))`, the platform's plain slide. These
+        // pages ARE the grid For You's two tabs were (until #2453), so a tap on
+        // them had every reason to open the way a tap on For You did — and did
+        // not, because the host was new and nobody had handed it the opener.
         surface.openPost = { [self] presenter, origin, ids in
             presentSnapFeedHero(postIDs: ids, from: presenter, origin: origin)
         }
@@ -999,9 +972,9 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     /// The presentation a post with nothing to fly gets: a native push, plus a
     /// full-surface rightward swipe that scrubs the pop 1:1 and releases on the
     /// same contract every other dismissal in this app uses. Deliberately the
-    /// SAME shape as `ForYouViewController`'s text branch, because a viewer
-    /// opening the same text post from a profile and from For You is looking at
-    /// one screen and must get one set of gestures.
+    /// SAME shape For You's text branch had (the tab is gone since #2453),
+    /// because a viewer opening the same text post from two surfaces is looking
+    /// at one screen and must get one set of gestures.
     ///
     /// ⚠️ Claiming ownership and attaching the swipe are ONE act, never two.
     /// `zoomOwnsInteractiveDismissal` tells `NativePopPolicy` to refuse the
@@ -1622,8 +1595,9 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         )
         // Every vertical feed records what the viewer viewed (#1344).
         feed.viewHistory = .shared
-        // The side list's posts (#1425, #1473): For You's discovery pool as
-        // the app already holds it, else as it loads.
+        // The side list's posts (#1425, #1473): the Discover pool
+        // (`DiscoveryFeedRepository`) as the app already holds it, else as it
+        // loads; the feed's own repository when there is no pool.
         let source: any FeedProviding = discovery ?? repository
         // Its share sheet's people (#1710).
         feed.shareTargeting = shareTargeting

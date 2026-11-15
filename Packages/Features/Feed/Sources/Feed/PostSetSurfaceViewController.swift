@@ -13,9 +13,10 @@ import UIKit
 /// # Why this is thin
 ///
 /// Everything it does already existed. `PostGridPageView` is the component both
-/// For You tabs are — one type, two styles — and `PlaceProfileViewController`
-/// already drives it over a fixed id set with `render(.content(posts))` and no
-/// `ForYouViewModel` anywhere. The hydration is the same one the place profile
+/// For You tabs were (until #2453) — one type, two styles — and
+/// `PlaceProfileViewController` already drives it over a fixed id set with
+/// `render(.content(posts))` and no view model behind it. The hydration is the
+/// same one the place profile
 /// runs: a fixed-set provider through `DiscoverRepository`, then one batched
 /// counter read, so every member is a cache hit against what the feed already
 /// holds.
@@ -26,12 +27,12 @@ import UIKit
 /// suite measures, and that one tab of a pushed screen is not where the
 /// remaining loans belong.
 ///
-/// That was the wrong trade to make quietly. These pages ARE For You's tabs:
-/// a viewer scrolling search results reads the same rows they read on the feed,
-/// and clips that stay frozen there make the surface look broken rather than
-/// frugal. The pool is handed over now, and the page's own autoplay reconcile —
-/// the same one For You runs, with the same fling gate and the same visibility
-/// rules — decides what plays.
+/// That was the wrong trade to make quietly. These pages ARE the grid For
+/// You's tabs were: a viewer scrolling search results read the same rows they
+/// read on the feed, and clips that stay frozen there make the surface look
+/// broken rather than frugal. The pool is handed over now, and the page's own
+/// autoplay reconcile — the same one For You ran, with the same fling gate and
+/// the same visibility rules — decides what plays.
 ///
 /// ⚠️ WHAT THIS COSTS IS REAL AND IS NOT PAID HERE. The pool is shared, and
 /// `HeroSoak`'s `players<=6` is already red on develop for reasons that predate
@@ -222,10 +223,11 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
 
     // MARK: - Discover (#629)
 
-    /// For You's coupling of its rows and its list, verbatim in shape
-    /// (`ForYouViewController.viewDidLoad`): the header's taps, the cards'
-    /// flights, and ONE player budget the two share — the list leaves the
-    /// players the row has claimed (`PostGridPageView.playerReserve`).
+    /// For You's coupling of its rows and its list, verbatim in shape (the
+    /// tab is gone since #2453; the place page's `wireRails` is the other
+    /// copy): the header's taps, the cards' flights, and ONE player budget the
+    /// two share — the list leaves the players the row has claimed
+    /// (`PostGridPageView.playerReserve`).
     private func wireDiscover() {
         guard let shelf, let lead else { return }
         shelf.visibleBand = { [weak self] in self?.visibleBand() }
@@ -355,8 +357,8 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
         return shelf.convert(band, from: view)
     }
 
-    /// A lead-row card opens the way For You's Following cards do
-    /// (`ForYouViewController.openCard`, `RowOrigins.card`).
+    /// A lead-row card opens the way For You's Following cards did
+    /// (`PostShelfOrigins.card`).
     ///
     /// ⚠️ **PINNED FROM THE TAP, AND HANDED BACK ONLY IN `viewDidAppear`
     /// (#924)** — the arrangement `openTile` got in #883, which this door
@@ -373,7 +375,8 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
     /// `thawsOnLanding: false` leaves the thaw to this screen's appearance.
     private func openCard(at index: Int) { shelf?.openCard(at: index) }
 
-    /// "View all": For You's media gallery over this page's media posts, fed
+    /// "View all": Discover's media gallery (`DiscoverGalleryViewController`)
+    /// over this page's media posts, fed
     /// the next pages as they land (#629).
     private func pushGallery() {
         guard let makeGallery, let navigationController,
@@ -636,8 +639,9 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
-        // The screen left: what its like chips staked is final now — For
-        // You's rule (`ForYouViewController.viewDidDisappear`).
+        // The screen left: what its like chips staked is final now, as a
+        // post's stakes are once the feed pages away from it — the rule For
+        // You kept (until #2453).
         staking?.endSession()
     }
 
@@ -662,8 +666,11 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
         page.clearRevealConcealment()
         page.clearHeroConcealment()
         page.endPlaybackHandoff()
-        // The rows' card too — active first, then the handoff closed, for the
-        // reason `ForYouViewController.viewDidAppear` gives.
+        // The rows' card too — active first, then the handoff closed. Closing
+        // the handoff reconciles, and a reconcile of a row still inactive
+        // stops EVERY card, the one the close just handed its player to
+        // included: a thumbnail flash a beat after the landing. Learnt on For
+        // You's root (removed in #2453).
         guard let shelf else { return }
         shelf.clearConcealments()
         if isPlaybackActive {

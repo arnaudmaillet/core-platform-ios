@@ -17,9 +17,10 @@ import PostGrid
 /// arriving after a real page is ignored).
 ///
 /// # Why it is shared
-/// It was a private static on `ForYouViewController`, which is why only For
-/// You's openings were ever fast: the profile gallery holds exactly the same
-/// `GalleryPost`s and threw them away at the route boundary, so the identical
+/// It was a private static on For You's view controller (the tab is gone
+/// since #2453), which is why only For You's openings were ever fast: the
+/// profile gallery holds exactly the same `GalleryPost`s and threw them away
+/// at the route boundary, so the identical
 /// tap on the identical post opened a black screen. Two surfaces mapping the
 /// same type to the same model is one mapping, and it belongs beside the model.
 ///
@@ -43,9 +44,9 @@ enum GalleryPostProjection {
     /// downstream (see `CaptionBubbleCell.configure`).
     ///
     /// **How complete this is depends on the origin, and the difference is
-    /// visible.** `ForYouDiscovery` and `ExploreRepository` build their
-    /// `GalleryPost`s from feed entries, so they carry author identity and the
-    /// page opens with its author pill already populated.
+    /// visible.** `DiscoverRepository` builds its `GalleryPost`s from feed
+    /// entries, so they carry author identity and the page opens with its
+    /// author pill already populated.
     /// `ProfileGalleryRepository` does not populate it at all — a profile grid
     /// has no need of it, since every tile on the authored pages is by the
     /// profile you are looking at — so a post opened from there shows an

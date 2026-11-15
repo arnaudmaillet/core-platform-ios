@@ -158,8 +158,11 @@ public final class GridVideoPlaybackCoordinator {
     /// assert visibility now costs autoplay on one screen, which is visible to
     /// anyone looking at it. The old default cost decoder loans nothing could
     /// reclaim, app-wide. Every host already asserts on appear:
-    /// `ProfileViewController.viewDidAppear`, `ForYouViewController` (both
-    /// entry points) and `PlaceProfileViewController.viewWillAppear`.
+    /// `ProfileViewController.viewDidAppear`,
+    /// `PlaceProfileViewController.viewWillAppear`, the post sets
+    /// (`PostSetSurfaceViewController`), the pushed lists
+    /// (`PushedPostListViewController`, `DiscoverGalleryViewController`) and
+    /// the sound sheet.
     private var isSurfaceVisible = false
     /// The post whose player is currently being handed to (or from) a
     /// full-screen page. Inside a handoff this coordinator treats that post as

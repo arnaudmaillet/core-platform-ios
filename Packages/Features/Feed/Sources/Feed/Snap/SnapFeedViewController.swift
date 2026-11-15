@@ -316,24 +316,10 @@ final class SnapFeedViewController: UIViewController {
     /// is exactly the bug this would otherwise become.
     public var zoomOwnsInteractiveDismissal = true
 
-    /// The shell's bell — the For You root's leading item while no back
-    /// arrow or ✕ holds the edge (`HeaderAccessoryHosting`).
+    /// The shell's bell — a tab-root feed's leading item while no back arrow
+    /// or ✕ holds the edge (`HeaderAccessoryHosting`). The shell installs it
+    /// on no feed since the reader stopped being the For You root (#2453).
     private var leadingAccessoryItem: UIBarButtonItem?
-
-    /// (#1703): the For You sector's item while this feed is
-    /// its page in front (`ForYouSectorPage`) — what `navigationItem`
-    /// answers then, so every write below lands in the bar on screen.
-    var sectorNavigationItem: UINavigationItem?
-    /// The sector's Feed | Shots selector, just inboard of the bell.
-    var sectorSelectorItem: UIBarButtonItem? {
-        didSet {
-            guard isViewLoaded else { return }
-            applyLeadingNavItem(engaged: engagedChromeOnBar, hasMedia: engagedChromeHasMedia, animated: false)
-        }
-    }
-
-    override var navigationItem: UINavigationItem { sectorNavigationItem ?? super.navigationItem }
-    var ownNavigationItem: UINavigationItem { super.navigationItem }
 
     /// The surface currently on loan to a dismissal's flight card, so a
     /// cancelled grab can take it back.
@@ -2149,10 +2135,6 @@ final class SnapFeedViewController: UIViewController {
         // this is the end that carries what the screen is DOING. The trailing
         // end carries who the post is by.
         var items = [backItem ?? leadingAccessoryItem].compactMap { $0 }
-        // The sector's selector (#1703), just inboard of the bell.
-        if backItem == nil, let selector = sectorSelectorItem {
-            items += items.isEmpty ? [selector] : [leadingSelectorSeparator, selector]
-        }
         if engaged, isCommentSortAvailable {
             items += items.isEmpty ? [sortItem] : [leadingSortSpacer, sortItem]
         }
@@ -2162,8 +2144,7 @@ final class SnapFeedViewController: UIViewController {
         navigationItem.setLeftBarButtonItems(items, animated: animated)
     }
 
-    /// The leading run's spaces, kept as its items are (#2331).
-    private let leadingSelectorSeparator = BarItems.separator()
+    /// The leading run's space, kept as its items are (#2331).
     private let leadingSortSpacer = UIBarButtonItem.fixedSpace(Spacing.sm)
 
     /// Whether the engaged thread is long enough to be worth sorting — see
@@ -8425,8 +8406,8 @@ extension SnapFeedViewController: ContentPopGating {
 
 extension SnapFeedViewController: HorizontalDragClaiming {
     /// The side list, open or on its way, is closed by the swipe: every pager
-    /// around the page or on it gives the drag away — For You's sector, not
-    /// left for Feed (#1703), and the comments' tabs (#2007).
+    /// around the page or on it gives the drag away — the comments' tabs
+    /// (#2007), as For You's sector did until #2453 (#1703).
     func claimsHorizontalDrag(velocity: CGPoint) -> Bool {
         guard let sideList else { return false }
         return sideList.isOpen || sideList.isEngaged

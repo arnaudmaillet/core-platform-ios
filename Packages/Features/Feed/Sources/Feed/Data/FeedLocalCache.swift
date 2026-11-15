@@ -30,13 +30,16 @@ public final class FeedLocalCache: Sendable {
         /// The pushed Following feed (`FeedRepository`): what the JSON
         /// snapshot `feed-first-page` held before.
         public static let following = ListKey("feed.following")
-        /// For You's Discover corpus (`GetDiscoveryFeed`).
-        public static let forYouDiscover = ListKey("foryou.discover")
-        /// For You's following timeline: its rows and the pushed lists.
-        public static let forYouFollowing = ListKey("foryou.following")
+        /// The post grids' Discover corpus (`DiscoverRepository`,
+        /// `GetDiscoveryFeed`). The stored name is For You's, kept so a cache
+        /// written before #2453 is still read.
+        public static let gridDiscover = ListKey("foryou.discover")
+        /// The post grids' following timeline (`DiscoverRepository`): the
+        /// pushed lists. The stored name is For You's, as above.
+        public static let gridFollowing = ListKey("foryou.following")
         /// The Discover pool's first page (`DiscoveryFeedRepository`): what
-        /// Shots, the launch screen, opens on before the network answers
-        /// (#1765).
+        /// the reader's side list reads before the network answers. Shots,
+        /// the launch screen until #2453, opened on it (#1765).
         public static let discovery = ListKey("discovery.foryou")
     }
 

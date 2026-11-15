@@ -58,8 +58,8 @@ final class PostShelfMediaCardCell: UICollectionViewCell {
         imageView.pin(to: contentView)
         isAccessibilityElement = true
         accessibilityTraits = .button
-        // No press feedback — see `ForYouStoryCell`: a tap opens, a long press
-        // lifts the native preview.
+        // No press feedback (For You's story cells had none either, until
+        // #2453): a tap opens, a long press lifts the native preview.
     }
 
     @available(*, unavailable)

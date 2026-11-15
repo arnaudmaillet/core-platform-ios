@@ -2,8 +2,8 @@ import DesignSystem
 import UIKit
 
 /// "View all ›" under each of Discover's mosaic chunks: pushes the whole
-/// mosaic — For You's `DiscoverGalleryViewController`, a profile's media
-/// gallery (#631). In PostGrid since the profile lays out the same list
+/// mosaic — `DiscoverGalleryViewController` (For You's until #2453, the place
+/// page's and the post sets' now), a profile's media gallery (#631). In PostGrid since the profile lays out the same list
 /// (`DiscoverListLayout`).
 ///
 /// A plain secondary-label button in semibold subheadline, the chevron

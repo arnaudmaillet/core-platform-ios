@@ -36,24 +36,25 @@ public struct DiscoveryReader: Equatable, Sendable {
     public static let guest = DiscoveryReader(contentLevel: .restricted, profileID: nil, nonPersonalized: true)
 }
 
-/// For You's Discover corpus: `timeline.v1.GetDiscoveryFeed` (backend B3,
+/// The Discover corpus: `timeline.v1.GetDiscoveryFeed` (backend B3,
 /// #448/#512) — one pool for guests and members alike, ranked by the
 /// reader's interest tags when it keeps Personalised For You on (#413).
 ///
 /// The RPC answers identifiers only, as the following feed does; the posts
 /// are hydrated through the app's one feed repository (`base`), so a tile and
 /// the snap feed it opens share one cache. A post the server serves again on a
-/// later page (it moved between rankings) is dropped by the caller's
-/// de-duplication (`ForYouViewModel`).
+/// later page (it moved between rankings) is not dropped here: that is the
+/// caller's de-duplication (For You's view model did it until #2453).
 public actor DiscoveryFeedRepository: FeedProviding {
     private let timelineClient: any Timeline_V1_TimelineServiceClientInterface
     private let base: any FeedProviding
     private let reader: @Sendable () async -> DiscoveryReader
     private let region: @Sendable () -> String
     private let pageSize: Int32
-    /// The device's copy of the first page, per viewer (#1765): Shots — the
-    /// launch screen — opens on it in its first frame, as TikTok's first video
-    /// comes from disk, and the network revalidates behind it.
+    /// The device's copy of the first page, per viewer (#1765): the reader's
+    /// side list reads it before the network answers. Shots, the launch screen
+    /// until #2453, opened on it in its first frame, as TikTok's first video
+    /// comes from disk, and the network revalidated behind it.
     private let localCache: FeedLocalCache?
 
     public init(

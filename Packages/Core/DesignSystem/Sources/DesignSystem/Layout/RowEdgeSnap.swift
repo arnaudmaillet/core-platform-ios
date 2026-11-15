@@ -33,9 +33,9 @@ import CoreGraphics
 /// (`LeadRowMetrics.itemGap`; a carousel inside its box has a margin
 /// of zero, so any gap does).
 ///
-/// Pure, so it is tested without a scroll view. Lived in Feed as
-/// `ForYouRowSnap` until the card carousel needed the same rule — moved here
-/// rather than copied, because twins drift.
+/// Pure, so it is tested without a scroll view. Lived in Feed, with For You's
+/// rows (removed in #2453), until the card carousel needed the same rule —
+/// moved here rather than copied, because twins drift.
 public enum RowEdgeSnap {
     public enum Direction: Equatable, Sendable {
         /// Towards the end of the strip — the finger moving LEFT.

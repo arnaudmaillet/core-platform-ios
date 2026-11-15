@@ -21,7 +21,6 @@ struct DirectPipelineReadGuardTests {
         "AvatarView.swift": "the avatar's slot (the animated still's lookup)",
         "ImageContentView.swift": "the plain picture's slot",
         // Not a view's picture.
-        "FeedFeatureBuilder.swift": "the launch warm-up of the first post's picture (#1765)",
         "SnapAuthorIdentityView.swift": "warms the next author's face into the pipeline",
         "SnapFeedViewController.swift": "the lock screen's now-playing artwork",
         "PostGridPageView.swift": "a flight's stand-in and the landing cover's warm-up",

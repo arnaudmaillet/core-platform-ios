@@ -217,8 +217,9 @@ final class GridZoomSource: ZoomTransitionSource {
             viewerStake: page?.viewerStake(on: anchorID) ?? 0
         )
         // A paired (Following) card wears its words as the flight's resting
-        // furniture, faded as it grows — the Following row's arrangement
-        // (`RowOrigins.card`). Nil for every other cell.
+        // furniture, faded as it grows — a shelf card's arrangement
+        // (`PostShelfOrigins.card`), first For You's Following row's. Nil for
+        // every other cell.
         // On a CLOSE only — an opening flies the picture alone
         // (`PostGridFlightCard.leaveFurnitureBehind`).
         if !isStagingDismissal {

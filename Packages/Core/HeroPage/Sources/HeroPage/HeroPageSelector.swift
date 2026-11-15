@@ -2,7 +2,7 @@ import DesignSystem
 import UIKit
 
 /// The hero page's tab selector (#1651, slice #1653): ONE `PagedTabBar` — the
-/// strip For You and Messages wear — kept in step with the page's pager both
+/// strip Messages wears (and For You did, until #2453) — kept in step with the page's pager both
 /// ways, and hosted at the foot of the screen for the screen's whole life.
 ///
 /// **Optional.** A page with one tab shows none: a strip with one segment is a

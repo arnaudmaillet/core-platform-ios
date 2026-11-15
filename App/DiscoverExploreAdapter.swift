@@ -25,10 +25,10 @@ import Search
 /// the server; with no discovery wired it falls back to the viewer's
 /// FOLLOWING timeline.
 struct DiscoverExploreAdapter: ExploreProviding {
-    private let forYou: any DiscoverProviding
+    private let repository: any DiscoverProviding
 
-    init(forYou: any DiscoverProviding) {
-        self.forYou = forYou
+    init(repository: any DiscoverProviding) {
+        self.repository = repository
     }
 
     func corpus(limit: Int) async throws -> [ExplorePost] {
@@ -37,8 +37,8 @@ struct DiscoverExploreAdapter: ExploreProviding {
         // viewer cannot scroll past would be fetching for nobody.
         // Discover's pool when the backend serves one; the following
         // timeline otherwise.
-        let discover = try await forYou.discoveryFirstPage()
-        let page = if let discover { discover } else { try await forYou.firstPage() }
+        let discover = try await repository.discoveryFirstPage()
+        let page = if let discover { discover } else { try await repository.firstPage() }
         return page.posts.prefix(limit).compactMap { post in
             // A post whose projection carried no author identifies nobody, so
             // there is no row it could become. `GalleryPost` carries the

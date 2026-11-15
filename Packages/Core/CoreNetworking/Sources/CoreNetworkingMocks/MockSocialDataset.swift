@@ -77,7 +77,8 @@ public struct MockSocialDataset: Sendable {
     public static let viewerProfileID = "prof-demo-viewer"
 
     /// Posts staged as having arrived since the viewer last looked, so For
-    /// You's unread badge has something real to count on a cold launch.
+    /// You's unread badge had something real to count on a cold launch (the
+    /// tab and its badge were removed in #2453).
     ///
     /// ⚠️ **Dated a few minutes into the FUTURE, and that is the mechanism.**
     /// The rest of the corpus sits on a fixed epoch so ordering is stable, which
@@ -85,7 +86,7 @@ public struct MockSocialDataset: Sendable {
     /// a badge derived honestly could only ever read zero, and the feature was
     /// unverifiable without a launch argument. A first sight baselines at the
     /// newest post the viewer COULD have seen, which is capped at the present
-    /// moment (see `ForYouUnreadStore.sessionBaseline`), so a post stamped
+    /// moment (the badge's unread store did exactly that), so a post stamped
     /// ahead of the clock is by construction an arrival. `MockChatService`
     /// stages the inbox's unread counts the same way and for the same reason.
     ///

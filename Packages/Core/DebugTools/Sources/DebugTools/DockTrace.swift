@@ -24,12 +24,13 @@ import UIKit
 /// an ancestor is hidden reads 0.
 ///
 /// Both halves of the bottom chrome are traced — the system tab bar and the
-/// bottom accessory's content (For You's Discover/Following selector, the place
-/// page's Discover/Activity pill) — because the band follows the bar, and both
+/// bottom accessory's content (the profile tab root's selector; For You's
+/// Discover/Following selector and the place page's Discover/Activity pill
+/// had one too) — because the band follows the bar, and both
 /// come back once a close is committed.
 ///
-///     [dock] +7901ms moving top=ForYouViewController bar=0.00(m0.00) y=791 hidden=N acc=none
-///     [dock] +9293ms rest top=ForYouViewController bar=1.00(m1.00) y=791 hidden=N acc=1.00
+///     [dock] +7901ms moving top=MapsViewController bar=0.00(m0.00) y=791 hidden=N acc=none
+///     [dock] +9293ms rest top=MapsViewController bar=1.00(m1.00) y=791 hidden=N acc=none
 ///
 /// `bar` is what is drawn, `m` the model alpha (they differ while an alpha
 /// animation runs, listed as `anim=`), `rest` the first frame after the

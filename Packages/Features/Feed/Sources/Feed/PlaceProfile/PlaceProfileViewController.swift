@@ -247,7 +247,7 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
         /// A post of the Recent list — a card or a mosaic tile.
         case list(PostID)
         /// A card of the Popular row, closed through the window its origin
-        /// described (`RowOrigins.card`).
+        /// described (`PostShelfOrigins.card`).
         case card(TextRevealOrigin)
     }
 
@@ -271,8 +271,7 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
         // ⚠️ THE ONE INSTANT THE BAR IS BOTH PRESENT AND LAID OUT on this
         // screen: `assertAppTabBar` has just restored its state (UIKit commits
         // the frame as a model value even while it animates it in). The
-        // layout pass is forced for the measurement's sake — `ForYouViewController`
-        // forces one in the same place, for the same read.
+        // layout pass is forced for the measurement's sake.
         view.layoutIfNeeded()
         restingBarCover = floatingBarCover
         applyLandingOcclusion()
@@ -809,10 +808,10 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
 
     // MARK: - Popular and Recent
 
-    /// For You's coupling of its rows and its list
-    /// (`ForYouViewController.viewDidLoad`, the hashtag page's `wireDiscover`):
-    /// the titles' pushes, the cards' flights, and ONE player budget the two
-    /// share — the list leaves the players the row has claimed.
+    /// For You's coupling of its rows and its list (the tab is gone since
+    /// #2453; the post sets' `wireDiscover` is the other copy): the titles'
+    /// pushes, the cards' flights, and ONE player budget the two share — the
+    /// list leaves the players the row has claimed.
     private func wireRails() {
         shelf.visibleBand = { [weak self] in self?.visibleBand() }
         lead.onHeightChange = { [weak self] in self?.updateLeadHeight() }
@@ -865,8 +864,9 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
     /// The Popular row's posts, in its order.
     private var popularPosts: [GalleryPost] { shelf.cards }
 
-    /// "Popular": the place's posts by popularity, as For You's pushed
-    /// Following list draws a run of posts.
+    /// "Popular": the place's posts by popularity, in the pushed post list
+    /// (`PushedPostListViewController`), the screen For You's Following list
+    /// was until #2453.
     private func pushPopularList() {
         guard let makePostList, let navigationController,
               navigationController.transitionCoordinator == nil,
@@ -877,8 +877,9 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
         pushLeavingTheBackSwipe(list, on: navigationController)
     }
 
-    /// "Recent" and every "View all": For You's media gallery over the
-    /// place's media, in the list's order.
+    /// "Recent" and every "View all": Discover's media gallery
+    /// (`DiscoverGalleryViewController`) over the place's media, in the list's
+    /// order.
     private func pushGallery() {
         guard let makeGallery, let navigationController,
               navigationController.transitionCoordinator == nil,
@@ -904,9 +905,9 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
         nav.pushViewController(screen, animated: true)
     }
 
-    /// A Popular card opens the way For You's Following cards do
-    /// (`ForYouViewController.openCard`, `RowOrigins.card`), and its
-    /// close comes home through the window the origin describes.
+    /// A Popular card opens the way For You's Following cards did
+    /// (`PostShelfOrigins.card`), and its close comes home through the window
+    /// the origin describes.
     private func openCard(at index: Int) { shelf.openCard(at: index) }
 
     override func viewWillAppear(_ animated: Bool) {

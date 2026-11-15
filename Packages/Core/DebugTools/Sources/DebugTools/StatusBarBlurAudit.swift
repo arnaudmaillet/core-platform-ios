@@ -9,7 +9,7 @@ import UIKit
 ///
 /// Every frame (cheap facts only), printed on change:
 ///
-///     [sbb] +5310ms top=ForYouViewController moving band=on front=Y h=62 style=light own=1 offscreen=0 ax=hidden touch=off bottom=62 bottomStyle=light
+///     [sbb] +5310ms top=MapsViewController moving band=on front=Y h=62 style=light own=1 offscreen=0 ax=hidden touch=off bottom=62 bottomStyle=light
 ///
 /// `band=on` = installed and not hidden; `front=Y` = no window sibling draws
 /// over it (`zPosition`); `h` = the height its edge effect covers; `own` = the
