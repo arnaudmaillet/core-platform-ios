@@ -15,13 +15,13 @@ import UIKit
 /// needs a landing post whose cover is not cached — reproducible on demand here,
 /// and a matter of luck with injected input.
 @MainActor
-struct ForYouLandingGateTests {
+struct GridLandingGateTests {
     private struct SilentFetcher: ImageFetching {
         func fetchImageData(for url: URL) async throws -> Data { Data() }
     }
 
-    private func page(_ posts: [GalleryPost]) -> ForYouGridPage {
-        let page = ForYouGridPage(
+    private func page(_ posts: [GalleryPost]) -> PostGridPageView {
+        let page = PostGridPageView(
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .grid
         )
         page.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
@@ -72,13 +72,13 @@ struct ForYouLandingGateTests {
 /// tile that was tapped (#1283). Nothing in that cycle may accumulate: not a
 /// lost post, not a moved one, and above all not a tile left hidden.
 @MainActor
-struct ForYouRepeatedRoundTripTests {
+struct GridRepeatedRoundTripTests {
     private struct SilentFetcher: ImageFetching {
         func fetchImageData(for url: URL) async throws -> Data { Data() }
     }
 
-    private func page(_ count: Int) -> ForYouGridPage {
-        let page = ForYouGridPage(
+    private func page(_ count: Int) -> PostGridPageView {
+        let page = PostGridPageView(
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .grid
         )
         page.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
@@ -92,12 +92,12 @@ struct ForYouRepeatedRoundTripTests {
         return page
     }
 
-    private func collectionView(of page: ForYouGridPage) -> UICollectionView {
+    private func collectionView(of page: PostGridPageView) -> UICollectionView {
         page.subviews.compactMap { $0 as? UICollectionView }.first!
     }
 
     /// Every realized tile must be visible once no flight is in the air.
-    private func hiddenTiles(of page: ForYouGridPage) -> [Int] {
+    private func hiddenTiles(of page: PostGridPageView) -> [Int] {
         let view = collectionView(of: page)
         return (0..<page.posts.count).filter {
             view.cellForItem(at: IndexPath(item: $0, section: 0))?.isHidden == true
@@ -116,7 +116,7 @@ struct ForYouRepeatedRoundTripTests {
             // anchors on it whatever the viewer paged to.
             let departure = page.posts[round % 6].id
             let active = page.posts[(round % 6) + 3 + (round % 9)].id
-            let source = ForYouGridZoomSource(
+            let source = GridZoomSource(
                 page: page, tappedID: departure, activePostID: { active }, depthView: nil
             )
             source.zoomSourceWillStageDismissal()
@@ -163,15 +163,15 @@ struct ForYouRepeatedRoundTripTests {
 /// applied to. A hero hide lives on the CELL, and a cell recycled while hidden
 /// carries the invisibility to whatever post it is bound to next.
 @MainActor
-struct ForYouHiddenCellRecyclingTests {
+struct GridHiddenCellRecyclingTests {
     private struct SilentFetcher: ImageFetching {
         func fetchImageData(for url: URL) async throws -> Data { Data() }
     }
 
     /// Small viewport, many posts — so most cells are unrealized and the pool
     /// actually recycles when the grid scrolls.
-    private func page(_ count: Int = 120) -> ForYouGridPage {
-        let page = ForYouGridPage(
+    private func page(_ count: Int = 120) -> PostGridPageView {
+        let page = PostGridPageView(
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .grid
         )
         page.frame = CGRect(x: 0, y: 0, width: 393, height: 500)
@@ -185,14 +185,14 @@ struct ForYouHiddenCellRecyclingTests {
         return page
     }
 
-    private func scroll(_ page: ForYouGridPage, to y: CGFloat) {
+    private func scroll(_ page: PostGridPageView, to y: CGFloat) {
         let view = page.subviews.compactMap { $0 as? UICollectionView }.first!
         view.contentOffset = CGPoint(x: 0, y: y)
         page.layoutIfNeeded()
         view.layoutIfNeeded()
     }
 
-    private func invisibleTiles(_ page: ForYouGridPage) -> [Int] {
+    private func invisibleTiles(_ page: PostGridPageView) -> [Int] {
         let view = page.subviews.compactMap { $0 as? UICollectionView }.first!
         return view.indexPathsForVisibleItems.sorted().compactMap { path in
             guard let cell = view.cellForItem(at: path) else { return nil }

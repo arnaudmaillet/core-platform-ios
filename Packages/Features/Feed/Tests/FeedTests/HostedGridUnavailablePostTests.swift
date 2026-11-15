@@ -26,8 +26,8 @@ struct HostedGridUnavailablePostTests {
         }
     }
 
-    private func page(withheld: UnavailablePosts) -> ForYouGridPage {
-        let page = ForYouGridPage(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .grid)
+    private func page(withheld: UnavailablePosts) -> PostGridPageView {
+        let page = PostGridPageView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .grid)
         page.withheldPosts = withheld
         page.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
         return page

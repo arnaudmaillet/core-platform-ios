@@ -43,7 +43,7 @@ struct CommentChipTests {
     /// device as a button that "does not work": the same capsule shrank under
     /// the finger on a media card and did nothing on a text card. The chip now
     /// always presses; where a text post's comments are is the HOST's answer
-    /// (`ForYouGridPage.open` sends it down the card's own reveal).
+    /// (`PostGridPageView.open` sends it down the card's own reveal).
     @Test func everyCardsCountIsAControl() {
         var media = 0, text = 0
 

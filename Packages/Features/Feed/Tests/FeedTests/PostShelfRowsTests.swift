@@ -55,7 +55,7 @@ struct PostShelfRowsTests {
             #expect(place.row === (isText ? fixture.textRow : fixture.mediaRow))
             #expect(place.indexPath.item == (isText ? text : media).firstIndex(of: post.id))
         }
-        #expect(ForYouLeadFixture.height(
+        #expect(ShelfLeadFixture.height(
             forWidth: 402, following: cards.count, textCards: text.count
         ) == fixture.lead.stack.preferredHeight(forWidth: 402))
 
@@ -152,7 +152,7 @@ struct PostShelfRowsTests {
         #expect(!fixture.mediaRow.isHidden)
         #expect(fixture.mediaRow.bounds.height == card.height)
         #expect(Rows.height(forWidth: 402, media: cards.count, text: 0) == card.height)
-        #expect(ForYouLeadFixture.height(forWidth: 402, following: cards.count)
+        #expect(ShelfLeadFixture.height(forWidth: 402, following: cards.count)
             == fixture.lead.stack.preferredHeight(forWidth: 402))
         #expect(!fixture.followingHeader.isHidden, "the heading stays")
         #expect(fixture.mediaRow.frame.minY == fixture.followingHeader.frame.maxY)
@@ -167,7 +167,7 @@ struct PostShelfRowsTests {
         #expect(!fixture.followingHeader.isHidden, "the heading stays")
         #expect(fixture.textRow.frame.minY == fixture.followingHeader.frame.maxY)
         #expect(Rows.height(forWidth: 402, media: 0, text: cards.count) == Rows.textCardHeight(forWidth: 402))
-        #expect(ForYouLeadFixture.height(forWidth: 402, following: cards.count, textCards: cards.count)
+        #expect(ShelfLeadFixture.height(forWidth: 402, following: cards.count, textCards: cards.count)
             == fixture.lead.stack.preferredHeight(forWidth: 402))
     }
 
@@ -593,7 +593,7 @@ struct PostShelfRowsTests {
     /// The list's cards and the profile's follow the same rule: no handler,
     /// no repost.
     @Test func theListsCardsOfferNoRepostWithoutAHandler() {
-        let page = ForYouGridPage(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .discover)
+        let page = PostGridPageView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .discover)
         let post = Self.post("p0", kind: .photo)
         #expect(page.repostHandler(for: post) == nil)
         page.onRepostRequested = { _ in }
@@ -609,8 +609,8 @@ struct PostShelfRowsTests {
     private final class Fixture {
         let window: UIWindow
         let host = UIViewController()
-        let lead: ForYouLeadFixture
-        let page: ForYouGridPage
+        let lead: ShelfLeadFixture
+        let page: PostGridPageView
 
         init(
             cards: [GalleryPost], width: CGFloat = 402, staking: PostCardStaking? = nil,
@@ -618,10 +618,10 @@ struct PostShelfRowsTests {
         ) {
             window = UIWindow(frame: CGRect(x: 0, y: 0, width: width, height: 874))
             let pipeline = ImagePipeline(fetcher: SilentFetcher())
-            lead = ForYouLeadFixture(pipeline: pipeline, videoPlayback: nil)
+            lead = ShelfLeadFixture(pipeline: pipeline, videoPlayback: nil)
             lead.shelf.staking = staking
             lead.shelf.onCardRepostRequested = onRepost
-            page = ForYouGridPage(imagePipeline: pipeline, style: .discover, videoPlayback: nil)
+            page = PostGridPageView(imagePipeline: pipeline, style: .discover, videoPlayback: nil)
             lead.render(following: cards)
             window.rootViewController = host
             window.isHidden = false

@@ -8,7 +8,7 @@ import UIKit
 /// start any.
 ///
 /// The surfaces feeding `GridVideoPlaybackCoordinator`: the For You grid
-/// (`ForYouGridAutoplayDriver` — which the profile's pages are too, #1273)
+/// (`GridAutoplayDriver` — which the profile's pages are too, #1273)
 /// and the For You rails' Following row
 /// (`PostShelfSection`). They used to carry three copies of these rules; what
 /// genuinely differs between them is passed in, never decided here:

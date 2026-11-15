@@ -142,7 +142,7 @@ drawn as (`PostListOpening`):
 - **The text window** (`TextRevealInstaller`, `RevealTransition`) still opens
   and closes: a text tile (`tileWindow`: the mosaic, Discover), a shelf's text
   card (`PostShelfOrigins`), the friends' stories row
-  (`ForYouRowOrigins.storyReveal`), the map's bubble, For You's preview, the
+  (`RowOrigins.storyReveal`), the map's bubble, For You's preview, the
   conversation status page and a History row's square (`rowSquareWindow`).
   `-no-text-reveal` turns it off for all of them.
 

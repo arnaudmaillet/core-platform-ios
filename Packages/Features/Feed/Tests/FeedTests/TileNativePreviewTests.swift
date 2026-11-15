@@ -34,8 +34,8 @@ struct TileNativePreviewTests {
         }
     }
 
-    private func makePage() -> ForYouGridPage {
-        let page = ForYouGridPage(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .grid)
+    private func makePage() -> PostGridPageView {
+        let page = PostGridPageView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .grid)
         page.frame = CGRect(x: 0, y: 0, width: 393, height: 3000)
         page.setCorpusComplete(true)
         page.render(.content(corpus(12)))
@@ -44,7 +44,7 @@ struct TileNativePreviewTests {
         return page
     }
 
-    private func configuration(_ page: ForYouGridPage, item: Int) -> UIContextMenuConfiguration? {
+    private func configuration(_ page: PostGridPageView, item: Int) -> UIContextMenuConfiguration? {
         page.collectionView(
             page.collectionView, contextMenuConfigurationForItemsAt: [page.indexPath(for: item)], point: .zero
         )
@@ -128,9 +128,9 @@ struct TileNativePreviewTests {
     }
 
     /// A list page in a window: the previews need the cell on screen.
-    private func hostingList(_ body: (ForYouGridPage) throws -> Void) rethrows {
+    private func hostingList(_ body: (PostGridPageView) throws -> Void) rethrows {
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 393, height: 3000))
-        let page = ForYouGridPage(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .list)
+        let page = PostGridPageView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .list)
         page.frame = window.bounds
         window.addSubview(page)
         window.isHidden = false
@@ -142,11 +142,11 @@ struct TileNativePreviewTests {
         try body(page)
     }
 
-    private func row(_ page: ForYouGridPage, item: Int) throws -> PostGridListRowCell {
+    private func row(_ page: PostGridPageView, item: Int) throws -> PostGridListRowCell {
         try #require(page.collectionView.cellForItem(at: page.indexPath(for: item)) as? PostGridListRowCell)
     }
 
-    private func press(_ page: ForYouGridPage, item: Int, at point: CGPoint) throws -> UIContextMenuConfiguration? {
+    private func press(_ page: PostGridPageView, item: Int, at point: CGPoint) throws -> UIContextMenuConfiguration? {
         let cell = try row(page, item: item)
         return page.collectionView(
             page.collectionView, contextMenuConfigurationForItemsAt: [page.indexPath(for: item)],
@@ -173,7 +173,7 @@ struct TileNativePreviewTests {
     /// gone, and a drag ends it.
     @Test func aCaptionSelectionBeginsAfterTheMenuAndADragEndsIt() async throws {
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 393, height: 3000))
-        let page = ForYouGridPage(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .list)
+        let page = PostGridPageView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .list)
         page.frame = window.bounds
         window.addSubview(page)
         window.isHidden = false
@@ -295,7 +295,7 @@ struct TileNativePreviewTests {
             videoURL: URL(string: "https://example.com/v.mp4"),
             aspectRatio: 9.0 / 16.0, caption: "clip", publishedAtMS: 1
         )
-        let preview = ForYouPostPreviewViewController(
+        let preview = PostPreviewViewController(
             post: clip, imagePipeline: ImagePipeline(fetcher: SilentFetcher()), width: 300,
             videoPlayback: VideoPlaybackController(source: StubSource(), poolSize: 1, capacity: 1)
         )

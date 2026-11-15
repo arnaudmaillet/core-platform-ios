@@ -15,7 +15,7 @@ import UIKit
 /// and hashtag surface, the place page, and the sound sheet.
 ///
 /// Two families here, as the code has them: the surfaces drawn by a
-/// `ForYouGridPage`, and the sound sheet's own tiles. Each is pinned for the
+/// `PostGridPageView`, and the sound sheet's own tiles. Each is pinned for the
 /// parking (the tap parks the tile's clip), the landing choice (a close from
 /// another post hands the tile its own clip, a same-post close is unchanged),
 /// and the still fallback. The profile's gallery is pinned in its own package
@@ -81,16 +81,16 @@ struct ReturnPlayersEverywhereTests {
         }
     }
 
-    // MARK: - The ForYouGridPage family (Discover gallery, pushed lists, search, place page)
+    // MARK: - The PostGridPageView family (Discover gallery, pushed lists, search, place page)
 
     /// A page in a window whose first tile is PLAYING, as the one a finger
     /// taps is.
     private func playingPage(
-        _ style: ForYouGridPage.Style, pool: VideoPlaybackController, prefix: String = "v",
+        _ style: PostGridPageView.Style, pool: VideoPlaybackController, prefix: String = "v",
         posts: [GalleryPost]? = nil, fetcher: any ImageFetching = SilentFetcher()
-    ) async throws -> (page: ForYouGridPage, tapped: PostID, window: UIWindow) {
+    ) async throws -> (page: PostGridPageView, tapped: PostID, window: UIWindow) {
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
-        let page = ForYouGridPage(
+        let page = PostGridPageView(
             imagePipeline: ImagePipeline(fetcher: fetcher), style: style, videoPlayback: pool
         )
         page.frame = window.bounds
@@ -123,8 +123,8 @@ struct ReturnPlayersEverywhereTests {
 
     /// The tap parks the tile's clip; the close resumes it on a surface of its
     /// own; the landing gives it to the tile, which then waits on its clip.
-    @Test(arguments: [ForYouGridPage.Style.grid, .list])
-    func aGridPageParksAndLandsTheTilesOwnClip(_ style: ForYouGridPage.Style) async throws {
+    @Test(arguments: [PostGridPageView.Style.grid, .list])
+    func aGridPageParksAndLandsTheTilesOwnClip(_ style: PostGridPageView.Style) async throws {
         let pool = Self.makePool()
         let (page, tapped, window) = try await playingPage(style, pool: pool)
         defer { window.isHidden = true }
@@ -258,7 +258,7 @@ struct ReturnPlayersEverywhereTests {
         let id = posts[0].id
         shelf.beginPlaybackHandoff(of: id)
         await Self.settle { pool.returnPlaybackCount == 1 }
-        let page = ForYouGridPage(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .discover)
+        let page = PostGridPageView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .discover)
         let reveal = PostShelfOrigins.cardReveal(for: posts[0], cover: Self.picture(), shelf: shelf, page: page)
         let standIn = try #require(reveal.makeDismissStandIn(nil))
         #expect(Self.firstVideoSurface(in: standIn) != nil, "the card's window carried a still")
@@ -311,7 +311,7 @@ struct ReturnPlayersEverywhereTests {
 
     @Test func aPushedListWiresTheReturn() throws {
         var opened: SnapFeedHeroOrigin?
-        let list = ForYouPostListViewController(
+        let list = PushedPostListViewController(
             kind: .following,
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
             videoPlayback: Self.makePool(),

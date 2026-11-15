@@ -235,11 +235,11 @@ struct ProfileRefreshLandingTests {
         var recounted = post
         recounted.reactionCount = 7
         recounted.commentCount = 3
-        #expect(ForYouGridPage.differOnlyInCounts(post, recounted))
+        #expect(PostGridPageView.differOnlyInCounts(post, recounted))
         let recaptioned = GalleryPost(
             id: PostID("p"), kind: .photo, isRepost: false, thumbnailURL: nil, caption: "b", publishedAtMS: 1
         )
-        #expect(!ForYouGridPage.differOnlyInCounts(post, recaptioned))
+        #expect(!PostGridPageView.differOnlyInCounts(post, recaptioned))
     }
 
     /// A new follower count re-applies the header once — and its height,

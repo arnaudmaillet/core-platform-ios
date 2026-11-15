@@ -54,7 +54,7 @@ struct StackScreenGuardTests {
         "ProfileSwitcherMenuController": "a menu over the screen, left by a pick or a tap outside",
         "ThreadPhotoViewerController": "a full-screen viewer",
         "MediaStickerPickerViewController": "a sheet",
-        "ForYouPostPreviewViewController": "a context menu's preview",
+        "PostPreviewViewController": "a context menu's preview",
         "AppLockViewController": "a full-screen cover",
         "ScreenTimeReminderViewController": "a sheet",
         "LaunchViewController": "the window's launch root",

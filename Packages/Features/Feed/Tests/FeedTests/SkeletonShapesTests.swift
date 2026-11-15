@@ -14,7 +14,7 @@ import UIKit
 struct SkeletonShapesTests {
     @Test func discoversColdSkeletonIsItsMosaic() {
         let time = ManualLoadingClock()
-        let page = ForYouGridPage(imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()), style: .discover)
+        let page = PostGridPageView(imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()), style: .discover)
         page.skeletonClock = time.clock
         page.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
         page.layoutIfNeeded()

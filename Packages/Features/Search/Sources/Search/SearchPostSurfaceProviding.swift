@@ -6,7 +6,7 @@ import UIKit
 /// ⚠️ **A SEAM RATHER THAN A DEPENDENCY, and the rule is the codebase's, not a
 /// preference.** No feature package here imports another feature package —
 /// eight `Features/*/Package.swift`, zero cross-feature edges — and
-/// `App/ForYouExploreAdapter.swift` exists for the sole purpose of keeping
+/// `App/DiscoverExploreAdapter.swift` exists for the sole purpose of keeping
 /// Search from importing Feed on behalf of this very screen. Search depending
 /// on Feed would put ~34,000 lines in front of every search-screen build to
 /// reuse two views.
@@ -33,7 +33,7 @@ public protocol SearchPostSurfaceProviding: Sendable {
 /// attachments, no aspect ratio and no counts. A card cannot be drawn from
 /// that, so whatever fills this seam has to hydrate the ids through `post.v1`
 /// before it can render. Feed already owns the only path in this repo that
-/// does (`FixedPostsFeedProvider` into `ForYouRepository.firstPage()`, plus one
+/// does (`FixedPostsFeedProvider` into `DiscoverRepository.firstPage()`, plus one
 /// batched counter read), which is the other half of why these surfaces are
 /// vended rather than built here.
 @MainActor

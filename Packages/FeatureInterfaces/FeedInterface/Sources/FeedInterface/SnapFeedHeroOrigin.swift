@@ -420,7 +420,7 @@ public struct SnapFeedHeroOrigin {
     ///
     /// ⚠️ A source NESTED in something that scrolls needs it. A grid's own
     /// source pins its inset and brings its tile back here
-    /// (`ForYouGridZoomSource.zoomSourceWillStageDismissal`); a source outside
+    /// (`GridZoomSource.zoomSourceWillStageDismissal`); a source outside
     /// this feature had no such moment, so a row that scrolled under the open
     /// post — or a list whose inset the pop animates — was measured wherever
     /// it happened to be, and the card landed beside it. Filmed on For You's

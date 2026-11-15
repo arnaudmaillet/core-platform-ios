@@ -8,8 +8,8 @@ import UIKit
 @testable import Feed
 
 /// ⚠️ ONE CONTRACT FOR EVERY MEDIA TILE (#1270, epic #1269): every host of a
-/// `ForYouGridPage` other than For You describes a tile's opening through
-/// `ForYouGridPage.heroOrigin`, and the origin carries every hook For You's own
+/// `PostGridPageView` other than For You describes a tile's opening through
+/// `PostGridPageView.heroOrigin`, and the origin carries every hook For You's own
 /// tiles fly with — the landing's playhead above all, whose absence restarted
 /// a tile's clip after a close onto the same post.
 @MainActor
@@ -30,8 +30,8 @@ struct TileHeroOriginTests {
         }
     }
 
-    private func page(style: ForYouGridPage.Style) -> ForYouGridPage {
-        let page = ForYouGridPage(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: style)
+    private func page(style: PostGridPageView.Style) -> PostGridPageView {
+        let page = PostGridPageView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: style)
         page.frame = CGRect(x: 0, y: 0, width: 393, height: 3000)
         page.setCorpusComplete(true)
         page.render(.content(corpus(12)))
@@ -39,8 +39,8 @@ struct TileHeroOriginTests {
         return page
     }
 
-    @Test(arguments: [ForYouGridPage.Style.grid, .list])
-    func theOriginCarriesEveryTileHook(style: ForYouGridPage.Style) throws {
+    @Test(arguments: [PostGridPageView.Style.grid, .list])
+    func theOriginCarriesEveryTileHook(style: PostGridPageView.Style) throws {
         let page = page(style: style)
         let tapped = try #require(page.posts.first)
         let origin = page.heroOrigin(
@@ -85,7 +85,7 @@ struct TileHeroOriginTests {
         let tapped = try #require(grid.posts.first)
         let tile = try #require(grid.hero(for: tapped.id, in: window)).frame
 
-        let preview = ForYouPostPreviewViewController(
+        let preview = PostPreviewViewController(
             post: tapped, imagePipeline: ImagePipeline(fetcher: SilentFetcher()), width: 361
         )
         let (held, drawn) = Self.mountLift(preview, drawnAt: CGRect(x: 24, y: 180, width: 345, height: 460), in: window)
@@ -115,7 +115,7 @@ struct TileHeroOriginTests {
     @Test func aLiftWithNoDrawingIsNoOrigin() {
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 393, height: 874))
         window.isHidden = true
-        let preview = ForYouPostPreviewViewController(
+        let preview = PostPreviewViewController(
             post: corpus(1)[0], imagePipeline: ImagePipeline(fetcher: SilentFetcher()), width: 361
         )
         let held = UIView(frame: window.bounds)

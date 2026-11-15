@@ -37,7 +37,7 @@ struct PreviewLaunchTests {
     ) throws -> (PreviewLaunch, window: UIWindow) {
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 393, height: 874))
         window.isHidden = true
-        let preview = ForYouPostPreviewViewController(
+        let preview = PostPreviewViewController(
             post: post, imagePipeline: ImagePipeline(fetcher: SilentFetcher()), width: 361
         )
         _ = TileHeroOriginTests.mountLift(preview, drawnAt: Self.drawnAt, in: window)
@@ -92,8 +92,8 @@ struct PreviewLaunchTests {
 
     // MARK: - Finding UIKit's drawing (#1888)
 
-    private func makePreview(_ id: String = "p", kind: GalleryPost.Kind = .photo) -> ForYouPostPreviewViewController {
-        ForYouPostPreviewViewController(
+    private func makePreview(_ id: String = "p", kind: GalleryPost.Kind = .photo) -> PostPreviewViewController {
+        PostPreviewViewController(
             post: post(id, kind: kind), imagePipeline: ImagePipeline(fetcher: SilentFetcher()), width: 361
         )
     }

@@ -48,7 +48,7 @@ struct PostVoiceProjectionTests {
 
     @Test func theGridTileCarriesItAndStaysText() {
         let post = FeedRepository.makePost(from: view(withVoice: true))
-        let tile = ForYouRepository.galleryPost(from: entry(post))
+        let tile = DiscoverRepository.galleryPost(from: entry(post))
         #expect(tile.voice == voice && tile.hasVoice)
         #expect(tile.kind == .text)
         // And the page a tile opens is seeded speaking.

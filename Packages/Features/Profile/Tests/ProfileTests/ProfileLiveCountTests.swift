@@ -62,8 +62,8 @@ struct ProfileLiveCountTests {
     }
 
     /// The media mosaic: every post a bare tile.
-    private func mosaic(staking: PostCardStaking) -> ForYouGridPage {
-        let page = ForYouGridPage(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .grid)
+    private func mosaic(staking: PostCardStaking) -> PostGridPageView {
+        let page = PostGridPageView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .grid)
         page.staking = staking
         page.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
         page.layoutIfNeeded()
@@ -74,7 +74,7 @@ struct ProfileLiveCountTests {
         return page
     }
 
-    private func tile(_ id: PostID, on page: ForYouGridPage) throws -> PostGridTileCell {
+    private func tile(_ id: PostID, on page: PostGridPageView) throws -> PostGridTileCell {
         let path = try #require(page.debugIndexPath(for: id))
         page.collectionView.scrollToItem(at: path, at: .top, animated: false)
         page.collectionView.layoutIfNeeded()
@@ -102,7 +102,7 @@ struct ProfileLiveCountTests {
         let staking = PostCardStaking(wallet: Self.wallet(), entities: entities)
         // The profile's pages are For You's (#1273): the open is measured on
         // the page the profile now draws its media on.
-        let page = ForYouGridPage(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .grid)
+        let page = PostGridPageView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .grid)
         page.staking = staking
         page.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
         page.setCorpusComplete(true)

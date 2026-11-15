@@ -14,7 +14,7 @@ import UIKit
 /// offset under the floating header, the travel it must offer, the detents
 /// a release snaps to, the pull handed to the header — are what every page
 /// owes it whatever it holds. This page keeps those, written as For You's
-/// page writes them (`ForYouGridPage`'s hosted header), and answers every
+/// page writes them (`PostGridPageView`'s hosted header), and answers every
 /// post-shaped requirement with nothing: it holds no post to open, play or
 /// fly.
 ///

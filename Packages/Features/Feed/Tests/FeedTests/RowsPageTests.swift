@@ -43,20 +43,20 @@ struct RowsPageTests {
         PostGridPageSection(title: title, posts: posts, viewedAt: dates.filter { date in posts.contains { $0.id == date.key } })
     }
 
-    private func page() -> (any PostGridPage, ForYouGridPage) {
-        let grid = ForYouGridPage(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: ForYouGridPage.Style(.rows))
+    private func page() -> (any PostGridPage, PostGridPageView) {
+        let grid = PostGridPageView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: PostGridPageView.Style(.rows))
         grid.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
         grid.setCorpusComplete(true)
         return (grid, grid)
     }
 
-    private func row(_ grid: ForYouGridPage, _ id: String) throws -> PostHistoryRowCell {
+    private func row(_ grid: PostGridPageView, _ id: String) throws -> PostHistoryRowCell {
         grid.layoutIfNeeded()
         return try #require(grid.debugCell(for: PostID(id)) as? PostHistoryRowCell)
     }
 
     @Test func theStyleMaps() {
-        #expect(ForYouGridPage.Style(.rows) == .rows)
+        #expect(PostGridPageView.Style(.rows) == .rows)
     }
 
     /// One section of rows per group, each titled; the group gone under the
@@ -127,15 +127,15 @@ struct RowsPageTests {
     @Test func removalsAreRowsAndEmptiedGroups() throws {
         let all = posts(5)
         let old = [PostGridPageSection(title: "Today", posts: Array(all[0..<3])), PostGridPageSection(title: "Yesterday", posts: Array(all[3..<5]))]
-        let oneRow = try #require(ForYouGridPage.rowUpdates(from: old, to: [
+        let oneRow = try #require(PostGridPageView.rowUpdates(from: old, to: [
             PostGridPageSection(title: "Today", posts: [all[0], all[2]]), old[1]
         ]))
         #expect(oneRow == .init(deletedItems: [IndexPath(item: 1, section: 0)], movedItems: [
             .init(from: IndexPath(item: 2, section: 0), to: IndexPath(item: 1, section: 0))
         ]))
-        let lastOfAGroup = try #require(ForYouGridPage.rowUpdates(from: old, to: [old[0]]))
+        let lastOfAGroup = try #require(PostGridPageView.rowUpdates(from: old, to: [old[0]]))
         #expect(lastOfAGroup == .init(deletedSections: IndexSet(integer: 1)))
-        #expect(ForYouGridPage.rowUpdates(from: old, to: old) == nil, "nothing changed")
+        #expect(PostGridPageView.rowUpdates(from: old, to: old) == nil, "nothing changed")
     }
 
     /// A reorder MOVES its rows (the owner, 2026-11-07): within a group,
@@ -148,20 +148,20 @@ struct RowsPageTests {
             PostGridPageSection(title: "This Week", posts: Array(all[3..<5]))
         ]
         // Within a group: p2 to the top.
-        let within = try #require(ForYouGridPage.rowUpdates(from: old, to: [
+        let within = try #require(PostGridPageView.rowUpdates(from: old, to: [
             PostGridPageSection(title: "Yesterday", posts: [all[2], all[0], all[1]]), old[1]
         ]))
         #expect(within.deletedItems.isEmpty && within.insertedItems.isEmpty)
         #expect(within.movedItems.count == 3)
         // Across groups: p3 from This Week up to Yesterday.
-        let across = try #require(ForYouGridPage.rowUpdates(from: old, to: [
+        let across = try #require(PostGridPageView.rowUpdates(from: old, to: [
             PostGridPageSection(title: "Yesterday", posts: [all[3], all[0], all[1], all[2]]),
             PostGridPageSection(title: "This Week", posts: [all[4]])
         ]))
         #expect(across.movedItems.contains(.init(from: IndexPath(item: 0, section: 1), to: IndexPath(item: 0, section: 0))))
         #expect(across.deletedItems.isEmpty && across.insertedItems.isEmpty && across.insertedSections.isEmpty)
         // Into Today, which appears, with p5 viewed for the first time.
-        let today = try #require(ForYouGridPage.rowUpdates(from: old, to: [
+        let today = try #require(PostGridPageView.rowUpdates(from: old, to: [
             PostGridPageSection(title: "Today", posts: [all[5], all[1]]),
             PostGridPageSection(title: "Yesterday", posts: [all[0], all[2]]), old[1]
         ]))
@@ -180,7 +180,7 @@ struct RowsPageTests {
             PostGridPageSection(title: "A", posts: [all[1]]),
             PostGridPageSection(title: "B", posts: [all[2]])
         ]
-        let updates = try #require(ForYouGridPage.rowUpdates(from: old, to: [
+        let updates = try #require(PostGridPageView.rowUpdates(from: old, to: [
             PostGridPageSection(title: "A", posts: [all[2]]),
             PostGridPageSection(title: "B", posts: [all[1]])
         ]))
@@ -192,8 +192,8 @@ struct RowsPageTests {
     @Test func groupsOutOfOrderReload() {
         let all = posts(2)
         let old = [PostGridPageSection(title: "A", posts: [all[0]]), PostGridPageSection(title: "B", posts: [all[1]])]
-        #expect(ForYouGridPage.rowUpdates(from: old, to: [old[1], old[0]]) == nil)
-        #expect(ForYouGridPage.rowUpdates(from: old, to: [old[0], PostGridPageSection(title: "A", posts: [all[1]])]) == nil)
+        #expect(PostGridPageView.rowUpdates(from: old, to: [old[1], old[0]]) == nil)
+        #expect(PostGridPageView.rowUpdates(from: old, to: [old[0], PostGridPageSection(title: "A", posts: [all[1]])]) == nil)
     }
 
     /// On a page in a window the reorder lands in the new order, every row

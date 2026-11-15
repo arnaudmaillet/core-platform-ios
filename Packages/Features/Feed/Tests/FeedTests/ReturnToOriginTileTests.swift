@@ -212,8 +212,8 @@ struct ReturnToOriginTileTests {
         func playableURL(for url: URL) async throws -> URL { self.url }
     }
 
-    private func listPage(pool: VideoPlaybackController) -> ForYouGridPage {
-        let page = ForYouGridPage(
+    private func listPage(pool: VideoPlaybackController) -> PostGridPageView {
+        let page = PostGridPageView(
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .list, videoPlayback: pool
         )
         page.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
@@ -235,7 +235,7 @@ struct ReturnToOriginTileTests {
         return surface
     }
 
-    private func tileSurface(of id: PostID, in page: ForYouGridPage) -> VideoRenderView? {
+    private func tileSurface(of id: PostID, in page: PostGridPageView) -> VideoRenderView? {
         (page.debugCell(for: id) as? any GridPlaybackCell)?.loadedVideoRenderView
     }
 
@@ -249,7 +249,7 @@ struct ReturnToOriginTileTests {
         let departure = await pagePlaying(pool)
         #expect(pool.hasPlayer(in: departure))
 
-        let source = ForYouGridZoomSource(
+        let source = GridZoomSource(
             page: page, tappedID: tapped, activePostID: { landed }, depthView: nil
         )
         source.zoomSourceWillStageDismissal()
@@ -270,7 +270,7 @@ struct ReturnToOriginTileTests {
         let tapped = page.posts[0].id
         let departure = await pagePlaying(pool)
 
-        let source = ForYouGridZoomSource(
+        let source = GridZoomSource(
             page: page, tappedID: tapped, activePostID: { tapped }, depthView: nil
         )
         source.zoomSourceWillStageDismissal()

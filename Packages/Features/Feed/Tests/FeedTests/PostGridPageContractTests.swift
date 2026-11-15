@@ -28,8 +28,8 @@ struct PostGridPageContractTests {
     }
 
     private func vended(_ style: PostGridPageStyle, posts: [GalleryPost]) -> any PostGridPage {
-        let page: any PostGridPage = ForYouGridPage(
-            imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: ForYouGridPage.Style(style)
+        let page: any PostGridPage = PostGridPageView(
+            imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: PostGridPageView.Style(style)
         )
         page.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
         page.setCorpusComplete(true)
@@ -39,9 +39,9 @@ struct PostGridPageContractTests {
     }
 
     @Test func theStylesMapOneToOne() {
-        #expect(ForYouGridPage.Style(.grid) == .grid)
-        #expect(ForYouGridPage.Style(.list) == .list)
-        #expect(ForYouGridPage.Style(.discover) == .discover)
+        #expect(PostGridPageView.Style(.grid) == .grid)
+        #expect(PostGridPageView.Style(.list) == .list)
+        #expect(PostGridPageView.Style(.discover) == .discover)
     }
 
     /// A tap hands the host the post and the stream after it; a comment chip
@@ -50,12 +50,12 @@ struct PostGridPageContractTests {
         let page = vended(.list, posts: posts(40))
         var opened: (GalleryPost, [GalleryPost], Bool)?
         page.onPostTapped = { opened = ($0, $1, $2) }
-        let grid = try #require(page as? ForYouGridPage)
+        let grid = try #require(page as? PostGridPageView)
         #expect(grid.debugSelectItem(at: 2))
         let (post, stream, comments) = try #require(opened)
         #expect(post.id == PostID("p2"))
         #expect(stream.first?.id == PostID("p2"))
-        #expect(stream.count == ForYouGridPage.vendedStreamWindow)
+        #expect(stream.count == PostGridPageView.vendedStreamWindow)
         #expect(!comments)
     }
 
@@ -65,7 +65,7 @@ struct PostGridPageContractTests {
         var refreshed = 0
         page.onRefresh = { refreshed += 1 }
         page.show(.status(PostGridPageStatus(symbolName: "lock", title: "Private", actionTitle: "Try Again")))
-        let grid = try #require(page as? ForYouGridPage)
+        let grid = try #require(page as? PostGridPageView)
         #expect(grid.posts.isEmpty)
         #expect(grid.debugStatusFrame != nil)
         #expect(refreshed == 0)
@@ -79,7 +79,7 @@ struct PostGridPageContractTests {
             asked = context.post.id
             return []
         }
-        let grid = page as? ForYouGridPage
+        let grid = page as? PostGridPageView
         _ = grid?.authorMenuActions?(PostGridAuthorMenuContext(
             post: posts(1)[0], authorID: ProfileID("a0"), anchor: UIView()
         ))
@@ -92,7 +92,7 @@ struct PostGridPageContractTests {
     @Test func titledGroupsAreTitledAndNamedOnceUnderTheBar() throws {
         let all = posts(30)
         let page = vended(.discover, posts: [])
-        let grid = try #require(page as? ForYouGridPage)
+        let grid = try #require(page as? PostGridPageView)
         var named: [PostGridPinnedSection?] = []
         page.onPinnedSectionChanged = { named.append($0) }
         page.show(.sections([

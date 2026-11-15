@@ -47,7 +47,7 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
     /// `lead`, and the landing of every dismissal from the map. Not a
     /// bespoke list: a place's activity is posts, and a viewer who reads them
     /// as For You's cards must read them as the same cards here.
-    private let activityPage: ForYouGridPage
+    private let activityPage: PostGridPageView
     /// The page's warm of its visible posts' first comments (#2002).
     var postOpenWarm: PostOpenWarm? {
         get { activityPage.postOpenWarm }
@@ -63,7 +63,7 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
     /// Pushes the Popular row's whole list, and "Recent"/"View all"'s media
     /// gallery — made by the builder, which holds what their headers need.
     /// Nil: the titles open nothing (a test's page).
-    var makePostList: (() -> ForYouPostListViewController)?
+    var makePostList: (() -> PushedPostListViewController)?
     var makeGallery: (() -> DiscoverGalleryViewController)?
 
     /// The place's flag, where a profile's avatar stands (`HeroHeaderAvatar
@@ -105,7 +105,7 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
     /// Popular shelf — with what each was before, to put back (#1595).
     private var grabFrozenScrollers: [GrabFrozenScroller] = []
     /// The page the header rides: the only one (`heroPager`'s).
-    private var hostedPages: [ForYouGridPage] { [activityPage] }
+    private var hostedPages: [PostGridPageView] { [activityPage] }
     private let activeIndex = 0
 
     private let postIDs: [PostID]
@@ -133,7 +133,7 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
     private var emptyPagesInARow = 0
     static let maxEmptyPagesInARow = 5
     /// The grid a feed was opened from, whose order its continuation follows.
-    private weak var continuationGrid: ForYouGridPage?
+    private weak var continuationGrid: PostGridPageView?
     private lazy var feedContinuation = GridFeedContinuation(
         ids: { [weak self] in self?.continuationGrid?.posts.map(\.id) ?? [] },
         hasMore: { [weak self] in self?.hasMorePosts ?? false },
@@ -247,7 +247,7 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
         /// A post of the Recent list — a card or a mosaic tile.
         case list(PostID)
         /// A card of the Popular row, closed through the window its origin
-        /// described (`ForYouRowOrigins.card`).
+        /// described (`RowOrigins.card`).
         case card(TextRevealOrigin)
     }
 
@@ -287,7 +287,7 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
         // Whatever happened above, nothing on THIS page may be hidden while it
         // is the screen: the same blanket rule the map applies to its markers.
         clearLandingConcealment()
-        // The tap's playback claim (`ForYouGridPage.open` focuses the tapped
+        // The tap's playback claim (`PostGridPageView.open` focuses the tapped
         // post) ends with the round trip, as the other grid hosts end it in
         // their own `viewDidAppear`. This page never did, so the last post
         // opened from it stayed pinned first in the ranking for good.
@@ -581,7 +581,7 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
                     guard let self else { return }
                     debugFlightBeforeTileOpen = ZoomTransitionController.debugMostRecent
                     debugDidOpenTile = true
-                    let grid: ForYouGridPage? = activityPage
+                    let grid: PostGridPageView? = activityPage
                     // The ELECTION, not just the tap: a text row that opens with
                     // no window is a plain push, and a plain push looks like a
                     // perfectly good animation. Only the line says which happened.
@@ -595,12 +595,12 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
                         + " window=\(window != nil)")
                     // ⚠️ THROUGH THE DELEGATE, NOT THE HOST'S OWN METHOD. Calling
                     // `openTile` directly skips `didSelectItemAt` and therefore
-                    // `ForYouGridPage.open(at:)`, which is where a tap REMEMBERS
+                    // `PostGridPageView.open(at:)`, which is where a tap REMEMBERS
                     // the row to settle clear of the chrome. So the one thing this
                     // hook exists to exercise — where a dismissal comes back to —
                     // was the one thing it could not reach, and a run showed a card
                     // returning still half behind the tab bar whether the code was
-                    // right or wrong. `ForYouGridPage.debugSelectItem` carries the
+                    // right or wrong. `PostGridPageView.debugSelectItem` carries the
                     // same warning about `-foryou-open`, which made this mistake
                     // first.
                     if grid?.debugSelectItem(at: index) != true {
@@ -711,7 +711,7 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
         self.loadPosts = loadPosts
         self.openPost = openPost
         self.anchorID = postIDs.first ?? PostID("")
-        let page = ForYouGridPage(imagePipeline: imagePipeline, style: .discover, videoPlayback: videoPlayback)
+        let page = PostGridPageView(imagePipeline: imagePipeline, style: .discover, videoPlayback: videoPlayback)
         self.activityPage = page
         let shelf = PostShelfSection(imagePipeline: imagePipeline, videoPlayback: videoPlayback)
         self.shelf = shelf
@@ -891,7 +891,7 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
 
     /// ⚠️ A PLAIN PUSH LEAVES THE DELEGATE SLOT EMPTY — the pushed screens'
     /// full-surface back swipe (the owner, 2026-10-16: "only from the left
-    /// edge"; For You's own contract, #670 / `ForYouPushedBackSwipeTests`).
+    /// edge"; For You's own contract, #670 / `PushedListBackSwipeTests`).
     /// UIKit refuses the iOS 26+ full-surface back swipe on a screen whose pop
     /// brings the tab bar back while ANY navigation delegate is in the slot,
     /// and this page holds it with its way home to the map (the marker's
@@ -905,7 +905,7 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
     }
 
     /// A Popular card opens the way For You's Following cards do
-    /// (`ForYouViewController.openCard`, `ForYouRowOrigins.card`), and its
+    /// (`ForYouViewController.openCard`, `RowOrigins.card`), and its
     /// close comes home through the window the origin describes.
     private func openCard(at index: Int) { shelf.openCard(at: index) }
 
@@ -981,14 +981,14 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
         super.viewDidDisappear(animated)
         // ⚠️ THE REVEAL THIS PAGE ARMED AND NEVER APPLIED.
         //
-        // `ForYouGridPage.open(at:)` remembers the tapped post on EVERY tap, on
+        // `PostGridPageView.open(at:)` remembers the tapped post on EVERY tap, on
         // every host, so that the row can be settled clear of the chrome once
         // the post is covering the grid — where the move costs nothing to look
         // at. For You and the profile both spend it from their own
         // `viewDidDisappear`. This page never did, so a card tapped while it
         // was half behind the tab bar departed from that rect and, because a
         // flight's landing deliberately does not scroll (see
-        // `ForYouGridZoomSource`), came home to it. Filmed: a card cut off at
+        // `GridZoomSource`), came home to it. Filmed: a card cut off at
         // the foot, opened, closed, and cut off in exactly the same way.
         //
         // ⚠️ THE COVER IS ALREADY ON THE PAGE, and it has to be. This used to
@@ -1738,7 +1738,7 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
     // MARK: - Opening a tile
 
     private func openTile(
-        at index: Int, in grid: ForYouGridPage?, showingComments: Bool = false
+        at index: Int, in grid: PostGridPageView?, showingComments: Bool = false
     ) {
         // One opening at a time — before anything below claims the tile.
         guard let grid,
@@ -1806,12 +1806,12 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
     ///
     /// ⚠️ NO WINDOW FOR A ROW since #2290. A text ROW opened through a
     /// marker-shaped window grown from its card; a list's row of words opens
-    /// with the native push now (`ForYouGridPage.opensWithNativePush`), whose
+    /// with the native push now (`PostGridPageView.opensWithNativePush`), whose
     /// close is the native pop (`presentSnapFeedHero` ignores the window for
     /// it), so the row's window was built for nothing. A media row's
     /// flight-opened close lands through this page's own `CardCloseLanding`.
     private func textTileReveal(
-        for post: GalleryPost, in grid: ForYouGridPage
+        for post: GalleryPost, in grid: PostGridPageView
     ) -> TextRevealOrigin? {
         // ⚠️ THE MODEL SAYS WHAT THE POST IS, the page only says whether it can
         // be described. Asking `heroAppearance` for the first half conflates

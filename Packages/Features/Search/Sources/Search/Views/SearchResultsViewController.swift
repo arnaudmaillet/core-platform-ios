@@ -62,7 +62,7 @@ import CoreNavigation
 /// tabs are, and they are NOT built here: they arrive as opaque child view
 /// controllers through `SearchPostSurfaceProviding`, which the composition root
 /// fills from Feed. That is the rule this codebase holds to — no feature
-/// package imports another feature package, and `ForYouExploreAdapter` exists
+/// package imports another feature package, and `DiscoverExploreAdapter` exists
 /// for exactly this reason on exactly this screen's behalf.
 @MainActor
 final class SearchResultsViewController: UIViewController {

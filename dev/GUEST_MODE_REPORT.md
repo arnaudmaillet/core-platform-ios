@@ -388,7 +388,7 @@ Gate where the action starts, at a handful of choke points rather than in every 
 
 ### 6.5 Data
 
-- **Discover feed.** A new `DiscoveryFeedRepository` behind the existing `ForYouRepository` seam calls the discovery RPC (§7.3). Today's client-side Trending/Recent orderings fall away, as `ForYouDiscovery.swift` already anticipates.
+- **Discover feed.** A new `DiscoveryFeedRepository` behind the existing `DiscoverRepository` seam calls the discovery RPC (§7.3). Today's client-side Trending/Recent orderings fall away, as `ForYouDiscovery.swift` already anticipates.
 - **Search trending.** The trending section reads the same discovery source, not the following timeline (`AppContainer.swift:791-796`).
 - **Profiles seen as a guest.**
   - The relationship is simply "none": skip `GetRelationStatus` instead of letting it fail silently into a hidden header (`ProfileViewModel.swift:993-1001`).
@@ -644,7 +644,7 @@ Every write in the app today, with its handler, grouped by feature. "Gate" is th
 | Post detail | Post like | `PostDetailViewModel.swift:193-204` | `like` |
 | Post detail | Boost / undo | `PostDetailViewController.swift:778-816` | `like` |
 | For You / grids | Card like chip | `PostCardStaking.swift:116-140` | `like` |
-| For You / grids | Bookmark | `ForYouGridPage.swift:3386`, `ForYouRailsView.swift:500` | `save` |
+| For You / grids | Bookmark | `PostGridPageView.swift:3386`, `ForYouRailsView.swift:500` | `save` |
 | For You / grids | Unfollow / report from "…" | `ForYouViewController.swift:1036-1078` | `follow` / open |
 | Place page | Follow place | `PlaceProfileViewController.swift:1858` | `followPlace` |
 | Text post | Publish, drafts | `PostDetailViewModel.swift:252-286`, `TextPostComposerViewController.swift:348-494` | `create` |

@@ -21,7 +21,7 @@ struct HandWrittenImageLoadGuardTests {
     /// File name → why it may stay.
     static let allowed: [String: String] = [
         // The hero's sources and their grids: the media surface (#1088).
-        "ForYouGridPage.swift": "hero source: the For You grid's covers and its skeleton dissolve (#1088)",
+        "PostGridPageView.swift": "hero source: the For You grid's covers and its skeleton dissolve (#1088)",
         // Not an image arrival: the file's dissolve is the header button's role
         // swap; the pills' faces land without animation and are UIImages the
         // menus reuse, not an avatar view (#943).

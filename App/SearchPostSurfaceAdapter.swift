@@ -8,7 +8,7 @@ import UIKit
 ///
 /// **A composition-root adapter rather than a dependency between the two
 /// features** — the same shape, and the same reason, as
-/// `ForYouExploreAdapter`. Search declares `SearchPostSurfaceProviding`; Feed
+/// `DiscoverExploreAdapter`. Search declares `SearchPostSurfaceProviding`; Feed
 /// declares `PostSetSurface` through `FeedInterface`; the two vocabularies
 /// meet here and nowhere else. Search gains no package dependency, and no code
 /// moves between features.

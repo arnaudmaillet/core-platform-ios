@@ -7,7 +7,7 @@ import Testing
 import UIKit
 @testable import Feed
 
-/// What `ForYouGridPage` gained to host the profile's pages (#1273, PR A):
+/// What `PostGridPageView` gained to host the profile's pages (#1273, PR A):
 /// snap detents, an animated offset, a status under a hosted header, counts
 /// updated in place, one near-end ask per content length, injectable
 /// bookmarks and one close window for every host. All of it is off — or
@@ -33,10 +33,10 @@ struct GridPageHostingTests {
     }
 
     private func page(
-        style: ForYouGridPage.Style, posts: [GalleryPost], height: CGFloat = 874,
+        style: PostGridPageView.Style, posts: [GalleryPost], height: CGFloat = 874,
         bookmarks: PostBookmarkStore? = .shared
-    ) -> ForYouGridPage {
-        let page = ForYouGridPage(
+    ) -> PostGridPageView {
+        let page = PostGridPageView(
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: style, bookmarks: bookmarks
         )
         page.frame = CGRect(x: 0, y: 0, width: 402, height: height)
@@ -111,8 +111,8 @@ struct GridPageHostingTests {
 
     /// The same posts with new counts re-dress nothing: the visible cells take
     /// the numbers in place, and the model carries them.
-    @Test(arguments: [ForYouGridPage.Style.grid, .list, .discover])
-    func newCountsAreWrittenInPlace(style: ForYouGridPage.Style) throws {
+    @Test(arguments: [PostGridPageView.Style.grid, .list, .discover])
+    func newCountsAreWrittenInPlace(style: PostGridPageView.Style) throws {
         let before = posts(12, likes: 10)
         let page = page(style: style, posts: before)
         let after = posts(12, likes: 99)
@@ -123,8 +123,8 @@ struct GridPageHostingTests {
     }
 
     @Test func aRealChangeIsNotACountsOnlyChange() {
-        #expect(ForYouGridPage.differOnlyInCounts(posts(1, likes: 1)[0], posts(1, likes: 5)[0]))
-        #expect(!ForYouGridPage.differOnlyInCounts(posts(1)[0], posts(1, caption: "changed")[0]))
+        #expect(PostGridPageView.differOnlyInCounts(posts(1, likes: 1)[0], posts(1, likes: 5)[0]))
+        #expect(!PostGridPageView.differOnlyInCounts(posts(1)[0], posts(1, caption: "changed")[0]))
     }
 
     // MARK: - Near end

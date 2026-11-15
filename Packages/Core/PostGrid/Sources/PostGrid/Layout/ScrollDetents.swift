@@ -4,7 +4,7 @@ import CoreGraphics
 /// few positions the finger's release is drawn to, rather than anywhere in
 /// between. Shared by every host that sets detents on its pages — the
 /// profile's (`ProfileScrollDetents` names its positions) — through
-/// `ForYouGridPage` (#1273).
+/// `PostGridPageView` (#1273).
 ///
 /// Past the last detent the offset belongs to the list and is left alone.
 public enum ScrollDetents {
