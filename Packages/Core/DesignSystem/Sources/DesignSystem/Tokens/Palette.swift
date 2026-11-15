@@ -271,7 +271,7 @@ public enum Palette {
     /// in the dark a very dark grey, `2C2C2E`, where a black disc would lose
     /// its outline on the black page and over dark photos. The same with
     /// Increased Contrast: the glyph already passes by far on it.
-    public static let friendsBadgeDisc = dynamic(light: 0x000000, dark: 0x2C2C2E)
+    public static let friendsBadgeDisc = dynamic(BrandNeutrals.friendsBadgeDisc)
     /// The Friends badge's glyph: the mint itself, `16FFCB`, in both
     /// appearances (16.2:1 on the black disc, 10.8:1 on `2C2C2E`).
     /// ⚠️ The mint's one use as an ink (#2282 § 3 keeps it off the UI): a
