@@ -39,7 +39,7 @@ final class HeroProbeDiagnosticsUITests: XCTestCase {
 
     /// Prints the head of the tree — run by hand when a query stops matching.
     func testDumpTheTree() {
-        let app = launchHeroApp(arguments: ["-select-tab", "1"])
+        let app = launchHeroApp(arguments: ["-select-tab", "0"])
         _ = waitForHeroSettle(in: app, after: 0)
         let tree = app.debugDescription
         print("=== HERO PROBE PRESENT: \(tree.contains("hero;")) ===")

@@ -21,13 +21,13 @@ struct PostShelfRowsTests {
 
     // MARK: - Two scroll views
 
-    /// Three scrollers: the Friends row, the media row and the text row —
-    /// each Following row its own collection view holding only its kind.
+    /// Two scrollers: the media row and the text row — each Following row
+    /// its own collection view holding only its kind.
     @Test func followingIsTwoScrollViews() throws {
         let fixture = Fixture(cards: Self.mixed)
-        // The Friends row's own, and the shelf's two (`PostShelfSection`, #1271).
-        let rows = (fixture.lead.friends.subviews + fixture.lead.shelf.subviews).compactMap { $0 as? UICollectionView }
-        #expect(rows.count == 3, "Friends, Following media, Following text")
+        // The shelf's two (`PostShelfSection`, #1271).
+        let rows = fixture.lead.shelf.subviews.compactMap { $0 as? UICollectionView }
+        #expect(rows.count == 2, "Following media, Following text")
         #expect(fixture.mediaRow !== fixture.textRow)
         #expect(!fixture.mediaRow.isHidden && !fixture.textRow.isHidden)
         for row in [fixture.mediaRow, fixture.textRow] {
@@ -56,7 +56,7 @@ struct PostShelfRowsTests {
             #expect(place.indexPath.item == (isText ? text : media).firstIndex(of: post.id))
         }
         #expect(ForYouLeadFixture.height(
-            forWidth: 402, friends: 0, following: cards.count, textCards: text.count
+            forWidth: 402, following: cards.count, textCards: text.count
         ) == fixture.lead.stack.preferredHeight(forWidth: 402))
 
         var opened: [Int] = []
@@ -152,7 +152,7 @@ struct PostShelfRowsTests {
         #expect(!fixture.mediaRow.isHidden)
         #expect(fixture.mediaRow.bounds.height == card.height)
         #expect(Rows.height(forWidth: 402, media: cards.count, text: 0) == card.height)
-        #expect(ForYouLeadFixture.height(forWidth: 402, friends: 0, following: cards.count)
+        #expect(ForYouLeadFixture.height(forWidth: 402, following: cards.count)
             == fixture.lead.stack.preferredHeight(forWidth: 402))
         #expect(!fixture.followingHeader.isHidden, "the heading stays")
         #expect(fixture.mediaRow.frame.minY == fixture.followingHeader.frame.maxY)
@@ -167,7 +167,7 @@ struct PostShelfRowsTests {
         #expect(!fixture.followingHeader.isHidden, "the heading stays")
         #expect(fixture.textRow.frame.minY == fixture.followingHeader.frame.maxY)
         #expect(Rows.height(forWidth: 402, media: 0, text: cards.count) == Rows.textCardHeight(forWidth: 402))
-        #expect(ForYouLeadFixture.height(forWidth: 402, friends: 0, following: cards.count, textCards: cards.count)
+        #expect(ForYouLeadFixture.height(forWidth: 402, following: cards.count, textCards: cards.count)
             == fixture.lead.stack.preferredHeight(forWidth: 402))
     }
 
@@ -622,9 +622,7 @@ struct PostShelfRowsTests {
             lead.shelf.staking = staking
             lead.shelf.onCardRepostRequested = onRepost
             page = ForYouGridPage(imagePipeline: pipeline, style: .discover, videoPlayback: nil)
-            var model = ForYouViewModel.Rails()
-            model.following = cards
-            lead.render(model)
+            lead.render(following: cards)
             window.rootViewController = host
             window.isHidden = false
             page.frame = host.view.bounds
@@ -639,6 +637,6 @@ struct PostShelfRowsTests {
         var mediaRow: UICollectionView { lead.shelf.mediaView }
         var textRow: UICollectionView { lead.shelf.textView }
         /// "Following" — the second of the rows' headings.
-        var followingHeader: SectionTitleView { [lead.friends.header, lead.shelf.header, lead.stack.debugListTitleView][1] }
+        var followingHeader: SectionTitleView { lead.shelf.header }
     }
 }

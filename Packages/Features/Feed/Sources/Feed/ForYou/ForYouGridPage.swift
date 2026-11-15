@@ -980,7 +980,6 @@ final class ForYouGridPage: UIView {
         self.imagePipeline = imagePipeline
         self.bookmarks = bookmarks
         videoPool = videoPlayback
-        chunkPlanner.chunksLeavePairableMedia = !ForYouPairedVertical.chunksTakeVerticals
         #if DEBUG
         CarouselPlaybackAudit.capturePoolTrace()
         #endif

@@ -4,8 +4,8 @@ import XCTest
 /// that draws one — the question the matrix suite left half-answered: its
 /// real taps landed on the feed's FIRST card (text, so the reveal family),
 /// while the media hero's opening stayed scripted. Here the finger does the
-/// opening too: a media card's picture on the Activity list, a tile on the
-/// Media grid, and a card on a pushed profile.
+/// opening too, on a card on a pushed profile. (For You's Activity list and
+/// Media grid went with the tab, #2453.)
 final class HeroCardUITests: XCTestCase {
     override func setUp() {
         super.setUp()
@@ -30,99 +30,6 @@ final class HeroCardUITests: XCTestCase {
             }
         }
         return nil
-    }
-
-    // MARK: - A media card's picture, tapped for real (Activity list)
-
-    /// The tap lands on the media area — the carousel's own "open this post"
-    /// tap — so the flight is the `.listMedia` hero: the row's picture flies,
-    /// not the whole card. Home by real grab; the census clean both ways.
-    func testAMediaCardsPictureFliesUnderARealFinger() throws {
-        let app = launchHeroApp(arguments: ["-select-tab", "1"])
-        waitForHeroSettle(in: app, after: 0)
-        XCTAssertTrue(app.collectionViews.firstMatch.cells.firstMatch
-            .waitForExistence(timeout: 20), "the card list never showed")
-
-        // Media cards sit below the first (text) cards on the mock corpus;
-        // scroll until one shows a tappable picture.
-        var media = mediaImage(in: app)
-        var scrolls = 0
-        while media == nil, scrolls < 4 {
-            app.swipeUp()
-            scrolls += 1
-            media = mediaImage(in: app)
-        }
-        let picture = try XCTUnwrap(media, "no media card within \(4) screens of cards")
-
-        let before = heroProbe(in: app)?.sequence ?? 0
-        picture.tap()
-        XCTAssertTrue(app.navigationBars.buttons.firstMatch.waitForExistence(timeout: 10),
-                      "tapping the card's picture opened nothing")
-        let opened = waitForHeroSettle(in: app, after: before,
-                                       "the card-media open never settled")
-        assertHeroResidueClear(opened, "after opening from a card's picture")
-        attachHeroEvidence(app, name: "s03-card-media-open")
-
-        let beforeReturn = opened?.sequence ?? 0
-        app.swipeRight()
-        let returned = waitForHeroSettle(in: app, after: beforeReturn,
-                                         "the return to the card never settled")
-        assertHeroResidueClear(returned, "after flying home to the card")
-        XCTAssertTrue(app.collectionViews.firstMatch.waitForExistence(timeout: 5),
-                      "the card list did not come back")
-        attachHeroEvidence(app, name: "s03-card-media-returned")
-    }
-
-    // MARK: - A tile on the Media grid, tapped for real
-
-    /// The mosaic: For You is ONE page now (2026-09-29) — a list of cards
-    /// with mosaic chunks — and the whole mosaic is a screen of its own
-    /// behind a chunk's "View all". So: "View all", then a tile of the pushed
-    /// grid (#1154: this used to tap a Discover tab that no longer exists). A
-    /// tile is a rect whatever the post, so EVERY tile flies; tap one, come
-    /// home by the back button, twice, because the second open is where
-    /// reuse bugs live.
-    func testATileOnTheMediaGridFliesUnderARealFinger() throws {
-        let app = launchHeroApp(arguments: ["-select-tab", "1"])
-        waitForHeroSettle(in: app, after: 0)
-
-        // The first chunk sits under three cards; scroll until its
-        // "View all" can be pressed.
-        let viewAll = app.buttons["View all"].firstMatch
-        var scrolls = 0
-        while !(viewAll.exists && viewAll.isHittable), scrolls < 6 {
-            app.swipeUp()
-            scrolls += 1
-        }
-        XCTAssertTrue(viewAll.isHittable, "no View all under a mosaic chunk")
-        viewAll.tap()
-        XCTAssertTrue(app.navigationBars.buttons.firstMatch.waitForExistence(timeout: 10),
-                      "View all did not push the mosaic")
-
-        for round in 1...2 {
-            let tile = app.collectionViews.firstMatch.cells.firstMatch
-            XCTAssertTrue(tile.waitForExistence(timeout: 20),
-                          "round \(round): the media grid never showed a tile")
-            guard tile.isHittable else {
-                app.swipeDown()
-                continue
-            }
-            let before = heroProbe(in: app)?.sequence ?? 0
-            tile.tap()
-            XCTAssertTrue(app.navigationBars.buttons.firstMatch.waitForExistence(timeout: 10),
-                          "round \(round): the tile tap opened nothing")
-            let opened = waitForHeroSettle(in: app, after: before,
-                                           "round \(round): the tile open never settled")
-            assertHeroResidueClear(opened, "round \(round): after the tile open")
-            attachHeroEvidence(app, name: "s01-grid-tile-open-round\(round)")
-
-            let beforeReturn = opened?.sequence ?? 0
-            app.navigationBars.buttons.firstMatch.tap()
-            let returned = waitForHeroSettle(in: app, after: beforeReturn,
-                                             "round \(round): the tile return never settled")
-            assertHeroResidueClear(returned, "round \(round): after the tile return")
-            attachHeroEvidence(app, name: "s01-grid-tile-returned-round\(round)")
-        }
     }
 
     // MARK: - A card on a pushed profile

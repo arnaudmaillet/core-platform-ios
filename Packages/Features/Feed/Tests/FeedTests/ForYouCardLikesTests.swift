@@ -205,8 +205,7 @@ struct ForYouCardLikesTests {
         let lead = ForYouLeadFixture(pipeline: pipeline(), videoPlayback: nil)
         lead.stack.frame = CGRect(x: 0, y: 0, width: 393, height: 600)
         lead.shelf.staking = PostCardStaking(wallet: wallet)
-        var state = ForYouViewModel.Rails()
-        state.following = [
+        let following = [
             GalleryPost(
                 id: PostID("words"), kind: .text, isRepost: false, thumbnailURL: nil,
                 caption: "Third coffee.", publishedAtMS: 1,
@@ -219,7 +218,7 @@ struct ForYouCardLikesTests {
                 authorID: ProfileID("cy"), authorName: "Cy", authorHandle: "cy", reactionCount: 9
             )
         ]
-        lead.render(state)
+        lead.render(following: following)
         lead.stack.layoutIfNeeded()
         lead.shelf.mediaView.layoutIfNeeded()
         lead.shelf.textView.layoutIfNeeded()

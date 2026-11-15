@@ -32,7 +32,7 @@ struct LaunchArgumentReadGuardTests {
         "Core/MediaPlayback": 15,
         "Core/PostGrid": 12,
         "Features/Chat": 13,
-        "Features/Feed": 202,
+        "Features/Feed": 166,
         "Features/Maps": 74,
         "Features/Profile": 39,
         "Features/Search": 16,

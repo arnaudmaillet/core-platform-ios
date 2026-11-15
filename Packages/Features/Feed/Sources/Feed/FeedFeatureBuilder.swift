@@ -226,34 +226,6 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         )
     }
 
-    /// (#1681): the timeline feed's construction over the
-    /// Discover list (For You's "For you", every author, ranked and paged),
-    /// laid out as the For You root (`SnapFeedViewController.isForYouRoot`).
-    public func makeForYouFullScreenFeedViewController() -> UIViewController {
-        let feed = makeSnapFeed(
-            viewModel: FeedViewModel(
-                // Media posts only (#1699): a text-only post is filtered out
-                // of every page the Discover list serves.
-                repository: MediaOnlyFeedProvider(base: discovery ?? repository),
-                // The launch screen opens on the device's first page, and the
-                // post playing is never swapped when the network answers
-                // (#1765).
-                cacheRevalidation: .keepShown,
-                engagementProvider: engagementProvider,
-                commentsProvider: commentsProvider,
-                realtime: realtime,
-                // No composed posts at the top: the viewer's own TEXT post
-                // would land in a media-only feed (#1699).
-                composedPosts: nil,
-                router: router,
-                entities: entities,
-                unavailablePosts: unavailablePosts
-            )
-        )
-        (feed as? SnapFeedViewController)?.isForYouRoot = true
-        return feed
-    }
-
     public func warmLaunchScreen() {
         guard let discovery else { return }
         let pipeline = imagePipeline
@@ -442,86 +414,6 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     private let discovery: (any FeedProviding)?
     private let shareTargeting: (any ShareTargeting)?
     private let localCache: FeedLocalCache?
-
-    public func makeForYouSectorViewController(
-        onTabPresentationChange: ((ForYouTabPresentation) -> Void)?
-    ) -> UIViewController {
-        guard let home = makeForYouViewController(onTabPresentationChange: onTabPresentationChange) as? any ForYouSectorPage,
-              let feed = makeForYouFullScreenFeedViewController() as? any ForYouSectorPage else {
-            return makeForYouFullScreenFeedViewController()
-        }
-        return ForYouSectorViewController(feed: home, shots: feed)
-    }
-
-    public func makeForYouViewController(
-        onTabPresentationChange: ((ForYouTabPresentation) -> Void)?
-    ) -> UIViewController {
-        let repository = repository
-        let forYou = ForYouViewController(
-            viewModel: ForYouViewModel(
-                // Two corpora: the following timeline makes the rows (a guest
-                // has none, and they stay empty); Discover reads its own pool.
-                repository: ForYouRepository(
-                    feed: repository, counterClient: counterClient, discovery: discovery, localCache: localCache
-                ),
-                // The rows split the people the viewer follows into FRIENDS
-                // (mutual) and the rest: asked of the graph as pages land, and
-                // kept live by the app's follow channel. Discover (everyone)
-                // reads neither.
-                followRelations: followRelations,
-                followEvents: followEvents,
-                // A post deleted anywhere (the author's profile) leaves the
-                // grid and the rows (#896).
-                entities: entities,
-                // And one the server withholds, learnt on a feed (#2048).
-                unavailablePosts: unavailablePosts
-            ),
-            imagePipeline: imagePipeline,
-            // Deliberately the SAME pool the snap feed uses. The grid parks a
-            // tile's running player for the feed to adopt, and a park in one
-            // pool is invisible to another — two pools would silently restart
-            // every video at 0:00 on tap.
-            videoPlayback: videoPlayback,
-            // The same seeded surface a Maps pin opens, from a tile instead.
-            makeSnapFeed: { postIDs, continuation in
-                makeSnapFeedViewController(postIDs: postIDs, ownsInteractiveDismissal: true, continuation: continuation)
-            },
-            // Discover's pushed mosaic opens its tiles through the shared
-            // flight, the one the place page and the search results use —
-            // see `DiscoverGalleryViewController`.
-            openPostHero: { presenter, origin, ids in
-                presentSnapFeedHero(postIDs: ids, from: presenter, origin: origin)
-            },
-            prewarm: { ids in await repository.prewarm(ids) },
-            // A post's first comments are warmed while its tile is on screen,
-            // so the flight carries them (#2002) — see `prewarmVisible`.
-            postOpenWarm: postOpenWarm,
-            // …and read back by a text card's long press (#1498).
-            cachedTopComments: { [commentsProvider] id in
-                commentsProvider?.cachedTopComments(for: id)
-            },
-            // For the `+` item, which routes to the composer rather than
-            // building one.
-            router: router,
-            // For a row's "...". Both are optional and both gate their own menu
-            // row, so a composition root that supplies neither gets a grid with
-            // no overflow control rather than one that offers dead actions.
-            reporting: reporting,
-            socialGraph: socialGraph,
-            moderation: moderation,
-            // The cards' like chips stake from the SAME wallet the badge and
-            // the feed's rail spend from — one instance app-wide.
-            wallet: wallet,
-            // The sheet the balance opens on every screen For You pushes —
-            // the shell's, the same one the root header's badge presents.
-            makeWalletSheet: makeWalletSheet,
-            showsBalance: showsBalance,
-            entities: entities,
-            authorMarks: authorMarks
-        )
-        forYou.onTabPresentationChange = onTabPresentationChange
-        return forYou
-    }
 
     /// Whether `presenter` may open a post now: its stack is at rest and it
     /// is (inside) the screen on top. What For You and the post list check

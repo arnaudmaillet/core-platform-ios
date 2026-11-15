@@ -7,7 +7,7 @@
 #
 # Usage:
 #   Scripts/hero-qa/run.sh --all              # every case in cases.d/
-#   Scripts/hero-qa/run.sh tapback-cycles     # one case by name
+#   Scripts/hero-qa/run.sh pin-flight         # one case by name
 #   Scripts/hero-qa/run.sh --list
 #
 # Each case is a small zsh file in cases.d/ defining:

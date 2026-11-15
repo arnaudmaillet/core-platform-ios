@@ -53,80 +53,7 @@ struct SnapFeedRepointTests {
         #expect(collection?.contentOffset == .zero)
     }
 
-    // MARK: - The cache's lifetime
-
-    /// Two taps, one feed. This is the whole point of the cache, and the
-    /// cheapest thing to regress by accident.
-    @Test func aSecondOpenReusesTheCachedFeed() {
-        let (grid, counter) = Self.grid()
-        let first = grid.snapFeed(for: [PostID("a")])
-        let second = grid.snapFeed(for: [PostID("b")])
-
-        #expect(first === second)
-        #expect(counter.built == 1)
-    }
-
-    /// The cache outlives the grid going away — being pushed over AND the tab
-    /// switching away. A cached feed holds no players (the feed released them
-    /// on its own disappearance), and holding its view hierarchy measured
-    /// inside the noise, so there is nothing to reclaim by dropping it.
-    @Test func theCachedFeedSurvivesTheGridDisappearing() {
-        let (grid, counter) = Self.grid()
-        let nav = UINavigationController(rootViewController: grid)
-        let feed = grid.snapFeed(for: [PostID("a")])
-        nav.pushViewController(feed, animated: false)
-
-        // Pushed over…
-        grid.viewDidDisappear(false)
-        nav.popToRootViewController(animated: false)
-        // …and the tab switching away, with the grid topmost.
-        grid.viewDidDisappear(false)
-
-        #expect(grid.snapFeed(for: [PostID("b")]) === feed)
-        #expect(counter.built == 1)
-    }
-
-    /// Pressure is the one signal that means "give something back", and the
-    /// only thing that drops the cache.
-    @Test func aMemoryWarningReleasesTheCachedFeed() {
-        let (grid, counter) = Self.grid()
-        let first = grid.snapFeed(for: [PostID("a")])
-
-        grid.didReceiveMemoryWarning()
-
-        let second = grid.snapFeed(for: [PostID("b")])
-        #expect(first !== second)
-        #expect(counter.built == 2)
-    }
-
-    /// …but never one that is still on screen: dropping the reference while
-    /// the feed is pushed would release the controller the viewer is looking
-    /// at.
-    @Test func aMemoryWarningSparesAFeedThatIsStillOnScreen() {
-        let (grid, counter) = Self.grid()
-        let nav = UINavigationController(rootViewController: grid)
-        let feed = grid.snapFeed(for: [PostID("a")])
-        nav.pushViewController(feed, animated: false)
-
-        grid.didReceiveMemoryWarning()
-        nav.popToRootViewController(animated: false)
-
-        #expect(grid.snapFeed(for: [PostID("b")]) === feed)
-        #expect(counter.built == 1)
-    }
-
     // MARK: - Helpers
-
-    private static func grid() -> (ForYouViewController, FeedBuildCounter) {
-        let counter = FeedBuildCounter()
-        let grid = ForYouViewController(
-            viewModel: ForYouViewModel(repository: StubForYouProvider()),
-            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
-            makeSnapFeed: { _, _ in counter.make() },
-            prewarm: { _ in }
-        )
-        return (grid, counter)
-    }
 
     fileprivate static func detachedFeed() -> SnapFeedViewController {
         SnapFeedViewController(
@@ -137,29 +64,6 @@ struct SnapFeedRepointTests {
 
     private static func collectionView(in feed: SnapFeedViewController) -> UICollectionView? {
         feed.view.subviews.compactMap { $0 as? UICollectionView }.first
-    }
-}
-
-/// Counts how many feeds were actually CONSTRUCTED — the thing the cache
-/// exists to keep down. The factory closure is the only honest place to count
-/// it; identity alone would also pass for a cache that rebuilt and happened to
-/// be handed back the same address.
-@MainActor
-private final class FeedBuildCounter {
-    private(set) var built = 0
-
-    func make() -> UIViewController {
-        built += 1
-        return SnapFeedRepointTests.detachedFeed()
-    }
-}
-
-private final class StubForYouProvider: ForYouProviding, @unchecked Sendable {
-    func firstPage() async throws -> ForYouPage {
-        ForYouPage(posts: [], nextPageToken: nil)
-    }
-    func page(after token: String) async throws -> ForYouPage {
-        ForYouPage(posts: [], nextPageToken: nil)
     }
 }
 

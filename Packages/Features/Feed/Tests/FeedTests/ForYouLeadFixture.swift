@@ -2,16 +2,15 @@ import CoreModels
 import Foundation
 import MediaCore
 import MediaPlayback
+import PostGrid
 import UIKit
 @testable import Feed
 
-/// For You's lead as `ForYouViewController` assembles it (#1271): the
-/// Friends row and the Following shelf, stacked over "For you" — the real
-/// three views, rendered from the view model's rows the way the screen does
-/// (`ForYouViewController.renderLead`).
+/// A shelf leading a grid, as the place page and a post set assemble it
+/// (#1271): the Following shelf stacked over a titled list — the real views.
+/// The Friends row that led it on For You went with the tab (#2453).
 @MainActor
 final class ForYouLeadFixture {
-    let friends: FriendsStoriesRow
     let shelf: PostShelfSection
     let stack: GridLeadStack
 
@@ -20,24 +19,22 @@ final class ForYouLeadFixture {
         videoPlayback: VideoPlaybackController? = nil,
         width: CGFloat = 393
     ) {
-        friends = FriendsStoriesRow(imagePipeline: pipeline)
         shelf = PostShelfSection(imagePipeline: pipeline, videoPlayback: videoPlayback)
-        stack = GridLeadStack(sections: [friends, shelf])
+        stack = GridLeadStack(sections: [shelf])
         shelf.title = "Following"
         stack.listTitle = "For you"
         stack.frame = CGRect(x: 0, y: 0, width: width, height: 600)
     }
 
-    func render(_ rows: ForYouViewModel.Rails) {
-        friends.render(rows.friends, newCount: rows.friendsBadge)
-        shelf.setCount(new: rows.followingBadge)
-        shelf.render(rows.following)
+    /// The shelf's cards and the count on its header.
+    func render(following: [GalleryPost], newCount: Int = 0) {
+        shelf.setCount(new: newCount)
+        shelf.render(following)
         stack.setNeedsLayout()
     }
 
-    /// Puts back everything a flight hid, in both rows.
+    /// Puts back everything a flight hid.
     func clearConcealments() {
-        friends.clearConcealments()
         shelf.clearConcealments()
     }
 
@@ -47,11 +44,10 @@ final class ForYouLeadFixture {
         stack.layoutIfNeeded()
     }
 
-    /// The lead's height for `friends` faces and `following` cards (of
-    /// which `textCards` are text) at `width`.
-    static func height(forWidth width: CGFloat, friends: Int, following: Int, textCards: Int = 0) -> CGFloat {
+    /// The lead's height for `following` cards (of which `textCards` are
+    /// text) at `width`.
+    static func height(forWidth width: CGFloat, following: Int, textCards: Int = 0) -> CGFloat {
         GridLeadStack.height(sections: [
-            FriendsStoriesRow.height(forWidth: width, friends: friends),
             PostShelfSection.height(forWidth: width, media: following - textCards, text: textCards),
         ])
     }

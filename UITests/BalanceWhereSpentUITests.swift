@@ -1,8 +1,8 @@
 import XCTest
 
 /// The likes balance stands where likes are spent or earned, and leaves the
-/// screens where it never moves (#2336, the owner 2026-11-12): For You and
-/// the own profile keep it; Messages (no heart, no spend, no claim) and the
+/// screens where it never moves (#2336, the owner 2026-11-12): the own
+/// profile keeps it; Messages (no heart, no spend, no claim) and the
 /// map (a tap opens the post, which wears it) lose it.
 ///
 /// ⚠️ **THE TAB COORDINATORS LIVE IN THE APP TARGET**, which has no unit-test
@@ -12,16 +12,12 @@ final class BalanceWhereSpentUITests: XCTestCase {
 
     override func setUp() { continueAfterFailure = false }
 
-    func testTheBalanceStaysOnForYouAndProfileAndLeavesMessagesAndTheMap() {
+    func testTheBalanceStaysOnTheProfileAndLeavesMessagesAndTheMap() {
         let app = XCUIApplication()
         app.launchArguments = ["-mock-auto-login"]
         app.launch()
         let bar = app.tabBars.firstMatch
         XCTAssertTrue(bar.waitForExistence(timeout: 25), "no tab bar")
-
-        // For You, the launch tab: where likes are spent the most.
-        bar.buttons["For You"].firstMatch.tap()
-        XCTAssertTrue(balance(in: app).waitForExistence(timeout: 25), "For You lost its balance")
 
         // Messages: `[bell] …` over the stacked search, no balance.
         bar.buttons["Messages"].firstMatch.tap()

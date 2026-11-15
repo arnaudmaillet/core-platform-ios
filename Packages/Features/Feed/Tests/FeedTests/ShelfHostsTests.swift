@@ -96,58 +96,6 @@ struct ShelfHostsTests {
         #expect(store.count(screen: "place.Paris", section: "popular") == 3)
     }
 
-    /// A presence store that remembers `following` posts and `friends` faces
-    /// from last time (nil: never loaded).
-    private static func presence(following: Int?, friends: Int? = nil) -> SectionPresenceStore {
-        let store = SectionPresenceStore(
-            defaults: UserDefaults(suiteName: UUID().uuidString)!,
-            scope: StorageScope(owner: .member(account: "a", profile: "p"))
-        )
-        if let following { store.remember(following, screen: "foryou", section: "following") }
-        if let friends { store.remember(friends, screen: "foryou", section: "friends") }
-        return store
-    }
-
-    private static func forYou(presence: SectionPresenceStore) -> ForYouViewController {
-        ForYouViewController(
-            viewModel: ForYouViewModel(repository: EmptyForYouProvider()),
-            imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
-            makeSnapFeed: { _, _ in UIViewController() },
-            prewarm: { _ in },
-            presence: presence
-        )
-    }
-
-    /// ⚠️ #1757: the shelf's skeleton only when the shelf was there last
-    /// time — never one that collapses because the shelf turned out empty.
-    @Test func forYousFollowingSkeletonFollowsLastKnownPresence() {
-        let seen = Self.forYou(presence: Self.presence(following: 7, friends: 4))
-        seen.loadViewIfNeeded()
-        #expect(seen.debugShelf.isLoading, "a shelf there last time has its skeleton")
-        #expect(seen.friendsRow.placeholderCount == 4)
-
-        let empty = Self.forYou(presence: Self.presence(following: 0, friends: 0))
-        empty.loadViewIfNeeded()
-        #expect(!empty.debugShelf.isLoading, "an empty shelf last time has no skeleton")
-        #expect(empty.friendsRow.placeholderCount == 0)
-
-        let unknown = Self.forYou(presence: Self.presence(following: nil))
-        unknown.loadViewIfNeeded()
-        #expect(!unknown.debugShelf.isLoading, "a shelf never seen fades in rather than shimmer")
-    }
-
-    @Test func forYousFollowingLoadsThenDrawsTenAndTheChevron() {
-        let screen = Self.forYou(presence: Self.presence(following: 10))
-        screen.loadViewIfNeeded()
-        let shelf = screen.debugShelf
-        #expect(shelf.isLoading, "no skeleton before the first snapshot")
-        #expect(shelf.title == "Following")
-        var rows = ForYouViewModel.Rails()
-        rows.following = Self.posts(14, prefix: "f")
-        shelf.apply(.init(title: "Following", posts: rows.following))
-        Self.expectLanded(shelf, of: 14)
-    }
-
     @Test func thePlacePagesPopularLoadsThenDrawsTenAndTheChevron() async {
         let place = Self.place(Self.posts(14, prefix: "p"))
         place.loadViewIfNeeded()
@@ -185,21 +133,6 @@ struct ShelfHostsTests {
         Self.expectLandedWhole(place.debugShelf, of: 3)
         #expect(!PlaceProfileViewController.popularShelf(Self.posts(10, prefix: "p")).hasMore)
         #expect(PlaceProfileViewController.popularShelf(Self.posts(11, prefix: "p")).hasMore)
-    }
-
-    /// For You's Following rows: cut at their limit, or with a page still to
-    /// load, they end on the chevron; showing the whole list, they do not.
-    @Test func forYousFollowingEndsOnTheChevronOnlyWithMore() {
-        let few = ForYouViewModel.rails(
-            following: Self.posts(3, prefix: "f"), followingNew: [], friends: [], friendsUnseen: [],
-            limit: 20, rowLimit: 10
-        )
-        #expect(!few.followingHasMore)
-        let many = ForYouViewModel.rails(
-            following: Self.posts(14, prefix: "f"), followingNew: [], friends: [], friendsUnseen: [],
-            limit: 20, rowLimit: 10
-        )
-        #expect(many.followingHasMore)
     }
 
     /// The hashtag's lead row: a few posts and nothing past them draw no

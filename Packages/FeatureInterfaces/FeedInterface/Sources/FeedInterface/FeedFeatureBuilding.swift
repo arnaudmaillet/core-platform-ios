@@ -3,24 +3,6 @@ import CoreNavigation
 import PostGrid
 import UIKit
 
-/// How the For You tab should present ITSELF in the app's tab bar: how much
-/// is waiting on the screen's two rows. Zero means nothing new.
-///
-/// It used to carry the active content lens's title and glyph as well; the
-/// lenses are gone (#1423, the owner 2026-10-19), and the tab reads "For You"
-/// whatever happens.
-///
-/// Carried as plain data across the interface boundary, so the shell can
-/// dress its `UITab` without importing Feed.
-public struct ForYouTabPresentation: Equatable, Sendable {
-    /// How much is waiting. Zero means no badge.
-    public let badgeCount: Int
-
-    public init(badgeCount: Int) {
-        self.badgeCount = badgeCount
-    }
-}
-
 /// Entry point contract for the Feed feature. Other modules (the app shell,
 /// or features that embed feed surfaces) depend on this interface package —
 /// never on the Feed implementation — so editing Feed internals recompiles
@@ -37,39 +19,6 @@ public struct ForYouTabPresentation: Equatable, Sendable {
 @MainActor
 public protocol FeedFeatureBuilding: ConversationThreadScreenBuilding, TextPostScreenBuilding {
     func makeFeedViewController() -> UIViewController
-    /// The For You tab's root: a Discover mosaic and a Following timeline under
-    /// one content lens, where tapping a tile opens the full-screen feed seeded
-    /// from that page's ordered posts.
-    ///
-    /// It lives behind the *feed* builder rather than a feature of its own
-    /// because the destination it opens (`makeSnapFeedViewController`) and the
-    /// read path it shares are both here — one repository, one post cache, so
-    /// a tapped tile is already warm in the feed it expands into.
-    ///
-    /// `onTabPresentationChange` reports how the shell's own bar item should
-    /// read — see `ForYouTabPresentation`. It fires on the first load and on
-    /// every publish after it, including while the tab is off screen, which is
-    /// the case the bar item exists for.
-    func makeForYouViewController(
-        onTabPresentationChange: ((ForYouTabPresentation) -> Void)?
-    ) -> UIViewController
-    /// The For You tab's Shots page (#1681, #1705): the full-screen post feed
-    /// over the Discover list — the author inside the page, save and repost
-    /// upright in the action column, no toolbar, the tab bar at the bottom.
-    func makeForYouFullScreenFeedViewController() -> UIViewController
-    /// Starts warming Shots' first post — the launch screen (#1765) — from the
-    /// device's copy of its first page: its picture decoded into memory while
-    /// the shell builds, so the page draws it in its first frame. Fire and
-    /// forget; nothing when the device holds no page yet.
-    func warmLaunchScreen()
-    /// The For You tab (#1703, #1705): the Feed | Shots sector — Feed the
-    /// discovery list (`makeForYouViewController`), Shots the full-screen
-    /// posts (`makeForYouFullScreenFeedViewController`) — switched by the
-    /// selector beside the bell or a swipe. Opens on Shots. It hosts the
-    /// shell's bell and points badge (`HeaderAccessoryHosting`).
-    func makeForYouSectorViewController(
-        onTabPresentationChange: ((ForYouTabPresentation) -> Void)?
-    ) -> UIViewController
     /// ONE POST SCREEN (#1577, the owner 2026-10-22): the vertical full-screen
     /// feed on `postID`, its comments up when `opensComments` — what the
     /// `.post` and `.comments` routes push (a tapped push notification,
@@ -543,11 +492,6 @@ public struct ClusterGalleryFollowing {
 }
 
 extension FeedFeatureBuilding {
-    /// The ordinary case: a For You tab nobody is listening to.
-    public func makeForYouViewController() -> UIViewController {
-        makeForYouViewController(onTabPresentationChange: nil)
-    }
-
     /// The overwhelmingly common case: a feed about to be flown to, or handed
     /// a slide of its own. Every existing call site means this, so it stays the
     /// unqualified spelling and only the plain-push caller has to say otherwise.
@@ -635,20 +579,4 @@ public enum SettledDeparture {
         guard let departure else { return false }
         return departure != arrival || (mediaPage ?? 0) > 0
     }
-}
-
-/// The For You sector as the shell sees it (#1703) — which page is in front,
-/// so the tab bar wears Shots' dark style over Shots only.
-@MainActor
-public protocol ForYouSectorPaging: AnyObject {
-    /// Whether Shots (the full-screen posts) is the page in front.
-    var isShowingShots: Bool { get }
-    /// The page in front changed.
-    var onPageChange: (() -> Void)? { get set }
-    /// The shell slid the sector aside (the notifications drawer): its media
-    /// pauses until it comes back.
-    func setSetAside(_ setAside: Bool)
-    /// The share of the sector still on screen as the shell slides it aside,
-    /// 0…1 (#1914): its clip fades with it and pauses at half.
-    func setVisibleShare(_ share: CGFloat)
 }
