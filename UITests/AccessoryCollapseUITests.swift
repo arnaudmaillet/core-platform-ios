@@ -23,8 +23,7 @@ final class AccessoryCollapseUITests: XCTestCase {
     /// The tabs whose root screen hosts its selector in the accessory.
     /// Indices into `AppTab.allCases` — `-select-tab` takes an INDEX, and a
     /// name is a silent no-op that lands on Explore and fakes a missing
-    /// selector. For You has no band since 2026-09-29, and its bar never
-    /// collapses (#758).
+    /// selector.
     ///
     /// ⚠️ NOT PROFILE (#1154). Its root puts a band up only with two
     /// sources holding something (#742, Posts included since #1422), and the
@@ -34,12 +33,12 @@ final class AccessoryCollapseUITests: XCTestCase {
     ///
     /// ⚠️ NOR MESSAGES ANY MORE (#2337, the owner 2026-11-12): its Chats /
     /// Requests / Suggestions selector moved into the navigation bar, right
-    /// of the bell, as on For You — `testMessagesPutsUpNoBand` pins that the
+    /// of the bell — `testMessagesPutsUpNoBand` pins that the
     /// foot is the tab bar alone. Empty until the profile leg comes back.
     private static let accessorySurfaces: [(name: String, tab: Int)] = []
 
     /// The Messages tab, by index into `AppTab.allCases`.
-    private static let messagesTab = 2
+    private static let messagesTab = 1
 
     /// **Messages has no band (#2337).** Its selector is in the navigation
     /// bar, so the probe reads `no-accessory` on the inbox — at rest and after

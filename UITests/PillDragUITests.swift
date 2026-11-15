@@ -22,8 +22,8 @@ final class PillDragUITests: XCTestCase {
     /// one page (2026-09-29) and lost its selector — which is what these tests
     /// then reported as "no selector" (#1154). Indices into `AppTab`.
     /// ⚠️ `-select-tab` takes an INDEX; a name is a silent no-op that lands on
-    /// Explore and fakes a missing selector.
-    private static let selectorTab = "2"
+    /// the map (Explore) and fakes a missing selector.
+    private static let selectorTab = "1"  // Messages since #2453 (was 2)
 
     func testTheFingerOnThePillPagesAndTheFingerBesideItDoesNot() {
         let app = XCUIApplication()

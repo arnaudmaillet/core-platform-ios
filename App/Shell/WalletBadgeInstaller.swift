@@ -9,8 +9,8 @@ import UIKit
 ///
 /// The balance stands where likes are spent or earned (#2336, the owner
 /// 2026-11-12) — and leaves the screens where it never moves. This installer's
-/// hosts: the For You root (`ForYouTabCoordinator`), the own profile's root
-/// (`ProfileTabCoordinator`), and a pushed profile or post screen
+/// hosts: the own profile's root (`ProfileTabCoordinator`; the For You root
+/// too until #2453), and a pushed profile or post screen
 /// (`AppContainer`'s `attachBalance` → `attach(to:…)`). The snap feed, the text
 /// page, the comments sheet, a place's page and the search results build their
 /// own badge with the same identifier. NOT Messages (no heart, no spend, no
@@ -43,7 +43,7 @@ final class WalletBadgeInstaller: NSObject {
 
     // A MEMBER'S ONLY (#1146, the owner 2026-10-14): a guest has no badge
     // anywhere, so no host builds one for a guest — the hosts ask
-    // (`ForYouTabCoordinator.start`, `ProfileTabCoordinator`,
+    // (`ProfileTabCoordinator`,
     // `AppContainer`'s `attachBalance`).
     private let wallet: WalletStore
     private let badge = WalletBadgeButton()

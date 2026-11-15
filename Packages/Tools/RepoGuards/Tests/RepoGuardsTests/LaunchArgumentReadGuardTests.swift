@@ -24,7 +24,7 @@ struct LaunchArgumentReadGuardTests {
     /// HeroPage, ShareSheet, VoiceKit, Auth and Notifications declare
     /// theirs (#2374, 2).
     static let budget: [String: Int] = [
-        "App": 84,
+        "App": 83,
         "Core/CoreNavigation": 48,
         "Core/CoreNetworking": 25,
         "Core/DebugTools": 22,

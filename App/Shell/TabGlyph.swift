@@ -74,7 +74,6 @@ extension TabGlyph {
     var unreadAccessibilityValue: String? {
         switch self {
         case .explore: nil
-        case .forYou: "New posts"
         case .messages: "New messages"
         }
     }

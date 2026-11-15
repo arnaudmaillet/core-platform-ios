@@ -21,7 +21,7 @@ import Upload
 /// Tabs are set via the modern `UITabBarController.tabs` API. The trailing item
 /// is the "+" (`CreateTabItem`), a `UISearchTab`, which the system detaches to
 /// the trailing edge, producing the grouped bar
-/// `| Explore  For You  Messages  Profile |  + |` natively. It opens a menu and
+/// `| Explore  Messages  Profile |  + |` natively (For You left it, #2453). It opens a menu and
 /// is never selected.
 ///
 /// Profile is a root tab, carrying the viewer's own avatar as its icon
@@ -32,22 +32,15 @@ import Upload
 /// wallet and search. Its "+" left with #152 — making a post starts from the
 /// bar's "+" (`CreateTabItem`).
 ///
-/// **Every bar button is now a tab.** Slot 1 used to be a vetoed Feed action
-/// that pushed the timeline onto whatever tab you were on; it is now the For You
-/// discovery grid (`ForYouTabCoordinator`), an ordinary root. The timeline did
-/// not go away — a tile tap on that grid opens it seeded from the grid's own
-/// order, and `AppRoute.feed` still pushes the open-ended one through
-/// `FeedFlowCoordinator`. That coordinator is therefore still built and held
-/// here even though nothing in the bar reaches it.
+/// **Every bar button is a tab.** For You (slot 1 from 2026-10, Feed and
+/// Shots) left the bar on 2026-11-15 (#2453): the app is the map's first.
+/// `AppRoute.feed` still pushes the open-ended timeline through
+/// `FeedFlowCoordinator`, which is therefore still built and held here even
+/// though nothing in the bar reaches it.
 @MainActor
 final class MainTabCoordinator: NSObject, Coordinator {
     var childCoordinators: [Coordinator] = []
     let tabBarController = ShellTabBarController()
-    /// The window's appearance is watched once the dark tab bar first shows (#1697, `applyTabBarStyle`).
-    fileprivate var isObservingWindowStyle = false
-    /// The style `applyTabBarStyle` gave the bars: `.dark` over Shots,
-    /// `.unspecified` (the app's) everywhere else.
-    fileprivate var barStyle: UIUserInterfaceStyle = .unspecified
 
     /// Internal (not private) only for the +QA hooks.
     let container: AppContainer
@@ -69,13 +62,8 @@ final class MainTabCoordinator: NSObject, Coordinator {
             // edge swipe is gated on its own (`NotificationsDrawer`).
             self?.notificationsDrawer.open()
         }
-        // Baked for the shell's traits — the app's appearance, not iOS's
+        // Baked for the WINDOW's traits — the app's appearance, not iOS's
         // (#1501).
-        // The WINDOW's traits — the app's appearance — not the tab bar
-        // controller's, which the dark tab bar overrides over Shots (#1697):
-        // the bell lives in the pages' bars, which keep the app's look.
-        // …unless the bar the bell stands in is Shots' dark one (#1703: it
-        // stayed black over that dark header).
         bell.traits = { [weak self] in self?.barTraits ?? .current }
         return bell
     }()
@@ -88,8 +76,6 @@ final class MainTabCoordinator: NSObject, Coordinator {
             tabBarController: tabBarController,
             list: container.notificationsFeature.makeNotificationsViewController()
         )
-        drawer.onSetAsideChange = { [weak self] setAside in self?.forYouTab?.setSetAside(setAside) }
-        drawer.onMainShareChange = { [weak self] share in self?.forYouTab?.setVisibleShare(share) }
         return drawer
     }()
     /// What the window shows: the drawer container, holding the tab bar
@@ -169,9 +155,6 @@ final class MainTabCoordinator: NSObject, Coordinator {
             switcherTracking = nil
         }
     }
-    /// The For You root, rebuilt on a change of viewer.
-    private var forYouTab: ForYouTabCoordinator?
-
     /// The bar's detached "+": a menu of ways to make a post, never a tab
     /// anyone stands on. See `CreateTabItem`.
     ///
@@ -194,8 +177,7 @@ final class MainTabCoordinator: NSObject, Coordinator {
     }
 
     /// Tabs paired with their `AppTab`, in bar order — the lookup `selectTab`
-    /// resolves against. Every bar button is in here now that the Feed action
-    /// slot has become the For You root.
+    /// resolves against. Every bar button but the "+" is in here.
     private var orderedTabs: [(AppTab, any TabCoordinator)] = []
     /// One per tab stack: keeps the native edge-swipe pop working under the
     /// feed's custom transition delegates (see `NativePopGestureEnabler`).
@@ -213,8 +195,7 @@ final class MainTabCoordinator: NSObject, Coordinator {
     }
 
     /// A sign-in or a sign-out, in the same shell. The tabs that need an
-    /// account swap their whole stack; For You is rebuilt because its rows are
-    /// the viewer's own graph; every other stack stays where it is, so a guest
+    /// account swap their whole stack; every other stack stays where it is, so a guest
     /// who signs in from a pushed screen is still on that screen.
     func viewerDidChange(isMember: Bool) {
         guard isMember != self.isMember else { return }
@@ -229,7 +210,6 @@ final class MainTabCoordinator: NSObject, Coordinator {
         messagesTab?.show(member: isMember)
         // The bar itself changes shape with the viewer (#626), in place.
         applyBar(animated: true)
-        forYouTab?.start()
         for (_, tab) in orderedTabs {
             (tab as? ExploreTabCoordinator)?.viewerDidChange()
         }
@@ -301,23 +281,19 @@ final class MainTabCoordinator: NSObject, Coordinator {
             container: container, notificationsBell: notificationsBell, onLogout: onLogout, onSignIn: onSignIn
         )
         self.profileTab = profileTab
-        let forYouTab = ForYouTabCoordinator(container: container, notificationsBell: notificationsBell)
-        self.forYouTab = forYouTab
-        forYouTab.onTabBarStyleChange = { [weak self] in self?.applyTabBarStyle() }
         let messagesTab = MessagesTabCoordinator(
             container: container, notificationsBell: notificationsBell, onSignIn: onSignIn
         )
         self.messagesTab = messagesTab
-        // Bar order: the four places, then the "+". The "+" is not a place, so
+        // Bar order: the three places, then the "+". The "+" is not a place, so
         // it is not in `orderedTabs` and nothing can route to it. UIKit
-        // separates it from the other four because it is a `UISearchTab` — see
+        // separates it from the other three because it is a `UISearchTab` — see
         // `CreateTabItem` for why the type, not `.pinned`, is what detaches it.
         orderedTabs = [
             (.explore, ExploreTabCoordinator(
                 container: container,
                 notificationsButtonItem: notificationsBell.makeItem()
             )),
-            (.forYou, forYouTab),
             (.messages, messagesTab),
             (.profile, profileTab)
         ]
@@ -337,13 +313,10 @@ final class MainTabCoordinator: NSObject, Coordinator {
         // (#1002) — see `BottomEdgeBlurView`.
         for (_, tab) in orderedTabs { BottomEdgeBlurView.install(in: tab.navigationController) }
         applyBar(animated: false)
-        // ⚠️ THE APP OPENS ON FOR YOU → SHOTS (the owner, 2026-10-27, #1765):
-        // its first post is the launch screen, as TikTok's first video is. The
-        // bar's order stays (Explore first); only the selection moves.
+        // ⚠️ THE APP OPENS ON THE MAP (#2453, the owner 2026-11-15): For You
+        // and its Shots left the bar, so the first tab, Explore, is the
+        // launch's — it opened on Shots from #1765 until then.
         // `-select-tab N` still overrides it, later in the launch.
-        if let forYou = orderedTabs.first(where: { $0.0 == .forYou })?.1.tab {
-            tabBarController.selectedTab = forYou
-        }
         LaunchTimeline.mark("shell")
         tabBarController.delegate = self
         // The stake menu's way to the cartridge pack, from any screen.
@@ -389,8 +362,7 @@ final class MainTabCoordinator: NSObject, Coordinator {
             _ = tabBarController.perform(setter, with: createItem.tab.identifier)
         }
         #endif
-        // The bar's menus: Profile's long-press switcher, For You's lens menu
-        // and the "+". `UITab` carries no menu of its own — `UITab`, `UITabBar`,
+        // The bar's menus: Profile's long-press switcher and the "+". `UITab` carries no menu of its own — `UITab`, `UITabBar`,
         // `UITabBarItem` and the controller delegate were all checked against
         // the iOS 26 SDK and expose nothing — so each menu rides an invisible
         // button kept aligned over its item.
@@ -409,8 +381,6 @@ final class MainTabCoordinator: NSObject, Coordinator {
         // On screen, the bar's buttons exist: redraw them once (#694).
         tabBarController.onAppear = { [weak self] in
             DispatchQueue.main.async { self?.refreshTabLabelsIfNeeded() }
-            // The window exists now: the pages take its appearance (#1697).
-            self?.applyTabBarStyle()
         }
 
         loadAvatar()
@@ -430,7 +400,7 @@ final class MainTabCoordinator: NSObject, Coordinator {
         // ⚠️ A SWITCH IS ANOTHER VIEWER (#892). A sign-out rebuilds what holds
         // the viewer's own graph (`viewerDidChange(isMember:)`); a switch
         // between two profiles of one account never reaches that, so the
-        // inbox, For You's rows, the map's people and the bell stayed the
+        // inbox, the map's people and the bell stayed the
         // previous profile's. The same rebuilds, minus the bar: the viewer is
         // still a member.
         if isMember {
@@ -439,7 +409,6 @@ final class MainTabCoordinator: NSObject, Coordinator {
             // A fresh inbox stack (its search and suggestions too), primed for
             // the new profile.
             messagesTab?.show(member: true)
-            forYouTab?.start()
             for (_, tab) in orderedTabs {
                 (tab as? ExploreTabCoordinator)?.viewerDidChange()
             }
@@ -523,25 +492,17 @@ final class MainTabCoordinator: NSObject, Coordinator {
 // MARK: - Tab selection
 
 extension MainTabCoordinator: UITabBarControllerDelegate {
-    /// The tab API's selection — a tap on a tab arrives HERE, not through
-    /// `didSelect viewController` (#1697: the dark bar never came on a real
-    /// tap, only through `selectTab`).
-    func tabBarController(_ tabBarController: UITabBarController, didSelectTab selectedTab: UITab, previousTab: UITab?) {
-        applyTabBarStyle()
-    }
-
     func tabBarController(_ tabBarController: UITabBarController, didSelect viewController: UIViewController) {
         refreshUnreadBadge()
         syncTabBarVisibility()
-        applyTabBarStyle()
         // Selection resizes the tab buttons (the selected one carries the
         // lens), so the overlays have to follow.
         alignMenuOverlays()
     }
 
-    /// The bar for this viewer (#626) — a member's: Explore, For You,
-    /// Messages, Profile and the "+"; a guest's: Explore, For You, Settings and
-    /// a "Sign in" bubble. Nothing in it is a dead end.
+    /// The bar for this viewer (#626) — a member's: Explore, Messages,
+    /// Profile and the "+"; a guest's: Explore, Settings and a "Sign in"
+    /// bubble. Nothing in it is a dead end.
     ///
     /// ⚠️ MESSAGES LEAVES THE BAR, it is not greyed out. A disabled tab stood
     /// in a guest's bar doing nothing on tap (and iOS 27 would not even redraw
@@ -556,60 +517,10 @@ extension MainTabCoordinator: UITabBarControllerDelegate {
     /// A viewer standing on a tab that leaves (a member on Messages who logs
     /// out) lands on Explore — set before the bar changes, so the bar never
     /// holds a selection it no longer has.
-    /// The tab bar dark over the For You tab's Shots — the full-screen posts
-    /// (#1697, #1703) — the app's own over Feed and every other tab — an appearance,
-    /// never an alpha (`native-chrome-uikit-only`).
-    ///
-    /// ⚠️ ON THE TAB BAR CONTROLLER: iOS 26's floating bar takes its traits
-    /// from it and ignores the `tabBar`'s own override (measured: no change).
-    /// Its pages are given the app's appearance back — the window's — so a
-    /// text page, a pushed profile or a sheet the feed presents stays as the
-    /// app draws it.
     /// The traits the bars' baked glyphs are drawn for — the tab icons and
-    /// the badged bell: the window's (the app's appearance), darkened over
-    /// Shots. ⚠️ Not read off `tabBar.traitCollection`: it
-    /// had not taken the controller's dark override when the glyphs were
-    /// baked, and the For You and Messages icons stayed black on the dark
-    /// bar (#1703).
+    /// the badged bell: the window's, the app's appearance (#1501).
     private var barTraits: UITraitCollection {
-        let base = tabBarController.view.window?.traitCollection ?? tabBarController.view.traitCollection
-        guard barStyle != .unspecified else { return base }
-        let style = barStyle
-        return base.modifyingTraits { $0.userInterfaceStyle = style }
-    }
-
-    private func applyTabBarStyle() {
-        let forYou = tabBarController.selectedTab?.identifier == AppTab.forYou.rawValue
-            && forYouTab?.wantsDarkTabBar ?? true
-        // Dark over Shots (#1697, #1703): the bar sits over the media as the
-        // post's own chrome does; the app's own everywhere else.
-        let style: UIUserInterfaceStyle = forYou ? .dark : .unspecified
-        let window = tabBarController.view.window
-        let pages: UIUserInterfaceStyle = style == .unspecified
-            ? .unspecified
-            : (window?.traitCollection.userInterfaceStyle ?? .unspecified)
-        // Through the TABS (`UITab.viewController`): with the tab API,
-        // `viewControllers` does not list them.
-        let tabPages = tabBarController.tabs.compactMap(\.viewController) + (tabBarController.viewControllers ?? [])
-        for page in tabPages where page.overrideUserInterfaceStyle != pages {
-            page.overrideUserInterfaceStyle = pages
-        }
-        if tabBarController.overrideUserInterfaceStyle != style {
-            tabBarController.overrideUserInterfaceStyle = style
-        }
-        if barStyle != style {
-            barStyle = style
-            refreshTabGlyphs()
-            notificationsBell.repaint()
-        }
-        // The app's appearance can change under a dark bar (iOS's switch, the
-        // app's theme): the pages follow the window, not the bar.
-        if style != .unspecified, let window, !isObservingWindowStyle {
-            isObservingWindowStyle = true
-            window.registerForTraitChanges([UITraitUserInterfaceStyle.self]) { [weak self] (_: UIWindow, _) in
-                self?.applyTabBarStyle()
-            }
-        }
+        tabBarController.view.window?.traitCollection ?? tabBarController.view.traitCollection
     }
 
     private func applyBar(animated: Bool) {
@@ -626,7 +537,6 @@ extension MainTabCoordinator: UITabBarControllerDelegate {
            let explore = orderedTabs.first(where: { $0.0 == .explore })?.1.tab {
             tabBarController.selectedTab = explore
         }
-        applyTabBarStyle()
         let current = tabBarController.tabs
         guard current.count != wanted.count || zip(current, wanted).contains(where: { $0 !== $1 }) else { return }
         tabBarController.setTabs(wanted, animated: animated)
@@ -653,8 +563,7 @@ extension MainTabCoordinator: UITabBarControllerDelegate {
         for (_, coordinator) in orderedTabs {
             guard let glyphTab = coordinator as? any GlyphTab else { continue }
             let tab = glyphTab.tab
-            // Baked for the BAR's traits (#1501): the app's appearance, or the
-            // dark Shots gives the bar (#1697).
+            // Baked for the bar's traits (#1501): the app's appearance.
             let traits = barTraits
             let outline = glyphTab.glyph.image(selected: false, badged: glyphTab.hasUnread, traits: traits)
             let fill = glyphTab.glyph.image(selected: true, badged: glyphTab.hasUnread, traits: traits)
@@ -883,7 +792,6 @@ extension MainTabCoordinator: AppNavigating {
             tabBarController.dismiss(presented: covering)
         }
         tabBarController.selectedTab = match.1.tab
-        applyTabBarStyle()
         // Programmatic selection skips `didSelect` — reconcile the bar here.
         syncTabBarVisibility()
     }

@@ -47,19 +47,6 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
     /// The launch screen held over the shell (#1812).
     private var launchCurtain: LaunchCurtain?
 
-    /// Whether the launch opens somewhere other than Shots (#1812): a deep
-    /// link or a tapped notification waiting for the shell, or a QA route —
-    /// the curtain then lifts as soon as the shell is in.
-    private var launchOpensElsewhere: Bool {
-        if pendingDeepLink != nil || container.pushNotifications.hasPending { return true }
-        #if DEBUG
-        let arguments = ProcessInfo.processInfo.arguments
-        if arguments.contains(where: { $0.hasPrefix("-open-") }) { return true }
-        if let index = arguments.firstIndex(where: { $0 == "-switch-tab" || $0 == "-select-tab" }),
-           index + 1 < arguments.count, arguments[index + 1] != "1" { return true }
-        #endif
-        return false
-    }
     /// The sign-in flow a guest opened, presented over the shell; dismissed
     /// when the session lands.
     private weak var presentedSignIn: UIViewController?
@@ -228,10 +215,6 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
             guard let container = self?.container else { return }
             let realtimeClient = container.realtimeClient
             for await state in await container.sessionManager.stateUpdates() {
-                if LaunchTimeline.time(of: "auth.firstState") == nil {
-                    // Shots' first post warms while the shell builds (#1765).
-                    container.feedFeature.warmLaunchScreen()
-                }
                 LaunchTimeline.mark("auth.firstState")
                 self?.render(state)
                 // Realtime lifecycle is driven here, in auth-state order, rather
@@ -631,12 +614,11 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
         // `-snap-comments-demo`'s engagement, for the engaged-outbound-push
         // handoff surface.
         //
-        // ⚠️ `-select-tab 1` NO LONGER PUSHES A FEED. It indexes
-        // `AppTab.allCases` (App/Shell/AppNavigating.swift), where 1 is the
-        // For You TAB — it selects a root and pushes nothing. The default
-        // 3 s used to be pegged to that push; now it is only a delay, and
-        // a feed to land above has to be opened by something else (e.g.
-        // a `-snap-*` / `-maps-open-*` hook), timed with the seconds knob.
+        // ⚠️ `-select-tab N` PUSHES NO FEED. It indexes `AppTab.allCases`
+        // (0 Explore, 1 Messages, 2 Profile since #2453) and selects a root.
+        // The default 3 s is only a delay; a feed to land above has to be
+        // opened by something else (e.g. a `-snap-*` / `-maps-open-*` hook),
+        // timed with the seconds knob.
         if let index = arguments.firstIndex(of: "-open-profile-delayed"), index + 1 < arguments.count {
             let id = ProfileID(arguments[index + 1])
             let delay = (index + 2 < arguments.count ? Double(arguments[index + 2]) : nil) ?? 3.0
@@ -714,17 +696,6 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
         if let index = arguments.firstIndex(of: "-open-hashtag"), index + 1 < arguments.count {
             container.router.route(to: .hashtag(arguments[index + 1]))
         }
-        // `-open-foryou` selects the For You root tab on launch.
-        //
-        // Direct tab selection rather than a route, because there is no
-        // `AppRoute` case for this tab — nothing in the app navigates TO
-        // For You, it is where the viewer starts from. That leaves it the
-        // one root tab a script could not reach, which is why its chrome
-        // (the mode badges, the tab item the active mode renames) had no
-        // way to be verified without a human tapping.
-        if arguments.contains("-open-foryou") {
-            tabCoordinator.selectTab(.forYou)
-        }
         if let index = arguments.firstIndex(of: "-open-comments"), index + 1 < arguments.count {
             container.router.route(to: .comments(PostID(arguments[index + 1])))
         }
@@ -751,7 +722,7 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
         // waits for the inbox to be the active stack's root, on screen
         // with nothing pushed over it, with a list table showing rows —
         // and prints GAVE UP if it never is (pair with `-open-messages`
-        // or `-select-tab 2`: from another tab there is no list to wait
+        // or `-select-tab 1`: from another tab there is no list to wait
         // for, and the push would not be the tap-a-row path anyway).
         if let index = arguments.firstIndex(of: "-open-conversation-settled"), index + 1 < arguments.count {
             let id = ConversationID(arguments[index + 1])
@@ -814,11 +785,12 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
                 window.rootViewController = viewController
                 window.layoutIfNeeded()
             }
-            // The launch screen stays OVER the shell until the first post's
-            // media is on screen, then fades out (#1812).
+            // The launch screen fades out over the shell (#1812). It waited
+            // for Shots' first post while the app opened there; the app opens
+            // on the map since #2453, so it lifts as soon as the shell is in.
             if let launch, viewController === mainTabCoordinator?.rootViewController {
                 let curtain = LaunchCurtain(curtain: launch.view, owner: launch, readyMilestone: LaunchCurtain.readyMilestone)
-                curtain.hold(over: window, opensElsewhere: launchOpensElsewhere)
+                curtain.hold(over: window, opensElsewhere: true)
                 launchCurtain = curtain
             }
             return

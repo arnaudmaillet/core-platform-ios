@@ -59,13 +59,13 @@ final class InteractionLatencyUITests: XCTestCase {
     /// 146–264 ms), with ~2x head-room: XCUITest's numbers swing by half
     /// between passes on the same code.
     @MainActor private static let routes: [Route] = [
-        Route(name: "tab → messages", arguments: ["-select-tab", "1"],
-              act: tab("Messages"), undo: { app in _ = tab("For You")(app); sleep(2) },
+        Route(name: "tab → messages", arguments: ["-select-tab", "0"],
+              act: tab("Messages"), undo: { app in _ = tab("Explore")(app); sleep(2) },
               ceilingMs: 350, issue: "#2117 (inbox reload), #2120 (band)"),
-        Route(name: "tab → profile", arguments: ["-select-tab", "1"],
-              act: tab("Profile"), undo: { app in _ = tab("For You")(app); sleep(2) },
+        Route(name: "tab → profile", arguments: ["-select-tab", "0"],
+              act: tab("Profile"), undo: { app in _ = tab("Explore")(app); sleep(2) },
               ceilingMs: 450, issue: "#2118 (tab faces), #2120 (band)"),
-        Route(name: "messages → thread", arguments: ["-select-tab", "2"],
+        Route(name: "messages → thread", arguments: ["-select-tab", "1"],
               act: { app in
                   let cell = app.cells.firstMatch
                   guard cell.waitForExistence(timeout: 20) else { return false }
@@ -73,7 +73,7 @@ final class InteractionLatencyUITests: XCTestCase {
                   return true
               },
               undo: back, ceilingMs: 1100, issue: "#2121 (thread), #2127 (gate lookup)"),
-        Route(name: "settings → security", arguments: ["-select-tab", "3"],
+        Route(name: "settings → security", arguments: ["-select-tab", "2"],
               act: { app in
                   let gear = app.buttons["Settings"]
                   if gear.waitForExistence(timeout: 10) {

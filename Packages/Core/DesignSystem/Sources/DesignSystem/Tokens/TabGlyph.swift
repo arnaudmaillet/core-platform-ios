@@ -9,7 +9,9 @@ import UIKit
 /// accent (`badgeTint`) — instead of a `badgeValue`. The app bakes the badged
 /// image for the bar (`TabGlyph.barImage` in the shell).
 public enum TabGlyph: CaseIterable, Sendable {
-    case explore, forYou, messages
+    /// For You's (`squarePlay`) left with its tab (#2453); its symbols stay in
+    /// `AppSymbol` for its return.
+    case explore, messages
 
     /// The badge's colour: the accent pink.
     @MainActor public static var badgeTint: UIColor { Palette.tint }
@@ -32,10 +34,6 @@ public enum TabGlyph: CaseIterable, Sendable {
         case (.explore, true, false): .paperplaneFill
         case (.explore, false, true): .paperplaneBadge
         case (.explore, true, true): .paperplaneBadgeFill
-        case (.forYou, false, false): .squarePlay
-        case (.forYou, true, false): .squarePlayFill
-        case (.forYou, false, true): .squarePlayBadge
-        case (.forYou, true, true): .squarePlayBadgeFill
         case (.messages, false, false): .chats
         case (.messages, true, false): .chatsFill
         case (.messages, false, true): .chatsBadge

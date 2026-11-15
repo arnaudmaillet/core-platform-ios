@@ -11,7 +11,7 @@ final class BarTapShieldUITests: XCTestCase {
     /// opens a conversation — exactly what must not happen through the bar.
     private func launchInbox() -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["-mock-auto-login", "-select-tab", "2"]
+        app.launchArguments = ["-mock-auto-login", "-select-tab", "1"]
         app.launch()
         return app
     }
