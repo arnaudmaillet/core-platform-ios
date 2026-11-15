@@ -24,11 +24,15 @@ import UIKit
 /// follows. The store's viewer facts are wiped on a sign-out or a profile
 /// switch (the cache coordinator), so a mark never outlives the viewer it
 /// was read for; reads in flight then are dropped (`generation`).
+///
+/// It sees the store through `ProfileEntityReading` and
+/// `ProfileEntityWriting` (#2377): the people and the viewer's relations, no
+/// posts. Tests hand it a fake.
 @MainActor
 public final class InboxRelations {
     private let reader: (any SocialGraphReading)?
     private let writer: (any SocialGraphWriting)?
-    private let entities: EntityStore
+    private let entities: any ProfileEntityReading & ProfileEntityWriting
     private var observation: EntityObservation?
     private var lookups: Set<ProfileID> = []
     /// Peers with a follow on its way: a read that lands meanwhile is older
@@ -45,7 +49,11 @@ public final class InboxRelations {
     private var observers: [Observer] = []
 
     /// Nil `reader` or `writer`: no mark at all — the "+" would mean nothing.
-    public init(entities: EntityStore, reader: (any SocialGraphReading)?, writer: (any SocialGraphWriting)?) {
+    public init(
+        entities: any ProfileEntityReading & ProfileEntityWriting,
+        reader: (any SocialGraphReading)?,
+        writer: (any SocialGraphWriting)?
+    ) {
         self.entities = entities
         self.reader = reader
         self.writer = writer
@@ -135,6 +143,7 @@ public final class InboxRelations {
         guard let peer = model.peerID else { return }
         entities.upsert(
             AuthorSummary(id: peer, handle: model.peerHandle ?? "", displayName: model.title, avatarURL: nil),
+            tier: .recent,
             freshness: .ifUnknown
         )
     }
@@ -182,12 +191,12 @@ public final class InboxRelations {
 /// over what it holds (#2049).
 private struct StoreRecordingAvatars: PeerAvatarProviding {
     let base: any PeerAvatarProviding
-    let entities: EntityStore
+    let entities: any ProfileEntityWriting
 
     func avatarURLs(for ids: [ProfileID]) async -> [ProfileID: URL] {
         let urls = await base.avatarURLs(for: ids)
         for (id, url) in urls {
-            entities.upsert(AuthorSummary(id: id, handle: "", displayName: "", avatarURL: url), freshness: .ifUnknown)
+            entities.upsert(AuthorSummary(id: id, handle: "", displayName: "", avatarURL: url), tier: .recent, freshness: .ifUnknown)
         }
         return urls
     }
