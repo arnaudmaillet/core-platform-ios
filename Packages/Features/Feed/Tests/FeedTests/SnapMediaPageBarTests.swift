@@ -1277,12 +1277,11 @@ struct SnapMediaPageBarTests {
     // MARK: - Where it sits in the column
 
     private func chrome(
-        pages: Int, clipPages: Set<Int> = [], overTabBar: Bool = false,
+        pages: Int, clipPages: Set<Int> = [],
         caption: String? = "A caption long enough to take the two lines the page reserves for it."
     ) -> SnapChromeView {
         let view = SnapChromeView(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
         view.setFixedInsets(UIEdgeInsets(top: 103, left: 0, bottom: 83, right: 0))
-        view.sitsOverTabBar = overTabBar
         view.configure(with: FeedItemDisplayModel(
             id: PostID("post-1"), authorID: ProfileID("a"), authorName: "Ava",
             metaText: "@ava · 3m", avatarURL: nil,
@@ -1303,10 +1302,8 @@ struct SnapMediaPageBarTests {
         view.debugCaptionFrame.maxY - SnapChromeView.captionLetterDrop
     }
 
-    /// The top of the bottom bar's glass: the toolbar's, or the tab bar's.
-    private func glassTop(overTabBar: Bool) -> CGFloat {
-        Self.barLine + (overTabBar ? SnapActionColumn.tabBarGlassDrop : SnapActionColumn.toolbarGlassDrop)
-    }
+    /// The top of the toolbar's glass.
+    private static var glassTop: CGFloat { barLine + SnapActionColumn.toolbarGlassDrop }
 
     /// ⚠️ BETWEEN THE CAPTION AND THE BAR, which is the whole point of moving
     /// it: the strip is the pictures' index and the caption is what they are
@@ -1318,7 +1315,7 @@ struct SnapMediaPageBarTests {
         let caption = view.debugCaptionFrame
 
         #expect(strip.minY > caption.maxY)
-        #expect(strip.maxY < glassTop(overTabBar: false), "the strip reaches the toolbar's glass")
+        #expect(strip.maxY < Self.glassTop, "the strip reaches the toolbar's glass")
         #expect(abs(strip.minX - caption.minX) < 0.5)
         // ⚠️ THE CONTENT'S FULL WIDTH (#2291): on to the column's outer edge,
         // under the sound cover, not stopping with the caption.
@@ -1330,102 +1327,86 @@ struct SnapMediaPageBarTests {
         #expect(strip.height == SnapMediaPageBarView.thickness)
     }
 
-    /// ⚠️ 10 PT OVER THE GLASS, THE LETTERS 16 PT ABOVE IT, ON BOTH SCREENS
-    /// (#2301, the owner 2026-11-11, superseding #2252's midpoint): the strip
-    /// belongs to the bottom of the screen, and the caption rises so a 2 pt
-    /// line no longer reads as its underline.
+    /// ⚠️ 10 PT OVER THE GLASS, THE LETTERS 16 PT ABOVE IT (#2301, the owner
+    /// 2026-11-11, superseding #2252's midpoint): the strip belongs to the
+    /// bottom of the screen, and the caption rises so a 2 pt line no longer
+    /// reads as its underline.
     @Test func theStripStandsOverTheGlassAndTheCaptionAboveIt() {
-        for overTabBar in [false, true] {
-            let view = chrome(pages: 3, overTabBar: overTabBar)
-            let strip = view.debugPageBarFrame
-            let below = glassTop(overTabBar: overTabBar) - strip.maxY
-            let above = strip.minY - lettersBottom(view)
-            #expect(abs(below - SnapActionColumn.stripAboveGlass) < 0.5,
-                    "over the tab bar: \(overTabBar) — the strip \(below) pt over the glass")
-            #expect(abs(above - SnapActionColumn.captionAboveStrip) < 0.5,
-                    "over the tab bar: \(overTabBar) — the letters \(above) pt above the strip")
-        }
+        let view = chrome(pages: 3)
+        let strip = view.debugPageBarFrame
+        let below = Self.glassTop - strip.maxY
+        let above = strip.minY - lettersBottom(view)
+        #expect(abs(below - SnapActionColumn.stripAboveGlass) < 0.5, "the strip \(below) pt over the glass")
+        #expect(abs(above - SnapActionColumn.captionAboveStrip) < 0.5, "the letters \(above) pt above the strip")
     }
 
     /// ⚠️ ONE SEAT, STRIP OR NOT (#2301, #2252's rule kept): a single photo's
     /// caption and column stand exactly where a carousel's do, raised alike.
     @Test func everyMediaPostTakesTheSameRaisedSeat() {
-        for overTabBar in [false, true] {
-            let carousel = chrome(pages: 3, overTabBar: overTabBar)
-            let photo = chrome(pages: 1, overTabBar: overTabBar)
-            #expect(carousel.debugCaptionFrame == photo.debugCaptionFrame, "over the tab bar: \(overTabBar)")
-            #expect(carousel.debugSoundStationFrame == photo.debugSoundStationFrame, "over the tab bar: \(overTabBar)")
-            // The column's bottom on the caption's letters' line (#2326).
-            #expect(abs(photo.debugSoundStationFrame.maxY - lettersBottom(photo)) < 0.5)
-        }
+        let carousel = chrome(pages: 3)
+        let photo = chrome(pages: 1)
+        #expect(carousel.debugCaptionFrame == photo.debugCaptionFrame)
+        #expect(carousel.debugSoundStationFrame == photo.debugSoundStationFrame)
+        // The column's bottom on the caption's letters' line (#2326).
+        #expect(abs(photo.debugSoundStationFrame.maxY - lettersBottom(photo)) < 0.5)
     }
 
-    /// ⚠️ THE COLUMN'S BOTTOM ON THE CAPTION'S LINE, ON BOTH BARS (#2326, the
-    /// owner 2026-11-11, reversing #2301's option c, where it stayed on the
-    /// composer's line and looked glued to the strip): the sound cover on
-    /// Shots, the share bubble on a pushed post, `captionAboveStrip` (16 pt)
-    /// over the strip's top, where the caption's letters end. The whole
-    /// column rises by one lift — the like pill keeps its height and its gap
-    /// over the cover.
-    @Test func theColumnStandsOnTheCaptionsLineOnBothBars() {
-        for overTabBar in [false, true] {
-            let view = chrome(pages: 3, overTabBar: overTabBar)
-            let strip = view.debugPageBarFrame
-            let column = view.debugSoundStationFrame
-            #expect(abs(strip.minY - column.maxY - SnapActionColumn.captionAboveStrip) < 0.5,
-                    "over the tab bar: \(overTabBar) — the column's bottom \(strip.minY - column.maxY) pt over the strip")
-            #expect(abs(column.maxY - lettersBottom(view)) < 0.5, "over the tab bar: \(overTabBar)")
-            // The composer's line, less the column's lift.
-            let breath = overTabBar ? SnapActionColumn.shotsBottomBreath : SnapActionColumn.bottomBreath
-            let composerLine = Self.barLine - breath - SnapActionColumn.inputRestingGap
-            let lift = SnapChromeView.columnLineLift(overTabBar: overTabBar)
-            #expect(abs(column.maxY - (composerLine - lift)) < 0.5, "over the tab bar: \(overTabBar)")
-            #expect(lift > SnapChromeView.coverLineLift(overTabBar: overTabBar), "the column rose less than the caption")
-            // The like pill rises with it: same height, same gap over the cover.
-            let like = view.debugFrame(of: view.debugBoostButton)
-            #expect(abs(like.height - SnapActionColumn.likePillHeight) < 0.5, "over the tab bar: \(overTabBar)")
-            #expect(abs(column.minY - like.maxY - SnapActionColumn.gap) < 0.5, "over the tab bar: \(overTabBar)")
-        }
+    /// ⚠️ THE COLUMN'S BOTTOM ON THE CAPTION'S LINE (#2326, the owner
+    /// 2026-11-11, reversing #2301's option c, where it stayed on the
+    /// composer's line and looked glued to the strip): the share bubble or
+    /// the sound cover, `captionAboveStrip` (16 pt) over the strip's top,
+    /// where the caption's letters end. The whole column rises by one lift —
+    /// the like pill keeps its height and its gap over the cover.
+    @Test func theColumnStandsOnTheCaptionsLine() {
+        let view = chrome(pages: 3)
+        let strip = view.debugPageBarFrame
+        let column = view.debugSoundStationFrame
+        #expect(abs(strip.minY - column.maxY - SnapActionColumn.captionAboveStrip) < 0.5,
+                "the column's bottom \(strip.minY - column.maxY) pt over the strip")
+        #expect(abs(column.maxY - lettersBottom(view)) < 0.5)
+        // The composer's line, less the column's lift.
+        let composerLine = Self.barLine - SnapActionColumn.bottomBreath - SnapActionColumn.inputRestingGap
+        let lift = SnapChromeView.columnLineLift()
+        #expect(abs(column.maxY - (composerLine - lift)) < 0.5)
+        #expect(lift > SnapChromeView.coverLineLift(), "the column rose less than the caption")
+        // The like pill rises with it: same height, same gap over the cover.
+        let like = view.debugFrame(of: view.debugBoostButton)
+        #expect(abs(like.height - SnapActionColumn.likePillHeight) < 0.5)
+        #expect(abs(column.minY - like.maxY - SnapActionColumn.gap) < 0.5)
     }
 
     /// ⚠️ A TEXT PAGE KEEPS #2252'S LINE (#2326, as #2301): no caption to
     /// stand on, so its column stays on the composer's line.
     @Test func aTextPagesColumnKeepsTheComposersLine() {
-        for overTabBar in [false, true] {
-            let view = SnapChromeView(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
-            view.setFixedInsets(UIEdgeInsets(top: 103, left: 0, bottom: 83, right: 0))
-            view.sitsOverTabBar = overTabBar
-            view.configure(with: FeedItemDisplayModel(
-                id: PostID("post-text"), authorID: ProfileID("a"), authorName: "Ava",
-                metaText: "@ava · 3m", avatarURL: nil, caption: "Words only.",
-                mediaURL: nil, mediaKind: .image, thumbnailURL: nil, audioText: nil
-            ))
-            view.layoutIfNeeded()
-            let breath = overTabBar ? SnapActionColumn.shotsBottomBreath : SnapActionColumn.bottomBreath
-            let composerLine = Self.barLine - breath - SnapActionColumn.inputRestingGap
-            #expect(abs(view.debugSoundStationFrame.maxY - composerLine) < 0.5, "over the tab bar: \(overTabBar)")
-            #expect(view.debugColumnLineLift == 0)
-        }
+        let view = SnapChromeView(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        view.setFixedInsets(UIEdgeInsets(top: 103, left: 0, bottom: 83, right: 0))
+        view.configure(with: FeedItemDisplayModel(
+            id: PostID("post-text"), authorID: ProfileID("a"), authorName: "Ava",
+            metaText: "@ava · 3m", avatarURL: nil, caption: "Words only.",
+            mediaURL: nil, mediaKind: .image, thumbnailURL: nil, audioText: nil
+        ))
+        view.layoutIfNeeded()
+        let composerLine = Self.barLine - SnapActionColumn.bottomBreath - SnapActionColumn.inputRestingGap
+        #expect(abs(view.debugSoundStationFrame.maxY - composerLine) < 0.5)
+        #expect(view.debugColumnLineLift == 0)
     }
 
     /// ⚠️ THE COUNTER BREATHES (#2326): with the column on the caption's line
     /// and no plate, the digits stand about 13 pt under the column's bottom
-    /// and about 7 pt over the bar's glass, on both bars — everything here is
-    /// stated from the glass, so the two screens agree.
+    /// and about 7 pt over the bar's glass — everything here is stated from
+    /// the glass.
     @Test func theCountersDigitsClearTheColumnAndTheGlass() throws {
-        for overTabBar in [false, true] {
-            let view = chrome(pages: 3, overTabBar: overTabBar)
-            let strip = view.debugPageBarFrame
-            let count = try #require(view.debugPageBar.debugCounterFrame)
-            let mid = strip.minY + count.midY
-            let half = SnapMediaPageBarView.counterFont.capHeight / 2
-            let above = (mid - half) - view.debugSoundStationFrame.maxY
-            let below = glassTop(overTabBar: overTabBar) - (mid + half)
-            #expect(above > 12 && above < 14, "over the tab bar: \(overTabBar) — \(above) pt to the column")
-            #expect(below > 6 && below < 8, "over the tab bar: \(overTabBar) — \(below) pt to the glass")
-            // Under the column: the strip's trailing end is the column's edge.
-            #expect(abs(strip.minX + count.maxX - view.debugSoundStationFrame.maxX) < 0.5)
-        }
+        let view = chrome(pages: 3)
+        let strip = view.debugPageBarFrame
+        let count = try #require(view.debugPageBar.debugCounterFrame)
+        let mid = strip.minY + count.midY
+        let half = SnapMediaPageBarView.counterFont.capHeight / 2
+        let above = (mid - half) - view.debugSoundStationFrame.maxY
+        let below = Self.glassTop - (mid + half)
+        #expect(above > 12 && above < 14, "\(above) pt to the column")
+        #expect(below > 6 && below < 8, "\(below) pt to the glass")
+        // Under the column: the strip's trailing end is the column's edge.
+        #expect(abs(strip.minX + count.maxX - view.debugSoundStationFrame.maxX) < 0.5)
     }
 
     /// ⚠️ ITS HEIGHT AT REST AND WHILE TOUCHED (#2252): 2 pt at rest; under
@@ -1544,7 +1525,7 @@ struct SnapMediaPageBarTests {
     /// room from the glass as from the letters.
     @Test func theStripStopsShortOfTheGlass() {
         let view = chrome(pages: 3)
-        let gap = glassTop(overTabBar: false) - view.debugPageBarFrame.maxY
+        let gap = Self.glassTop - view.debugPageBarFrame.maxY
         #expect(gap > 6, Comment(rawValue: "the strip left \(gap)pt"))
     }
 
@@ -1565,8 +1546,8 @@ struct SnapMediaPageBarTests {
         let view = chrome(pages: 1)
         view.setMediaPageCount(1, current: 0, clipPages: [0])
         view.setMediaPlayhead(0.2, seconds: 120)
-        showPostActions(on: view)
-        #expect(!view.postActions.isHidden && view.postActions.alpha == 1, "the premise: the capsule is on screen")
+        showSoundBubble(on: view)
+        #expect(!view.debugSoundBubble.isHidden && view.debugSoundBubble.alpha == 1, "the premise: the sound bubble is on screen")
         let resting = view.debugScrubFadedAlphas
 
         let bar = view.debugPageBar
@@ -1574,11 +1555,11 @@ struct SnapMediaPageBarTests {
         bar.debugScrub(.changed, atX: 140)
         #expect(view.debugScrubFadedAlphas.allSatisfy { $0 == 0 })
         // The column fades as one glass (#1872).
-        #expect(view.debugGlassColumn.alpha == 0, "the save and share capsule stayed beside the scrub (#1847)")
+        #expect(view.debugGlassColumn.alpha == 0, "the column stayed beside the scrub (#1847)")
 
         bar.debugScrub(.ended, atX: 140)
         #expect(view.debugScrubFadedAlphas == resting)
-        #expect(view.postActions.alpha == 1)
+        #expect(view.debugSoundBubble.alpha == 1)
     }
 
     /// ⚠️ AND A CELL RECYCLED MID-SCRUB HANDS BACK WHAT IT BORROWED.
@@ -1592,8 +1573,8 @@ struct SnapMediaPageBarTests {
         let view = chrome(pages: 1)
         view.setMediaPageCount(1, current: 0, clipPages: [0])
         view.setMediaPlayhead(0.2, seconds: 120)
-        showPostActions(on: view)
-        #expect(!view.postActions.isHidden && view.postActions.alpha == 1, "the premise: the capsule is on screen")
+        showSoundBubble(on: view)
+        #expect(!view.debugSoundBubble.isHidden && view.debugSoundBubble.alpha == 1, "the premise: the sound bubble is on screen")
         let resting = view.debugScrubFadedAlphas
 
         let bar = view.debugPageBar
@@ -1605,7 +1586,7 @@ struct SnapMediaPageBarTests {
         view.reset()
 
         #expect(view.debugScrubFadedAlphas == resting)
-        #expect(view.postActions.alpha == 1, "the capsule came back to the next post faded")
+        #expect(view.debugSoundBubble.alpha == 1, "the sound bubble came back to the next post faded")
     }
 
     /// And the strip itself never fades: it is the instrument in the hand.
@@ -1641,7 +1622,7 @@ struct SnapMediaPageBarTests {
         }
         // The cover's line, raised by the seat's lift (#2301).
         let line = Self.barLine - SnapActionColumn.bottomBreath - SnapActionColumn.inputRestingGap
-            - SnapChromeView.coverLineLift(overTabBar: false)
+            - SnapChromeView.coverLineLift()
         #expect(abs(photo.debugCaptionFrame.maxY - line) < 0.5, "the caption is off its seat")
     }
 
@@ -1898,11 +1879,10 @@ struct SnapStripBrowseTests {
         ))
         view.setMediaPageCount(4, current: 0)
         view.setMediaPreviews(thumbnails: [nil, nil, nil, nil], videoPages: [2], pipeline: nil)
-        showPostActions(on: view)
+        showSoundBubble(on: view)
         let resting = view.debugScrubFadedAlphas
-        let capsuleCentre = view.postActions.convert(
-            CGPoint(x: view.postActions.bounds.midX, y: view.postActions.bounds.midY), to: view
-        )
+        let sound = view.debugSoundBubble
+        let soundCentre = sound.convert(CGPoint(x: sound.bounds.midX, y: sound.bounds.midY), to: view)
         var browsed: [Int] = []
         view.onMediaBrowse = { browsed.append($0) }
 
@@ -1912,10 +1892,10 @@ struct SnapStripBrowseTests {
         bar.debugScrub(.changed, atX: slot * 2.5)
         #expect(view.debugScrubFadedAlphas.allSatisfy { $0 == 0 })
         // The column fades as one glass (#1872).
-        #expect(view.debugGlassColumn.alpha == 0, "the save and share capsule stayed beside the filmstrip (#1847)")
-        // A tap where the capsule stood no longer reaches it.
-        let hit = view.hitTest(capsuleCentre, with: nil)
-        #expect(hit.map { !$0.isDescendant(of: view.postActions) } ?? true, "a tap there would still save or share")
+        #expect(view.debugGlassColumn.alpha == 0, "the column stayed beside the filmstrip (#1847)")
+        // A tap where the sound bubble stood no longer reaches it.
+        let hit = view.hitTest(soundCentre, with: nil)
+        #expect(hit.map { !$0.isDescendant(of: sound) } ?? true, "a tap there would still open the sound")
         let strip = view.debugBrowseStrip
         #expect(strip.debugIsShown)
         #expect(strip.debugTileCount == 4)
@@ -1946,11 +1926,10 @@ struct SnapStripBrowseTests {
     }
 }
 
-/// The For You root's save and share capsule, shown: it needs the flag AND a
-/// sound face, and a hidden capsule would make a fade case vacuous (#1847).
+/// The column's sound bubble, shown: it needs a sound face, and a hidden
+/// bubble would make a fade case vacuous (#1847).
 @MainActor
-private func showPostActions(on view: SnapChromeView) {
-    view.showsPostActions = true
+private func showSoundBubble(on view: SnapChromeView) {
     view.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true))
     view.layoutIfNeeded()
 }

@@ -80,8 +80,6 @@ Reach with `-select-tab 1` (the default) and `-snap-start-index N` (`LaunchCurta
 - snap | rail (SnapShortcutRailView boost button) | like / boost | tap | optimistic stake + haptic + confirmation | `SnapShortcutRailView.swift:745-753` → `cell.onRequestBoost` `:1830` → `performBoost` `:3136`, sync | `-wallet-demo-boost`, `-wallet-demo-shot`
 - snap | rail | boost button | long press | UIMenu (StakeMenu: amounts, Undo) | deferred menu `SnapShortcutRailView.swift:759-767` → `performBoostUndo` `:3219` | `-wallet-demo-undo`
 - snap | SnapWheelCapsule (shortcut wheel) | wheel / return chevron | press-drag / tap | wheel scroll / return to rest | `pressChanged` `SnapWheelCapsule.swift:283`, `returnTapped` `:329` | –
-- snap | SnapPostActionsCapsule (column) | save | tap | optimistic bookmark toggle | `SnapPostActionsCapsule.swift:53` → `toggleBookmark` `:2654` | `-save-elsewhere`
-- snap | SnapPostActionsCapsule | share | tap | present ShareSheetViewController | `:56` → `presentShareSheet` `:5657-5690`, sync | –
 - snap | share sheet | system share | tap | UIActivityViewController | `:5676-5683` | –
 - snap | share sheet | send to a person | tap | push draft DM | `:5684` → `.sendLink` route | –
 - snap | share sheet | Repost | tap | info toast "coming soon" | `repostRequested` `:5703`, `:5725` | –

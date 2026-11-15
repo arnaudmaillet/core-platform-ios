@@ -5,20 +5,17 @@ import UIKit
 @testable import Feed
 
 /// The page's bottom scrim protects the caption block and leaves the picture
-/// alone above it (#1983): its top is the block's top less the fade — the
-/// caption on a pushed post, the author row on Shots — and nothing else
-/// moves it. Its curve is set in points of the block, calibrated on TikTok's
+/// alone above it (#1983): its top is the caption's top less the fade, and
+/// nothing else moves it. Its curve is set in points of the block, calibrated on TikTok's
 /// and Instagram's (#2175).
 @MainActor
 struct SnapPageScrimTests {
     private func makeChrome(
         caption: String? = "Golden hour at the pier",
         timestamp: String = "2h",
-        mediaURL: URL? = URL(string: "mock://photo/single-04"),
-        showsAuthorRow: Bool = false
+        mediaURL: URL? = URL(string: "mock://photo/single-04")
     ) -> SnapChromeView {
         let chrome = SnapChromeView(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
-        chrome.showsAuthorRow = showsAuthorRow
         chrome.configure(with: FeedItemDisplayModel(
             id: PostID("post-0004"),
             authorID: ProfileID("profile-1"),
@@ -60,20 +57,11 @@ struct SnapPageScrimTests {
         #expect(abs(scrimTop(chrome) - (caption.minY - SnapChromeView.scrimLead)) < 0.5)
     }
 
-    @Test func onShotsTheScrimStartsAtTheAuthorRowLessTheFade() {
-        let chrome = makeChrome(showsAuthorRow: true)
-        let author = frame(of: chrome.debugAuthorRow, in: chrome)
-        #expect(!chrome.debugAuthorRow.isHidden)
-        #expect(abs(scrimTop(chrome) - (author.minY - SnapChromeView.scrimLead)) < 0.5)
-        #expect(scrimTop(chrome) < frame(of: chrome.debugCaptionLabel, in: chrome).minY - SnapChromeView.scrimLead)
-    }
-
     /// The measurement in the issue: the middle of the screen read 0.80 of the
     /// picture, because the scrim began at 32 % of it.
     @Test func theMiddleOfThePageIsNotUnderTheScrim() {
-        for chrome in [makeChrome(), makeChrome(showsAuthorRow: true)] {
-            #expect(scrimTop(chrome) > chrome.bounds.midY, "the scrim starts at \(scrimTop(chrome))")
-        }
+        let chrome = makeChrome()
+        #expect(scrimTop(chrome) > chrome.bounds.midY, "the scrim starts at \(scrimTop(chrome))")
     }
 
     @Test func aTextPostHasNoScrim() {
@@ -113,7 +101,6 @@ struct SnapPageScrimTests {
     /// alike: one layout, one top.
     @Test func theReplicaAndTheLivePageAgree() {
         #expect(scrimTop(makeChrome()) == scrimTop(makeChrome()))
-        #expect(scrimTop(makeChrome(showsAuthorRow: true)) == scrimTop(makeChrome(showsAuthorRow: true)))
     }
 
     /// The darkness `y` points down the page, as the scrim draws it there.
@@ -123,16 +110,14 @@ struct SnapPageScrimTests {
 
     private static let twoLines = "Golden hour at the pier, the light going amber over the water, the boats coming in."
 
-    /// The same darkness at the block's top whatever the caption — one line,
-    /// two, or Shots' author row over it — and the reference's on the text.
+    /// The same darkness at the block's top whatever the caption — one line
+    /// or two — and the reference's on the text.
     @Test func theBlocksTopIsAsDarkOnEveryPost() {
         let one = makeChrome(caption: "Pier.")
         let two = makeChrome(caption: Self.twoLines)
-        let shots = makeChrome(caption: Self.twoLines, showsAuthorRow: true)
         let tops = [
             darkness(atY: frame(of: one.debugCaptionLabel, in: one).minY, in: one),
             darkness(atY: frame(of: two.debugCaptionLabel, in: two).minY, in: two),
-            darkness(atY: frame(of: shots.debugAuthorRow, in: shots).minY, in: shots),
         ]
         for top in tops {
             #expect(abs(top - SnapChromeView.scrimTopAlpha) <= 0.01, "the block's top at \(top)")

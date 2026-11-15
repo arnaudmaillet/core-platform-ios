@@ -22,7 +22,7 @@ import UIKit
 /// (possibly mid-flight, on a cold tap) without moving the scaffold.
 final class SnapChromeView: UIView {
     /// The bottom legibility scrim: it protects the caption block — the
-    /// caption, and the author row above it on Shots — and leaves the picture
+    /// caption — and leaves the picture
     /// alone above it (#1983, the owner 2026-10-31: "the scrim ends at the
     /// caption block, as a card's does").
     ///
@@ -115,10 +115,6 @@ final class SnapChromeView: UIView {
         scrimStopPoints.map { UIColor.black.withAlphaComponent(scrimAlpha(at: $0)) }
     }
 
-    /// The scrim's top on the caption, and on the author row while it shows.
-    private var scrimOverCaption: NSLayoutConstraint!
-    private var scrimOverAuthor: NSLayoutConstraint!
-
     /// An `EmoteLabel`: the caption's emoji and `:code:` emotes animate in
     /// place, at the caption's own size (`composedCaption` marks them).
     private let captionLabel = SnapCaptionLabel()
@@ -147,8 +143,7 @@ final class SnapChromeView: UIView {
 
     /// Where the page strip's line is centred, below the margins line
     /// (#2252, the owner 2026-11-10): halfway between the bottom of the
-    /// caption's letters and the top of the bottom bar's glass, whichever
-    /// bar it is — the toolbar on a pushed post, the tab bar on Shots.
+    /// caption's letters and the top of the toolbar's glass.
     ///
     /// ⚠️ IT RESERVES NO HEIGHT. The caption stands on the cover's line on
     /// every format (`captionOnCoverLine`); the strip lies in the gap that
@@ -160,16 +155,14 @@ final class SnapChromeView: UIView {
     /// The letters' bottom is the caption's last baseline: its frame's
     /// bottom, less what its line box keeps under the baseline
     /// (`captionLetterDrop`). Expected (the owner's measures, the issue):
-    /// about 10 pt either side of the line over the toolbar, about 8 over
-    /// the tab bar — the 2 pt difference between the two screens is
-    /// accepted, for one rule on both.
+    /// about 10 pt either side of the line over the toolbar.
     ///
     /// ⚠️ SUPERSEDED BY #2301 (the owner, 2026-11-11): the strip is no longer
     /// centred. Its line stands `SnapActionColumn.stripAboveGlass` (10 pt)
-    /// over the bar's glass on both screens, and the caption rises instead
+    /// over the bar's glass, and the caption rises instead
     /// (`coverLineLift`), its letters `captionAboveStrip` (16 pt) above it.
-    static func pageBarCenterOffset(overTabBar: Bool, breathApplied: Bool = true) -> CGFloat {
-        let glass: CGFloat = SnapActionColumn.glassBelowMargins(overTabBar: overTabBar, breathApplied: breathApplied)
+    static func pageBarCenterOffset(breathApplied: Bool = true) -> CGFloat {
+        let glass: CGFloat = SnapActionColumn.glassBelowMargins(breathApplied: breathApplied)
         return glass - SnapActionColumn.stripAboveGlass - SnapMediaPageBarView.thickness / 2
     }
 
@@ -177,13 +170,12 @@ final class SnapChromeView: UIView {
     /// caption's bottom — and with it the caption floor and the band —
     /// stands above where #2252 put it (`inputRestingGap` over the margins),
     /// so the caption's letters end `captionAboveStrip` over the strip's top,
-    /// strip or not. Stated from the glass, so it is the same on both bars:
-    /// about 6 pt on a pushed post, 10 on Shots.
+    /// strip or not. Stated from the glass: about 6 pt over the toolbar.
     ///
     /// The column rises too since #2326 (`columnLineLift`), which reverses
     /// #2301's option (c), where it stayed on the composer's line.
-    static func coverLineLift(overTabBar: Bool, breathApplied: Bool = true) -> CGFloat {
-        let lettersAboveMargins: CGFloat = captionLettersAboveMargins(overTabBar: overTabBar, breathApplied: breathApplied)
+    static func coverLineLift(breathApplied: Bool = true) -> CGFloat {
+        let lettersAboveMargins: CGFloat = captionLettersAboveMargins(breathApplied: breathApplied)
         let captionBottomAboveMargins: CGFloat = lettersAboveMargins - captionLetterDrop
         return max(0, captionBottomAboveMargins - SnapActionColumn.inputRestingGap)
     }
@@ -191,19 +183,19 @@ final class SnapChromeView: UIView {
     /// Where the caption's letters end above the margins line on a media
     /// page (#2301): `captionAboveStrip` over the strip's top, which stands
     /// `stripAboveGlass` over the bar's glass.
-    static func captionLettersAboveMargins(overTabBar: Bool, breathApplied: Bool = true) -> CGFloat {
-        let glass: CGFloat = SnapActionColumn.glassBelowMargins(overTabBar: overTabBar, breathApplied: breathApplied)
+    static func captionLettersAboveMargins(breathApplied: Bool = true) -> CGFloat {
+        let glass: CGFloat = SnapActionColumn.glassBelowMargins(breathApplied: breathApplied)
         return SnapActionColumn.stripAboveGlass + SnapMediaPageBarView.thickness
             + SnapActionColumn.captionAboveStrip - glass
     }
 
     /// ⚠️ THE COLUMN ON THE CAPTION'S LINE (#2326, the owner 2026-11-11,
     /// reversing #2301's option c): how far the whole action column — the
-    /// sound cover or the share bubble at its bottom, the post's actions, the
-    /// like pill and the emote rail over it — stands above the composer's
+    /// sound cover or the share bubble at its bottom, the like pill and the
+    /// emote rail over it — stands above the composer's
     /// line (`inputRestingGap`) on a media page at rest. Its bottom lands on
     /// the caption's letters' line, `captionAboveStrip` (16 pt) over the
-    /// strip's top, on both bars: 10 pt on a pushed post, 14 on Shots.
+    /// strip's top: 10 pt over the toolbar.
     ///
     /// This is the cover line's lift (`coverLineLift`) plus the caption's
     /// letter drop: the caption's frame keeps what its line box holds under
@@ -214,8 +206,8 @@ final class SnapChromeView: UIView {
     /// #680) at `inputRestingGap`; the column glides down to it inside the
     /// comments' opening, driven by the opening's own progress, and back up
     /// inside the close (`applyColumnGlide`).
-    static func columnLineLift(overTabBar: Bool, breathApplied: Bool = true) -> CGFloat {
-        let lettersAboveMargins: CGFloat = captionLettersAboveMargins(overTabBar: overTabBar, breathApplied: breathApplied)
+    static func columnLineLift(breathApplied: Bool = true) -> CGFloat {
+        let lettersAboveMargins: CGFloat = captionLettersAboveMargins(breathApplied: breathApplied)
         return max(0, lettersAboveMargins - SnapActionColumn.inputRestingGap)
     }
 
@@ -316,10 +308,6 @@ final class SnapChromeView: UIView {
     // replica) keeps the layer inside itself, as before.
     private let boostStation = UIView()
     private let soundStation = UIView()
-    /// (#1681): save and repost upright between the like pill
-    /// and the sound bubble (`showsPostActions`).
-    private let postActionsStation = UIView()
-    let postActions = SnapPostActionsCapsule()
     private var boostStationTop: NSLayoutConstraint?
     private var boostStationBottom: NSLayoutConstraint?
     /// The caption floor's bottom, raised with the caption on a media page
@@ -334,29 +322,9 @@ final class SnapChromeView: UIView {
     /// bottom breath is added to them.
     private var fixedInsets: UIEdgeInsets?
 
-    /// Shots — the For You root (#1716, the owner): its breath over the tab
-    /// bar is its own (`shotsBottomBreath`, `applyFixedInsets`).
-    var sitsOverTabBar = false {
-        didSet {
-            guard sitsOverTabBar != oldValue else { return }
-            applyFixedInsets()
-            // The strip centres on the tab bar's glass, not the toolbar's.
-            applyPageBarPlacement()
-        }
-    }
-    /// The like pill's bottom above the margin line, without the capsule.
+    /// The like pill's bottom above the margin line.
     private static var boostStationBottomInset: CGFloat {
         SnapActionColumn.inputRestingGap + SnapActionColumn.bubbleSize + SnapActionColumn.gap
-    }
-
-    /// (#1681, the For You root): the column holds save and
-    /// repost between the like pill and the sound bubble, and the pill — with
-    /// the emote rail it stands on — rises by the capsule's room.
-    var showsPostActions = false {
-        didSet {
-            guard showsPostActions != oldValue else { return }
-            applyPostActionsLayout()
-        }
     }
 
     /// (#1924, the owner): a TEXT page's like stands in the screen's footer —
@@ -377,8 +345,8 @@ final class SnapChromeView: UIView {
         glassColumn.refresh(animated: false)
     }
     private let columnLayer = SnapActionColumnLayer()
-    /// The column's bubbles as ONE glass (#1872): the like, the post's
-    /// actions and the sound fuse, split and fold into the sound — the
+    /// The column's bubbles as ONE glass (#1872): the like and the sound
+    /// fuse, split and fold into the sound — the
     /// buttons are its items, on their stations.
     private let glassColumn = SnapGlassColumn()
     /// Where `columnLayer` is mounted: this chrome, or the cell's content.
@@ -439,87 +407,7 @@ final class SnapChromeView: UIView {
     var interactionRoots: [UIView] {
         // The wheel's capsule (#1872): the wheel lets its touches through to it.
         [shortcutRail, shortcutRail.capsule.glass, boostButton, commentEmptyState, subtitleView, commentTicker,
-         soundBubble, authorRow, captionLabel]
-    }
-
-    // MARK: - The author row (#1699)
-
-    /// The post's author INSIDE the page, between the comment stream and the
-    /// caption — the For You root's (the owner, 2026-10-24: out of the top
-    /// bar). NO GLASS: the pill's face and lines over the media, their
-    /// shadows (`setOverMedia`) keeping them legible, as the caption's do.
-    /// The bar's glass was only ever the bar item's platter, never the
-    /// pill's own.
-    let authorRow = PersonPill(height: 40, carriesBadge: true, ceiling: 260)
-
-    /// The author's LINE, from the pill's face to the rail's stop and down to
-    /// the caption, under the pill (#1848). The pill hugs its name, and the
-    /// canvas beside a short one fell through to the media: a horizontal swipe
-    /// there turned the carousel's page. Touchable and empty, it holds those
-    /// touches as the caption does: a vertical swipe still reaches the feed's
-    /// pager, and a tap still toggles playback (it is not an interaction root).
-    /// `PersonPill` is untouched: the bar's author item is the same control.
-    private let authorLane = UIView()
-
-    /// Whether the page shows its author row (the For You root only).
-    var showsAuthorRow = false {
-        didSet {
-            guard showsAuthorRow != oldValue else { return }
-            applyAuthorRowLayout()
-        }
-    }
-
-    /// A tap on the author: the screen opens the author's card.
-    var onAuthorTapped: (() -> Void)?
-    /// A hold on the author: the screen pushes the profile.
-    var onAuthorLongPressed: (() -> Void)?
-    /// The "+" on the face: the screen follows the author.
-    var onAuthorFollowTapped: (() -> Void)?
-
-    private var subtitleOverCaption: NSLayoutConstraint!
-    private var subtitleOverAuthor: NSLayoutConstraint!
-    private var emptyStateOverCaption: NSLayoutConstraint!
-    private var emptyStateOverAuthor: NSLayoutConstraint!
-    private var tickerOverStream: NSLayoutConstraint!
-    private var tickerOverAuthor: NSLayoutConstraint!
-
-    /// Whether the danmaku has bubbles to show, from the streams last handed
-    /// over (`updateCommentStreams`).
-    private var tickerCarriesReactions = false
-
-    /// (#1699, the owner 2026-10-24): on the For You root, a
-    /// running danmaku REPLACES the comment stream — the band takes the
-    /// stream's seat on the author row, and the stream stays down.
-    private var tickerReplacesStream: Bool {
-        showsAuthorRow && hasMedia && tickerCarriesReactions
-    }
-
-    private func installAuthorRow() {
-        authorRow.setOverMedia(true)
-        authorRow.isHidden = true
-        authorRow.onFollowTapped = { [weak self] in self?.onAuthorFollowTapped?() }
-        // A person beside content (#2145): a tap opens the card, a hold the
-        // profile — the shared contract owns both.
-        authorRowOpening.openCard = { [weak self] in self?.onAuthorTapped?() }
-        authorRowOpening.openProfile = { [weak self] in self?.onAuthorLongPressed?() }
-        authorRow.constrain(in: self) { parent in
-            // The face on the caption's text axis.
-            authorRow.leadingAnchor.constraint(equalTo: parent.layoutMarginsGuide.leadingAnchor, constant: Spacing.lg - 2)
-            authorRow.trailingAnchor.constraint(lessThanOrEqualTo: railSeat.leadingAnchor, constant: -Spacing.md)
-            authorRow.bottomAnchor.constraint(equalTo: captionLabel.topAnchor, constant: -Spacing.xs)
-        }
-        authorLane.isHidden = true
-        authorLane.translatesAutoresizingMaskIntoConstraints = false
-        insertSubview(authorLane, belowSubview: authorRow)
-        NSLayoutConstraint.activate([
-            authorLane.leadingAnchor.constraint(equalTo: authorRow.leadingAnchor),
-            // The pill's own ceiling, the band's and the subtitle zone's stop.
-            authorLane.trailingAnchor.constraint(equalTo: railSeat.leadingAnchor, constant: -Spacing.md),
-            authorLane.topAnchor.constraint(equalTo: authorRow.topAnchor),
-            // Over the seam between the pill and the caption too.
-            authorLane.bottomAnchor.constraint(equalTo: captionLabel.topAnchor),
-        ])
-        scrimOverAuthor = scrimView.topAnchor.constraint(equalTo: authorRow.topAnchor, constant: -Self.scrimLead)
+         soundBubble, captionLabel]
     }
 
     @objc private func captionTapped() {
@@ -530,57 +418,11 @@ final class SnapChromeView: UIView {
     func debugTapCaption() { captionTapped() }
 
     #if DEBUG
-    var debugAuthorLane: UIView { authorLane }
-    /// The scrim, the caption and the author row, for the scrim's suite.
+    /// The scrim and the caption, for the scrim's suite.
     var debugScrimView: UIView { scrimView }
     var debugScrimClip: UIView { scrimClip }
     var debugCaptionLabel: UIView { captionLabel }
-    var debugAuthorRow: UIView { authorRow }
-    /// A hold on the author row, as a finger's would land.
-    func debugHoldAuthorRow() { authorRowOpening.debugHold() }
-    /// A tap on the author row. Tests.
-    func debugTapAuthorRow() { authorRowOpening.debugTap() }
     #endif
-
-    /// The row's tap and hold (#2145).
-    private lazy var authorRowOpening = PersonOpening(on: authorRow)
-
-
-    /// The stream stands on the author row while it shows, on the caption
-    /// otherwise; the danmaku stands on the author row in the stream's place
-    /// while it replaces it (`tickerReplacesStream`), on the stream otherwise.
-    private func applyAuthorRowLayout() {
-        let shown = showsAuthorRow && hasMedia
-        authorRow.isHidden = !shown
-        authorLane.isHidden = !shown
-        let overAuthor: [NSLayoutConstraint] = [subtitleOverAuthor, emptyStateOverAuthor, scrimOverAuthor]
-        let overCaption: [NSLayoutConstraint] = [subtitleOverCaption, emptyStateOverCaption, scrimOverCaption]
-        // Off before on: two required bottoms at once would conflict.
-        NSLayoutConstraint.deactivate(shown ? overCaption : overAuthor)
-        NSLayoutConstraint.activate(shown ? overAuthor : overCaption)
-        let replaces = tickerReplacesStream
-        let tickerOff: NSLayoutConstraint = replaces ? tickerOverStream : tickerOverAuthor
-        let tickerOn: NSLayoutConstraint = replaces ? tickerOverAuthor : tickerOverStream
-        tickerOff.isActive = false
-        tickerOn.isActive = true
-    }
-
-    /// The author the row names, and the relation its badge says.
-    func setAuthorRow(_ model: FeedItemDisplayModel, badge: PersonPill.Badge, pipeline: ImagePipeline) {
-        let meta = SnapAuthorIdentityView.pillMetaLine(fromMeta: model.metaText)
-        authorRow.setName(model.authorName, handle: meta)
-        authorRow.avatar.setMonogram(MonogramAvatarView.monogram(name: model.authorName, handle: String(meta.dropFirst())))
-        authorRow.avatar.setPicture(model.avatarURL, pipeline: pipeline)
-        authorRow.avatar.frameID = model.avatarFrameID
-        authorRow.setBadge(badge, animated: false)
-        applyAuthorRowLayout()
-    }
-
-    /// The relation changed (a follow, from here or elsewhere), as the
-    /// author binding draws it (#1972).
-    func setAuthorRowBadge(_ badge: PersonPill.Badge, animated: Bool) {
-        authorRow.setBadge(badge, animated: animated)
-    }
 
     /// A comments surface was tapped (empty-state pill, subtitle zone, or
     /// ticker band — one fan-in, one path) — the cell forwards this as a
@@ -739,10 +581,10 @@ final class SnapChromeView: UIView {
         return hit === self ? nil : hit
     }
 
-    /// The column item (the sound cover, the actions, the like) under
-    /// `point`, if one takes touches there.
+    /// The column item (the sound cover, the like) under `point`, if one
+    /// takes touches there.
     private func columnItemHit(at point: CGPoint, with event: UIEvent?) -> UIView? {
-        for item in [soundBubble, postActions, boostButton] as [UIView] {
+        for item in [soundBubble, boostButton] as [UIView] {
             guard !item.isHidden, item.alpha > 0.01, item.isUserInteractionEnabled, item.window != nil else { continue }
             let local = convert(point, to: item)
             guard item.point(inside: local, with: event), let hit = item.hitTest(local, with: event) else { continue }
@@ -784,9 +626,6 @@ final class SnapChromeView: UIView {
             // Fixed: its stops are points (see `scrimView`).
             scrimView.heightAnchor.constraint(equalToConstant: Self.scrimHeight)
         }
-        // Its top: the caption block's, less the lead (`applyAuthorRowLayout`
-        // picks the author row's while it shows).
-        scrimOverCaption = scrimView.topAnchor.constraint(equalTo: captionLabel.topAnchor, constant: -Self.scrimLead)
 
         // Caption, over the scrim; its trailing edge stops one md short of the
         // sound bubble (`installSoundBubble`). The margins guide tracks the
@@ -1020,14 +859,10 @@ final class SnapChromeView: UIView {
         // On the caption — always two lines tall on a media page since #2252
         // (it was one line for a short caption with its time inline, the
         // owner 2026-10-16, and the stream came down a line: a jump between
-        // posts) — or on the author row standing on it, on the For You root
-        // (#1699).
-        subtitleOverCaption = subtitleView.bottomAnchor.constraint(equalTo: captionLabel.topAnchor, constant: -Spacing.md)
-        subtitleOverAuthor = subtitleView.bottomAnchor.constraint(equalTo: authorRow.topAnchor, constant: -Spacing.md)
-        tickerOverStream = commentTicker.bottomAnchor.constraint(equalTo: subtitleView.topAnchor, constant: -Spacing.md)
+        // posts).
         NSLayoutConstraint.activate([
-            subtitleOverCaption,
-            tickerOverStream,
+            subtitleView.bottomAnchor.constraint(equalTo: captionLabel.topAnchor, constant: -Spacing.md),
+            commentTicker.bottomAnchor.constraint(equalTo: subtitleView.topAnchor, constant: -Spacing.md),
             commentTicker.trailingAnchor.constraint(equalTo: railSeat.leadingAnchor, constant: -Spacing.md),
         ])
         commentTicker.fadesTrailingEdge = true
@@ -1045,15 +880,10 @@ final class SnapChromeView: UIView {
             commentEmptyState.trailingAnchor.constraint(lessThanOrEqualTo: parent.layoutMarginsGuide.trailingAnchor, constant: -Spacing.lg)
         }
         // md: it stands in the band's seat, so it keeps the band's harmonized
-        // seam against the caption — or against the author row (#1699).
-        emptyStateOverCaption = commentEmptyState.bottomAnchor.constraint(equalTo: captionLabel.topAnchor, constant: -Spacing.md)
-        emptyStateOverAuthor = commentEmptyState.bottomAnchor.constraint(equalTo: authorRow.topAnchor, constant: -Spacing.md)
-        emptyStateOverCaption.isActive = true
-        installAuthorRow()
-        scrimOverCaption.isActive = true
-        // The danmaku in the stream's seat (#1699): md over the author row,
-        // as the stream stands.
-        tickerOverAuthor = commentTicker.bottomAnchor.constraint(equalTo: authorRow.topAnchor, constant: -Spacing.md)
+        // seam against the caption.
+        commentEmptyState.bottomAnchor.constraint(equalTo: captionLabel.topAnchor, constant: -Spacing.md).isActive = true
+        // The scrim's top: the caption block's, less the lead.
+        scrimView.topAnchor.constraint(equalTo: captionLabel.topAnchor, constant: -Self.scrimLead).isActive = true
         commentEmptyState.onTap = { [weak self] in self?.onCommentsTapped?() }
         subtitleView.onTap = { [weak self] in self?.onCommentsTapped?() }
         commentTicker.onTap = { [weak self] in self?.onCommentsTapped?() }
@@ -1147,26 +977,11 @@ final class SnapChromeView: UIView {
         // floats between the caption and a glass bar, inside the content's
         // column.
         mediaPageBar.trailingAnchor.constraint(equalTo: soundStation.trailingAnchor).isActive = true
-        // The post's actions (#1681): one bubble wide, two tall, `gap` over
-        // the sound bubble.
-        postActionsStation.isUserInteractionEnabled = false
-        postActionsStation.constrain(in: self) { parent in
-            postActionsStation.trailingAnchor.constraint(
-                equalTo: parent.layoutMarginsGuide.trailingAnchor, constant: -SnapActionColumn.trailingInset
-            )
-            postActionsStation.widthAnchor.constraint(equalTo: bandSeat.heightAnchor)
-            postActionsStation.heightAnchor.constraint(equalTo: bandSeat.heightAnchor, multiplier: 2)
-            postActionsStation.bottomAnchor.constraint(equalTo: soundStation.topAnchor, constant: -SnapActionColumn.gap)
-        }
-        postActions.isHidden = true
         // The buttons are the glass column's items (#1872): the column is
         // their one glass, standing them on their stations.
         boostButton.drawsGlass = false
         soundBubble.drawsGlass = false
-        postActions.drawsGlass = false
-        for (id, button) in [
-            (ColumnItem.like, boostButton as UIView), (ColumnItem.actions, postActions), (ColumnItem.sound, soundBubble),
-        ] {
+        for (id, button) in [(ColumnItem.like, boostButton as UIView), (ColumnItem.sound, soundBubble)] {
             button.translatesAutoresizingMaskIntoConstraints = true
             glassColumn.register(button, for: id)
         }
@@ -1286,31 +1101,20 @@ final class SnapChromeView: UIView {
         return constraint
     }
 
-    /// The column with or without the post's actions (#1681): the like
-    /// pill and its rail rise by the capsule's room, the capsule shows on a
-    /// media page (the sound bubble's rule).
-    private func applyPostActionsLayout() {
-        applyColumnSeat()
-        applySoundVisibility()
-        setNeedsLayout()
-    }
-
     /// The column's stations as the page stands (#2326): risen by the
-    /// column's lift on a media page at rest — the like pill, the post's
-    /// actions and the sound together, the rail's bottom with them — and the
-    /// like pill and its rail risen by the capsule's room (#1681) while the
-    /// capsule shows. The like pill's top hangs off the band's seat, which
-    /// already rose by the cover line's lift with the caption floor: only
-    /// the difference is added. True when a constant changed.
+    /// column's lift on a media page at rest — the like pill and the sound
+    /// together, the rail's bottom with them. The like pill's top hangs off
+    /// the band's seat, which already rose by the cover line's lift with the
+    /// caption floor: only the difference is added. True when a constant
+    /// changed.
     @discardableResult
     private func applyColumnSeat() -> Bool {
-        let actionsLift: CGFloat = showsPostActions ? SnapPostActionsCapsule.columnExtent : 0
         let column = currentColumnLineLift
         let overBand = currentCoverLineLift - column
         let constants: [(NSLayoutConstraint?, CGFloat)] = [
-            (boostStationTop, -actionsLift + overBand),
-            (boostStationBottom, -(Self.boostStationBottomInset + actionsLift + column)),
-            (railBottom, -actionsLift + overBand),
+            (boostStationTop, overBand),
+            (boostStationBottom, -(Self.boostStationBottomInset + column)),
+            (railBottom, overBand),
             (soundStationBottom, -(SnapActionColumn.inputRestingGap + column)),
         ]
         var changed = false
@@ -1327,9 +1131,6 @@ final class SnapChromeView: UIView {
     /// Share (#1999), on the same frame.
     private func applySoundVisibility() {
         soundBubble.isHidden = soundFace == nil && !soundBubble.sharesPost
-        // The post's actions (#1681) are media chrome too: a text page's
-        // composer holds them.
-        postActions.isHidden = !showsPostActions || soundFace == nil
         // The glass column stands what shows (#1872).
         setNeedsLayout()
     }
@@ -1418,17 +1219,17 @@ final class SnapChromeView: UIView {
     /// #1722: every feed, the flight replica included).
     private func applyFixedInsets() {
         guard var insets = fixedInsets else { return }
-        insets.bottom += sitsOverTabBar ? SnapActionColumn.shotsBottomBreath : SnapActionColumn.bottomBreath
+        insets.bottom += SnapActionColumn.bottomBreath
         insetsLayoutMarginsFromSafeArea = false
         layoutMargins = insets
         // The breath is in the margins now: the glass is that much nearer.
         applyPageBarPlacement()
     }
 
-    /// The strip's centre for this chrome as it stands: over the tab bar or
-    /// the toolbar, with the breath in its margins once a feed handed them.
+    /// The strip's centre for this chrome as it stands: over the toolbar,
+    /// with the breath in its margins once a feed handed them.
     private var currentPageBarCenterOffset: CGFloat {
-        Self.pageBarCenterOffset(overTabBar: sitsOverTabBar, breathApplied: fixedInsets != nil)
+        Self.pageBarCenterOffset(breathApplied: fixedInsets != nil)
     }
 
     /// Re-centres the strip (#2252): the bar under it, the breath and the
@@ -1445,14 +1246,14 @@ final class SnapChromeView: UIView {
     /// media page's; a text page keeps #2252's line.
     private var currentCoverLineLift: CGFloat {
         guard hasMedia else { return 0 }
-        return onPixels(Self.coverLineLift(overTabBar: sitsOverTabBar, breathApplied: fixedInsets != nil))
+        return onPixels(Self.coverLineLift(breathApplied: fixedInsets != nil))
     }
 
     /// The column's lift for this chrome as it stands (#2326): a media
     /// page's; a text page keeps #2252's line.
     private var currentColumnLineLift: CGFloat {
         guard hasMedia else { return 0 }
-        return onPixels(Self.columnLineLift(overTabBar: sitsOverTabBar, breathApplied: fixedInsets != nil))
+        return onPixels(Self.columnLineLift(breathApplied: fixedInsets != nil))
     }
 
     /// On the pixel grid, so the band, the floor, the column and the rail's
@@ -1586,7 +1387,6 @@ final class SnapChromeView: UIView {
         // chrome (seeded on every post type below); the "+" that rides it
         // is not — see its assignment.
         hasMedia = model.mediaURL != nil
-        applyAuthorRowLayout()
         // ⚠️ THE CAPTION'S GEOMETRY AT CONFIGURE, never at a page count
         // (#1724: the flight replica of a single picture never gets one, and
         // the caption jumped at the landing). Since #2252 there is one seat;
@@ -1641,7 +1441,6 @@ final class SnapChromeView: UIView {
         applyLikeBadge(animated: false)
         applySoundVisibility()
         if !hasMedia {
-            tickerCarriesReactions = false
             commentTicker.setComments([])
             subtitleView.setCues([])
             commentEmptyState.setVisible(false)
@@ -1948,12 +1747,7 @@ final class SnapChromeView: UIView {
             commentTicker.setReservesBand(!streams.reactions.isEmpty)
         }
         subtitleView.setCommentCount(streams.commentCount)
-        // A danmaku WITH BUBBLES TO SHOW replaces the stream on the For You
-        // root (#1699): no cues, so the zone hides itself. None — or Reduce
-        // Motion, which keeps the band down — and the stream stays.
-        tickerCarriesReactions = !streams.reactions.isEmpty && !MotionPreference.reducesMotion
-        subtitleView.setCues(tickerReplacesStream ? [] : streams.subtitles)
-        applyAuthorRowLayout()
+        subtitleView.setCues(streams.subtitles)
         // THE COUNT IS THE WHOLE CONDITION (product rule 2026-08-08): no
         // comments → the pill; one or more → the comment stream speaks for
         // the post and the pill stays down. The zone is never blank on
@@ -2266,13 +2060,10 @@ final class SnapChromeView: UIView {
     /// the available one — the way out of a post should not blink away because
     /// a thumb landed on a clip's bar.
     ///
-    /// The save and share capsule is in here with the like pill and the sound
-    /// bubble, its neighbours in the column (#1847): left standing, it was the
-    /// only piece of the post beside the filmstrip.
     private var scrubFadedViews: [UIView] {
         // The column fades as one glass (#1872): its bubbles' glass would
         // stay behind the buttons' faded faces.
-        [captionLabel, commentTicker, subtitleView, commentEmptyState, shortcutRail, glassColumn, authorRow]
+        [captionLabel, commentTicker, subtitleView, commentEmptyState, shortcutRail, glassColumn]
     }
 
     /// What each faded view was worth before the scrub took it, so the fade
@@ -2476,7 +2267,6 @@ final class SnapChromeView: UIView {
     /// The glass column's items (#1872).
     enum ColumnItem {
         static let like = "like"
-        static let actions = "actions"
         static let sound = "sound"
     }
 
@@ -2492,7 +2282,6 @@ final class SnapChromeView: UIView {
         let sound = slot(ColumnItem.sound, soundBubble, soundStation)
         return [
             slot(ColumnItem.like, boostButton, boostStation),
-            slot(ColumnItem.actions, postActions, postActionsStation),
             sound,
         ].compactMap { $0.map { [$0] } }
     }
@@ -2521,7 +2310,7 @@ final class SnapChromeView: UIView {
         // ⚠️ AND ON EACH ITEM (#1872): a glass's content takes the ink the
         // glass picks over what is behind it, and the column's ink is the
         // page's choice — white over media, whatever the picture.
-        for item in [boostButton as UIView, soundBubble, postActions] {
+        for item in [boostButton as UIView, soundBubble] {
             item.overrideUserInterfaceStyle = style
         }
     }
@@ -2566,7 +2355,6 @@ final class SnapChromeView: UIView {
         onBoostRequested = nil
         onBoostUndoRequested = nil
         hasMedia = true
-        tickerCarriesReactions = false
         commentTicker.reset()
         boostButton.isHidden = true
         boostButton.setSpentTotal(0)

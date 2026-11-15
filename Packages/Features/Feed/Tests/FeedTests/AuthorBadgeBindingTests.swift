@@ -92,22 +92,6 @@ struct AuthorBadgeBindingTests {
         #expect(pill.drawn.last == .following)
         #expect(pill.animated.last == false)
     }
-
-    /// The For You root's page: a cell configured before its author's
-    /// answer lands wears the badge once it lands, without a reconfigure —
-    /// though it is in no window.
-    @Test func aPreparedCellWearsTheBadgeOnceTheAnswerLands() async {
-        let graph = AnsweringGraph(answers: [ava: .notFollowing])
-        let store = SnapAuthorFollowStore(writer: graph, reader: graph)
-        let binding = AuthorBadgeBinding(store: store)
-        store.onRelationChange = { binding.relationDidChange(for: $0) }
-        let cell = SnapFeedCell(frame: CGRect(x: 0, y: 0, width: 400, height: 800))
-        binding.bind(cell, to: ava)
-        #expect(cell.authorRowBadgeSymbol == nil, "an unknown relation drew a badge")
-        await Self.settle { cell.authorRowBadgeSymbol != nil }
-        #expect(cell.authorRowBadgeSymbol != nil, "the prepared cell never wore its author's badge")
-        #expect(cell.window == nil)
-    }
 }
 
 /// A pill that records what it was told to draw.

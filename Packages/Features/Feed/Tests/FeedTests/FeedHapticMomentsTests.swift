@@ -101,14 +101,4 @@ struct FeedHapticMomentsTests {
         #expect(!played.isEmpty)
         #expect(played.count < crossed, "a flick across \(crossed) detents played \(played.count)")
     }
-
-    /// The Shots author row's hold is `held`, once.
-    @Test func theShotsAuthorRowsHoldIsHeldOnce() {
-        let chrome = SnapChromeView(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
-        var opened = 0
-        chrome.onAuthorLongPressed = { opened += 1 }
-        let played = HapticRecorder.recording { chrome.debugHoldAuthorRow() }
-        #expect(played == [.held])
-        #expect(opened == 1)
-    }
 }
