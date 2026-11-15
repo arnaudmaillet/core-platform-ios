@@ -212,21 +212,19 @@ struct SnapSideListTests {
         #expect(feed.zoomVerticalDismissalPermitted(at: middle, in: feed.view), "the first post lost its dismiss")
     }
 
-    /// The post share sheet's own chips (#1710, #1712): Repost, then the ⋯
-    /// menu's Not interested and Report — Report only with somewhere to file.
-    @Test func theShareSheetOffersRepostNotInterestedAndReport() {
-        // Shots — the For You root — offers Repost; a pushed post does not
-        // (its toolbar carries it, #1728).
+    /// The post share sheet's own chips (#1710, #1712): the ⋯ menu's Not
+    /// interested and Report — Report only with somewhere to file.
+    @Test func theShareSheetOffersNotInterestedAndReport() {
+        // A pushed media post offers no Repost: its toolbar carries it
+        // (#1728).
         let feed = feed(sideList: false)
-        feed.isForYouRoot = true
-        #expect(feed.shareSheetActions(for: PostID("p1")).map(\.title) == ["Repost", "Not interested", "Report"])
+        #expect(feed.shareSheetActions(for: PostID("p1")).map(\.title) == ["Not interested", "Report"])
 
         let unfiled = SnapFeedViewController(
             viewModel: FeedViewModel(repository: SideListProvider()),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
         )
-        unfiled.isForYouRoot = true
-        #expect(unfiled.shareSheetActions(for: PostID("p1")).map(\.title) == ["Repost", "Not interested"],
+        #expect(unfiled.shareSheetActions(for: PostID("p1")).map(\.title) == ["Not interested"],
                 "Report offered with nowhere to file it")
     }
 

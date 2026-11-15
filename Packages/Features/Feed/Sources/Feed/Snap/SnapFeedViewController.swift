@@ -316,15 +316,6 @@ final class SnapFeedViewController: UIViewController {
     /// is exactly the bug this would otherwise become.
     public var zoomOwnsInteractiveDismissal = true
 
-    /// (#1681): this feed IS the
-    /// For You tab's root. The author pill leads the TOP bar's trailing run
-    /// (beside the points), the shell's bell leads its other end, there is no
-    /// toolbar — save and repost stand upright in the action column, the ⋯
-    /// is gone — and the tab bar holds the bottom, stepping aside while a
-    /// media post's comments are open. Set by the builder before the view
-    /// loads.
-    public var isForYouRoot = false
-
     /// The shell's bell — the For You root's leading item while no back
     /// arrow or ✕ holds the edge (`HeaderAccessoryHosting`).
     private var leadingAccessoryItem: UIBarButtonItem?
@@ -846,9 +837,6 @@ final class SnapFeedViewController: UIViewController {
     }
 
     private var isClosable: Bool {
-        // The For You root never closes — and under the sector (#1703) it is
-        // not its stack's first controller either.
-        if isForYouRoot { return false }
         if presentingViewController != nil { return true }
         guard let nav = navigationController else { return false }
         return nav.viewControllers.first !== self
@@ -1601,13 +1589,6 @@ final class SnapFeedViewController: UIViewController {
         if isMovingFromParent || isBeingDismissed || navigationController == nil {
             closeSideListForDismissal()
         }
-        // …and the For You root's, left for Feed or another tab (#1703, the
-        // owner) — not for a screen pushed over it (the swipe chain's
-        // profile), which comes back to the list it left.
-        else if isForYouRoot, let nav = navigationController,
-                nav.topViewController === self || nav.topViewController === parent {
-            closeSideListForDismissal()
-        }
         // ⚠️ HERE, NOT IN `viewWillDisappear`. A cancelled drag-back fires that
         // one, and on a cold open a grab is possible for the whole wait — so
         // tearing down there would strip the skeletons and leave the viewer
@@ -1891,22 +1872,22 @@ final class SnapFeedViewController: UIViewController {
                     guard let id = cell?.representedPostID else { return }
                     self?.commentsPanel(for: id)?.scrollToStart(animated: true)
                 }
-                // The For You root's save and repost (#1681), in the column.
-                cell.setPostActions(shown: self.isForYouRoot, saved: self.bookmarks.isSaved(id.rawValue))
+                // Save and repost stand in the toolbar, not the column: the
+                // column's pair was Shots' (#1681), gone with it (#2453).
+                cell.setPostActions(shown: false, saved: self.bookmarks.isSaved(id.rawValue))
                 // A text page's like, in the footer when there is one (#1924).
                 cell.setLikeInFooter(self.footerCarriesTextLike)
-                // …and its bottom block one breath higher over the tab bar,
-                // no room for an absent strip (#1716).
-                cell.setSitsOverTabBar(self.isForYouRoot)
-                // …and its author, inside the page without glass (#1699): the
-                // pill's own taps — the card, the profile on a hold, the "+".
+                // No tab bar under a pushed page (#1716 was Shots').
+                cell.setSitsOverTabBar(false)
+                // The author is the toolbar's pill; the in-page row was Shots'
+                // (#1699).
                 cell.setAuthorRow(
-                    shown: self.isForYouRoot, model: model,
+                    shown: false, model: model,
                     badge: self.followStore.badge(for: model.authorID), pipeline: self.imagePipeline
                 )
                 // Bound to its author (#1972): a page configured ahead of
                 // time — prefetched — hears its author's answer too.
-                self.authorBadges.bind(cell, to: self.isForYouRoot ? model.authorID : nil)
+                self.authorBadges.bind(cell, to: nil)
                 let author = model.authorID
                 cell.onRequestAuthorCard = { [weak self] in
                     guard let self else { return }
@@ -1961,20 +1942,6 @@ final class SnapFeedViewController: UIViewController {
         applyTrailingNavItems(engagedTrailingItems(), animated: animated)
 
         applyLeadingNavItem(engaged: engaged, hasMedia: hasMedia, animated: animated)
-        // The toolbar is state-invariant: the ⋯ keeps its bubble in every
-        // state, because the menu it holds is not about the layout.
-        applyForYouRootTabBar()
-    }
-
-    /// The For You root's tab bar (#1681): it holds the bottom (#1699, the owner 2026-10-24): it STAYS while a media post's comments
-    /// are open — their composer rests above it — so this only brings it back
-    /// where something hid it, through UIKit's own animation
-    /// (`TabBarRevealPolicy`). A placeholder toolbar in its place was tried
-    /// and dropped the same day.
-    private func applyForYouRootTabBar() {
-        guard isForYouRoot, let tabBarController, view.window != nil,
-              tabBarController.isTabBarHidden else { return }
-        tabBarController.showTabBarNatively()
     }
 
     /// Gives both pills their FIXED widths for the bars as they stand — see
@@ -2043,32 +2010,12 @@ final class SnapFeedViewController: UIViewController {
         applyAuthorWidthBudget(bar: bar, sortOnBar: sortOnBar)
     }
 
-    /// The pill's room: the top bar's on the For You root, else the footer's
-    /// — less the like's on a text post (#1924), so the run never folds.
+    /// The pill's room: the footer's, less the like's on a text post (#1924),
+    /// so the run never folds.
     private func applyAuthorWidthBudget(bar: CGFloat? = nil, sortOnBar: Bool? = nil) {
         guard let widths = barPillWidths else { return }
-        if isForYouRoot {
-            guard let bar else { return }
-            authorWidthBudget = forYouRootPillBudget(bar: bar, sortOnBar: sortOnBar ?? false)
-        } else {
-            authorWidthBudget = footerLikeItem == nil ? widths.toolbarAuthor : widths.toolbarAuthorBesideLike
-        }
+        authorWidthBudget = footerLikeItem == nil ? widths.toolbarAuthor : widths.toolbarAuthorBesideLike
         authorIdentityView.setWidthBudget(authorWidthBudget)
-    }
-
-    /// The For You root's pill (#1681): what the top bar leaves it — its
-    /// margins, the leading bubble (bell, arrow or ✕) and the sort beside
-    /// it, the points — each with UIKit's item padding and the gap between
-    /// bubbles, so the run never folds into "•••".
-    private func forYouRootPillBudget(bar: CGFloat, sortOnBar: Bool) -> CGFloat {
-        let padding: CGFloat = 18
-        let gap = Spacing.sm
-        var used: CGFloat = 16 * 2 + padding + 44 + padding + gap
-        if sortOnBar { used += commentTabs.width + padding + gap }
-        if walletBadgeItem != nil {
-            used += walletBadge.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width + padding + gap
-        }
-        return max(80, bar - used)
     }
 
     /// The widths `applyBarPillWidths` last gave the pills.
@@ -2078,9 +2025,7 @@ final class SnapFeedViewController: UIViewController {
     /// post's thread is open, the points, and — engaged under Recent, once a
     /// day chip has gone under the header — the day (#757).
     private func engagedTrailingItems() -> [UIBarButtonItem] {
-        // The For You root keeps its author in every state (#1681): the
-        // thread's day would crowd it off a phone's bar.
-        guard engagedChromeOnBar, !isForYouRoot else { return restingTrailingItems() }
+        guard engagedChromeOnBar else { return restingTrailingItems() }
         // The comments' ✕ is the LEADING button now (#1192), not a trailing
         // item.
         var items: [UIBarButtonItem] = []
@@ -2173,11 +2118,6 @@ final class SnapFeedViewController: UIViewController {
     /// pill with the badge to its left, spacer-separated so iOS 26 never
     /// fuses them into one platter.
     private func restingTrailingItems() -> [UIBarButtonItem] {
-        // The For You root (#1681): the points alone — its author is INSIDE
-        // the page since #1699, no longer the top bar's pill.
-        if isForYouRoot {
-            return walletBadgeItem.map { [$0] } ?? []
-        }
         // The pill is the toolbar's (#671): the nav bar holds the points alone.
         return walletBadgeItem.map { [$0] } ?? []
     }
@@ -2379,9 +2319,7 @@ final class SnapFeedViewController: UIViewController {
         // drawn below with the pill's own swap rules.
         defer { authorBadges.bind(barAuthorBadge, to: model.authorID) }
         let shown = authorIdentityView.shownAuthor?.authorID
-        // The For You root wears the pill in no bar (#1699): nothing to
-        // transition, so no fresh pill per page of the tab's endless scroll.
-        guard let shown, shown != model.authorID, !isForYouRoot else {
+        guard let shown, shown != model.authorID else {
             pendingAuthor = nil
             authorIdentityView.setAuthor(model, pipeline: imagePipeline, animated: false)
             authorIdentityView.setFollowBadge(badge, animated: canAnimateBarItems)
@@ -2440,8 +2378,6 @@ final class SnapFeedViewController: UIViewController {
         authorItem = makeAuthorItem()
         // The toolbar's leading item (#671).
         defaultToolbarItems = defaultToolbarItems.map { $0 === previousItem ? authorItem : $0 }
-        // The For You root wears no pill in any bar (#1699).
-        if isForYouRoot { return }
         guard var items = toolbarItems, let index = items.firstIndex(of: previousItem) else { return }
         items[index] = authorItem
         setToolbarItems(items, animated: animated)
@@ -2525,7 +2461,6 @@ final class SnapFeedViewController: UIViewController {
         // Named now, while the pill shows them: by the time the graph answers
         // the viewer may have swiped to someone else.
         let name = authorIdentityView.shownAuthor.flatMap { $0.authorID == author ? Self.followName(of: $0) : nil }
-            ?? (isForYouRoot ? modelsByID.values.first { $0.authorID == author }.map(Self.followName(of:)) : nil)
         let followed = followStore.follow(author) { [weak self] in
             guard let self else { return }
             // The "+" comes back — and says why (#802): a mark that undoes
@@ -2694,10 +2629,6 @@ final class SnapFeedViewController: UIViewController {
         // the comments exit is the nav bar's ✕, and the sort selector is the
         // nav bar's too (`setEngagedChrome`).
         defaultToolbarItems = [authorItem, footerFlexibleSpace, bookmarkItem, repost, shareSeparator, sound]
-        // The For You root wears no toolbar (#1681): the tab bar holds the
-        // bottom, the pill is the top bar's, save and repost are the action
-        // column's.
-        if isForYouRoot { defaultToolbarItems = [] }
         #if DEBUG
         // `-no-toolbar`: the upper bound on what trimming the footer can buy.
         // Measured (push work, 3 runs): the floating bar's machinery costs ~45
@@ -2733,14 +2664,6 @@ final class SnapFeedViewController: UIViewController {
         // different offers, and a reader who cannot see the fill has only this.
         bookmarkItem.accessibilityLabel = saved ? "Saved" : "Save"
         bookmarkItem.image = SnapFooterToolbar.saveImage(saved: saved)
-        // The For You root draws it in the column (#1681) — the page's, and
-        // the composer's on a text page.
-        if isForYouRoot {
-            snapCell(for: id)?.setPostSaved(saved)
-            if let detail = commentsContentVC as? PostDetailViewController, detail.postID == id {
-                detail.setPostSaved(saved)
-            }
-        }
     }
 
     /// The save glyph (#1128): the star, outline at rest; filled in the
@@ -2776,12 +2699,6 @@ final class SnapFeedViewController: UIViewController {
     /// call to prove it on a device.
     private func presentToolbar() {
         guard let nav = navigationController else { return }
-        // The For You root (#1681): the tab bar's bottom, no toolbar — with
-        // the comments open too (#1699).
-        if isForYouRoot {
-            if !nav.isToolbarHidden { nav.setToolbarHidden(true, animated: false) }
-            return
-        }
         toolbarHost = nav
 
         // The stack's toolbar is shown by this screen alone, so configuring
@@ -3630,11 +3547,10 @@ final class SnapFeedViewController: UIViewController {
         applyRailSlot(to: previewRestingVC)
     }
 
-    /// Whether `model`'s slot is its Share (#1999): every pushed page — a
-    /// text post has no sound, and a media post's moves to the footer. The
-    /// For You root keeps its column as it is (#1681): no toolbar there.
+    /// Whether `model`'s slot is its Share (#1999): every page — a text post
+    /// has no sound, and a media post's moves to the footer.
     func slotSharesPost(_ model: FeedItemDisplayModel) -> Bool {
-        !isForYouRoot
+        true
     }
 
     /// Whether the way back's hold over Share arms it (#1999): a media
@@ -3678,15 +3594,15 @@ final class SnapFeedViewController: UIViewController {
             holdArms: slotHoldArmsShare(model)
         )
         detail.setRailSoundFace(face, keepsSlot: face != nil || sharesInSlot)
-        // The For You root's save and repost (#1681), in the composer's
-        // column too — drawn on a text page, reserved under a media page's.
+        // The composer's column holds no save and repost: they were Shots'
+        // (#1681).
         detail.setPostActions(
-            shown: isForYouRoot, saved: bookmarks.isSaved(id.rawValue),
+            shown: false, saved: bookmarks.isSaved(id.rawValue),
             onSave: { [weak self] in self?.toggleBookmark(for: id) },
             onShare: { [weak self] in self?.presentShareSheet(for: id) }
         )
-        // …and the composer on the page's breath over the bar (#1716, #1722).
-        detail.setComposerLift(isForYouRoot ? SnapActionColumn.shotsBottomBreath : SnapActionColumn.bottomBreath)
+        // …and the composer on the page's breath (#1716, #1722).
+        detail.setComposerLift(SnapActionColumn.bottomBreath)
         // A remote cover loads in the rail's own slot (#1772).
         // A tap opens the sound sheet — the bubble's (#683). No hold since
         // #1931: no in-app mute.
@@ -6010,11 +5926,10 @@ final class SnapFeedViewController: UIViewController {
     /// may read (#1409), Report only with somewhere to file it. Both leave
     /// the sheet first.
     func shareSheetActions(for id: PostID) -> [ShareSheetAction] {
-        // Repost on Shots, and on a text page, whose footer gave its place to
-        // the like (#1924); a pushed media post's toolbar carries it (#1728,
-        // the owner).
+        // Repost on a text page, whose footer gave its place to the like
+        // (#1924); a media post's toolbar carries it (#1728, the owner).
         var actions: [ShareSheetAction] = []
-        if isForYouRoot || footerLikeFace?.id == id {
+        if footerLikeFace?.id == id {
             actions.append(ShareSheetAction(title: "Repost", symbol: PostActionSymbol.repost, dismissesSheet: false) {
                 [weak self] in self?.repostRequested()
             })
@@ -6612,11 +6527,8 @@ extension SnapFeedViewController: SnapFeedSettleReporting {
 // MARK: - ZoomTransitionDestination
 
 extension SnapFeedViewController: ZoomTransitionDestination {
-    /// A full-bleed feed covers the tab bar — except the For You ROOT
-    /// (#1681), which shows it: the shell's reconciliation
-    /// (`syncTabBarVisibility`) read the default and hid the bar there on a
-    /// tab switch (#1699).
-    public var concealsAppTabBar: Bool { !isForYouRoot }
+    /// A full-bleed feed covers the tab bar.
+    public var concealsAppTabBar: Bool { true }
 
     public func zoomTargetFrame(in container: UICoordinateSpace) -> CGRect {
         view.convert(view.bounds, to: container)
@@ -7688,9 +7600,6 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         guard orderedIDs.indices.contains(index),
               let model = modelsByID[orderedIDs[index]] else { return }
         chrome.configure(with: model)
-        // The page's own breath over the bar (#1722): the replica lands where
-        // the live chrome stands.
-        chrome.sitsOverTabBar = isForYouRoot
         chrome.setPostLikeCount(viewModel.visibleLikeCount(for: model))
         chrome.setImagePipeline(imagePipeline)
         // ⚠️ THE REPLICA CARRIES EVERYTHING THE PAGE'S CHROME WILL SHOW AT
@@ -7869,16 +7778,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         async let similar = sideListEntries?() ?? []
         async let shown = viewModel.entry(for: anchor)
         let (entries, anchorEntry) = await (similar, shown)
-        // ⚠️ THE FOR YOU ROOT'S FEED IS THE POOL ITSELF (#1703): every post
-        // the list draws from is already loaded there, so leaving out the
-        // whole feed left the list with the post on show alone. There, only
-        // what the viewer has already scrolled past is left out.
-        let inFeed: Set<PostID>
-        if isForYouRoot, let index = orderedIDs.firstIndex(of: anchor) {
-            inFeed = Set(orderedIDs[...index])
-        } else {
-            inFeed = Set(orderedIDs)
-        }
+        let inFeed = Set(orderedIDs)
         let kind: SnapFeedKindScope? = modelsByID[anchor].map { $0.mediaURL == nil ? .text : .media }
         var seen: Set<PostID> = [anchor]
         let others = entries.filter { entry in
