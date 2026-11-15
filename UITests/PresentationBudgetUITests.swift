@@ -95,29 +95,27 @@ final class PresentationBudgetUITests: XCTestCase {
     /// of two, with ~1.6x head-room. Each names the charter PR that owns
     /// bringing it down.
     @MainActor private static let routes: [Route] = [
-        Route("for-you → post → back", ["-select-tab", "1"],
-              ceilingMs: 650, trackedBy: "charter PR 5b (feed first layout)", drive: firstCellThenBack),
-        Route("messages → thread → back", ["-select-tab", "2"],
+        Route("messages → thread → back", ["-select-tab", "1"],
               ceilingMs: 950, trackedBy: "charter PR 5b (thread first layout)", drive: firstCellThenBack),
-        Route("profile → post → back", ["-select-tab", "3"],
+        Route("profile → post → back", ["-select-tab", "2"],
               ceilingMs: 550, trackedBy: "charter PR 5b (feed first layout)", drive: firstCellThenBack),
         // PR 3 (#193, lazy pager pages): 3 lists rendered at push → 1.
         // Harness alone 212–334 ms on a loaded host; what remains is the one
         // page's skeleton rows and the accessory's settle.
-        Route("profile → relationships", ["-select-tab", "3", "-profile-relationships"],
+        Route("profile → relationships", ["-select-tab", "2", "-profile-relationships"],
               ceilingMs: 550, trackedBy: "charter PR 3 (done); what remains is the page itself"),
-        Route("profile → share sheet", ["-select-tab", "3", "-profile-share-demo"],
+        Route("profile → share sheet", ["-select-tab", "2", "-profile-share-demo"],
               ceilingMs: 350, trackedBy: "charter PR 7"),
         // 313 ms on a quiet host, 737 ms with three builds running beside the
         // sweep: the ratchet is for regressions of the CODE, so the routes
         // the fix PRs have not reached carry ~2.5x head-room, not 1.6x.
         Route("map pin → feed", ["-select-tab", "0", "-maps-open-first-pin"],
               ceilingMs: 800, trackedBy: "charter PR 5b"),
-        Route("+ → text post", ["-select-tab", "1"],
+        Route("+ → text post", ["-select-tab", "0"],
               ceilingMs: 550, trackedBy: "charter PR 5c", drive: createMenu("Text Post")),
         // PR 2 (the picker's library off the main actor): 514 → ~200 ms
         // under XCUITest. The remaining cost is the sheet's own presentation.
-        Route("+ → upload media", ["-select-tab", "1"],
+        Route("+ → upload media", ["-select-tab", "0"],
               ceilingMs: 320, trackedBy: "charter PR 2 (done); what remains is the sheet", drive: createMenu("Upload Media")),
     ]
 

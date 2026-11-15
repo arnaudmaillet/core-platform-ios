@@ -27,7 +27,6 @@ struct TabGlyphTests {
     /// The owner's glyphs, by tab.
     @Test func eachTabWearsTheOwnersGlyph() {
         #expect(TabGlyph.explore.symbol(selected: false, badged: false) == .paperplane)
-        #expect(TabGlyph.forYou.symbol(selected: false, badged: false) == .squarePlay)
         #expect(TabGlyph.messages.symbol(selected: false, badged: false) == .chats)
     }
 

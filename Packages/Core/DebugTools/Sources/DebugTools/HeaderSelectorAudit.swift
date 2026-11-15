@@ -49,19 +49,17 @@ public final class HeaderSelectorAudit {
     /// view — where this audit could never have found it anyway. It is in the
     /// bottom accessory now, which is somewhere the audit looks.
     ///
-    /// `.forYou` IS TOO, since its Feed | Shots sector (2026-10-25): the note
-    /// here said a selector there would be the bug, which was true from #312
-    /// to the sector and has not been since.
-    private let mustHaveSelector: Set<AppTab> = [.forYou, .messages, .profile]
+    /// For You was too, with its Feed | Shots sector, until it left the bar
+    /// (#2453).
+    private let mustHaveSelector: Set<AppTab> = [.messages, .profile]
 
     /// Where each surface's selector belongs (#2337, the owner 2026-11-12).
     /// The paged TAB ROOTS wear theirs in the navigation bar, right of the
-    /// bell (`BarSelectorItem`): For You's Feed | Shots since 2026-10-25,
-    /// Messages' Chats | Requests | Suggestions since #2337 — it hung in the
+    /// bell (`BarSelectorItem`): Messages' Chats | Requests | Suggestions
+    /// since #2337 (and For You's Feed | Shots until #2453) — it hung in the
     /// bottom accessory from PR #154 until then. The profile keeps the
     /// accessory: its tabs are sections of one page under a hero header.
     private let expectedHost: [AppTab: SelectorHost] = [
-        .forYou: .navigationBar,
         .messages: .navigationBar,
         .profile: .bottomAccessory,
     ]

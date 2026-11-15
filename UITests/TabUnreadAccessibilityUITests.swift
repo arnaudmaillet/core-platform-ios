@@ -11,7 +11,7 @@ final class TabUnreadAccessibilityUITests: XCTestCase {
     func testAnUnreadTabCarriesItsValue() {
         let app = XCUIApplication()
         // The mock's inbox opens with unread conversations.
-        app.launchArguments = ["-mock-auto-login", "-switch-tab", "1"]
+        app.launchArguments = ["-mock-auto-login", "-switch-tab", "0"]
         app.launch()
 
         let messages = app.tabBars.buttons["Messages"]

@@ -180,7 +180,7 @@ enum DebugDashboardWiring {
 
     private static let launchOnly: [(String, String)] = [
         ("-guest", "As a guest"),
-        ("-select-tab 2", "On Messages"),
+        ("-select-tab 1", "On Messages"),
         ("-open-settings security", "On Security and Login"),
         ("-latency-bench", "UIKit's floor bench"),
         ("-lens-lab", "The lens lab"),
