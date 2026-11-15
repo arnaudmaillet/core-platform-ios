@@ -51,13 +51,15 @@ public enum AppSymbol: String, CaseIterable, Sendable {
     /// Gems, filled — the glyph beside an amount (`GemSymbol.glyph`).
     case crownFilled = "core.crown.fill"
 
-    // The tab bar's own glyphs (#1191), drawn by the owner from Phosphor:
-    // each an outline, a fill (the selected tab), and both with a badge
-    // layer (unread) — palette layer 0 the glyph, layer 1 the badge.
-    case paperplane = "core.paperplane"
-    case paperplaneFill = "core.paperplane.fill"
-    case paperplaneBadge = "core.paperplane.badge"
-    case paperplaneBadgeFill = "core.paperplane.badge.fill"
+    // The tab bar's own glyphs (#1191): each an outline, a fill (the
+    // selected tab), and both with a badge layer (unread) — palette layer 0
+    // the glyph, layer 1 the badge. Explore's is the owner's folded map with
+    // its pin, traced from their drawings (#2413, `dev/symbols/tabs/map`);
+    // the other two are drawn from Phosphor.
+    case map = "core.map"
+    case mapFill = "core.map.fill"
+    case mapBadge = "core.map.badge"
+    case mapBadgeFill = "core.map.badge.fill"
     case squarePlay = "core.square.play"
     case squarePlayFill = "core.square.play.fill"
     case squarePlayBadge = "core.square.play.badge"
@@ -101,7 +103,7 @@ public enum AppSymbol: String, CaseIterable, Sendable {
         case .saved: "Saved"
         case .share: "Share"
         case .crown, .crownFilled: GemSymbol.name
-        case .paperplane, .paperplaneFill, .paperplaneBadge, .paperplaneBadgeFill: "Explore"
+        case .map, .mapFill, .mapBadge, .mapBadgeFill: "Explore"
         case .squarePlay, .squarePlayFill, .squarePlayBadge, .squarePlayBadgeFill: "For You"
         case .chats, .chatsFill, .chatsBadge, .chatsBadgeFill: "Messages"
         case .play, .playCircle: "Play"

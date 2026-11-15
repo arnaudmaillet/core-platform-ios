@@ -30,10 +30,10 @@ public enum TabGlyph: CaseIterable, Sendable {
     /// The symbol for a tab's state.
     public func symbol(selected: Bool, badged: Bool) -> AppSymbol {
         switch (self, selected, badged) {
-        case (.explore, false, false): .paperplane
-        case (.explore, true, false): .paperplaneFill
-        case (.explore, false, true): .paperplaneBadge
-        case (.explore, true, true): .paperplaneBadgeFill
+        case (.explore, false, false): .map
+        case (.explore, true, false): .mapFill
+        case (.explore, false, true): .mapBadge
+        case (.explore, true, true): .mapBadgeFill
         case (.messages, false, false): .chats
         case (.messages, true, false): .chatsFill
         case (.messages, false, true): .chatsBadge
