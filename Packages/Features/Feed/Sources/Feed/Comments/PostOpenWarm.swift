@@ -1,5 +1,6 @@
 import CoreModels
 import Foundation
+import LaunchArguments
 
 /// Warms a post's first page of comments before it is opened (#2002), for
 /// every surface that opens a post full screen: the Feed, a profile's grid,
@@ -165,6 +166,6 @@ public final class PostOpenWarm {
     }
 
     #if DEBUG
-    private static let traces = ProcessInfo.processInfo.arguments.contains("-warm-log")
+    private static let traces = LaunchArgument.warmLog.isPassed()
     #endif
 }

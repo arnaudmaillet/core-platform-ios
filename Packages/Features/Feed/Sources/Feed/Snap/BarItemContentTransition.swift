@@ -1,5 +1,6 @@
 import Accelerate
 import DesignSystem
+import LaunchArguments
 import UIKit
 
 /// Changes what a bar item's custom view DRAWS through a blur — the old
@@ -202,7 +203,7 @@ final class BarItemContentTransition {
         #if DEBUG
         let started = CACurrentMediaTime()
         defer {
-            if ProcessInfo.processInfo.arguments.contains("-pill-probe") {
+            if LaunchArgument.pillProbe.isPassed() {
                 print(String(format: "[pill-probe] still %@ %.2fms",
                              "\(type(of: host))", (CACurrentMediaTime() - started) * 1000))
             }

@@ -1,5 +1,6 @@
 import CoreModels
 import CoreNavigation
+import LaunchArguments
 import MediaPlayback
 import UIKit
 
@@ -91,7 +92,7 @@ final class LandingLiveMediaRetry: NSObject {
         card.setZoomLandingLiveMedia(surface)
         stop()
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+        if LaunchArgument.zoomLiveLog.isPassed() {
             print(String(format: "[zoom-live] %.3f landing operand ADOPTED mid-flight",
                          CACurrentMediaTime()))
         }

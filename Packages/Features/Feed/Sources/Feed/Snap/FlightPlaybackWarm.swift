@@ -4,6 +4,7 @@ import Foundation
 import UIKit
 import MediaCore
 import MediaPlayback
+import LaunchArguments
 
 /// A post's page player, started before the post opens (#646).
 ///
@@ -74,7 +75,7 @@ public final class FlightPlaybackWarm: FeedPlaybackWarm {
                 pausesOnFirstFrame = false
                 pool.setPaused(true, in: surface)
                 #if DEBUG
-                if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+                if LaunchArgument.zoomLiveLog.isPassed() {
                     print("[zoom-live] preroll \(scope): first frame decoded, paused")
                 }
                 #endif

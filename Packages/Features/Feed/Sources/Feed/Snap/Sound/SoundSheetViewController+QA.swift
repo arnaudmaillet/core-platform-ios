@@ -2,6 +2,7 @@
 import CoreModels
 import CoreNavigation
 import DesignSystem
+import LaunchArguments
 import PostGrid
 import UIKit
 
@@ -26,12 +27,10 @@ extension SoundSheetViewController {
     func debugOpenTileIfRequested() {
         let arguments = ProcessInfo.processInfo.arguments
         guard !Self.didDebugOpenTile,
-              let position = arguments.firstIndex(of: "-sound-sheet-open"),
-              arguments.indices.contains(position + 1)
+              let mode = LaunchArgument.soundSheetOpen.value(in: arguments)
         else { return }
         Self.didDebugOpenTile = true
-        let mode = arguments[position + 1]
-        let closes = arguments.indices.contains(position + 2) && !arguments[position + 2].hasPrefix("-")
+        let closes = LaunchArgument.soundSheetOpen.value(at: 2, in: arguments).map { !$0.hasPrefix("-") } ?? false
         let parts = mode.split(separator: ">").map(String.init)
         let wantsText = parts.first == "text"
         let nextIsText: Bool? = parts.count > 1 ? parts[1] == "text" : nil

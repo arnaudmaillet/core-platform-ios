@@ -1,3 +1,4 @@
+import LaunchArguments
 import MediaPlayback
 import QuartzCore
 import UIKit
@@ -72,7 +73,7 @@ final class SnapCellPlayback: NSObject {
 
     /// A trace line naming the page's post and the surface it reads.
     private func traceFeed(_ event: String) {
-        guard ProcessInfo.processInfo.arguments.contains("-media-log") else { return }
+        guard LaunchArgument.mediaLog.isPassed() else { return }
         let view = surface()
         print(String(format: "[page-play] %.3f ", CACurrentMediaTime()) + "\(event) post=\(debugPostID()) surface=\(view.map { String(UInt(bitPattern: ObjectIdentifier($0).hashValue), radix: 16) } ?? "nil") feed=\(String(UInt(bitPattern: ObjectIdentifier(self).hashValue), radix: 16))")
     }
@@ -158,7 +159,7 @@ final class SnapCellPlayback: NSObject {
     /// identical from every other angle.
     private func traceViewerPlayback(_ action: String, paused: Bool) {
         #if DEBUG
-        guard ProcessInfo.processInfo.arguments.contains("-media-log") else { return }
+        guard LaunchArgument.mediaLog.isPassed() else { return }
         // A player that took the instruction now reads the OPPOSITE of the
         // state it was moved out of; one that never heard it reads unchanged.
         let advancing = surface().map { pool?.isAdvancing(in: $0) ?? false } ?? false
@@ -231,7 +232,7 @@ final class SnapCellPlayback: NSObject {
         }
         let head = pool?.playhead(in: view)
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-media-log") {
+        if LaunchArgument.mediaLog.isPassed() {
             // ⚠️ ONCE A SECOND, not thirty times: a trace that costs more than
             // the thing it watches changes what it is watching. The fraction
             // and the length together, because a nil here has two causes — no
@@ -331,8 +332,7 @@ final class SnapCellPlayback: NSObject {
     static let scrubSeekTolerance: Double = {
         #if DEBUG
         let arguments = ProcessInfo.processInfo.arguments
-        if let position = arguments.firstIndex(of: "-scrub-tolerance"),
-           position + 1 < arguments.count, let seconds = Double(arguments[position + 1]) {
+        if let seconds = LaunchArgument.scrubTolerance.doubleValue(in: arguments) {
             return seconds
         }
         #endif
@@ -381,7 +381,7 @@ final class SnapCellPlayback: NSObject {
     func beginScrub() {
         #if DEBUG
         guard let pool, let view = surface() else { return }
-        if ProcessInfo.processInfo.arguments.contains("-scrub-log") {
+        if LaunchArgument.scrubLog.isPassed() {
             print(String(format: "[scrub] %.3f began paused=%@", CACurrentMediaTime(),
                          pool.isPaused(in: view) == true ? "Y" : "N"))
         }
@@ -406,7 +406,7 @@ final class SnapCellPlayback: NSObject {
         pool.whenSeeksSettle(in: view) { [weak self] in
             guard let self else { return }
             #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-scrub-log") {
+            if LaunchArgument.scrubLog.isPassed() {
                 print(String(format: "[scrub] %.3f landed in %.0f ms head=%@", CACurrentMediaTime(),
                              (CACurrentMediaTime() - start) * 1000,
                              pool.playhead(in: view).map { String(format: "%.4f", $0.fraction) } ?? "nil"))

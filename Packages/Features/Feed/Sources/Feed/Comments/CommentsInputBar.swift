@@ -5,6 +5,7 @@ import MediaCore
 import UIKit
 import CoreModels
 import CoreNavigation
+import LaunchArguments
 
 /// THE ONE COMPOSER (#2308): a post's comments and a conversation's
 /// messages — and the text post's first message — in the app's native Liquid
@@ -1981,7 +1982,7 @@ final class CommentsInputBar: UIView {
             onPageSwipe?(.changed, dy, vy)
         case .ended:
             #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-gesture-log") {
+            if LaunchArgument.gestureLog.isPassed() {
                 print("GESTURELOG: bar page-swipe ended dy=\(dy) vy=\(vy)")
             }
             #endif
@@ -1995,7 +1996,7 @@ final class CommentsInputBar: UIView {
 
     #if DEBUG
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
-        if ProcessInfo.processInfo.arguments.contains("-gesture-log"), let touch = touches.first {
+        if LaunchArgument.gestureLog.isPassed(), let touch = touches.first {
             print("GESTURELOG: bar touchesBegan at \(touch.location(in: self))")
         }
         super.touchesBegan(touches, with: event)
@@ -2394,10 +2395,8 @@ final class CommentsInputBar: UIView {
     /// each step.
     private func runComposerDraftQAIfAsked() {
         let arguments = ProcessInfo.processInfo.arguments
-        guard !ranComposerDraftQA, let index = arguments.firstIndex(of: "-composer-draft"),
-              index + 1 < arguments.count else { return }
+        guard !ranComposerDraftQA, let text = LaunchArgument.composerDraft.value(in: arguments) else { return }
         ranComposerDraftQA = true
-        let text = arguments[index + 1]
         let report: @MainActor (String) -> Void = { [weak self] step in
             guard let self else { return }
             let ink = self.rowActionButton.imageView?.tintColor.resolvedColor(with: self.traitCollection)
@@ -2418,7 +2417,7 @@ final class CommentsInputBar: UIView {
                 report("typed")
             }
             // `-composer-draft-keep`: the draft stays, to be looked at.
-            guard !arguments.contains("-composer-draft-keep") else { return }
+            guard !LaunchArgument.composerDraftKeep.isPassed(in: arguments) else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + 8.0) { [weak self] in
                 self?.draftText = ""
                 report("cleared")
@@ -2438,7 +2437,7 @@ final class CommentsInputBar: UIView {
 
     private var ranComposerKeyboardQA = false
     /// Read once: `applyRise` runs on every layout pass.
-    private static let logsRise = ProcessInfo.processInfo.arguments.contains("-composer-keyboard-qa")
+    private static let logsRise = LaunchArgument.composerKeyboardQa.isPassed()
 
     /// One `[composer-kbd]` line: the rise, and the field's and the column's
     /// window frames. stderr: unbuffered, so a detached `--stderr=` sink is
@@ -2517,7 +2516,7 @@ final class CommentsInputBar: UIView {
     /// scripted on the simulator, and "does the bar jump" is a question
     /// about two numbers; this prints them.
     private func runEmoteKeyboardQAIfAsked() {
-        guard !ranEmoteKeyboardQA, ProcessInfo.processInfo.arguments.contains("-emote-keyboard-qa") else { return }
+        guard !ranEmoteKeyboardQA, LaunchArgument.emoteKeyboardQa.isPassed() else { return }
         ranEmoteKeyboardQA = true
         let report: @MainActor (String) -> Void = { [weak self] stage in
             guard let self, let window = self.window else { return }

@@ -1,4 +1,5 @@
 #if DEBUG
+import LaunchArguments
 import UIKit
 
 /// `-scroll-stop-trace`: what ends each deceleration of a grid page — the
@@ -15,7 +16,7 @@ import UIKit
 ///   write and offset write while a deceleration runs (with their stack).
 @MainActor
 final class ScrollStopTrace {
-    static let isEnabled = ProcessInfo.processInfo.arguments.contains("-scroll-stop-trace")
+    static let isEnabled = LaunchArgument.scrollStopTrace.isPassed()
 
     /// The speed under which an end is a deceleration's natural rest.
     static let cutSpeed: CGFloat = 300

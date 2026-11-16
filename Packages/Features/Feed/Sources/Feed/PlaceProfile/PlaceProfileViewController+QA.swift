@@ -4,6 +4,7 @@ import CoreNavigation
 import CoreStorage
 import DesignSystem
 import FeedInterface
+import LaunchArguments
 import MediaCore
 import MediaPlayback
 import PostGrid
@@ -21,7 +22,7 @@ extension PlaceProfileViewController {
     /// `-maps-place-pop-demo`: see `scheduleDebugDrivesIfRequested`.
     func scheduleDebugPopIfRequested() {
         guard !didScheduleDebugPop,
-              ProcessInfo.processInfo.arguments.contains("-maps-place-pop-demo")
+              LaunchArgument.mapsPlacePopDemo.isPassed()
         else { return }
         didScheduleDebugPop = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in

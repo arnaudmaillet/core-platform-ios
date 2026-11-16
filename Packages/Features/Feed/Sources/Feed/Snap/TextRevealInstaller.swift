@@ -40,7 +40,7 @@ enum TextRevealInstaller {
     /// for the old plain push.
     static var isEnabled: Bool {
         #if DEBUG
-        !ProcessInfo.processInfo.arguments.contains("-no-text-reveal")
+        !LaunchArgument.noTextReveal.isPassed()
         #else
         true
         #endif

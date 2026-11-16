@@ -1,5 +1,6 @@
 import DesignSystem
 import Foundation
+import LaunchArguments
 import QuartzCore
 
 /// Whether a post page is announcing a wait for its media — the spinner over
@@ -36,8 +37,7 @@ final class SnapMediaWait {
         // working, and also why "I could not see it" is not evidence that it
         // does not work.
         let arguments = ProcessInfo.processInfo.arguments
-        if let position = arguments.firstIndex(of: "-media-wait-grace"),
-           position + 1 < arguments.count, let milliseconds = Double(arguments[position + 1]) {
+        if let milliseconds = LaunchArgument.mediaWaitGrace.doubleValue(in: arguments) {
             return milliseconds / 1000
         }
         #endif
@@ -84,7 +84,7 @@ final class SnapMediaWait {
     /// on a timer would be inventing a signal that exists.
     func refresh() {
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-media-log") {
+        if LaunchArgument.mediaLog.isPassed() {
             print(String(format: "[media-wait] %.3f decide own=%@ armed=%@ showing=%@ url=%@",
                          CACurrentMediaTime(), hasItsOwnMedia() ? "Y" : "n",
                          gate.isArmed ? "Y" : "n",

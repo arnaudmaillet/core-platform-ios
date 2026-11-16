@@ -12,6 +12,7 @@ import PostGrid
 import ShareSheet
 import ThreadKit
 import UIKit
+import LaunchArguments
 
 /// The feed feature's entry point, resolved by the composition root and
 /// consumed through `FeedFeatureBuilding` by the app shell.
@@ -304,7 +305,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         guard let videoPlayback, let entry,
               let clip = FlightPlaybackWarm.warmableClip(of: entry) else {
             #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            if LaunchArgument.zoomLiveLog.isPassed() {
                 print("[zoom-live] warm refused \(postID.rawValue): pool=\(videoPlayback != nil) "
                       + "autoplay=\(MediaPlaybackPolicy.autoplays) hydrated=\(entry != nil) "
                       + "attachments=\(entry?.post.attachments.map { $0.mimeType } ?? [])")
@@ -336,7 +337,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         guard allowed, let videoPlayback, let entry,
               let clip = FlightPlaybackWarm.warmableClip(of: entry) else {
             #if DEBUG
-            if process.arguments.contains("-zoom-live-log") {
+            if LaunchArgument.zoomLiveLog.isPassed(in: process.arguments) {
                 print("[zoom-live] preroll refused \(postID.rawValue): preloads=\(MediaPlaybackPolicy.preloads) "
                       + "autoplay=\(MediaPlaybackPolicy.autoplays) lowPower=\(process.isLowPowerModeEnabled) "
                       + "thermal=\(process.thermalState.rawValue) hydrated=\(entry != nil)")
@@ -378,7 +379,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     /// not the transport, so the map's own markers stay fast and the window
     /// under test is the only slow thing.
     static var isColdOpenForced: Bool {
-        ProcessInfo.processInfo.arguments.contains("-feed-cold-open")
+        LaunchArgument.feedColdOpen.isPassed()
     }
     #endif
 
@@ -567,7 +568,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         // the simulator has none — so this is the only way a scripted run can
         // tell "attached" from "claimed ownership and attached nothing", which
         // is what left profile-opened posts unswipeable.
-        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+        if LaunchArgument.zoomLiveLog.isPassed() {
             let pans = destination.view.gestureRecognizers?
                 .filter { $0 is UIPanGestureRecognizer }.count ?? 0
             print("[hero] pushed with dismissal grab: pans=\(pans)")
@@ -577,7 +578,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         // `-hero-demo-grab`: dismiss the pushed post by grab once it lands, so a
         // scripted run can see the surface UNDERNEATH in its returned state.
         // The reveal that runs while the post covers it is only observable there.
-        if ProcessInfo.processInfo.arguments.contains("-hero-demo-grab") {
+        if LaunchArgument.heroDemoGrab.isPassed() {
             transition.onDestinationShown = { [weak transition] in
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
                     transition?.debugScriptedGrab()
@@ -607,7 +608,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         // `-tabbar-flag`: the A/B this decision rests on. Swaps the hand-managed
         // hide for `hidesBottomBarWhenPushed`, so the two can be filmed against
         // each other on the same grab rather than argued about.
-        let usesFlag = ProcessInfo.processInfo.arguments.contains("-tabbar-flag")
+        let usesFlag = LaunchArgument.tabbarFlag.isPassed()
         if usesFlag { destination.hidesBottomBarWhenPushed = true }
         let hidesBar = !usesFlag && !nav.flagHidesAppTabBar(at: nav.topViewController)
         #else
@@ -1175,7 +1176,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         // "claimed ownership and attached nothing", which is what the defect
         // looked like from the outside — a screen that renders perfectly and
         // answers no gesture.
-        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+        if LaunchArgument.zoomLiveLog.isPassed() {
             let pans = destination.view.gestureRecognizers?
                 .filter { $0 is UIPanGestureRecognizer }.count ?? 0
             print("[hero] pushed WITHOUT flight, dismissal pans=\(pans)")
@@ -1193,9 +1194,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         // reports success while a real finger would have watched the page jump
         // instead of follow. That distinction is the entire defect.
         let arguments = ProcessInfo.processInfo.arguments
-        if let position = arguments.firstIndex(of: "-text-swipe-demo"),
-           position + 1 < arguments.count,
-           let peak = Double(arguments[position + 1]) {
+        if let peak = LaunchArgument.textSwipeDemo.doubleValue(in: arguments) {
             // `-zoom-demo-grab-vertical` flips this script to the vertical
             // axis, exactly as it does the zoom demos — the axis a semantic
             // cluster's feed dismisses into its place page on.
@@ -1206,17 +1205,16 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             // process-wide flag cannot say that, which is how this leg went
             // unscripted while the flag was set for the leg before it.
             let axis: ZoomDismissAxis
-            if arguments.contains("-text-swipe-demo-horizontal") {
+            if LaunchArgument.textSwipeDemoHorizontal.isPassed(in: arguments) {
                 axis = .horizontal
             } else {
-                axis = arguments.contains("-zoom-demo-grab-vertical") ? .vertical : .horizontal
+                axis = LaunchArgument.zoomDemoGrabVertical.isPassed(in: arguments) ? .vertical : .horizontal
             }
             // Optional second argument: how long to wait. A run that PAGES the
             // feed first has to outlast that paging — a swipe scripted before
             // the pager has settled asks about the post the feed opened on,
             // which is the one case the re-pointing exists for.
-            let delay = position + 2 < arguments.count
-                ? (Double(arguments[position + 2]) ?? 1.5) : 1.5
+            let delay = LaunchArgument.textSwipeDemo.value(at: 2, in: arguments).flatMap(Double.init) ?? 1.5
             Task { @MainActor in
                 try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                 let driven = await dismissal.debugPerformSwipe(
@@ -1357,16 +1355,13 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         // route is a driver nobody verifies — the hole that had just been
         // closed for the neighbouring leg.
         let arguments = ProcessInfo.processInfo.arguments
-        if let position = arguments.firstIndex(of: "-tile-card-close-demo"),
-           position + 1 < arguments.count,
-           let peak = Double(arguments[position + 1]) {
+        if let peak = LaunchArgument.tileCardCloseDemo.doubleValue(in: arguments) {
             // Optional second argument: how long to wait. The default is the
             // usual beat after the push, but a run that pages the feed first
             // has to outlast that paging — a swipe scripted before the pager
             // has SETTLED asks about the post the feed opened on, which is the
             // one row this driver is not for.
-            let delay = position + 2 < arguments.count
-                ? (Double(arguments[position + 2]) ?? 2.5) : 2.5
+            let delay = LaunchArgument.tileCardCloseDemo.value(at: 2, in: arguments).flatMap(Double.init) ?? 2.5
             Task { @MainActor [weak close, weak feed] in
                 try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                 // The three things that decide whether this driver may claim
@@ -1403,7 +1398,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         // to be back. `hidden=false viewHidden=true` is the defect a bar
         // un-hidden inside a transition leaves — a bar every API reports as
         // shown and nothing draws — and it is invisible from anywhere else.
-        if ProcessInfo.processInfo.arguments.contains("-grab-log") {
+        if LaunchArgument.grabLog.isPassed() {
             print("[pop] restoreTabBar top="
                 + (nav?.topViewController.map { String(describing: type(of: $0)) } ?? "nil")
                 + " hidden=\(String(describing: nav?.tabBarController?.isTabBarHidden))"

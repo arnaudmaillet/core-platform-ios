@@ -3,6 +3,7 @@ import CoreNavigation
 import CoreStorage
 import DesignSystem
 import FeedInterface
+import LaunchArguments
 import MediaCore
 import MediaPlayback
 import PostGrid
@@ -671,7 +672,7 @@ final class PostGridPageView: UIView {
     /// line per adoption — `rows(3) chunk(7) pairs(4) …`, with the flat index
     /// each starts at (what `-foryou-open N` takes).
     private func logSegmentsIfAsked() {
-        guard ProcessInfo.processInfo.arguments.contains("-foryou-segments-log") else { return }
+        guard LaunchArgument.foryouSegmentsLog.isPassed() else { return }
         let parts = zip(segments, segmentStarts).map { segment, start -> String in
             let kind = switch segment {
             case .rows: "rows"
@@ -1671,7 +1672,7 @@ final class PostGridPageView: UIView {
     /// never reach the coordinator, and each is a different bug when it is the
     /// wrong answer.
     private func logRejectedCandidates(chosen: Set<PostID>) {
-        guard ProcessInfo.processInfo.arguments.contains("-grid-playback-log"),
+        guard LaunchArgument.gridPlaybackLog.isPassed(),
               !showsSkeleton
         else { return }
         let viewport = autoplayViewport
@@ -2150,7 +2151,7 @@ final class PostGridPageView: UIView {
         // tile keeps today's answer.
         let made = playback.tileFlightSurface(for: postID, url: url, cell: row)
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+        if LaunchArgument.zoomLiveLog.isPassed() {
             print(String(format: "[zoom-live] %.3f producer GRID liveFlightSurface -> %@",
                          CACurrentMediaTime(), made == nil ? "NIL (tile not playing)" : "surface"))
         }
@@ -2877,7 +2878,7 @@ final class PostGridPageView: UIView {
     /// removes, read with `-list-jump-trace`).
     func pinForPushedClose() {
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-list-jump-unpinned") { return }
+        if LaunchArgument.listJumpUnpinned.isPassed() { return }
         #endif
         beginHeroFreeze()
     }
@@ -2923,7 +2924,7 @@ final class PostGridPageView: UIView {
             collectionView.contentOffset = offset
         }
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-list-jump-trace") {
+        if LaunchArgument.listJumpTrace.isPassed() {
             print("[list-jump] thaw from offset=\(offset.y) pinnedTop=\(pinnedTop) → \(debugInsetState)")
         }
         #endif
@@ -2989,7 +2990,7 @@ final class PostGridPageView: UIView {
     /// `items` must agree, or the data source and the collection view have
     /// diverged and cells are missing rather than invisible.
     func logVisibility(_ moment: String) {
-        guard ProcessInfo.processInfo.arguments.contains("-foryou-visibility-log"),
+        guard LaunchArgument.foryouVisibilityLog.isPassed(),
               style == .grid
         else { return }
         let visible = collectionView.indexPathsForVisibleItems.sorted()
@@ -3126,7 +3127,7 @@ final class PostGridPageView: UIView {
         // written when only list surfaces opened windows and never caught up.
         let target = cell(for: postID)
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-text-reveal-log") {
+        if LaunchArgument.textRevealLog.isPassed() {
             // Whether the cell it names is REALIZED, because a concealment
             // applied to nothing looks exactly like one that was never asked
             // for — and the cell it must hide is the one a dismissal is landing
@@ -4180,7 +4181,7 @@ extension PostGridPageView: UICollectionViewDataSource, UICollectionViewDelegate
             // `-gallery-tile-info-log`: which tile wears what — the flat
             // index `-foryou-open` / `-foryou-gallery-open` take, to film a
             // worded tile's flight.
-            if showsTileInfo, ProcessInfo.processInfo.arguments.contains("-gallery-tile-info-log") {
+            if showsTileInfo, LaunchArgument.galleryTileInfoLog.isPassed() {
                 let size = cell.bounds.size
                 print("[tile-info] index=\(flatIndex(for: indexPath)) id=\(post.id.rawValue)"
                     + " size=\(Int(size.width))x\(Int(size.height)) variant=\(PostTileInfo.variant(for: size))")

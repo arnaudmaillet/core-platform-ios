@@ -4,6 +4,7 @@ import CoreModels
 import CoreNetworking
 import CoreStorage
 import Foundation
+import LaunchArguments
 import OSLog
 import ThreadKit
 
@@ -313,9 +314,8 @@ public actor FeedRepository: FeedProviding {
         // `-feed-cold-open [ms]` — see `FeedFeatureBuilder.isColdOpenForced`.
         // On the FETCH, deliberately, and not on the transport: the map's tile
         // query has to stay fast or the pin under test never appears.
-        if let position = ProcessInfo.processInfo.arguments.firstIndex(of: "-feed-cold-open") {
-            let ms = ProcessInfo.processInfo.arguments.dropFirst(position + 1)
-                .first.flatMap(Int.init) ?? 800
+        if LaunchArgument.feedColdOpen.isPassed() {
+            let ms = LaunchArgument.feedColdOpen.intValue() ?? 800
             try? await Task.sleep(for: .milliseconds(ms))
         }
         #endif

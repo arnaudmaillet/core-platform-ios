@@ -5,6 +5,7 @@ import DesignSystem
 import EntityStore
 import FeedInterface
 import HeroPage
+import LaunchArguments
 import MediaCore
 import MediaPlayback
 import PostGrid
@@ -418,8 +419,7 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
             // a script — released short of the threshold for a peak under it
             // (#1638). The simulator injects no drag.
             let arguments = ProcessInfo.processInfo.arguments
-            if let position = arguments.firstIndex(of: "-place-grab-demo"), position + 1 < arguments.count,
-               let peak = Double(arguments[position + 1]) {
+            if let peak = LaunchArgument.placeGrabDemo.doubleValue(in: arguments) {
                 Task { @MainActor [weak slide] in
                     try? await Task.sleep(nanoseconds: 3_000_000_000)
                     let driven = await slide?.debugPerformSwipe(peakProgress: CGFloat(peak), axis: .horizontal)
@@ -445,15 +445,11 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
         guard !didScheduleDebugDrives else { return }
         didScheduleDebugDrives = true
         let arguments = ProcessInfo.processInfo.arguments
-        func value(_ flag: String) -> Double? {
-            guard let position = arguments.firstIndex(of: flag),
-                  position + 1 < arguments.count else { return nil }
-            return Double(arguments[position + 1])
-        }
+        func value(_ flag: LaunchArgument) -> Double? { flag.doubleValue(in: arguments) }
         // `-place-ink-audit`: the WCAG contrast of the name and the counters
         // against the pixels rendered behind them, once the banner's picture
         // is in (it lands after the posts, and dissolves over 0.25s).
-        if arguments.contains("-place-ink-audit") {
+        if LaunchArgument.placeInkAudit.isPassed(in: arguments) {
             QAWait.until("place-ink-audit", { [weak self] in
                 guard let self else { return false }
                 return !showsBanner || heroHeader.debugBannerHasPicture
@@ -474,7 +470,7 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
         // still empty, the offset clamped to the minimum travel (or went
         // nowhere) and the run still said it had scrolled. It now waits for
         // the active page to hold posts, and reports where it actually ended.
-        if let offset = value("-maps-place-scroll") {
+        if let offset = value(.mapsPlaceScroll) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
                 QAWait.until("-maps-place-scroll \(offset)", { [weak self] in
                     guard let self else { return false }
@@ -493,7 +489,7 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
         // way — the profile's `-profile-scroll-sweep` — and says what each
         // frame cost (`HERO-SCROLL place …` on standard error, see
         // `HeroScrollFrameProbe`).
-        if arguments.contains("-place-scroll-sweep") {
+        if LaunchArgument.placeScrollSweep.isPassed(in: arguments) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
                 QAWait.until("-place-scroll-sweep", { [weak self] in
                     guard let self else { return false }
@@ -514,7 +510,7 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
         // and settled (`HERO-SCROLL place-stretch/<phase> …`). No refresh:
         // a refresh is asked by a FINGER reaching the threshold (#2235),
         // which a scripted offset never has — `-place-pull-refresh` does.
-        if arguments.contains("-place-stretch-sweep") {
+        if LaunchArgument.placeStretchSweep.isPassed(in: arguments) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
                 QAWait.until("-place-stretch-sweep", { [weak self] in
                     guard let self else { return false }
@@ -536,7 +532,7 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
         // how long the spinner ran — or `[qa] GAVE UP`, which is
         // what a release through the stock control did while nothing
         // answered it.
-        if arguments.contains("-place-pull-refresh") {
+        if LaunchArgument.placePullRefresh.isPassed(in: arguments) {
             QAWait.until("-place-pull-refresh ready", { [weak self] in
                 guard let self else { return false }
                 return !renderedActivity.isEmpty && !isLoading
@@ -570,7 +566,7 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
         // `post=nil` in the line hinted at it). It also remembers which flight
         // was the latest BEFORE it opened, so `-maps-place-tile-dismiss` can
         // tell this tile's flight from the one before it.
-        if let index = value("-maps-place-open-tile").map(Int.init) {
+        if let index = value(.mapsPlaceOpenTile).map(Int.init) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.6) { [weak self] in
                 QAWait.until("-maps-place-open-tile \(index)", { [weak self] in
                     guard let self else { return false }
@@ -614,7 +610,7 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
         // `debugMostRecent`, which is exactly the "present one screen and
         // dismiss that one" usage it exists for. Delay is absolute rather than
         // chained off the open so a run can settle a page first.
-        if let after = value("-maps-place-tile-dismiss") {
+        if let after = value(.mapsPlaceTileDismiss) {
             // ⚠️ ITS OWN AXIS, not the process-wide `-zoom-demo-grab-vertical`.
             // A run that reaches this page by a VERTICAL grab and then leaves
             // the post above it HORIZONTALLY needs both in one process, and a
@@ -622,7 +618,7 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
             // went unscripted while the flag was set for the leg before it.
             // Horizontal by default: that is the escape this hook exists for.
             let axis: ZoomDismissAxis =
-                arguments.contains("-maps-place-tile-dismiss-vertical") ? .vertical : .horizontal
+                LaunchArgument.mapsPlaceTileDismissVertical.isPassed(in: arguments) ? .vertical : .horizontal
             // ⚠️ THE TILE'S OWN FLIGHT, LANDED — not whatever is most recent
             // at `after` seconds. If the open failed or came late,
             // `debugMostRecent` was still the PREVIOUS flight (the one that
@@ -631,7 +627,7 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
             // as the floor; past it the grab waits for a controller NEWER than
             // the one the open hook saw, with a screen above this page and no
             // transition running.
-            let requiresTileOpen = arguments.contains("-maps-place-open-tile")
+            let requiresTileOpen = LaunchArgument.mapsPlaceOpenTile.isPassed(in: arguments)
             DispatchQueue.main.asyncAfter(deadline: .now() + after) { [weak self] in
                 QAWait.until("-maps-place-tile-dismiss", { [weak self] in
                     guard let self, let nav = self.navigationController,
@@ -2258,7 +2254,7 @@ extension PlaceProfileViewController {
     /// reason has to be said out loud or a regression here is invisible.
     private func debugLogLanding(_ message: @autoclosure () -> String) {
         #if DEBUG
-        guard ProcessInfo.processInfo.arguments.contains("-grab-log") else { return }
+        guard LaunchArgument.grabLog.isPassed() else { return }
         print("[place-landing] \(message())")
         #endif
     }

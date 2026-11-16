@@ -2,6 +2,7 @@ import AVFoundation
 import CoreImage
 import CoreStorage
 import DesignSystem
+import LaunchArguments
 import MediaPlayback
 import UIKit
 import Vision
@@ -178,7 +179,7 @@ final class PersonOcclusionDriver {
 
     #if DEBUG
     /// `-occlusion-log`: when the driver runs, stops, and what each mask covers.
-    static let traces = ProcessInfo.processInfo.arguments.contains("-occlusion-log")
+    static let traces = LaunchArgument.occlusionLog.isPassed()
     private func trace(_ message: @autoclosure () -> String) {
         guard Self.traces else { return }
         print(String(format: "[occlusion] %.3f %@", CACurrentMediaTime(), message()))
