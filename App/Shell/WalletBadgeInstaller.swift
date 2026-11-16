@@ -3,6 +3,7 @@ import CoreModels
 import CoreNavigation
 import CoreStorage
 import DesignSystem
+import LaunchArguments
 import UIKit
 
 /// The wallet's toolbar face, and everything that keeps it true.
@@ -201,8 +202,8 @@ final class WalletBadgeInstaller: NSObject {
     /// root answers first.
     func presentSheetIfAskedAtLaunch() {
         let arguments = ProcessInfo.processInfo.arguments
-        guard arguments.contains("-open-wallet") else { return }
-        let delay: TimeInterval = arguments.contains("-switch-tab") ? 3.5 : 1.5
+        guard LaunchArgument.openWallet.isPassed(in: arguments) else { return }
+        let delay: TimeInterval = LaunchArgument.switchTab.isPassed(in: arguments) ? 3.5 : 1.5
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             guard let self, !Self.didOpenAtLaunch, let presenter, presenter.viewIfLoaded?.window != nil,
                   presenter.presentedViewController == nil else { return }

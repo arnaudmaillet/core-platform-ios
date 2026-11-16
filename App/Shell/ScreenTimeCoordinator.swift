@@ -1,5 +1,6 @@
 import CoreStorage
 import DesignSystem
+import LaunchArguments
 import Profile
 import UIKit
 
@@ -39,8 +40,7 @@ final class ScreenTimeCoordinator {
         #if DEBUG
         // `-supervision-report-interval <seconds>`: sooner, for a QA run.
         let arguments = ProcessInfo.processInfo.arguments
-        if let index = arguments.firstIndex(of: "-supervision-report-interval"), index + 1 < arguments.count,
-           let seconds = TimeInterval(arguments[index + 1]), seconds > 0 {
+        if let seconds = LaunchArgument.supervisionReportInterval.doubleValue(in: arguments), seconds > 0 {
             return seconds
         }
         #endif
@@ -233,9 +233,7 @@ final class ScreenTimeCoordinator {
     /// `-screen-time-seed <minutes>`: today's ledger starts with this much
     /// time, so the limit can be reached in a QA run.
     static func applyDebugSeed(store: ScreenTimeStore = .standard, arguments: [String] = ProcessInfo.processInfo.arguments) {
-        guard let index = arguments.firstIndex(of: "-screen-time-seed"), index + 1 < arguments.count,
-              let minutes = Double(arguments[index + 1])
-        else { return }
+        guard let minutes = LaunchArgument.screenTimeSeed.doubleValue(in: arguments) else { return }
         let end = Date()
         store.record(from: end.addingTimeInterval(-minutes * 60), to: end)
         store.updateReminderState { $0 = ScreenTimeReminderState() }

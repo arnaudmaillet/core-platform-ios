@@ -45,7 +45,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             guard let windowScene else { return }
             DebugDashboardWiring.handleShake(in: windowScene)
         }
-        if ProcessInfo.processInfo.arguments.contains("-debug-dashboard") {
+        if LaunchArgument.debugDashboard.isPassed() {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak windowScene] in
                 DebugDashboard.present(in: windowScene)
             }

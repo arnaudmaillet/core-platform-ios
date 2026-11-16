@@ -77,7 +77,7 @@ final class AppContainer {
             // A guest's write is refused here as at the fleet's edge, so a missing
             // gate shows up in mock mode (`[edge] REFUSED` in the console).
             // `-mock-open-edge` turns it off for QA that predates guest mode.
-            enforcesEdgePolicy: !ProcessInfo.processInfo.arguments.contains("-mock-open-edge"),
+            enforcesEdgePolicy: !LaunchArgument.mockOpenEdge.isPassed(),
             // A place page asked by country code (#643): the map's borders.
             countryOf: { latitude, longitude in
                 CountryAtlas.shared.country(owning: CLLocationCoordinate2D(latitude: latitude, longitude: longitude))?.code
@@ -106,7 +106,7 @@ final class AppContainer {
     /// looked at without viewing each post first. Replaces the pile on every
     /// launch that asks.
     private static func seedViewHistoryIfAsked(from dataset: MockSocialDataset) {
-        guard ProcessInfo.processInfo.arguments.contains("-mock-view-history") else { return }
+        guard LaunchArgument.mockViewHistory.isPassed() else { return }
         let posts = dataset.posts.filter { $0.parentID.isEmpty }
         let isVideo: (MockSocialDataset.PostRecord) -> Bool = {
             $0.media.map { MockMediaFixtures.isVideoURL($0.url) } ?? false
@@ -176,7 +176,7 @@ final class AppContainer {
     /// and the Maps feature's place decoration so the two can never
     /// disagree.
     static let seedsMapPlaces =
-        !ProcessInfo.processInfo.arguments.contains("-maps-mock-no-places")
+        !LaunchArgument.mapsMockNoPlaces.isPassed()
 
     /// `-rich-media`: seed the mock dataset's AVATARS from `MockMediaFixtures`
     /// — real photographs at exact dimensions — instead of the synthesized
@@ -187,7 +187,7 @@ final class AppContainer {
     /// which is what the unit suite and CI depend on; this flag trades that for
     /// realism (real image decode cost) when driving the app by hand. It
     /// requires network.
-    static let usesRichMedia = ProcessInfo.processInfo.arguments.contains("-rich-media")
+    static let usesRichMedia = LaunchArgument.richMedia.isPassed()
 
     private(set) lazy var mockRealtimeServer: MockRealtimeServer = {
         let server = MockRealtimeServer()
@@ -557,7 +557,7 @@ final class AppContainer {
     private static var imageDisk: ImageDiskLocation? {
         #if DEBUG
         let arguments = ProcessInfo.processInfo.arguments
-        if arguments.contains("-slow-media") || arguments.contains("-image-disk-off") { return nil }
+        if LaunchArgument.slowMedia.isPassed(in: arguments) || LaunchArgument.imageDiskOff.isPassed(in: arguments) { return nil }
         #endif
         return .caches
     }
@@ -1143,7 +1143,7 @@ final class AppContainer {
         // every relaunch — and an install seeded before the seed grew gets
         // only the new codes.
         // `-countries-no-seed` skips it (with `-countries-reset`: home only).
-        if !ProcessInfo.processInfo.arguments.contains("-countries-no-seed") {
+        if !LaunchArgument.countriesNoSeed.isPassed() {
             unlocks.seedUnlocks(MockWorldSeed.unlockedCountryCodes, for: MockAuthService.accountID)
         }
         return CountryAccessService(
@@ -1262,9 +1262,9 @@ final class AppContainer {
     /// screenshot of a healthy build, so without these it is only ever pinned by
     /// unit tests.
     static let iconsUnavailable =
-        ProcessInfo.processInfo.arguments.contains("-map-icons-unavailable")
+        LaunchArgument.mapIconsUnavailable.isPassed()
     static let previewsUnavailable =
-        ProcessInfo.processInfo.arguments.contains("-map-previews-unavailable")
+        LaunchArgument.mapPreviewsUnavailable.isPassed()
     /// A manifest that does not exist. `AnimatedIconCatalog` answers an absent
     /// manifest with an empty table rather than trapping, so every lookup misses
     /// and every async resolve throws — the real failure path, not a stub.
@@ -1273,7 +1273,7 @@ final class AppContainer {
     /// `-maps-baked-icons`: text posts wear the baked catalogue's icons, the
     /// decomposed placeholders included — see `mockAnimatedIcons`.
     static let wearsBakedIcons =
-        ProcessInfo.processInfo.arguments.contains("-maps-baked-icons")
+        LaunchArgument.mapsBakedIcons.isPassed()
     #else
     static let wearsBakedIcons = false
     static let iconsUnavailable = false
@@ -1507,8 +1507,7 @@ final class AppContainer {
     private static var galleryPageSize: Int32 {
         #if DEBUG
         let arguments = ProcessInfo.processInfo.arguments
-        if let index = arguments.firstIndex(of: "-gallery-page-size"), index + 1 < arguments.count,
-           let size = Int32(arguments[index + 1]), size > 0 {
+        if let size = LaunchArgument.galleryPageSize.value(in: arguments).flatMap { Int32($0) }, size > 0 {
             return size
         }
         #endif
@@ -1838,8 +1837,7 @@ final class AppContainer {
     private static var groupGoesPrivateAfter: TimeInterval? {
         #if DEBUG
         let arguments = ProcessInfo.processInfo.arguments
-        if let index = arguments.firstIndex(of: "-mock-group-private-after"), index + 1 < arguments.count,
-           let seconds = TimeInterval(arguments[index + 1]), seconds >= 0 {
+        if let seconds = LaunchArgument.mockGroupPrivateAfter.doubleValue(in: arguments), seconds >= 0 {
             return seconds
         }
         #endif
@@ -1854,8 +1852,7 @@ final class AppContainer {
     private static var inboxPageSize: Int32 {
         #if DEBUG
         let arguments = ProcessInfo.processInfo.arguments
-        if let index = arguments.firstIndex(of: "-inbox-page-size"), index + 1 < arguments.count,
-           let size = Int32(arguments[index + 1]), size > 0 {
+        if let size = LaunchArgument.inboxPageSize.value(in: arguments).flatMap { Int32($0) }, size > 0 {
             return size
         }
         #endif

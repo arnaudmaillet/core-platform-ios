@@ -1,5 +1,6 @@
 import Darwin
 import DebugTools
+import LaunchArguments
 import MachO
 import ObjectiveC
 import UIKit
@@ -116,7 +117,7 @@ enum PresentationBudget {
     private(set) static var isActive = false
 
     static func installIfRequested() {
-        guard ProcessInfo.processInfo.arguments.contains("-presentation-budget") else { return }
+        guard LaunchArgument.presentationBudget.isPassed() else { return }
         install()
     }
 
@@ -132,15 +133,13 @@ enum PresentationBudget {
         guard !isInstalled else { return }
         isInstalled = true
         isActive = true
-        if let index = arguments.firstIndex(of: "-presentation-budget-ms"), index + 1 < arguments.count,
-           let value = Double(arguments[index + 1]) {
+        if let value = LaunchArgument.presentationBudgetMs.doubleValue(in: arguments) {
             budgetMs = value
         }
-        if let index = arguments.firstIndex(of: "-presentation-budget-grace"), index + 1 < arguments.count,
-           let value = Double(arguments[index + 1]) {
+        if let value = LaunchArgument.presentationBudgetGrace.doubleValue(in: arguments) {
             graceMs = value
         }
-        traps = arguments.contains("-presentation-budget-trap")
+        traps = LaunchArgument.presentationBudgetTrap.isPassed(in: arguments)
         installedAt = CFAbsoluteTimeGetCurrent()
 
         let url = URL.documentsDirectory.appendingPathComponent("presentation-budget.log")

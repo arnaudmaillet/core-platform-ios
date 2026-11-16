@@ -8,8 +8,8 @@ import Testing
 /// in a raw string turns a feature off without a word, and nothing lists
 /// the flags a package understands.
 ///
-/// 626 raw reads were left when the guard came in. Each package keeps a
-/// budget, and a budget may only shrink:
+/// 626 raw reads were left when the guard came in; none is left now. Each
+/// package kept a budget, which could only shrink:
 /// - **More reads than the budget fails.** Declare the argument next to
 ///   its code (`extension LaunchArgument { static let … }`) and read it
 ///   through `isPassed` or `value`.
@@ -20,14 +20,9 @@ import Testing
 /// A repository guard (`RepoGuards`, #2371): every pull request runs it.
 struct LaunchArgumentReadGuardTests {
     /// Raw reads each package may still hold, as `Layer/Package` (or `App`).
-    /// A package that is not listed may hold none: CoreStorage, MediaCore,
-    /// HeroPage, ShareSheet, VoiceKit, Auth and Notifications declare
-    /// theirs (#2374, 2), and so do CoreNetworking, DebugTools, DesignSystem,
-    /// PostGrid, Chat, Search and Upload (#2374, 3), CoreNavigation,
-    /// MediaPlayback, Maps and Profile (#2374, 4), and Feed (#2374, 5).
-    static let budget: [String: Int] = [
-        "App": 83,
-    ]
+    /// Empty since #2374's last step: every package and App declare their
+    /// flags (#2374, 2–6), so a raw read anywhere fails. Keep it empty.
+    static let budget: [String: Int] = [:]
 
     /// How many raw reads `text` holds.
     static func rawReads(in text: String) -> Int {
