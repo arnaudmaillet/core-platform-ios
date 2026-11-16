@@ -7,6 +7,7 @@ import Foundation
 import LaunchArguments
 import MapsInterface
 import MediaCore
+import PostGrid
 import Testing
 import UIKit
 @testable import Profile

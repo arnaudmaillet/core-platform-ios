@@ -9,6 +9,7 @@ import FeedInterface
 import Foundation
 import LaunchArguments
 import MediaCore
+import PostGrid
 import ThreadKit
 import UIKit
 

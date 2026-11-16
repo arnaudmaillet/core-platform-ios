@@ -4,6 +4,7 @@ import DesignSystem
 import FeedInterface
 import HeroPage
 import MediaCore
+import PostGrid
 import UIKit
 
 /// A group's info screen (#2214), pushed from its thread's header — since

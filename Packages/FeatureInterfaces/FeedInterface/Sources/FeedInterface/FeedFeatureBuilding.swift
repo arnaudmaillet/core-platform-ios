@@ -569,14 +569,3 @@ public protocol SnapFeedSettleReporting: AnyObject {
 public extension SnapFeedSettleReporting {
     var settledMediaPage: Int? { nil }
 }
-
-/// Whether a close must dissolve FROM the page on screen into the source's
-/// own cover (#1326): it lands on another post, or on the same collection
-/// left on a page past its head — the cover is the head, so flying it would
-/// swap the picture the viewer is looking at for page 1 at the grab.
-public enum SettledDeparture {
-    public static func blends(departure: PostID?, arrival: PostID?, mediaPage: Int?) -> Bool {
-        guard let departure else { return false }
-        return departure != arrival || (mediaPage ?? 0) > 0
-    }
-}

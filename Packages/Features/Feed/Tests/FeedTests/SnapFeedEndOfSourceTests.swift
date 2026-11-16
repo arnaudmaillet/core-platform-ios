@@ -3,6 +3,7 @@ import CoreNavigation
 import FeedInterface
 import Foundation
 import MediaCore
+import PostGrid
 import Testing
 import UIKit
 @testable import Feed

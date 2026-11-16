@@ -4,6 +4,7 @@ import DesignSystem
 import FeedInterface
 import HeroPage
 import MediaCore
+import PostGrid
 import UIKit
 
 /// A channel's info screen (#2215), pushed from its thread's header — since

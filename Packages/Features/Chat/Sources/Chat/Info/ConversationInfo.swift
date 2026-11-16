@@ -5,6 +5,7 @@ import FeedInterface
 import Foundation
 import HeroPage
 import MediaCore
+import PostGrid
 
 // A group's and a channel's info screens (#2237) read like a profile and a
 // place: the hero header (`HeroHeaderView`), the lists behind its counters
