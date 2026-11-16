@@ -66,7 +66,7 @@ Columns: area | screen | element | gesture | response | handler (async note) | h
 - foryou | ForYouViewController | text card | long press | top comments preview | `page.topComments` `:441` | –
 
 ### For You → Shots / snap feed (`F/Feed/Sources/Feed/Snap/SnapFeedViewController.swift` unless noted)
-Reach with `-select-tab 1` (the default) and `-snap-start-index N` (`LaunchCurtain.swift:70`, `:1124`). `-snap-start-paused` pauses. Pushed variants: `-open-post <id>`, `-open-feed`.
+Reach with `-open-feed` and `-snap-start-index N` (`:1125`); the Shots tab went with For You (#2453). `-snap-start-paused` pauses. Pushed variant: `-open-post <id>`.
 
 - snap | SnapFeedCell | media | tap | play/pause | `handleBackgroundTap` `SnapFeedCell.swift:2868` → `togglePlayback` `:3108` | –
 - snap | SnapFeedCell | media | long press | hold (pause / speed) | `handleMediaHold` `SnapFeedCell.swift:2934` | –

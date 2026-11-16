@@ -44,8 +44,6 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
     /// A link that arrived before the shell existed (a cold launch from a
     /// link), opened once it does.
     private var pendingDeepLink: AppRoute?
-    /// The launch screen held over the shell (#1812).
-    private var launchCurtain: LaunchCurtain?
 
     /// The sign-in flow a guest opened, presented over the shell; dismissed
     /// when the session lands.
@@ -785,13 +783,10 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
                 window.rootViewController = viewController
                 window.layoutIfNeeded()
             }
-            // The launch screen fades out over the shell (#1812). It waited
-            // for Shots' first post while the app opened there; the app opens
-            // on the map since #2453, so it lifts as soon as the shell is in.
+            // The launch screen fades out over the shell (#1812), as soon as
+            // the shell is in: the app opens on the map since #2453.
             if let launch, viewController === mainTabCoordinator?.rootViewController {
-                let curtain = LaunchCurtain(curtain: launch.view, owner: launch, readyMilestone: LaunchCurtain.readyMilestone)
-                curtain.hold(over: window, opensElsewhere: true)
-                launchCurtain = curtain
+                LaunchCurtain.lift(launch.view, over: window, owner: launch)
             }
             return
         }

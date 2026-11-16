@@ -4,8 +4,8 @@ import LaunchArguments
 import os
 
 /// How long after the process started a launch milestone was reached (#1765):
-/// the first Shots post's picture, its first video frame — what "the launch
-/// screen is instant" is measured by, cold and warm.
+/// the scene, the first auth state, the shell, the curtain's lift — what "the
+/// launch is instant" is measured by, cold and warm.
 ///
 /// Each milestone is recorded once per process, and logged (`os.Logger`,
 /// category `launch`, any build — how a Release run is measured); `-launch-log`
@@ -58,8 +58,7 @@ public enum LaunchTimeline {
     }
 
     /// Calls `handler` on the main actor once `milestone` is reached — on the
-    /// next turn if it already was (#1812: the launch screen waits for the
-    /// first post's picture).
+    /// next turn if it already was.
     public static func whenReached(_ milestone: String, _ handler: @escaping @MainActor @Sendable () -> Void) {
         let already = reached.withLock { () -> Bool in
             guard marks[milestone] == nil else { return true }
@@ -68,20 +67,4 @@ public enum LaunchTimeline {
         }
         if already { DispatchQueue.main.async { MainActor.assumeIsolated { handler() } } }
     }
-
-    // MARK: - The launch curtain (#1812)
-
-    /// Whether the launch screen still covers the app: the shell holds it over
-    /// the first post until that post's picture is on screen. What would be
-    /// HEARD waits for it to lift — the page's song, a clip's sound — and is
-    /// told when it does (`curtainDidLift`).
-    @MainActor public static var curtainIsUp = false {
-        didSet {
-            guard oldValue, !curtainIsUp else { return }
-            NotificationCenter.default.post(name: curtainDidLift, object: nil)
-        }
-    }
-
-    /// Posted on the main actor when the launch curtain starts to lift.
-    public static let curtainDidLift = Notification.Name("cn.wynn.core-platform-ios.launchCurtainDidLift")
 }

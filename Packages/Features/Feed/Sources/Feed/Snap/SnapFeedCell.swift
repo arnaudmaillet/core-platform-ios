@@ -2372,23 +2372,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         return mediaCard.showsPicture || mediaCard.isPictureFailed
     }
 
-    #if DEBUG
-    /// Whether the page has what it shows — the QA start-index hook (#1855).
-    var debugShowsAPicture: Bool { showsAPicture }
-    #endif
-
     /// Re-decides whether the page is announcing a wait — called from every
     /// place the answer can change (`SnapMediaWait.refresh`).
     private func refreshMediaLoader() {
-        // The launch screen's milestones (#1765): the first post's picture,
-        // then its first frame — each once per process.
-        if mediaURL != nil, mediaCard.showsPicture { LaunchTimeline.mark("shots.firstPicture") }
-        if mediaCard.renderView.hasFrame { LaunchTimeline.mark("shots.firstFrame") }
-        // What the launch screen waits for (#1812): the first page has what it
-        // shows — its picture, a text page (no media to wait for), or a
-        // picture that failed for good (its Try Again). Never the video's
-        // first frame: that would add the stream's buffering to every launch.
-        if window != nil, showsAPicture { LaunchTimeline.mark("shots.firstPageReady") }
         mediaWait.refresh()
     }
 

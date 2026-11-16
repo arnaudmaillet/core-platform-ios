@@ -1214,13 +1214,6 @@ final class SnapFeedViewController: UIViewController {
                     self.updateActiveItem()
                     if self.lifecycle.activeIndex == target {
                         print("[qa] \(label): active page \(target) of \(self.orderedIDs.count)")
-                        // The launch screen lifts on THIS page, once it has its
-                        // picture (#1855; `LaunchCurtain.readyMilestone`).
-                        QAWait.until("\(label) picture", { [weak self] in
-                            self?.activeSnapCell?.debugShowsAPicture == true
-                        }) {
-                            LaunchTimeline.mark(LaunchCurtain.qaStartPageReady)
-                        }
                     } else {
                         QAWait.fail(label, "jumped but active page is \(self.lifecycle.activeIndex.map(String.init) ?? "nil")")
                     }
@@ -2801,13 +2794,6 @@ final class SnapFeedViewController: UIViewController {
                 MainActor.assumeIsolated { self?.refreshAudibleSurface() }
             })
         }
-        // The launch screen lifting (#1812): what the page would have been
-        // heard saying under it starts now.
-        appObservers.add(center.addObserver(
-            forName: LaunchTimeline.curtainDidLift, object: nil, queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.refreshAudibleSurface() }
-        })
         // (A keyboard-session rail yield used to live here: the engaged
         // composer rose into the rail's column, so the rail conceded the
         // band while typing. The engagement fades the rail outright now, so
@@ -3116,10 +3102,6 @@ final class SnapFeedViewController: UIViewController {
             )
             statusView.isHidden = false
         }
-        // The page says why it has no post (#1812): that is what it shows, so
-        // the launch screen lifts on it. Offline on a first launch, it waited
-        // out its 2 s cap over a failure known at 0.3 s (measured on device).
-        if !statusView.isHidden, view.window != nil { LaunchTimeline.mark("shots.firstPageReady") }
     }
 
     /// Comment streams land on exactly the cell showing that post; each
@@ -5285,10 +5267,10 @@ final class SnapFeedViewController: UIViewController {
         // (#1849, `refreshSong`).
         // A volume key turns the sound on while this screen owns it (#1931).
         videoPlayback.feedSound.setWatching(
-            isOnScreen && isForeground && !isAudioYielded && !LaunchTimeline.curtainIsUp, by: self,
+            isOnScreen && isForeground && !isAudioYielded, by: self,
             readsRinger: MediaPlaybackPolicy.playsInBackground || MediaPlaybackPolicy.floatsInPictureInPicture
         )
-        if isOnScreen, isForeground, !isAudioYielded, !LaunchTimeline.curtainIsUp,
+        if isOnScreen, isForeground, !isAudioYielded,
            let owner = playbackOwner, ownerModel.map(SnapSoundState.clipIsHeard(in:)) ?? true,
            let cell = ownerCell ?? lifecycleCell(at: owner) as? SnapFeedCell {
             surface = cell.audibleSurface
@@ -5354,12 +5336,11 @@ final class SnapFeedViewController: UIViewController {
     }
 
     /// Whether `model`'s track may run now, heard or muted: the post owns
-    /// the screen in the foreground, nothing took the audio, the launch
-    /// screen is gone (#1812: the song waits for it to lift,
-    /// `curtainDidLift`), and the viewer has neither paused nor held it. The
-    /// song's rule, and the muted record's (#1875).
+    /// the screen in the foreground, nothing took the audio, and the viewer
+    /// has neither paused nor held it. The song's rule, and the muted
+    /// record's (#1875).
     private func trackMayRun(_ model: FeedItemDisplayModel) -> Bool {
-        isOnScreen && isForeground && !isAudioYielded && !LaunchTimeline.curtainIsUp && !isSongHeld
+        isOnScreen && isForeground && !isAudioYielded && !isSongHeld
             && model.id != songPausedFor && !unavailablePostIDs.contains(model.id)
     }
 

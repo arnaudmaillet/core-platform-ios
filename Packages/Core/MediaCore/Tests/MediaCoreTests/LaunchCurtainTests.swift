@@ -2,30 +2,11 @@ import Testing
 import UIKit
 @testable import MediaCore
 
-/// The launch screen held over the shell until the first post has what it
-/// shows, then faded out (#1812).
+/// The launch screen faded out over the shell (#1812); it lifts as soon as
+/// the shell is in since the app opens on the map (#2453).
 @MainActor
 @Suite(.serialized)
 struct LaunchCurtainTests {
-    /// What decides the lift: a launch elsewhere at once, the page's signal,
-    /// or the cap — nothing else.
-    /// Without a QA start index, the curtain lifts on the first page that has
-    /// what it shows; under `-snap-start-index` (DEBUG) it waits for the page
-    /// asked for (#1855). A test process carries no such flag.
-    @Test func theCurtainLiftsOnTheFirstPageOutsideAQAStartIndex() {
-        #expect(!ProcessInfo.processInfo.arguments.contains(LaunchCurtain.startIndexFlag))
-        #expect(LaunchCurtain.readyMilestone == "shots.firstPageReady")
-        #expect(LaunchCurtain.cap == 2)
-    }
-
-    @Test func theRevealDecision() {
-        #expect(LaunchCurtain.decision(pageReady: false, sinceLaunch: 0.4, opensElsewhere: true) == .route)
-        #expect(LaunchCurtain.decision(pageReady: true, sinceLaunch: 0.4, opensElsewhere: false) == .ready)
-        #expect(LaunchCurtain.decision(pageReady: false, sinceLaunch: LaunchCurtain.cap, opensElsewhere: false) == .capped)
-        #expect(LaunchCurtain.decision(pageReady: false, sinceLaunch: 1.2, opensElsewhere: false) == nil)
-        #expect(LaunchCurtain.decision(pageReady: false, sinceLaunch: nil, opensElsewhere: false) == nil)
-    }
-
     private func shell() -> (UIWindow, UIViewController) {
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
         let root = UIViewController()
@@ -43,65 +24,37 @@ struct LaunchCurtainTests {
         return condition()
     }
 
-    /// The curtain covers the shell — which keeps rendering under it, never
-    /// hidden — until the page's signal; a committed frame later it lifts, and
-    /// once faded it is gone from the window.
-    ///
-    /// ⚠️ A CAP FAR PAST THE WAIT (#2069): with the app's 2 s, a loaded runner
-    /// saw the cap fire before the signal's frame and read `.capped`.
-    @Test func theCurtainLiftsOnTheSignalAndIsRemovedAfterTheFade() async {
+    /// The curtain covers the window's whole bounds over the shell, which is
+    /// never hidden under it, fades out at once, and leaves the window once
+    /// faded.
+    @Test func theCurtainFadesOutOverTheShellAndLeaves() async {
         let (window, root) = shell()
         defer { window.isHidden = true }
-        let milestone = "test.curtain.\(UUID().uuidString)"
-        let curtain = LaunchCurtain(curtain: UIView(), owner: NSObject(), readyMilestone: milestone, cap: 600)
+        let curtain = UIView()
 
-        curtain.hold(over: window, opensElsewhere: false)
-        #expect(curtain.isUp && curtain.curtainIsShown)
-        #expect(!root.view.isHidden && root.view.alpha == 1, "the shell was hidden while it waits")
+        LaunchCurtain.lift(curtain, over: window, owner: NSObject())
 
-        LaunchTimeline.mark(milestone)
-        #expect(await settle { !curtain.isUp }, "the signal never lifted the curtain")
-        #expect(curtain.revealed == .ready)
-        #expect(await settle { !curtain.curtainIsShown }, "the curtain stayed in the window after its fade")
+        #expect(curtain.superview === window)
+        #expect(curtain.frame == window.bounds)
+        #expect(!root.view.isHidden && root.view.alpha == 1, "the shell was hidden under the curtain")
+        #expect(curtain.alpha == 0, "the fade did not start at once")
+        #expect(await settle { curtain.superview == nil }, "the curtain stayed in the window after its fade")
     }
 
-    /// The signal never comes: the cap lifts the curtain, and says so.
-    @Test func theCapLiftsWhenTheSignalNeverComes() async {
+    /// What drives the curtain's loader lives until the fade is over.
+    @Test func theOwnerLivesUntilTheFadeIsOver() async {
         let (window, _) = shell()
         defer { window.isHidden = true }
-        let curtain = LaunchCurtain(
-            curtain: UIView(), owner: NSObject(), readyMilestone: "test.never.\(UUID().uuidString)", cap: 0
-        )
+        let curtain = UIView()
+        weak var weakOwner: NSObject?
+        do {
+            let owner = NSObject()
+            weakOwner = owner
+            LaunchCurtain.lift(curtain, over: window, owner: owner)
+        }
 
-        curtain.hold(over: window, opensElsewhere: false)
-
-        #expect(await settle { !curtain.isUp }, "the cap never lifted the curtain")
-        #expect(curtain.revealed == .capped)
-    }
-
-    /// A launch that opens somewhere else does not wait for Shots.
-    @Test func aLaunchElsewhereLiftsAtOnce() {
-        let (window, _) = shell()
-        defer { window.isHidden = true }
-        let curtain = LaunchCurtain(curtain: UIView(), owner: NSObject(), readyMilestone: "test.never")
-
-        curtain.hold(over: window, opensElsewhere: true)
-
-        #expect(!curtain.isUp)
-        #expect(curtain.revealed == .route)
-    }
-
-    /// Sound waits for the lift: the flag is up while the curtain is, and
-    /// down from the moment the fade begins.
-    @Test func soundWaitsForTheLift() {
-        let (window, _) = shell()
-        defer { window.isHidden = true }
-        let curtain = LaunchCurtain(curtain: UIView(), owner: NSObject(), readyMilestone: "test.never.2")
-
-        curtain.hold(over: window, opensElsewhere: false)
-        #expect(LaunchTimeline.curtainIsUp)
-        curtain.lift(.capped)
-        #expect(!LaunchTimeline.curtainIsUp)
-        #expect(curtain.revealed == .capped)
+        #expect(weakOwner != nil, "the owner went before the fade")
+        #expect(await settle { curtain.superview == nil })
+        #expect(await settle { weakOwner == nil }, "the owner outlived the fade")
     }
 }
