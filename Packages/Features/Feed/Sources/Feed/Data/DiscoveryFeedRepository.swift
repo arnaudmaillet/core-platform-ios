@@ -23,7 +23,7 @@ public struct DiscoveryReader: Equatable, Sendable {
     public var contentLevel: DiscoveryContentLevel
     /// The active profile; nil for a guest, whose page is never personalised.
     public var profileID: String?
-    /// The profile's Personalised For You is off. The server enforces the
+    /// The profile's Personalised Recommendations is off. The server enforces the
     /// stored setting anyway; sending it keeps one read honest meanwhile.
     public var nonPersonalized: Bool
 
@@ -38,7 +38,7 @@ public struct DiscoveryReader: Equatable, Sendable {
 
 /// The Discover corpus: `timeline.v1.GetDiscoveryFeed` (backend B3,
 /// #448/#512) — one pool for guests and members alike, ranked by the
-/// reader's interest tags when it keeps Personalised For You on (#413).
+/// reader's interest tags when it keeps Personalised Recommendations on (#413).
 ///
 /// The RPC answers identifiers only, as the following feed does; the posts
 /// are hydrated through the app's one feed repository (`base`), so a tile and
@@ -115,7 +115,7 @@ public actor DiscoveryFeedRepository: FeedProviding {
 
     /// FOR_YOU: the server's default mix (trending, with fresh posts given a
     /// chance). The reader is asked on every first page and every page after,
-    /// so a Sensitive Content or Personalised For You change applies from the
+    /// so a Sensitive Content or Personalised Recommendations change applies from the
     /// next load.
     private func loadPage(token: String) async throws -> FeedPage {
         // "A page can hold fewer items than asked (even none) with a

@@ -114,7 +114,7 @@ package enum SettingsSection: String, CaseIterable, Sendable {
         case .privacy: ["Private account and follow requests", "Who can comment and message you", "Location sharing"]
         case .safety: ["Blocked and muted accounts", "Hidden words", "Your reports and account status"]
         case .notifications: ["Push notifications by category", "Email notifications", "Pause and quiet hours"]
-        case .whatYouSee: ["Sensitive content", "Reset For You", "Chronological feed"]
+        case .whatYouSee: ["Sensitive content", "Personalised recommendations", "Your interests"]
         case .activity: ["Recently deleted", "Likes and history", "Time limits and breaks"]
         case .playback: ["Autoplay", "Background play"]
         case .display: ["Light, dark or system appearance", "Reduce motion"]

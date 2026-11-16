@@ -114,7 +114,7 @@ struct DiscoveryFeedRepositoryTests {
                 "with no tags left, the page is everyone's")
     }
 
-    /// Personalised For You off: the reader's tags are ignored.
+    /// Personalised Recommendations off: the reader's tags are ignored.
     @Test func aNonPersonalisedReaderGetsEveryonesPage() async throws {
         let reader = DiscoveryReader(contentLevel: .restricted, profileID: MockSocialDataset.viewerProfileID, nonPersonalized: true)
         let (discovery, _, _) = makeDiscovery(reader: reader)
