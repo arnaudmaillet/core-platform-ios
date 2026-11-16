@@ -180,8 +180,8 @@ public final class HorizontalPagerView: UIView {
     /// out. `setActivePage` records the index and returns without scrolling,
     /// since a zero-width pager has no offset to scroll to — so without this
     /// the header's lens sat on Requests while the All list stayed on screen,
-    /// and only a manual swipe put the two back in agreement. Same override,
-    /// for the same reason, as `ForYouPagerView`.
+    /// and only a manual swipe put the two back in agreement. For You's own
+    /// pager (removed in #2453) carried the same override for the same reason.
     override public func layoutSubviews() {
         super.layoutSubviews()
         // Outside the width guard below: the scroller is published on the FIRST
@@ -247,8 +247,8 @@ public final class HorizontalPagerView: UIView {
     /// already named.
     ///
     /// ⚠️ NEVER FROM `onProgress`. Mid-swipe two pages share the screen and
-    /// neither is the answer; `ForYouPagerView` publishes at its commit points
-    /// for the same reason, and the reason is recorded there too.
+    /// neither is the answer. For You's own pager (removed in #2453) published
+    /// at its commit points for the same reason.
     private func publishActiveScrollView() {
         guard pages.indices.contains(activeIndex),
               let scroller = OnScreenScroller.vertical(in: pages[activeIndex]),
@@ -290,15 +290,15 @@ public final class HorizontalPagerView: UIView {
     /// does; `onSettled` fires on arrival, so lazy surfaces wake the same way
     /// they do after a swipe.
     ///
-    /// ⚠️ **`setContentOffset(animated:)`, and it must stay that way** — this is
-    /// character-for-character what `ForYouPagerView` does, and the two screens
-    /// wear the same `PagedTabBar`. A display-link spring was built here and
-    /// removed: it moved the lens just as continuously (34 fractional samples
-    /// across the flight, monotonic) but on a different curve to the other
-    /// screen's, and one tab bar that eases differently depending on which tab
-    /// you are in is worse than either curve on its own. The claim it was built
-    /// on — that UIKit's scroll animation does not report intermediate offsets
-    /// to `scrollViewDidScroll` — was simply wrong.
+    /// ⚠️ **`setContentOffset(animated:)`, and it must stay that way** — this was
+    /// character-for-character what For You's own pager did (removed in #2453),
+    /// and the two screens wore the same `PagedTabBar`. A display-link spring
+    /// was built here and removed: it moved the lens just as continuously (34
+    /// fractional samples across the flight, monotonic) but on a different
+    /// curve to the other screen's, and one tab bar that eases differently
+    /// depending on which tab you are in is worse than either curve on its own.
+    /// The claim it was built on — that UIKit's scroll animation does not
+    /// report intermediate offsets to `scrollViewDidScroll` — was simply wrong.
     public func setActivePage(_ index: Int, animated: Bool) {
         guard pages.indices.contains(index), index != activeIndex else { return }
         installPageIfNeeded(index)
@@ -462,10 +462,10 @@ extension HorizontalPagerView: UIScrollViewDelegate {
 /// ⚠️ PUBLIC because this app has more than one pager, and the second one did
 /// not have these rules. The tab-swipe fix was written here first and changed
 /// nothing on the surface it was reported against: the Messages inbox uses this
-/// pager, For You has its own `ForYouPagerView`, and a post card lives in the
-/// latter. Two twins, one defect, one of them fixed — which a real drag on the
-/// simulator caught and a unit test on this class had just called green. Sharing
-/// the class is what stops it happening a third time.
+/// pager, For You had its own pager (removed in #2453), and a post card lived
+/// in the latter. Two twins, one defect, one of them fixed — which a real drag
+/// on the simulator caught and a unit test on this class had just called green.
+/// Sharing the class is what stops it happening a third time.
 public final class HorizontalPagerScrollView: UIScrollView {
     /// See `HorizontalPagerView.yieldsPastEnds`.
     public var yieldsPastEnds = false

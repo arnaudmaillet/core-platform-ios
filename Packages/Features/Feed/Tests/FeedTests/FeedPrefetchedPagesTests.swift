@@ -120,9 +120,9 @@ final class FeedPrefetchedPagesTests {
     /// discarded, and a post of it shown later promotes nothing.
     @Test func aRefreshForgetsThePagesFetchedAheadOfTheOldFirstPage() throws {
         let cache = try makeCache()
-        cache.storeFirstPage([Self.entry("p1")], nextCursor: "c1", in: .forYouDiscover, as: viewer)
-        cache.storeNextPage([Self.entry("p2")], nextCursor: nil, after: "c1", in: .forYouDiscover, as: viewer, tier: .speculative)
-        cache.storeFirstPage([Self.entry("n1")], nextCursor: nil, in: .forYouDiscover, as: viewer)
+        cache.storeFirstPage([Self.entry("p1")], nextCursor: "c1", in: .gridDiscover, as: viewer)
+        cache.storeNextPage([Self.entry("p2")], nextCursor: nil, after: "c1", in: .gridDiscover, as: viewer, tier: .speculative)
+        cache.storeFirstPage([Self.entry("n1")], nextCursor: nil, in: .gridDiscover, as: viewer)
         cache.didShow(PostID("p2"))
         cache.store.waitForPendingWrites()
         let fates = cache.store.statistics.speculative

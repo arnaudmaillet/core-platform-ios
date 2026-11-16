@@ -35,8 +35,8 @@ final class HashtagViewModel {
     /// unseen since the last visit.
     static let rowTitle = "Recent"
     static let listTitle = "Top"
-    /// How many of the newest posts the row shows — For You's Following row's
-    /// number (`ForYouViewModel.railLimit`).
+    /// How many of the newest posts the row shows — the number For You's
+    /// Following row carried (until #2453).
     static let rowLimit = 20
 
     /// The tag, lowercased and without its `#`.

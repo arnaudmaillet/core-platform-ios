@@ -4,13 +4,14 @@ import MediaCore
 import PostGrid
 import UIKit
 
-/// How For You's two rows describe themselves to the shared flight
-/// (`presentSnapFeedHero`): a friend's FACE. A shelf's CARD is
-/// `PostShelfOrigins`'.
+/// The close steps a row's origins share with the shared flight
+/// (`presentSnapFeedHero`). A shelf's CARD is `PostShelfOrigins`'. Written for
+/// For You's two rows, whose friend's FACE was described here too (until
+/// #2453).
 ///
-/// Built here rather than inline in `ForYouViewController` so the one
-/// decision the rows kept getting wrong — what a close has to work with — is
-/// something a test can hold without a navigation stack.
+/// Built here rather than inline in a host so the one decision the rows kept
+/// getting wrong — what a close has to work with — is something a test can
+/// hold without a navigation stack.
 ///
 /// ## ⚠️ Every origin carries its window, whatever the tapped post is
 ///

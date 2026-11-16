@@ -50,15 +50,15 @@ final class PostGridFlightCard: UIView {
         var showsCounters: Bool { self == .tile }
     }
 
-    /// Matches the rounding the For You grid gives its tiles, so the card is
+    /// Matches the rounding the Discover grid gives its tiles, so the card is
     /// the brick's twin rather than its approximation.
     ///
     /// Sourced from the layout rather than restated as a literal: the card, the
-    /// tile and the hoisted dismissal surface (`ForYouViewController`) all have
-    /// to round identically, and three copies of one number is how they drift
-    /// apart. Every flight this card serves departs from the For You grid — the
-    /// profile gallery has no zoom source — so the chaotic layout's pairing is
-    /// unconditionally the right one here.
+    /// tile and the hoisted dismissal surface (For You's root, until #2453) all
+    /// had to round identically, and three copies of one number is how they
+    /// drift apart. When this was written every flight this card served
+    /// departed from the For You grid — the profile gallery had no zoom source
+    /// — so the chaotic layout's pairing was unconditionally the right one.
     static let tileCornerRadius = ChaoticSliceLayout.harmonisedCornerRadius
 
     private let style: Style

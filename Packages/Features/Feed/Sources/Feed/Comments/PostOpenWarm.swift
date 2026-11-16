@@ -10,7 +10,7 @@ import Foundation
 /// the post instead of fading in after the landing.
 ///
 /// ⚠️ TWO QUEUES, AND THE DIFFERENCE IS THE WHOLE FEATURE (the Feed's rule,
-/// lifted from `ForYouViewController.warm`):
+/// lifted from the For You tab's warm-up, removed in #2453):
 /// - **`warmNow`** is what the viewer is LOOKING AT: one task per post,
 ///   started now. Serial is wrong here: the post filling the screen waited
 ///   behind eleven others down the page and was still fetching at the tap.

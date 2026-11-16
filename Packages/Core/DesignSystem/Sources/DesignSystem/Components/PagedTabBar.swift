@@ -5,17 +5,19 @@ import UIKit
 /// slides between segments in step with the pages beneath it.
 ///
 /// Built for the Messages inbox (All / Requests / Suggestions) and reused
-/// unchanged by the For You grid (Discover / Following). It knows nothing about
+/// unchanged by the For You grid (Discover / Following) until #2453. It knows
+/// nothing about
 /// either — it takes titles and reports an index, so a third host is a `titles`
 /// array and two closures.
 ///
 /// ⚠️ **NO HOST WEARS IT AS `navigationItem.titleView` ANY MORE.** This said
 /// "all three hosts" do, and named Messages, For You and the relationship
 /// lists; every selector left the navigation bar in the migration that ended
-/// on 2026-09-10. They are in a `UITabAccessory` above the tab bar (For You,
-/// Messages, the profile tab root, the place page) or a `UIBarButtonItem` in
-/// the stack's bottom toolbar (search results, relationship lists, a pushed
-/// profile). `.navigationTitle` still carries the measured constants and is
+/// on 2026-09-10. They went into a `UITabAccessory` above the tab bar (For
+/// You until #2453, Messages, the profile tab root, the place page) or a
+/// `UIBarButtonItem` in the stack's bottom toolbar (search results,
+/// relationship lists, a pushed profile). Today the profile tab root is the
+/// only one in the accessory (`HeroPageSelector`'s `.accessory` placement). `.navigationTitle` still carries the measured constants and is
 /// still the right style for both — it is the HUGGING style, and the name is
 /// now historical. `.floating` is the original arrangement, still complete, and
 /// has no host today, so treat its numbers as unverified against real

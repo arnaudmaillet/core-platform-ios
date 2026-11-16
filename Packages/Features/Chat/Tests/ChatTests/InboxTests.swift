@@ -1766,7 +1766,8 @@ struct InboxTabWatermarkTests {
     }
 
     /// A first sight is never "all new": whatever was already there when the
-    /// app opened is not an arrival. The trap `ForYouUnread` documents, and the
+    /// app opened is not an arrival. The trap For You's unread count documented
+    /// (removed in #2453), and the
     /// reason the baseline starts at the opening moment rather than at zero.
     @Test func nothingAlreadyOnScreenCountsAsNew() {
         let watermark = InboxTabWatermark(openedAt: opened)

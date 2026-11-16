@@ -386,9 +386,10 @@ public enum WalletBoostOutcome: Equatable, Sendable {
 /// transport swap rather than a redesign.
 ///
 /// Shape-wise this is `PostBookmarkStore`'s pattern (UserDefaults + lock,
-/// injectable defaults, DEBUG seed hooks) with `ForYouUnreadStore`'s
-/// injectable clock, because every rule in it is time-derived and the test
-/// suite must never sleep to cross an hour boundary. Change fan-out is a
+/// injectable defaults, DEBUG seed hooks) with an injectable clock (as For
+/// You's unread store had, removed in #2453), because every rule in it is
+/// time-derived and the test suite must never sleep to cross an hour
+/// boundary. Change fan-out is a
 /// scoped `NotificationCenter` post (`MapFavoritesStore`'s contract): the
 /// map badge, the feed rail, and the comments bar all watch ONE injected
 /// instance, and posts carry `object: self` so parallel test suites with

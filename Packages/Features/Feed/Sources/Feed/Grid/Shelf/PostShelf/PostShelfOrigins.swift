@@ -6,8 +6,9 @@ import UIKit
 
 /// How a shelf's cards describe themselves to the shared flight
 /// (`presentSnapFeedHero`) — built by the SHELF (`PostShelfSection.open`,
-/// #1271), never by a host: For You, the place page and the search lead row
-/// get the same origin from the same place.
+/// #1271), never by a host: the place page and the hashtag page's lead row
+/// get the same origin from the same place (For You's rows did too, until
+/// #2453).
 ///
 /// See `RowOrigins` for the two rules every row origin keeps: every
 /// origin carries its window whatever the tapped post is, and a close stages
@@ -18,8 +19,8 @@ enum PostShelfOrigins {
     /// list row's media flight (`.listMedia`, the card's own corner), wearing
     /// the card's caption as furniture that fades as it grows.
     ///
-    /// `thawsOnLanding` is For You's arrangement: the page is pinned only for
-    /// the close, and handed back as it lands. A PUSHED host (the hashtag
+    /// `thawsOnLanding` true pins the page only for the close and hands it
+    /// back as it lands (For You's arrangement, until #2453). A PUSHED host (the hashtag
     /// page's lead row, #924) passes false: it pins from the tap
     /// (`PostGridPageView.openHoldingStill`) and hands the inset back in its own
     /// `viewDidAppear`, because both landings here can come while that screen
@@ -154,9 +155,9 @@ enum PostShelfOrigins {
         )
     }
 
-    /// The window a TEXT card opens and closes through — the one Discover's
-    /// list opens its text cards through (`ForYouViewController
-    /// .installTextReveal`), since the card IS the list's card: the page grows
+    /// The window a TEXT card opens and closes through — the one For You's
+    /// Discover list opened its text cards through (until #2453), since the
+    /// card IS the list's card: the page grows
     /// out of the card with its caption aligned to the card's (`captionTop`),
     /// the card's author band borrowed for the flight, the page veiled below
     /// where the card's two lines stop (`captionEnd`), and the close carrying

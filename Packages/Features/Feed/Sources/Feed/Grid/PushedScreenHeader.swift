@@ -3,7 +3,9 @@ import CoreStorage
 import DesignSystem
 import UIKit
 
-/// The header every screen For You PUSHES wears: `[‹] ———— [points][search]`.
+/// The header every pushed post screen wears: `[‹] ———— [points][search]`.
+/// Written for the screens For You pushed (until #2453); the place page and
+/// the post sets push them now.
 ///
 /// No title, on purpose (product call, 2026-09-29, restated 2026-09-30 after
 /// #323's large titles were tried and taken back): the back chevron says where
@@ -13,30 +15,30 @@ import UIKit
 /// so the two items read as the same controls carried one level in rather
 /// than as a second header.
 ///
-/// `.never` is stated rather than left `.automatic`, and For You's stack never
-/// turns `prefersLargeTitles` on: no tab stack does, so nothing pushed over
-/// these screens has a large title to inherit.
+/// `.never` is stated rather than left `.automatic`, and no tab stack turns
+/// `prefersLargeTitles` on, so nothing pushed over these screens has a large
+/// title to inherit.
 ///
 /// # Why it is an object, and why it is not the shell's installer
 ///
 /// The shell's `WalletBadgeInstaller` owns the root headers' badge and hangs
-/// one on a pushed PROFILE through the router. These screens are pushed by For
-/// You itself, inside this package, where the shell's type cannot be reached —
-/// the place page and the post screen are in the same position and build their
+/// one on a pushed PROFILE through the router. These screens are pushed from
+/// inside this package, where the shell's type cannot be reached — the place
+/// page and the post screen are in the same position and build their
 /// badge locally for the same reason. What the installer exists to share is
 /// the freshness rules, and they are small: a store observer, a claim-unlock
 /// wake-up, and a FRESH item whenever the count changes width. Written once
-/// here, three screens use it (Discover's whole mosaic, and the Friends and
-/// Following lists), and each holds its own — a badge is a view, and a view
-/// lives in one bar.
+/// here, two screens use it (Discover's whole mosaic and the pushed post list;
+/// For You's Friends and Following lists until #2453), and each holds its own
+/// — a badge is a view, and a view lives in one bar.
 ///
 /// ⚠️ THE BAR ITEMS CARRY THE ROOT'S IDENTIFIERS. iOS 26 treats two items with
 /// one identifier as ONE item across a push, so the balance and search stay in
 /// place while the rest of the bar transitions, instead of cross-fading two
 /// copies of the same controls. The balance's is the shell's own
 /// (`WalletBadgeInstaller.itemIdentifier` — spelled out again here because the
-/// App target cannot be imported); search's is shared with
-/// `ForYouViewController.searchItem`.
+/// App target cannot be imported); search's is `BarItems.SharedID.search`, the
+/// one the Explore root's search item carries (`ExploreTabCoordinator`).
 ///
 /// Native chrome is UIKit's (`TabBarRevealPolicy`): these screens hide the tab
 /// bar with `hidesBottomBarWhenPushed` and write nothing on any bar.

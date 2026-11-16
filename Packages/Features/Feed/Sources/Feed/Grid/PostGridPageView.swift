@@ -240,9 +240,9 @@ final class PostGridPageView: UIView {
     /// that the list the row's header pushes is divided the way the Messages
     /// inbox is). The page is TOLD this rather than deriving it, so the "New"
     /// header's count and the badge on the For You header the viewer tapped
-    /// cannot be two answers to one question — see
-    /// `ForYouSnapshot.followingNew` / `.friendsUnseen`. Empty on
-    /// every other page, which is therefore one plain run.
+    /// could not be two answers to one question: For You's snapshot handed
+    /// both over (until #2453). Empty on every other page, which is therefore
+    /// one plain run.
     private var newPostIDs: Set<PostID> = []
 
     /// Whether every section of a list wears its title, a lone one included —
@@ -496,7 +496,7 @@ final class PostGridPageView: UIView {
     /// The posts Discover draws as mosaic tiles rather than as cards.
     private var tilePostIDs: Set<PostID> = []
     /// The posts Discover draws as HALF-WIDTH cards in pairs
-    /// (`ForYouPairedVertical`).
+    /// (`VerticalMediaPairing`, placed by `MosaicChunkPlanner`).
     private var pairedPostIDs: Set<PostID> = []
     /// Keeps the chunk tilings it has generated, for the page's whole life.
     private var chunkPlanner = MosaicChunkPlanner()
@@ -617,8 +617,9 @@ final class PostGridPageView: UIView {
     }
 
     /// A paired card's words, for the flight to wear as resting furniture
-    /// that fades as the card grows into the page — the Following row's own
-    /// arrangement (`RowOrigins.card`). Wrapped at the card's size, and
+    /// that fades as the card grows into the page — a shelf card's own
+    /// arrangement (`PostShelfOrigins.card`), first For You's Following row's.
+    /// Wrapped at the card's size, and
     /// only posed after (`PostCardCaptionOverlay`). Nil for anything else.
     ///
     /// And a LARGE TILE's words, when the page's tiles wear them
@@ -720,7 +721,11 @@ final class PostGridPageView: UIView {
 
     /// The corpus this page is about to be handed was RE-DERIVED — a lens
     /// change or a re-ordering — so whatever similarity it bears to what is on
-    /// screen is a coincidence, not an append. See `ForYouViewModel.onCorpusReset`.
+    /// screen is a coincidence, not an append. The page cannot tell for
+    /// itself: "every post still there, plus more" reads as an append, the
+    /// newcomers inserted at the end mis-order the list, and when the sections
+    /// move in the same pass `performBatchUpdates` throws. Only the host knows
+    /// (the place page says so; For You's view model did until #2453).
     func invalidateIncrementalUpdates() {
         mustReload = true
     }
@@ -886,13 +891,13 @@ final class PostGridPageView: UIView {
 
     /// The scroll view the host names to the bars (`setContentScrollView`) —
     /// their scroll-edge treatment, and the tab bar's minimize on a screen
-    /// that arms one (For You does not, since it lost its tabs).
+    /// that arms one.
     ///
     /// ⚠️ NAMED FOR ITS JOB, not opened up. Reading an offset through this is
     /// what `verticalOffset` is for; this exists because
     /// `UIViewController.setContentScrollView(_:for:)` needs the object itself
     /// and UIKit's own heuristic search does NOT find a scroll view nested in a
-    /// horizontal pager — measured, see `ForYouSelectorAccessory`.
+    /// horizontal pager — measured on the For You tab (removed in #2453).
     var minimizeScrollView: UIScrollView { collectionView }
     /// The centred "nothing here" block, shared with every other surface that
     /// has to say it. Hidden unless the page is genuinely empty or failed.
@@ -1785,13 +1790,13 @@ final class PostGridPageView: UIView {
         // ⚠️ THE INSET IS THE COVER ONLY WHERE THE INSET IS CHROME.
         //
         // `ScrollIntoView` defaults the cover to the content inset, which is
-        // correct on a page whose insets exist BECAUSE of chrome — For You,
-        // where the top inset IS the navigation bar. The bottom is short even
-        // there: the tab bar FLOATS, drawing over the grid without insetting
-        // it, and `ForYouViewController` measured the gap years ago in its own
-        // words — "bar at y 791 height 83, while the grid reserves 34" — so a
-        // tile whose foot is within those 49pt was "revealed" while still
-        // behind the bar. That is what `footChromeCover` repairs.
+        // correct on a page whose insets exist BECAUSE of chrome — For You
+        // (removed in #2453), where the top inset WAS the navigation bar. The
+        // bottom was short even there: the tab bar FLOATS, drawing over the
+        // grid without insetting it, and For You's root measured the gap in
+        // its own words — "bar at y 791 height 83, while the grid reserves
+        // 34" — so a tile whose foot is within those 49pt was "revealed" while
+        // still behind the bar. That is what `footChromeCover` repairs.
         //
         // ⚠️ AND ON A HOSTED PAGE THE TOP IS NOT CHROME AT ALL. A host with a
         // header that scrolls away insets this page by the header's WHOLE
@@ -2349,8 +2354,8 @@ final class PostGridPageView: UIView {
         switch cell(for: postID) {
         case let tile as PostGridTileCell:
             (cover: tile.renderedCover, style: .tile)
-        // A paired card flies as the Following row's cards do: a list
-        // media flight, on the card's own corner (`RowOrigins.card`).
+        // A paired card flies as a shelf's cards do: a list media flight, on
+        // the card's own corner (`PostShelfOrigins.card`).
         case let card as PostShelfMediaCardCell:
             (cover: card.renderedCover, style: .listMedia)
         case let row as PostGridListRowCell:
@@ -2613,8 +2618,8 @@ final class PostGridPageView: UIView {
               size.width > 0, size.height > 0
         else { return nil }
         // A paired slot is a Following card: its twin is that card as it
-        // rests — the picture the cell is showing and the words over it — the
-        // Following row's own stand-in (`RowOrigins.cardReveal`).
+        // rests — the picture the cell is showing and the words over it — a
+        // shelf card's own stand-in (`PostShelfOrigins.cardReveal`).
         if drawsAsPairedCard(occupantID) {
             let cover = (cell(for: occupantID) as? PostShelfMediaCardCell)?.renderedCover
                 ?? post.thumbnailURL.flatMap { imagePipeline.cachedImage(for: $0) }

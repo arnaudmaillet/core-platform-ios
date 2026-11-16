@@ -1645,7 +1645,7 @@ final class AppContainer {
     /// cache, and a post opened from a trending tile is already warm in the
     /// snap feed it opens into. See `DiscoverExploreAdapter`.
     private lazy var exploreRepository = DiscoverExploreAdapter(
-        forYou: DiscoverRepository(
+        repository: DiscoverRepository(
             feed: feedRepository,
             counterClient: Counter_V1_CounterServiceClient(client: authenticatedRPCClient),
             discovery: discoveryRepository

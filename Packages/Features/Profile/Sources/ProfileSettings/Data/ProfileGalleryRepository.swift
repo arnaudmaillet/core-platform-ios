@@ -225,9 +225,10 @@ public actor ProfileGalleryRepository: ProfileGalleryProviding {
     /// looking at. It is carried for the surface a tile OPENS INTO — the
     /// full-screen page's author capsule and its attribution pill are seeded
     /// from the tile's own model, and a tile with no author seeds a page with
-    /// an anonymous one. `ForYouDiscovery` has carried it for the same reason
-    /// since that grid learned to seed; this is the same fact, resolved the only
-    /// way this repository can get it.
+    /// an anonymous one. The Discover grid's repository (`DiscoverRepository`,
+    /// For You's until #2453) has carried it for the same reason since that
+    /// grid learned to seed; this is the same fact, resolved the only way this
+    /// repository can get it.
     ///
     /// One read per DISTINCT author, not per post: the authored pages are a
     /// single person, so a whole grid is one round trip. `post.v1` carries only

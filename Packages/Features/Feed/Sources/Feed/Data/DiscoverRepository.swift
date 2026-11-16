@@ -150,7 +150,7 @@ public actor DiscoverRepository: DiscoverProviding {
         let writer = localCache?.viewer
         let page = try await discovery.loadFirstPage()
         let pageCounters = await counters(for: page)
-        localCache?.storeFirstPage(page.entries, counters: pageCounters, nextCursor: page.nextPageToken, in: .forYouDiscover, as: writer)
+        localCache?.storeFirstPage(page.entries, counters: pageCounters, nextCursor: page.nextPageToken, in: .gridDiscover, as: writer)
         return Self.decorate(Self.map(page), with: pageCounters)
     }
 
@@ -161,13 +161,13 @@ public actor DiscoverRepository: DiscoverProviding {
         do {
             page = try await discovery.loadPage(afterToken: token)
         } catch {
-            guard let stored = storedPage(after: token, in: .forYouDiscover) else { throw error }
+            guard let stored = storedPage(after: token, in: .gridDiscover) else { throw error }
             return stored
         }
         let pageCounters = await counters(for: page)
         // Fetched ahead of the viewer (`LookaheadPaging`, #970).
         localCache?.storeNextPage(
-            page.entries, counters: pageCounters, nextCursor: page.nextPageToken, after: token, in: .forYouDiscover,
+            page.entries, counters: pageCounters, nextCursor: page.nextPageToken, after: token, in: .gridDiscover,
             as: writer, tier: .speculative
         )
         return Self.decorate(Self.map(page), with: pageCounters)
@@ -177,7 +177,7 @@ public actor DiscoverRepository: DiscoverProviding {
         let writer = localCache?.viewer
         let page = try await feed.loadFirstPage()
         let pageCounters = await counters(for: page)
-        localCache?.storeFirstPage(page.entries, counters: pageCounters, nextCursor: page.nextPageToken, in: .forYouFollowing, as: writer)
+        localCache?.storeFirstPage(page.entries, counters: pageCounters, nextCursor: page.nextPageToken, in: .gridFollowing, as: writer)
         return Self.decorate(Self.map(page), with: pageCounters)
     }
 
@@ -187,12 +187,12 @@ public actor DiscoverRepository: DiscoverProviding {
         do {
             page = try await feed.loadPage(afterToken: token)
         } catch {
-            guard let stored = storedPage(after: token, in: .forYouFollowing) else { throw error }
+            guard let stored = storedPage(after: token, in: .gridFollowing) else { throw error }
             return stored
         }
         let pageCounters = await counters(for: page)
         localCache?.storeNextPage(
-            page.entries, counters: pageCounters, nextCursor: page.nextPageToken, after: token, in: .forYouFollowing,
+            page.entries, counters: pageCounters, nextCursor: page.nextPageToken, after: token, in: .gridFollowing,
             as: writer, tier: .speculative
         )
         return Self.decorate(Self.map(page), with: pageCounters)
@@ -215,8 +215,8 @@ public actor DiscoverRepository: DiscoverProviding {
     /// a screen half-restored would reshuffle when the rest lands.
     public nonisolated func cachedPages() -> DiscoverCachedPages? {
         guard let localCache else { return nil }
-        let following = localCache.firstPage(of: .forYouFollowing)
-        let discover = discovery == nil ? nil : localCache.firstPage(of: .forYouDiscover)
+        let following = localCache.firstPage(of: .gridFollowing)
+        let discover = discovery == nil ? nil : localCache.firstPage(of: .gridDiscover)
         if discovery != nil {
             guard let discover, !discover.entries.isEmpty else { return nil }
         } else {
