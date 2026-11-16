@@ -6,7 +6,6 @@ extension LaunchArgument {
     static let avatarPlayLog = LaunchArgument("-avatar-play-log")
     static let avatarRounds = LaunchArgument("-avatar-rounds")
     static let cacheAudit = LaunchArgument("-cache-audit")
-    static let launchCap = LaunchArgument("-launch-cap")
     static let launchLog = LaunchArgument("-launch-log")
     static let slowMedia = LaunchArgument("-slow-media")
 }

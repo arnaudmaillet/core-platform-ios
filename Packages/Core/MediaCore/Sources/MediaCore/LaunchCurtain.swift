@@ -1,184 +1,35 @@
-import LaunchArguments
 import UIKit
 
-/// The launch screen held over the shell until the first post's media is on
-/// screen, then faded out (#1812, the owner 2026-10-28).
+/// The launch screen faded out over the shell (#1812, the owner 2026-10-28).
 ///
-/// It was a hard cut from the launch screen to the shell at the first auth
-/// state — a keychain read, long before the first post's picture — so a cold
-/// start showed ~180 ms of black page under the whole chrome, and then the
-/// picture in one frame. Now the shell is installed UNDER the launch view: it
-/// lays out, the first page dequeues, the picture decodes and renders behind
-/// it, and the launch view fades out over it.
+/// A hard cut from the launch screen to the shell showed the shell's first
+/// layout in one frame. The shell is installed UNDER the launch view instead,
+/// laid out, and the launch view fades out over it.
 ///
-/// ⚠️ THE SHELL IS NEVER HIDDEN WHILE IT WAITS. It must render, or the
-/// picture is never committed and the signal never comes: the curtain is a
-/// view over it, never an `isHidden` or `alpha = 0` on it.
+/// It once waited for Shots' first post to have its picture, with a 2 s cap.
+/// The app opens on the map since #2453, so it lifts as soon as the shell is
+/// in: the map draws its own tiles and loaders.
 ///
-/// What it waits for, `LaunchCurtain.decision`:
-/// - the first page has what it shows (`shots.firstPageReady`: its picture, a
-///   text page, a picture that failed for good, or the page's own empty or
-///   failed state — offline with nothing on disk), plus one committed frame;
-/// - or the cap, `cap` seconds after `app.didFinishLaunching` — a first
-///   install whose first page is slow to come: the page then shows its own
-///   centred loader;
-/// - or nothing, when the launch opens somewhere else (a deep link, a
-///   notification): it lifts as soon as the shell is in.
+/// ⚠️ THE SHELL IS NEVER HIDDEN UNDER IT. The curtain is a view over the
+/// shell, never an `isHidden` or `alpha = 0` on it.
 @MainActor
-public final class LaunchCurtain {
-    /// Why the curtain lifted.
-    public enum Reveal: Equatable, Sendable {
-        /// The first page had what it shows.
-        case ready
-        /// The cap ran out first.
-        case capped
-        /// The launch opened somewhere other than Shots.
-        case route
-    }
-
-    /// The longest the launch screen is held, from `app.didFinishLaunching`.
-    /// One constant, tuned on a device. DEBUG: `-launch-cap <seconds>`
-    /// overrides it — a simulator's Debug launch under `-mock-auto-login`
-    /// reaches the shell past 2 s, where the cap would fire at once.
-    public static let cap: TimeInterval = {
-        #if DEBUG
-        let arguments = ProcessInfo.processInfo.arguments
-        if let seconds = LaunchArgument.launchCap.doubleValue(in: arguments) { return seconds }
-        // A QA launch onto post N waits for that page (`readyMilestone`), past
-        // the start-index hook's own settle.
-        if arguments.contains(startIndexFlag) { return 8 }
-        #endif
-        return 2
-    }()
-
-    /// The milestone the launch screen lifts on: the first page that has what
-    /// it shows (`shots.firstPageReady`).
-    ///
-    /// DEBUG, under `-snap-start-index N` (#1855): the page the QA launch asked
-    /// for, once it has its picture (`qaStartPageReady`, marked by the feed's
-    /// start-index hook). Post 0 is ready first, and the curtain lifted on it
-    /// before the hook jumped to post N, so every QA film opened on the wrong
-    /// post and then cut.
-    public static var readyMilestone: String {
-        #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains(startIndexFlag) { return qaStartPageReady }
-        #endif
-        return "shots.firstPageReady"
-    }
-
-    #if DEBUG
-    public static let startIndexFlag = "-snap-start-index"
-    public static let qaStartPageReady = "qa.startPageReady"
-    #endif
+public enum LaunchCurtain {
     /// The fade: ease-out, no zoom.
     public static let fadeDuration: TimeInterval = 0.3
 
-    /// Whether to lift now, and why — nil to keep waiting. Pure, for tests.
-    public static func decision(pageReady: Bool, sinceLaunch: TimeInterval?, opensElsewhere: Bool) -> Reveal? {
-        if opensElsewhere { return .route }
-        if pageReady { return .ready }
-        if let sinceLaunch, sinceLaunch >= cap { return .capped }
-        return nil
-    }
-
-    /// The launch screen's view, kept over the shell.
-    private let curtain: UIView
-    /// Holds what drives the curtain's own loader (`LaunchViewController`'s
-    /// gate) for as long as the curtain shows.
-    private let owner: AnyObject
-    public private(set) var isUp = false
-    public private(set) var revealed: Reveal?
-    private var frameLink: CADisplayLink?
-
-    /// What the curtain waits for: the first Shots page having what it shows.
-    /// Settable for tests, which use a milestone of their own.
-    let readyMilestone: String
-    /// The longest this curtain holds: `LaunchCurtain.cap` in the app.
-    ///
-    /// ⚠️ SETTABLE FOR TESTS (#2069). A test host never marks
-    /// `app.didFinishLaunching`, so the cap there runs from `hold(over:)`; a
-    /// test that waits for the signal on a loaded CI runner could see the
-    /// 2 s cap fire before the signal's committed frame, and read `.capped`.
-    /// Such a test holds far longer than it waits; one that checks the cap
-    /// holds for none.
-    let holdCap: TimeInterval
-
-    public init(
-        curtain: UIView, owner: AnyObject, readyMilestone: String = "shots.firstPageReady",
-        cap: TimeInterval = LaunchCurtain.cap
-    ) {
-        self.curtain = curtain
-        self.owner = owner
-        self.readyMilestone = readyMilestone
-        self.holdCap = cap
-    }
-
-    /// Puts the curtain over `window`'s new root and waits for the signal.
-    public func hold(over window: UIWindow, opensElsewhere: Bool) {
+    /// Puts `curtain` over `window`'s new root and fades it out at once; it
+    /// leaves the window once faded. `owner` (what drives the curtain's own
+    /// loader, `LaunchViewController`) lives until then.
+    public static func lift(_ curtain: UIView, over window: UIWindow, owner: AnyObject) {
         curtain.frame = window.bounds
         curtain.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         window.addSubview(curtain)
-        isUp = true
-        LaunchTimeline.curtainIsUp = true
-        if let reveal = Self.decision(pageReady: false, sinceLaunch: nil, opensElsewhere: opensElsewhere) {
-            return lift(reveal)
-        }
-        LaunchTimeline.whenReached(readyMilestone) { [weak self] in self?.pageIsReady() }
-        let since = LaunchTimeline.time(of: "app.didFinishLaunching")
-            .flatMap { start in LaunchTimeline.sinceProcessStart().map { $0 - start } } ?? 0
-        DispatchQueue.main.asyncAfter(deadline: .now() + max(0, holdCap - since)) { [weak self] in
-            self?.lift(.capped)
-        }
-    }
-
-    /// The picture is set: lifts on the next committed frame, so the fade
-    /// never uncovers a picture that is set but not yet drawn.
-    private func pageIsReady() {
-        guard isUp, frameLink == nil else { return }
-        let link = CADisplayLink(target: FrameProxy(self), selector: #selector(FrameProxy.tick))
-        link.add(to: .main, forMode: .common)
-        frameLink = link
-    }
-
-    fileprivate func frameCommitted() {
-        frameLink?.invalidate()
-        frameLink = nil
-        lift(.ready)
-    }
-
-    /// Fades the curtain out and takes it away. Sound may start as the fade
-    /// begins (`LaunchTimeline.curtainIsUp`).
-    public func lift(_ reveal: Reveal) {
-        guard isUp else { return }
-        isUp = false
-        revealed = reveal
-        frameLink?.invalidate()
-        frameLink = nil
         LaunchTimeline.mark("launch.revealed")
-        if reveal == .capped { LaunchTimeline.mark("launch.revealCapped") }
-        LaunchTimeline.curtainIsUp = false
-        let curtain = curtain
-        let owner = owner
-        UIView.animate(withDuration: Self.fadeDuration, delay: 0, options: [.curveEaseOut, .allowUserInteraction]) {
+        UIView.animate(withDuration: fadeDuration, delay: 0, options: [.curveEaseOut, .allowUserInteraction]) {
             curtain.alpha = 0
         } completion: { _ in
             curtain.removeFromSuperview()
             withExtendedLifetime(owner) {}
         }
-    }
-
-    /// Whether the curtain's view is still in the window.
-    public var curtainIsShown: Bool { curtain.superview != nil }
-}
-
-/// Holds the curtain for its display link without keeping it alive.
-@MainActor
-private final class FrameProxy: NSObject {
-    weak var curtain: LaunchCurtain?
-    init(_ curtain: LaunchCurtain) { self.curtain = curtain }
-
-    @objc func tick(_ link: CADisplayLink) {
-        guard let curtain else { return link.invalidate() }
-        curtain.frameCommitted()
     }
 }
