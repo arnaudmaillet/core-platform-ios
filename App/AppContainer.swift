@@ -1066,8 +1066,8 @@ final class AppContainer {
     )
 
     /// Who reads Discover (#407, #413): the active profile, its Sensitive
-    /// Content setting as the content level, and its Personalised For You
-    /// setting. A guest — and anything that can't be read — is restricted
+    /// Content setting as the content level, and its Personalised
+    /// Recommendations setting. A guest — and anything that can't be read — is restricted
     /// and unpersonalised; the server clamps teens and guests anyway.
     private func discoveryReader() async -> DiscoveryReader {
         guard memberGate.isMember,

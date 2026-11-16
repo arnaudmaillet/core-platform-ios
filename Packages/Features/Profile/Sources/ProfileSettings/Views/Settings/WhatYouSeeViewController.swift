@@ -3,10 +3,14 @@ import DesignSystem
 import UIKit
 
 /// Settings → What You See (#407, #413): how much sensitive content the feeds
-/// may show (synced on the profile, backend #731), whether For You is ranked
-/// by the profile's interests, the interests themselves — each removable,
-/// or all reset (timeline #662) — and how each feed is ordered: the
-/// plain-language account of the recommender DSA Art. 27 and 38 ask for.
+/// may show (synced on the profile, backend #731), whether suggested posts
+/// (Discover: Search's trending, the place page's) are ranked by the
+/// profile's interests, and the interests themselves — each removable, or
+/// all reset (timeline #662): the plain-language account of the recommender,
+/// and its off switch, that DSA Art. 27 and 38 ask for.
+///
+/// For You left the app on 2026-11-15 (#2453): its name left this screen,
+/// and so did "How Your Feeds Are Ordered", whose two rows were its feeds.
 ///
 /// Not optimistic, like the other privacy-adjacent choices: the checkmark
 /// and the switch show where the tap put them, with the loader beside them,
@@ -26,7 +30,7 @@ package final class WhatYouSeeViewController: UIViewController {
     }
 
     package enum Section: Hashable {
-        case sensitive, personalization, interests, ordering
+        case sensitive, personalization, interests
     }
 
     private enum Item: Hashable {
@@ -42,8 +46,6 @@ package final class WhatYouSeeViewController: UIViewController {
         case takingLonger
         case interestsTakingLonger
         case resetInterests
-        case following
-        case forYou
     }
 
     private let preferences: any FeedPreferencesManaging
@@ -177,7 +179,7 @@ package final class WhatYouSeeViewController: UIViewController {
         loadInterests()
     }
 
-    /// The sensitive-content section's read: the level, the For You switch
+    /// The sensitive-content section's read: the level, the recommendations switch
     /// and the age that decides whether Standard is offered. Any of the
     /// three failing fails the section — the age included (#799). Pure, so
     /// the rule is pinned by tests. `failure` is why it failed (#794).
@@ -214,9 +216,8 @@ package final class WhatYouSeeViewController: UIViewController {
     package static func header(_ section: Section) -> String {
         switch section {
         case .sensitive: "Sensitive Content"
-        case .personalization: "For You"
+        case .personalization: "Recommendations"
         case .interests: "Your Interests"
-        case .ordering: "How Your Feeds Are Ordered"
         }
     }
 
@@ -227,11 +228,9 @@ package final class WhatYouSeeViewController: UIViewController {
                 ? "You're under 18, so posts marked as sensitive stay out of your feeds. Applies to this profile."
                 : "Applies to this profile, on all your devices."
         case .personalization:
-            "When this is on, For You puts posts that match your interests first. Your interests come from the hashtags of posts you react to. When it's off, For You is ranked the same way for everyone, nothing is learnt, and the interests learnt so far are erased."
+            "When this is on, suggested posts that match your interests come first. Your interests come from the hashtags of posts you react to. When it's off, suggestions are ranked the same way for everyone, nothing is learnt, and the interests learnt so far are erased."
         case .interests:
-            "Swipe left on an interest to remove it. A removed interest stops shaping For You and isn't learnt again. Resetting forgets everything, including interests you removed."
-        case .ordering:
-            "Following never uses your interests."
+            "Swipe left on an interest to remove it. A removed interest stops shaping your recommendations and isn't learnt again. Resetting forgets everything, including interests you removed."
         }
     }
 
@@ -244,20 +243,13 @@ package final class WhatYouSeeViewController: UIViewController {
         FailureCopy.row(for: failure, fallback: "Couldn't load your interests. Tap to try again.")
     }
 
-    package static let personalizedTitle = "Personalised For You"
+    package static let personalizedTitle = "Personalised Recommendations"
     package static let resetTitle = "Reset Interests"
-    package static let followingDetail = "Posts from accounts you follow, newest first."
-
-    package static func forYouDetail(personalized: Bool) -> String {
-        personalized
-            ? "Popular and recent posts, with the ones that match your interests first."
-            : "Popular and recent posts, ranked the same way for everyone."
-    }
 
     package static func noInterestsText(personalized: Bool) -> String {
         personalized
             ? "No interests yet. They appear as you react to posts with hashtags."
-            : "Personalised For You is off, so no interests are learnt."
+            : "Personalised Recommendations is off, so no interests are learnt."
     }
 
     /// How much a tag weighs, in words: weights halve every 30 days without a
@@ -351,16 +343,6 @@ package final class WhatYouSeeViewController: UIViewController {
                 content = .cell()
                 content.text = Self.resetTitle
                 content.textProperties.color = isResetting ? .secondaryLabel : .systemRed
-            case .following:
-                content.text = "Following"
-                content.secondaryText = Self.followingDetail
-                content.image = UIImage(systemName: "person.2")
-                content.imageProperties.tintColor = .label
-            case .forYou:
-                content.text = "For You"
-                content.secondaryText = Self.forYouDetail(personalized: isPersonalized)
-                content.image = UIImage(systemName: "sparkles")
-                content.imageProperties.tintColor = .label
             }
             cell.contentConfiguration = content
         }
@@ -431,8 +413,6 @@ package final class WhatYouSeeViewController: UIViewController {
                 }
             }
         }
-        snapshot.appendSections([.ordering])
-        snapshot.appendItems([.following, .forYou], toSection: .ordering)
         snapshot.reconfigureItems(snapshot.itemIdentifiers)
         // Their footers follow state (teen, an empty list).
         snapshot.reloadSections([.sensitive] + (snapshot.sectionIdentifiers.contains(.interests) ? [.interests] : []))
@@ -511,7 +491,7 @@ package final class WhatYouSeeViewController: UIViewController {
         guard interestTags != nil, !isResetting else { return }
         let confirm = UIAlertController(
             title: "Reset your interests?",
-            message: "For You forgets everything it learnt about you, including interests you removed, and starts over.",
+            message: "Your recommendations forget everything learnt about you, including interests you removed, and start over.",
             preferredStyle: .alert
         )
         confirm.addAction(UIAlertAction(title: "Cancel", style: .cancel))

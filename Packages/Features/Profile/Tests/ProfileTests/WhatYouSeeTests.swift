@@ -9,8 +9,8 @@ import Testing
 @testable import ProfileSettings
 
 /// Settings → What You See (#407, #413; backend #731, timeline #662):
-/// sensitive content, Personalised For You, the interests that rank it, and
-/// how the feeds are ordered.
+/// sensitive content, Personalised Recommendations, and the interests that
+/// rank suggested posts. For You's name left the screen with For You (#2453).
 @MainActor
 struct WhatYouSeeTests {
     private struct Session: AuthSessionProviding {
@@ -88,7 +88,7 @@ struct WhatYouSeeTests {
         #expect(try await interests.interests().isEmpty)
     }
 
-    /// Turning Personalised For You off erases what was learnt (timeline
+    /// Turning Personalised Recommendations off erases what was learnt (timeline
     /// #662), which is why the screen reads the list again.
     @Test func turningPersonalisationOffErasesInterests() async throws {
         let (repository, interests) = makeFixture()
@@ -97,17 +97,33 @@ struct WhatYouSeeTests {
         #expect(try await interests.interests().isEmpty)
     }
 
-    @Test func theScreenSaysHowTheFeedsAreOrdered() {
+    @Test func theScreenSaysHowSuggestionsAreRanked() {
         #expect(SensitiveContentLevel.allCases.map(\.title) == ["Less", "Standard"])
         #expect(SensitiveContentLevel.standard.detail.contains("under 18"))
-        // Done when: the chronological option shows followed posts newest first.
-        #expect(WhatYouSeeViewController.followingDetail.contains("newest first"))
-        #expect(WhatYouSeeViewController.forYouDetail(personalized: false).contains("same way for everyone"))
-        #expect(WhatYouSeeViewController.forYouDetail(personalized: true).contains("match your interests"))
+        #expect(WhatYouSeeViewController.footer(.personalization, teen: false)?.contains("same way for everyone") == true)
+        #expect(WhatYouSeeViewController.footer(.personalization, teen: false)?.contains("match your interests") == true)
         #expect(WhatYouSeeViewController.footer(.sensitive, teen: true)?.contains("under 18") == true)
         #expect(WhatYouSeeViewController.footer(.interests, teen: false)?.contains("Swipe left") == true)
         #expect(WhatYouSeeViewController.strength(0.92) == "Strong")
         #expect(WhatYouSeeViewController.strength(0.44) == "Moderate")
         #expect(WhatYouSeeViewController.strength(0.18) == "Light")
+    }
+
+    /// For You left the app (#2453): no copy on the screen names it, and the
+    /// screen has no section for feeds that are gone.
+    @Test func noCopyNamesForYou() {
+        let sections: [WhatYouSeeViewController.Section] = [.sensitive, .personalization, .interests]
+        var copy = sections.map(WhatYouSeeViewController.header)
+        copy += sections.compactMap { WhatYouSeeViewController.footer($0, teen: false) }
+        copy += sections.compactMap { WhatYouSeeViewController.footer($0, teen: true) }
+        copy += [
+            WhatYouSeeViewController.personalizedTitle,
+            WhatYouSeeViewController.noInterestsText(personalized: true),
+            WhatYouSeeViewController.noInterestsText(personalized: false),
+        ]
+        copy += SettingsSection.whatYouSee.plannedItems
+        for line in copy {
+            #expect(!line.localizedCaseInsensitiveContains("for you"), "\(line)")
+        }
     }
 }
