@@ -7,6 +7,7 @@ import PostGrid
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// Every host of a shelf (#1296, the owner 2026-10-16): its title over
 /// skeleton cards until its posts land, then ten cards a row at most — a row

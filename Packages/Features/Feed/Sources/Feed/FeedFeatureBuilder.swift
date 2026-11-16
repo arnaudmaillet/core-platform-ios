@@ -4,6 +4,7 @@ import CoreModels
 import CoreNetworking
 import CoreStorage
 import EntityStore
+import PostSurfaces
 import ProfileInterface
 import CoreNavigation
 import FeedInterface

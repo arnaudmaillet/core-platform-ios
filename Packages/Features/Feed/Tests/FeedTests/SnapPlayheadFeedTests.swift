@@ -5,6 +5,7 @@ import MediaPlayback
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// The clip bar's feed belongs to the page on show, and only to it (#1532).
 @MainActor

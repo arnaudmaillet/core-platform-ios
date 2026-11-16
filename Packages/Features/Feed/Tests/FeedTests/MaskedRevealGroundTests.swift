@@ -4,6 +4,7 @@ import MediaPlayback
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// The screen's ground under a media page: black at rest. (The masked
 /// comments opening these tests also pinned is gone with the first comments

@@ -10,6 +10,7 @@ import Foundation
 import LaunchArguments
 import MediaCore
 import PostGrid
+import PostSurfaces
 import ThreadKit
 import UIKit
 

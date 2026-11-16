@@ -4,6 +4,7 @@ import MediaCore
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// THE LIVE GRAB (#1915, the owner 2026-10-29, after filming Instagram,
 /// TikTok and Douyin): a grab moves the live page, its whole interface on

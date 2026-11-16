@@ -7,6 +7,7 @@ import PostGrid
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// For You's page drawing the post lists' rows (#2243; the only style since
 /// #2290): its rows with no card, the hairlines it decides from each row's

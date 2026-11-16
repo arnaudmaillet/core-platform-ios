@@ -3,6 +3,7 @@ import DesignSystem
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// The comments empty state's visibility contract: the "No comments yet"
 /// pill renders exactly when a media post's stream is LOADED with a zero

@@ -3,6 +3,7 @@ import DesignSystem
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// ⚠️ THE TRAILING COLUMN STANDS AT THE EDGE, WHERE IT ALWAYS STOOD (the
 /// owner, 2026-10-22): #1592 had pushed the emote rail, the like bubble and

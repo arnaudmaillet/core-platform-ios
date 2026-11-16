@@ -4,6 +4,7 @@ import MediaPlayback
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// A page from the moment it is warmed to the moment it is on screen showing
 /// its own interface — and, above all, that every page can be REACHED.

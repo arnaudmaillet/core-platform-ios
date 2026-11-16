@@ -5,6 +5,7 @@ import PostGrid
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// A channel's showcase on For You's surfaces and its share (#2216, part
 /// 2): the shelf's card compact, the lift's card full under the author's

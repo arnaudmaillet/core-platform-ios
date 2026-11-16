@@ -30,6 +30,9 @@ let package = Package(
         .package(path: "../../Core/DesignSystem"),
         .package(path: "../../Core/EmoteKit"),
         .package(path: "../../Core/PostGrid"),
+        // The grid and list surfaces the place page, post sets and the
+        // builder's pages are drawn with (#2379).
+        .package(path: "../../Core/PostSurfaces"),
         .package(path: "../../Core/ShareSheet"),
         // The place page is a hero page, the profile's container (#1656).
         .package(path: "../../Core/HeroPage"),
@@ -70,6 +73,7 @@ let package = Package(
                 // build asks whether THIS target was entitled to it.
                 "CoreNetworking",
                 "PostGrid",
+                "PostSurfaces",
                 // The place page's QR bubble opens the profile's share sheet.
                 "ShareSheet",
                 "HeroPage",
@@ -91,6 +95,7 @@ let package = Package(
                 "LocalStore",
                 "EntityStore",
                 "PostGrid",
+                "PostSurfaces",
                 "HeroPage",
                 .product(name: "CoreNetworkingMocks", package: "CoreNetworking"),
                 .product(name: "CoreRealtimeMocks", package: "CoreRealtime")

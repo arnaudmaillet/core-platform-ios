@@ -7,6 +7,7 @@ import QuartzCore
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// ⚠️ A WINDOW OPENS OUT OF THE LIFT TOO (#1543): words and friends' faces
 /// open through a window, and every surface's window is built in one place

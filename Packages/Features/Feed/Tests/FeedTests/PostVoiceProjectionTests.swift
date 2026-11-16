@@ -5,6 +5,7 @@ import Foundation
 import PostGrid
 import Testing
 @testable import Feed
+@testable import PostSurfaces
 
 /// A voice post (#2206) is a text post whose caption speaks: the voice is
 /// mapped from the wire and carried to every projection, and the post stays

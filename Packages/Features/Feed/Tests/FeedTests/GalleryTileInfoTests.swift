@@ -7,6 +7,7 @@ import PostGrid
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// On For You's chunks and the pushed Discover gallery, a tile large enough
 /// wears its author and the start of its caption over the picture — the

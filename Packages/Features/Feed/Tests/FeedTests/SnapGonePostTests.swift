@@ -4,6 +4,7 @@ import MediaCore
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// A post the server stops showing, on the feed it is shown in (#2048): the
 /// page in front gives way to the next with a toast (the block only for a

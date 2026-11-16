@@ -7,6 +7,7 @@ import PostGrid
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// #951: every surface that opens a post from a playing tile parks that tile's
 /// clip for a close that pages on and comes home, and lands it back on the

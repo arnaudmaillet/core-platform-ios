@@ -3,6 +3,7 @@ import PostGrid
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// A channel showcase's menu (#2216): no Comment row, since a showcase takes
 /// no comments; every other row as for any text post.

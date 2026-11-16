@@ -33,8 +33,11 @@ let package = Package(
         // Tests only: the live-count suite drives the app's EntityStore
         // (#896); the target reaches it through PostGrid's card staking.
         .package(path: "../../Core/EntityStore"),
-        // Tests only: the profile's pages are For You's grid (#1273), built
-        // through `PostGridPages.make` — the real page, not a stand-in.
+        // Tests only: the profile's pages are the post surfaces' grid (#1273,
+        // #2379), built through `PostGridPages.make` — the real page, not a
+        // stand-in.
+        .package(path: "../../Core/PostSurfaces"),
+        // Tests only, until #2372: some suites still reach Feed.
         .package(path: "../Feed")
     ],
     targets: [
@@ -147,6 +150,7 @@ let package = Package(
                 "DesignSystem",
                 "CoreNetworking",
                 "PostGrid",
+                "PostSurfaces",
                 // The Storage suite drives a real coordinator and image pipeline,
                 // and the video byte cache's namespaces.
                 "MediaCore",

@@ -6,6 +6,7 @@ import PostGrid
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// For You's page as the profile sees it (`PostGridPage`, #1273 B): the
 /// vended contract maps onto the page's own behaviour.

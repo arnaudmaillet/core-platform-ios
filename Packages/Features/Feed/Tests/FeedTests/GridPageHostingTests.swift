@@ -6,6 +6,7 @@ import PostGrid
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// What `PostGridPageView` gained to host the profile's pages (#1273, PR A):
 /// snap detents, an animated offset, a status under a hosted header, counts

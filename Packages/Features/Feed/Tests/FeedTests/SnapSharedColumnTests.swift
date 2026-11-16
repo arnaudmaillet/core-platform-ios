@@ -4,6 +4,7 @@ import MediaCore
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// ONE action column for the media and comments layouts (#695): the page's
 /// like pill and sound bubble stay on screen when the comments take the page,

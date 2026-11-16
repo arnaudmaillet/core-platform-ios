@@ -2,6 +2,7 @@ import CoreModels
 import MediaCore
 import Testing
 @testable import Feed
+@testable import PostSurfaces
 
 /// A SEED IS A FIRST DRAFT, NOT THE PAGE.
 ///

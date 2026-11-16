@@ -5,6 +5,7 @@ import MediaPlayback
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// What the post on screen travels as, asked of the screen that is showing it.
 ///

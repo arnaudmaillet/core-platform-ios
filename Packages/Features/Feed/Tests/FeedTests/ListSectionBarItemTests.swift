@@ -6,6 +6,7 @@ import PostGrid
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// The pushed lists' pinned section in the bar (#1378): `[‹][New · 3]`,
 /// `[‹][Recent]`, `[‹][Popular]`, nothing at the top, and no capsule pinned

@@ -4,6 +4,7 @@ import Foundation
 import Testing
 @testable import Feed
 @testable import ThreadKit
+@testable import PostSurfaces
 
 /// The author's avatar frame (#943) rides from the profile read to the snap
 /// pill and the comment rows, and through both device stores.

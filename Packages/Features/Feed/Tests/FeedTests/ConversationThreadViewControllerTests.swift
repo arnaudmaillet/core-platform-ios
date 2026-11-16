@@ -7,6 +7,7 @@ import Testing
 import UIKit
 @testable import Feed
 @testable import ThreadKit
+@testable import PostSurfaces
 
 /// The conversation drawn as a text post's screen, driven
 /// by a fake: what it lists, how it groups, what the composer and the footer

@@ -10,6 +10,7 @@ import MediaCore
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// A text page's like stands in the screen's footer (#1924, the owner):
 /// `[author] [♥ count] [☆] [↪]` — repost in the share sheet — and no pill floats over its composer, so a

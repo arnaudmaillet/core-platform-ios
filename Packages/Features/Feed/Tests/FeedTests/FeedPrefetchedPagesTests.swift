@@ -9,6 +9,7 @@ import Synchronization
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// Pages fetched ahead of the viewer (#970) are stored `speculative` on the
 /// device and promoted to `recent` when one of their posts is first shown, so

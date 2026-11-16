@@ -8,6 +8,7 @@ import UIKit
 @testable import Feed
 @testable import Profile
 @testable import ProfileSettings
+@testable import PostSurfaces
 
 /// **A pull-to-refresh lands for what it brought, and nothing more.**
 ///

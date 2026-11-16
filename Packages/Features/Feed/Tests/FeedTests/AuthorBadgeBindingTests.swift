@@ -5,6 +5,7 @@ import MediaCore
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// One relation binding for every author pill (#1972): the page's author on
 /// Shots wore no badge on its first pass — a page configured ahead of time

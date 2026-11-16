@@ -4,6 +4,7 @@ import MediaPlayback
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// **What the footer offers, and what the ⋯ folds up.**
 ///

@@ -2,6 +2,7 @@ import AuthInterface
 import Connect
 import CoreContracts
 import CoreLocation
+import CoreModels
 import CoreNetworkingMocks
 import CoreStorage
 import Foundation

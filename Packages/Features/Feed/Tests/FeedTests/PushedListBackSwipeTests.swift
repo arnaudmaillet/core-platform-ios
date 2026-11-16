@@ -5,6 +5,7 @@ import PostGrid
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// For You's pushed galleries go back with a swipe (#670): Discover's mosaic and
 /// the Following and Friends lists.

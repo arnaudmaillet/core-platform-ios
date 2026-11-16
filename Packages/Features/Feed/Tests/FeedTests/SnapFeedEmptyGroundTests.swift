@@ -6,6 +6,7 @@ import PostGrid
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// **A FEED PUSHED BEFORE ITS CORPUS ARRIVES HAS NOTHING TO DRAW, so what fills
 /// the screen is whatever colour its floors were built with.**

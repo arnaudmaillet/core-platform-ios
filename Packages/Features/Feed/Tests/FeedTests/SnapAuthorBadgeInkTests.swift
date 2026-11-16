@@ -3,6 +3,7 @@ import MediaCore
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// THE PERSON PILL'S BADGE IS A BLACK DISC WITH A WHITE GLYPH (#968), on every
 /// relation and in light and dark mode alike. #930 drew a white disc with a

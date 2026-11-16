@@ -3,6 +3,7 @@ import DesignSystem
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// Care Mode on a media page (#482): the emote shortcuts go, and nothing
 /// around them moves.

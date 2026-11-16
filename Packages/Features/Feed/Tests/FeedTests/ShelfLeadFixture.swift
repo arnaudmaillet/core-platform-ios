@@ -5,6 +5,7 @@ import MediaPlayback
 import PostGrid
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// A shelf leading a grid, as the place page and a post set assemble it
 /// (#1271): the Following shelf stacked over a titled list — the real views.

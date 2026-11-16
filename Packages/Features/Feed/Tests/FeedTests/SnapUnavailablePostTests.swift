@@ -10,6 +10,7 @@ import MediaCore
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// A snap page whose post turns unavailable (#447: taken down, deleted,
 /// withheld) — learnt when its comments panel revalidates and hears

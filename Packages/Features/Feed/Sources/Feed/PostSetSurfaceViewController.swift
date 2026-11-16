@@ -6,6 +6,7 @@ import LaunchArguments
 import MediaPlayback
 import PostGrid
 import MediaCore
+import PostSurfaces
 import UIKit
 
 /// A `PostGridPageView` over an arbitrary set of post ids, vended across the

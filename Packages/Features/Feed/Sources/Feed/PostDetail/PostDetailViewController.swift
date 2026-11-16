@@ -6,6 +6,7 @@ import CoreStorage
 import MediaCore
 import DesignSystem
 import FeedInterface
+import PostSurfaces
 import ProfileInterface
 import ThreadKit
 import UIKit

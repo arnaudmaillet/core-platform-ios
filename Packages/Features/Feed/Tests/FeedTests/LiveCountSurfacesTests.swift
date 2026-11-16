@@ -8,6 +8,7 @@ import PostGrid
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// The surfaces #896 B left on their loaded counts: search results (and the
 /// gallery they push), and the Following cards' flights and stand-ins. Each

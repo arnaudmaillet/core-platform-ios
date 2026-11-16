@@ -6,6 +6,7 @@ import PostGrid
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 // A full-screen feed opened from a tile, going on into the source (#638).
 

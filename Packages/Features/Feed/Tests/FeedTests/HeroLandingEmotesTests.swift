@@ -8,6 +8,7 @@ import PostGrid
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// A close's landing hands the caption's emotes from the flight's card to the
 /// resting cell without a frame of still glyphs (#922).

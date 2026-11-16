@@ -6,6 +6,7 @@ import PostGrid
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// ⚠️ A FAST FLING GLIDES THROUGH A PAGE LANDING (#2097). For You ends its
 /// pages' refresh controls whenever a load settles, a next page included,

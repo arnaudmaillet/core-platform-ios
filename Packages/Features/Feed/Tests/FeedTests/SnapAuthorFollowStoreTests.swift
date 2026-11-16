@@ -3,6 +3,7 @@ import EntityStore
 import Foundation
 import Testing
 @testable import Feed
+@testable import PostSurfaces
 
 /// THE PILL'S FOLLOW STATE, WITHOUT THE PILL.
 ///

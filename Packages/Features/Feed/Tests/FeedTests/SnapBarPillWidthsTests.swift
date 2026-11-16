@@ -5,6 +5,7 @@ import MediaCore
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// THE BAR PILLS HAVE FIXED WIDTHS, READ OFF THE BARS.
 ///

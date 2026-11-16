@@ -3,6 +3,7 @@ import MediaCore
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// The pill footer (#671, the layout since #680): the author pill leads the
 /// toolbar; the column's lower bubble is the sound's.

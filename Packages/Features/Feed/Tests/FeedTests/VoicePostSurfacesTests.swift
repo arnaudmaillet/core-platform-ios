@@ -7,6 +7,7 @@ import UIKit
 import VoiceKitUI
 @testable import Feed
 @testable import ThreadKit
+@testable import PostSurfaces
 
 /// A voice post on For You's surfaces and its share (#2208): the shelf's
 /// card compact, the lift's card full with its words under the voice, the

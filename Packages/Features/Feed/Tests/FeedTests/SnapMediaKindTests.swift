@@ -3,6 +3,7 @@ import Foundation
 import MediaCore
 import Testing
 @testable import Feed
+@testable import PostSurfaces
 
 /// The display-model builder must carry a `video/*` attachment through as
 /// `MediaKind.video` — that's what routes a snap cell to the player.

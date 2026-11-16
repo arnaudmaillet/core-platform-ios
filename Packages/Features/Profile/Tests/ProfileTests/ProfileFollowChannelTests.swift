@@ -12,6 +12,7 @@ import UIKit
 @testable import Feed
 @testable import Profile
 @testable import ProfileSettings
+@testable import PostSurfaces
 
 /// "Follow from Search → the profile header and the feed's '+' agree"
 /// (#896), the Profile half. Search opens a person's profile; the follow

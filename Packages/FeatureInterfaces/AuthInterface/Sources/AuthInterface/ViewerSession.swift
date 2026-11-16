@@ -37,12 +37,6 @@ public protocol ViewerProviding: Sendable {
     func setActiveProfile(_ id: ProfileID) async
 }
 
-public extension Notification.Name {
-    /// Posted on the main queue after every viewer transition, for main-actor
-    /// caches no repository owns (`ProfileCache`). No object, no user info.
-    static let viewerDidChange = Notification.Name("ViewerDidChange")
-}
-
 /// A cache that holds data about the viewer and must drop it when the viewer
 /// becomes someone else (`ViewerProviding.transitions()`).
 public protocol ViewerScoped: Sendable {

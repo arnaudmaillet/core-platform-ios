@@ -5,6 +5,7 @@ import Testing
 import UIKit
 @testable import Feed
 @testable import ThreadKit
+@testable import PostSurfaces
 
 // The first comments fly in with the post (#2002): one warm for every
 // surface that opens a post, and the text stand-in drawing what it holds.

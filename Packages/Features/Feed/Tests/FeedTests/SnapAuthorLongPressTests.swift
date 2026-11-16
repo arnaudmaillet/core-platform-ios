@@ -4,6 +4,7 @@ import MediaCore
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// The post's author pill (#1669): a tap opens the profile card, a hold
 /// pushes the profile — opt-in, so the thread's and the composer's pills

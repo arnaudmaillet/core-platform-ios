@@ -5,6 +5,7 @@ import PostGrid
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// `PostGridFlightCard`'s picture channel, and everything it is required NOT to
 /// touch.

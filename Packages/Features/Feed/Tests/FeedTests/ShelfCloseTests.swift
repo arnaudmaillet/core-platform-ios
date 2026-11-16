@@ -7,6 +7,7 @@ import PostGrid
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// How the Following shelf's cards CLOSE (2026-09-29, after #312).
 ///

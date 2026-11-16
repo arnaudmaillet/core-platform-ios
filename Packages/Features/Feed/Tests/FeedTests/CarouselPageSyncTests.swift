@@ -5,6 +5,7 @@ import PostGrid
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// The two carousels — the card's and the post's — must show the same page at
 /// every handshake between them.

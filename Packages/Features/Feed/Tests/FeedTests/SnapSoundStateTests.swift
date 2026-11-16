@@ -4,6 +4,7 @@ import Foundation
 import PostGrid
 import Testing
 @testable import Feed
+@testable import PostSurfaces
 
 /// THE PAGE'S SOUND, WITHOUT THE SCREEN.
 ///

@@ -3,6 +3,7 @@ import DesignSystem
 import MediaCore
 import MediaPlayback
 import PostGrid
+import PostSurfaces
 import UIKit
 
 /// One post made with the sound: its poster (or its words, for a text post),

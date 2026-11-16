@@ -5,6 +5,7 @@ import PostGrid
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// **A PAGE THAT ADOPTS A LANDING'S LIVE SURFACE OWNS WHAT IT DRAWS.**
 ///

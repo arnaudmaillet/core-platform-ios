@@ -1,6 +1,7 @@
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// THE BAR PILLS' CONTENT BLURS ACROSS, INSIDE ONE ITEM.
 ///

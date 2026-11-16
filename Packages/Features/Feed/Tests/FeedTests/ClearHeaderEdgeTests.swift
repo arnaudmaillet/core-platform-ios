@@ -2,6 +2,7 @@ import MediaCore
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// Every For You surface under the header hides the system's top edge effect.
 ///

@@ -5,6 +5,7 @@ import Foundation
 import PostGrid
 import Testing
 @testable import Feed
+@testable import PostSurfaces
 
 /// A channel's showcase (#2216) is a text post carrying an embed: the embed
 /// is mapped from the wire, kept on the device and carried to every

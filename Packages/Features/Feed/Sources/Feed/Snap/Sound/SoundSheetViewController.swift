@@ -8,6 +8,7 @@ import LaunchArguments
 import MediaCore
 import MediaPlayback
 import PostGrid
+import PostSurfaces
 import UIKit
 
 /// The sound a post is set to, opened from the attribution at the foot of

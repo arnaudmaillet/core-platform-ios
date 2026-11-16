@@ -4,6 +4,7 @@ import PostGrid
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// The For You grid's autoplay decisions, without a collection view, a window
 /// or the wall clock (#858).

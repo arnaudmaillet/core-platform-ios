@@ -3,6 +3,7 @@ import DesignSystem
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// The page's bottom scrim protects the caption block and leaves the picture
 /// alone above it (#1983): its top is the caption's top less the fade, and

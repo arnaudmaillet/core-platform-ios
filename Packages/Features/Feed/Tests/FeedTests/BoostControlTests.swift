@@ -5,6 +5,7 @@ import MediaCore
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// The boost controls' spend contract — the same on both surfaces that carry
 /// one (the rail anchor on media pages, the comments composer's trailing

@@ -4,6 +4,7 @@ import MediaCore
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// A NEW AUTHOR IS A NEW ITEM, UNDER THE AUTHOR'S IDENTIFIER (#1791).
 ///

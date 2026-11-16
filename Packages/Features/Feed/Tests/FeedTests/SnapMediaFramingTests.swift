@@ -6,6 +6,7 @@ import PostGrid
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// The fullscreen feed frames a picture by its shape — fill, fit on its
 /// blurred extension, or fit on black — and tells a hero how, so the flight is
