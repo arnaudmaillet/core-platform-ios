@@ -1,5 +1,6 @@
 import CoreModels
 import CoreNavigation
+import LaunchArguments
 import Notifications
 import UIKit
 import UserNotifications
@@ -138,7 +139,7 @@ final class PushNotifications: NSObject {
     /// `-push-log`: registration and taps, which no screen shows.
     private static func trace(_ line: String) {
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-push-log") { print("[push] \(line)") }
+        if LaunchArgument.pushLog.isPassed() { print("[push] \(line)") }
         #endif
     }
 

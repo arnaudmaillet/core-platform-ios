@@ -4,6 +4,7 @@ import CoreNavigation
 import CoreStorage
 import DesignSystem
 import FeedInterface
+import LaunchArguments
 import Maps
 import MapsInterface
 import MediaCore
@@ -203,7 +204,7 @@ final class WalletSheetViewController: UIViewController {
             sheet.selectedDetentIdentifier = Self.smallDetent
             #if DEBUG
             // `-wallet-sheet-large`: opens expanded, for screenshots and tests.
-            if ProcessInfo.processInfo.arguments.contains("-wallet-sheet-large") {
+            if LaunchArgument.walletSheetLarge.isPassed() {
                 sheet.detents = [large]
                 sheet.selectedDetentIdentifier = .large
             }
@@ -864,21 +865,20 @@ final class WalletSheetViewController: UIViewController {
         // `-wallet-demo-claim`: fires the Claim once the sheet is up — the
         // real claim path minus the finger. Pair with `-open-wallet
         // -wallet-claim-ready`.
-        if arguments.contains("-wallet-demo-claim") {
+        if LaunchArgument.walletDemoClaim.isPassed(in: arguments) {
             QAWait.until("-wallet-demo-claim", landed) { [weak self] in self?.claim() }
         }
         // `-wallet-open-shop`: the Shop door's path, once the sheet is up.
-        if arguments.contains("-wallet-open-shop") {
+        if LaunchArgument.walletOpenShop.isPassed(in: arguments) {
             QAWait.until("-wallet-open-shop", landed) { [weak self] in self?.openShop() }
         }
         // `-wallet-open-activity`: the Activity door's path.
-        if arguments.contains("-wallet-open-activity") {
+        if LaunchArgument.walletOpenActivity.isPassed(in: arguments) {
             QAWait.until("-wallet-open-activity", landed) { [weak self] in self?.openActivity() }
         }
         // `-wallet-open-stake <n>`: opens the n-th stake row's post (0-based,
         // list order) once its post has loaded — the row's own tap path.
-        if let index = arguments.firstIndex(of: "-wallet-open-stake"), index + 1 < arguments.count,
-           let row = Int(arguments[index + 1]) {
+        if let row = LaunchArgument.walletOpenStake.intValue(in: arguments) {
             let stakeID: @MainActor () -> String? = { [weak self] in
                 guard let self else { return nil }
                 let ids = dataSource.snapshot().itemIdentifiers.compactMap { item -> String? in
@@ -898,14 +898,13 @@ final class WalletSheetViewController: UIViewController {
         }
         // `-wallet-open-stakes active|settled`: the Stakes screen (#1477), the
         // heading's and the Settled door's own way.
-        if let index = arguments.firstIndex(of: "-wallet-open-stakes"), index + 1 < arguments.count {
-            let segment: WalletStakesViewController.Segment = arguments[index + 1] == "settled" ? .settled : .active
+        if let choice = LaunchArgument.walletOpenStakes.value(in: arguments) {
+            let segment: WalletStakesViewController.Segment = choice == "settled" ? .settled : .active
             QAWait.until("-wallet-open-stakes", landed) { [weak self] in self?.openStakes(segment) }
         }
         // `-wallet-sheet-scroll <pt>`: grows the sheet and scrolls the list,
         // so the rows under the bar can be screenshotted.
-        if let index = arguments.firstIndex(of: "-wallet-sheet-scroll"), index + 1 < arguments.count,
-           let offset = Double(arguments[index + 1]) {
+        if let offset = LaunchArgument.walletSheetScroll.doubleValue(in: arguments) {
             growForQA()
             QAWait.until("-wallet-sheet-scroll", landed) { [weak self] in
                 guard let collection = self?.collectionView else { return }

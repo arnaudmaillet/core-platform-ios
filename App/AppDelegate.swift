@@ -1,4 +1,5 @@
 import DesignSystem
+import LaunchArguments
 import MediaCore
 import UIKit
 
@@ -42,8 +43,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         BrandTheme.forgetRetiredThemes()
         #if DEBUG
         let arguments = ProcessInfo.processInfo.arguments
-        if let flag = arguments.firstIndex(of: "-simulate-low-power-mode"),
-           arguments.indices.contains(flag + 1), let period = TimeInterval(arguments[flag + 1]) {
+        if let period = LaunchArgument.simulateLowPowerMode.doubleValue(in: arguments) {
             LowPowerMode.simulateSystem(flippingEvery: period)
         }
         #endif

@@ -11,6 +11,7 @@ import ProfileInterface
 import UIKit
 import DesignSystem
 import Upload
+import LaunchArguments
 
 // MARK: - QA hooks: launch arguments
 
@@ -26,7 +27,7 @@ extension MainTabCoordinator {
         AccessoryCollapseAudit.installIfRequested(tabBarController: tabBarController)
         PillDragAudit.installIfRequested(tabBarController: tabBarController)
         DockTrace.installIfRequested(tabBarController: tabBarController)
-        if ProcessInfo.processInfo.arguments.contains("-profile-switcher-hold") {
+        if LaunchArgument.profileSwitcherHold.isPassed() {
             DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in self?.debugHoldProfileTab() }
         }
 
@@ -36,8 +37,7 @@ extension MainTabCoordinator {
         // the feed push instead, which it no longer does; use `-open-feed` for
         // the timeline.
         let arguments = ProcessInfo.processInfo.arguments
-        if let index = arguments.firstIndex(of: "-select-tab"), index + 1 < arguments.count,
-           let tabIndex = Int(arguments[index + 1]), AppTab.allCases.indices.contains(tabIndex) {
+        if let tabIndex = LaunchArgument.selectTab.intValue(in: arguments), AppTab.allCases.indices.contains(tabIndex) {
             selectTab(AppTab.allCases[tabIndex])
         }
         // `-switch-tab N` selects a tab a few seconds AFTER launch, which is a
@@ -47,8 +47,7 @@ extension MainTabCoordinator {
         // arrives by switching, and the Messages selector collapsed into a `•••`
         // on exactly that path while `-select-tab` showed it hosted perfectly.
         // Pair with `-header-audit-current`.
-        if let index = arguments.firstIndex(of: "-switch-tab"), index + 1 < arguments.count,
-           let tabIndex = Int(arguments[index + 1]), AppTab.allCases.indices.contains(tabIndex) {
+        if let tabIndex = LaunchArgument.switchTab.intValue(in: arguments), AppTab.allCases.indices.contains(tabIndex) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
                 self?.selectTab(AppTab.allCases[tabIndex])
             }
@@ -56,8 +55,8 @@ extension MainTabCoordinator {
         // `-switch-tab-after <seconds> <index>`: the same, at a time of the
         // run's choosing — after a scripted sign-in, say (`-guest
         // -guest-sign-in-after`), when the member's tabs exist.
-        if let index = arguments.firstIndex(of: "-switch-tab-after"), index + 2 < arguments.count,
-           let delay = Double(arguments[index + 1]), let tabIndex = Int(arguments[index + 2]),
+        if let delay = LaunchArgument.switchTabAfter.doubleValue(in: arguments),
+           let tabIndex = LaunchArgument.switchTabAfter.value(at: 2, in: arguments).flatMap { Int($0) },
            AppTab.allCases.indices.contains(tabIndex) {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                 self?.selectTab(AppTab.allCases[tabIndex])
@@ -67,7 +66,7 @@ extension MainTabCoordinator {
         // path, which no longer has a bar button behind it. Deferred a tick:
         // at `start()` the shell isn't the window root yet, so an immediate
         // push would animate off-window.
-        if arguments.contains("-open-feed") {
+        if LaunchArgument.openFeed.isPassed(in: arguments) {
             DispatchQueue.main.async { [weak self] in self?.openFeed() }
         }
         // `-toast-demo` (#954, #2143): one toast held up — the same words
@@ -77,8 +76,8 @@ extension MainTabCoordinator {
         // instead fires one from a screen pushed for the purpose and pops it
         // in the same turn: the toast must stay (it lives in the scene's
         // overlay, not in the screen).
-        if let index = arguments.firstIndex(of: "-toast-demo") {
-            let mode = index + 1 < arguments.count ? arguments[index + 1] : ""
+        if LaunchArgument.toastDemo.isPassed(in: arguments) {
+            let mode = LaunchArgument.toastDemo.value(in: arguments) ?? ""
             // `-toast-demo kinds`: one of each kind, a beat apart — each
             // replacing the one before (one result toast at a time).
             if mode == "kinds" {
@@ -171,14 +170,14 @@ extension MainTabCoordinator {
         // the avatar's destination; the destination is now a root, so the intent
         // "show me my profile" is a selection. Deferred a tick: at `start()` the
         // shell isn't the window root yet.
-        if arguments.contains("-open-my-profile") {
+        if LaunchArgument.openMyProfile.isPassed(in: arguments) {
             DispatchQueue.main.async { [weak self] in self?.selectTab(.profile) }
         }
         // `-open-search` pushes the global search screen onto the current tab —
         // the `AppRoute.search` path both header magnifiers take. The simulator
         // injects no taps, so this is the only way to reach that screen, and its
         // keyboard, headlessly. Pair with `-select-tab` to choose the origin.
-        if arguments.contains("-open-search") {
+        if LaunchArgument.openSearch.isPassed(in: arguments) {
             DispatchQueue.main.async { [weak self] in self?.container.router.route(to: .search) }
         }
         // `-switch-profile-after <seconds> <profileID>` switches the active
@@ -187,10 +186,10 @@ extension MainTabCoordinator {
         // transition #892 resets the caches on, with no long-press menu to
         // drive. With `-open-search`, the search screen opens again after the
         // switch, as the viewer would reopen it.
-        if let index = arguments.firstIndex(of: "-switch-profile-after"), index + 2 < arguments.count,
-           let delay = Double(arguments[index + 1]) {
-            let target = ProfileID(arguments[index + 2])
-            let reopensSearch = arguments.contains("-open-search")
+        if let delay = LaunchArgument.switchProfileAfter.doubleValue(in: arguments),
+           let targetID = LaunchArgument.switchProfileAfter.value(at: 2, in: arguments) {
+            let target = ProfileID(targetID)
+            let reopensSearch = LaunchArgument.openSearch.isPassed(in: arguments)
             Task { @MainActor [weak self] in
                 try? await Task.sleep(for: .seconds(delay))
                 guard let self else { return }
@@ -218,8 +217,7 @@ extension MainTabCoordinator {
         // composer's presentation off the launch's own turns; the hook then
         // waits for a shell in a window with nothing presented and no
         // transition running, and says GAVE UP if that never comes.
-        if let index = arguments.firstIndex(of: "-open-create"), index + 1 < arguments.count,
-           let destination = CreateTabItem.Destination(rawValue: arguments[index + 1]) {
+        if let destination = LaunchArgument.openCreate.value(in: arguments).flatMap { CreateTabItem.Destination(rawValue: $0) } {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
                 QAWait.until("-open-create \(destination.rawValue)", { [weak self] in
                     guard let self else { return true }
@@ -235,7 +233,7 @@ extension MainTabCoordinator {
         // tap takes (`shouldSelectTab`), ~1.5s in — the menu is a `UIMenu`
         // no simulator tap can open, and `-presentation-budget` needs its
         // presentation turn on its own, without a composer behind it.
-        if arguments.contains("-open-create-menu") {
+        if LaunchArgument.openCreateMenu.isPassed(in: arguments) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
                 guard let self else { return }
                 _ = self.tabBarController(self.tabBarController, shouldSelectTab: self.createItem.tab)
@@ -249,8 +247,8 @@ extension MainTabCoordinator {
         // shortcut's state, never on a clock (the pauses are pacing, so a
         // recording shows each state at rest), and prints GAVE UP if the
         // state never comes. `[plus-hold]` lines go to stderr.
-        if let index = arguments.firstIndex(of: "-plus-hold-demo") {
-            let mode = index + 1 < arguments.count ? arguments[index + 1] : "full"
+        if LaunchArgument.plusHoldDemo.isPassed(in: arguments) {
+            let mode = LaunchArgument.plusHoldDemo.value(in: arguments) ?? "full"
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
                 self?.debugPlusHoldDemo(mode: mode)
             }
@@ -259,16 +257,14 @@ extension MainTabCoordinator {
         // what each round trip leaves behind — see `NavigationStressTest`. The
         // failure it hunts is a screen that looks correct and no longer answers
         // touches, which no screenshot can tell from a working one.
-        if let position = arguments.firstIndex(of: "-nav-stress"),
-           position + 1 < arguments.count, let cycles = Int(arguments[position + 1]) {
+        if let cycles = LaunchArgument.navStress.intValue(in: arguments) {
             let harness = NavigationStressTest(
                 tabBarController: tabBarController,
                 router: container.router,
                 selectTab: { [weak self] tab in self?.selectTab(tab) }
             )
             // `-nav-stress <cycles> [tab]` — one tab by name, or every tab.
-            let only = position + 2 < arguments.count
-                ? AppTab(rawValue: arguments[position + 2]) : nil
+            let only = LaunchArgument.navStress.value(at: 2, in: arguments).flatMap { AppTab(rawValue: $0) }
             Task { @MainActor in
                 try? await Task.sleep(nanoseconds: 3_000_000_000)
                 await harness.run(cycles: cycles, tabs: only.map { [$0] } ?? AppTab.allCases)
@@ -278,7 +274,7 @@ extension MainTabCoordinator {
         // layout on each: in the leading group, sized, hit-testable at every
         // segment, and — on a pushed surface — with the back button and the
         // interactive pop still intact. See `HeaderSelectorAudit`.
-        if arguments.contains("-header-audit") {
+        if LaunchArgument.headerAudit.isPassed(in: arguments) {
             let audit = HeaderSelectorAudit(
                 tabBarController: tabBarController,
                 selectTab: { [weak self] tab in self?.selectTab(tab) }
@@ -292,7 +288,7 @@ extension MainTabCoordinator {
         // cannot reach a PUSHED host — a profile, or the relationships screen —
         // and those are the only ones where the back button and the interactive
         // pop are at stake. Pair it with `-open-profile` / `-profile-relationships`.
-        if arguments.contains("-header-audit-current") {
+        if LaunchArgument.headerAuditCurrent.isPassed(in: arguments) {
             let audit = HeaderSelectorAudit(
                 tabBarController: tabBarController,
                 selectTab: { [weak self] tab in self?.selectTab(tab) }
@@ -322,7 +318,7 @@ extension MainTabCoordinator {
                     }
                     previous = frame
                 }
-                if arguments.contains("-header-bar-tree") { audit.dumpBarTree() }
+                if LaunchArgument.headerBarTree.isPassed(in: arguments) { audit.dumpBarTree() }
                 let finding = audit.audit(surface: "on-screen")
                 for problem in finding.problems { print("[header-audit] on-screen: PROBLEM \(problem)") }
                 if finding.isClean { print("[header-audit] on-screen: clean") }
@@ -351,7 +347,7 @@ extension MainTabCoordinator {
         // re-pushed nothing. Now: push once the stack is at rest, wait for
         // the landing, wait for the pop, push again; GAVE UP at any step
         // that never comes. The 1 s before the first push is the opening beat.
-        if arguments.contains("-feed-repush-demo") {
+        if LaunchArgument.feedRepushDemo.isPassed(in: arguments) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
                 self?.debugPushFeedWhenResting("-feed-repush-demo first push") { [weak self] stack, feed in
                     QAWait.until(
@@ -376,7 +372,7 @@ extension MainTabCoordinator {
         // flight. It now waits for the landing, then holds 1.5 s on the landed
         // feed (pacing, so a recording shows it at rest before the grab), and
         // swipes only if the feed is still on top at rest.
-        if arguments.contains("-feed-swipe-demo") {
+        if LaunchArgument.feedSwipeDemo.isPassed(in: arguments) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
                 self?.debugPushFeedWhenResting("-feed-swipe-demo") { stack, feed in
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self, weak stack] in
@@ -410,10 +406,9 @@ extension MainTabCoordinator {
 
     /// The notifications drawer's launch hooks: see the note in `installQAHooks()`.
     fileprivate func debugNotificationsDrawerHooks(_ arguments: [String]) {
-        let wantsOpen = arguments.contains("-open-notifications")
-        let heldProgress = arguments.firstIndex(of: "-notifications-progress")
-            .flatMap { $0 + 1 < arguments.count ? Double(arguments[$0 + 1]) : nil }
-        let wantsDragDemo = arguments.contains("-notifications-drag-demo")
+        let wantsOpen = LaunchArgument.openNotifications.isPassed(in: arguments)
+        let heldProgress = LaunchArgument.notificationsProgress.doubleValue(in: arguments)
+        let wantsDragDemo = LaunchArgument.notificationsDragDemo.isPassed(in: arguments)
         guard wantsOpen || heldProgress != nil || wantsDragDemo else { return }
         let drawer = notificationsDrawer
         // Deferred past launch, then gated: the drawer only opens from a root

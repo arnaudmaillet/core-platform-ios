@@ -2,6 +2,7 @@
 import Auth
 import CoreNetworkingMocks
 import Foundation
+import LaunchArguments
 
 /// `-mock-apple-sign-in <email>`: "Continue with Apple" skips Apple's sheet
 /// (a simulator rarely has an Apple Account) and signs in as `email`, with a
@@ -12,8 +13,8 @@ struct MockAppleSignIn: FederatedSignInProviding {
 
     static func fromLaunchArguments() -> MockAppleSignIn? {
         let arguments = ProcessInfo.processInfo.arguments
-        guard let index = arguments.firstIndex(of: "-mock-apple-sign-in"), index + 1 < arguments.count else { return nil }
-        return MockAppleSignIn(email: arguments[index + 1])
+        guard let email = LaunchArgument.mockAppleSignIn.value(in: arguments) else { return nil }
+        return MockAppleSignIn(email: email)
     }
 
     func signIn(with provider: FederatedProvider, nonce: String) async throws -> FederatedSignInResult {

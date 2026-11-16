@@ -20,6 +20,7 @@ import CoreNetworkingMocks
 import Upload
 #if DEBUG
 import ChatInterface
+import LaunchArguments
 #endif
 
 /// Root coordinator. Owns the window and the top-level state machine:
@@ -164,7 +165,7 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
         // account, skipping the login form on every run/screenshot cycle. It
         // owns the whole startup sequence, because WHEN the observation starts
         // decides how many shells get built — see `startWithMockAutoLogin`.
-        if ProcessInfo.processInfo.arguments.contains("-mock-auto-login") {
+        if LaunchArgument.mockAutoLogin.isPassed() {
             startWithMockAutoLogin()
             return
         }
@@ -173,16 +174,14 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
         // `-guest-sign-in-after <seconds>`, the guest then signs in to the mock
         // fixture account by itself: the guest → member transition, with no
         // typing (the simulator drops keystrokes while the keyboard rises).
-        if ProcessInfo.processInfo.arguments.contains("-guest") {
+        if LaunchArgument.guest.isPassed() {
             let sessionManager = container.sessionManager
             let arguments = ProcessInfo.processInfo.arguments
-            let signInAfter = arguments.firstIndex(of: "-guest-sign-in-after")
-                .flatMap { $0 + 1 < arguments.count ? Double(arguments[$0 + 1]) : nil }
+            let signInAfter = LaunchArgument.guestSignInAfter.doubleValue(in: arguments)
             // `-guest-sign-out-after <seconds>`: and then out again, that many
             // seconds after the sign-in — the member → guest leg of the bar
             // (#626), with no Settings walk to the log-out row.
-            let signOutAfter = arguments.firstIndex(of: "-guest-sign-out-after")
-                .flatMap { $0 + 1 < arguments.count ? Double(arguments[$0 + 1]) : nil }
+            let signOutAfter = LaunchArgument.guestSignOutAfter.doubleValue(in: arguments)
             Task { [weak self] in
                 await sessionManager.logout()
                 self?.observeAuthState()
@@ -266,8 +265,8 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
     private func startWithMockAutoLogin() {
         let sessionManager = container.sessionManager
         let autoLogin = container.environment.autoLoginCode
-        let composeDemo = ProcessInfo.processInfo.arguments.contains("-mock-compose-demo")
-        let composeVideoDemo = ProcessInfo.processInfo.arguments.contains("-mock-compose-video-demo")
+        let composeDemo = LaunchArgument.mockComposeDemo.isPassed()
+        let composeVideoDemo = LaunchArgument.mockComposeVideoDemo.isPassed()
         let composer = container.postComposer
         Task { [weak self] in
             await sessionManager.logout()
@@ -389,7 +388,7 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
         // `-gate-demo`: asks the member gate for a like ~2 s in, as a gated tap
         // would, and logs the answer — so the sheet's prompt and its close /
         // sign-in outcomes are verifiable before any control is gated (#440).
-        if ProcessInfo.processInfo.arguments.contains("-gate-demo") {
+        if LaunchArgument.gateDemo.isPassed() {
             let gate = container.memberGate
             Task {
                 try? await Task.sleep(for: .seconds(2))
@@ -399,7 +398,7 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
         }
         // `-button-catalog`: every button the app wears, as its screen
         // configures it, with its states — see `AppButtonCatalogViewController`.
-        if ProcessInfo.processInfo.arguments.contains("-button-catalog") {
+        if LaunchArgument.buttonCatalog.isPassed() {
             Task { @MainActor [weak self] in
                 try? await Task.sleep(for: .seconds(1))
                 guard let shell = self?.mainTabCoordinator?.rootViewController else { return }
@@ -412,7 +411,7 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
         // every haptic, to feel and choose on a device (#1882, #2193) — see
         // `HapticPlaygroundViewController`. Also in the debug dashboard's Labs.
         let arguments = ProcessInfo.processInfo.arguments
-        if arguments.contains("-haptic-playground") || arguments.contains("-haptic-catalog") {
+        if LaunchArgument.hapticPlayground.isPassed(in: arguments) || LaunchArgument.hapticCatalog.isPassed(in: arguments) {
             Task { @MainActor [weak self] in
                 try? await Task.sleep(for: .seconds(1))
                 guard let shell = self?.mainTabCoordinator?.rootViewController else { return }
@@ -423,7 +422,7 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
         }
         // `-button-gallery`: every AppButton aspect, size and state, and its
         // motions on demand (#931), over the app.
-        if ProcessInfo.processInfo.arguments.contains("-button-gallery") {
+        if LaunchArgument.buttonGallery.isPassed() {
             Task { @MainActor [weak self] in
                 try? await Task.sleep(for: .seconds(1))
                 guard let shell = self?.mainTabCoordinator?.rootViewController else { return }
@@ -571,7 +570,7 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
         // come back with exactly what it had (`-profile-stretch-sweep`'s
         // identical landing).
         if container.environment == .mock,
-           !ProcessInfo.processInfo.arguments.contains("-mock-likes-still") {
+           !LaunchArgument.mockLikesStill.isPassed() {
             container.startMockRealtimeDemo()
         }
         #endif
@@ -582,7 +581,7 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
     /// `-guest`: the run starts signed out (see `start()`).
     private static var launchedAsGuest: Bool {
         #if DEBUG
-        ProcessInfo.processInfo.arguments.contains("-guest")
+        LaunchArgument.guest.isPassed()
         #else
         false
         #endif
@@ -601,8 +600,8 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
         // the shell is up — the same code path universal links and taps use
         // — so cross-tab routing is testable without driving the UI.
         let arguments = ProcessInfo.processInfo.arguments
-        if let index = arguments.firstIndex(of: "-open-profile"), index + 1 < arguments.count {
-            container.router.route(to: .profile(ProfileID(arguments[index + 1]), stub: nil))
+        if let id = LaunchArgument.openProfile.value(in: arguments) {
+            container.router.route(to: .profile(ProfileID(id), stub: nil))
         }
         // `-open-profile-delayed <id> [seconds]` fires the same route
         // after a delay (default ~3s), so a profile ABOVE a pushed feed's
@@ -617,9 +616,9 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
         // The default 3 s is only a delay; a feed to land above has to be
         // opened by something else (e.g. a `-snap-*` / `-maps-open-*` hook),
         // timed with the seconds knob.
-        if let index = arguments.firstIndex(of: "-open-profile-delayed"), index + 1 < arguments.count {
-            let id = ProfileID(arguments[index + 1])
-            let delay = (index + 2 < arguments.count ? Double(arguments[index + 2]) : nil) ?? 3.0
+        if let rawID = LaunchArgument.openProfileDelayed.value(in: arguments) {
+            let id = ProfileID(rawID)
+            let delay = LaunchArgument.openProfileDelayed.value(at: 2, in: arguments).flatMap { Double($0) } ?? 3.0
             let router = container.router
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
                 router.route(to: .profile(id, stub: nil))
@@ -628,32 +627,34 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
         // `-open-profile-stubbed <id> <handle> <name>` fires the same route
         // WITH an identity stub — the feed-origin path — so the pre-seeded
         // navigation chrome is verifiable without driving a cell tap.
-        if let index = arguments.firstIndex(of: "-open-profile-stubbed"), index + 3 < arguments.count {
+        if let rawID = LaunchArgument.openProfileStubbed.value(in: arguments),
+           let handle = LaunchArgument.openProfileStubbed.value(at: 2, in: arguments),
+           let displayName = LaunchArgument.openProfileStubbed.value(at: 3, in: arguments) {
             container.router.route(to: .profile(
-                ProfileID(arguments[index + 1]),
-                stub: ProfileIdentityStub(handle: arguments[index + 2], displayName: arguments[index + 3])
+                ProfileID(rawID),
+                stub: ProfileIdentityStub(handle: handle, displayName: displayName)
             ))
         }
         // `-open-profile-card <id>` presents the profile CARD (the sheet a
         // bottom toolbar's author pill opens, #1524) over the launch screen,
         // a beat after the shell is up, so the card's header is verifiable
         // without a tap (#2014).
-        if let index = arguments.firstIndex(of: "-open-profile-card"), index + 1 < arguments.count {
-            let id = ProfileID(arguments[index + 1])
+        if let rawID = LaunchArgument.openProfileCard.value(in: arguments) {
+            let id = ProfileID(rawID)
             let router = container.router
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
                 router.route(to: .profileCard(id, stub: nil))
             }
         }
-        if let index = arguments.firstIndex(of: "-open-post"), index + 1 < arguments.count {
-            container.router.route(to: .post(PostID(arguments[index + 1])))
+        if let id = LaunchArgument.openPost.value(in: arguments) {
+            container.router.route(to: .post(PostID(id)))
         }
         #if DEBUG
         // `-open-voice-post [n]` (#2207): the mock's n-th seeded voice post
         // (one text post in five speaks), for checking a voice post's page
         // without hunting for one. With `-voice-posts` it is drawn speaking.
-        if let index = arguments.firstIndex(of: "-open-voice-post") {
-            let turn = index + 1 < arguments.count ? Int(arguments[index + 1]) ?? 0 : 0
+        if LaunchArgument.openVoicePost.isPassed(in: arguments) {
+            let turn = LaunchArgument.openVoicePost.intValue(in: arguments) ?? 0
             let dataset = container.mockBackend.dataset
             let ids = dataset.posts.lazy.filter { dataset.seededVoice(forPostID: $0.postID) != nil }.map(\.postID)
             if !ids.isEmpty {
@@ -665,8 +666,8 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
         // the corpus's order — the channels come in turn (Join, Request to
         // join, Requested, Open, the viewer's own, deleted, private), so 0–6
         // open one of each. With `-channels` it is drawn with its card.
-        if let index = arguments.firstIndex(of: "-open-showcase") {
-            let turn = index + 1 < arguments.count ? Int(arguments[index + 1]) ?? 0 : 0
+        if LaunchArgument.openShowcase.isPassed(in: arguments) {
+            let turn = LaunchArgument.openShowcase.intValue(in: arguments) ?? 0
             let dataset = container.mockBackend.dataset
             let showcases = dataset.channelShowcases()
             let ids = dataset.posts.map(\.postID).filter { showcases[$0] != nil }
@@ -680,33 +681,33 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
         // (`MockSocialServices.hiddenProfiles`), which reads "This account
         // isn't available". Pair `-open-post <id>` with `-mock-takedown <id>`
         // for a post moderation removed.
-        if let index = arguments.firstIndex(of: "-open-unavailable-profile") {
-            let kind = index + 1 < arguments.count ? arguments[index + 1] : "suspended"
+        if LaunchArgument.openUnavailableProfile.isPassed(in: arguments) {
+            let kind = LaunchArgument.openUnavailableProfile.value(in: arguments) ?? "suspended"
             container.router.route(to: .profile(ProfileID(kind == "hidden" ? "prof-hidden" : "prof-suspended"), stub: nil))
         }
         // `-open-place <CC>` (#1599): a country's place page, as its share
         // link opens it (#985) — the one way to reach a place page on a
         // simulator, whose mock markers are single posts.
-        if let index = arguments.firstIndex(of: "-open-place"), index + 1 < arguments.count {
-            container.router.route(to: .place(.country(code: arguments[index + 1].uppercased())))
+        if let code = LaunchArgument.openPlace.value(in: arguments) {
+            container.router.route(to: .place(.country(code: code.uppercased())))
         }
         // `-open-hashtag <tag>`: a tag's posts (#524), as a tapped `#tag` opens them.
-        if let index = arguments.firstIndex(of: "-open-hashtag"), index + 1 < arguments.count {
-            container.router.route(to: .hashtag(arguments[index + 1]))
+        if let tag = LaunchArgument.openHashtag.value(in: arguments) {
+            container.router.route(to: .hashtag(tag))
         }
-        if let index = arguments.firstIndex(of: "-open-comments"), index + 1 < arguments.count {
-            container.router.route(to: .comments(PostID(arguments[index + 1])))
+        if let id = LaunchArgument.openComments.value(in: arguments) {
+            container.router.route(to: .comments(PostID(id)))
         }
         // `-open-messages [all|requests|suggestions]` selects the Messages
         // root tab on launch and pages the inbox to a category — swipes
         // can't be injected in-sim, so this is how the Requests and
         // Suggestions surfaces are reachable for verification.
-        if let index = arguments.firstIndex(of: "-open-messages") {
-            let category = (index + 1 < arguments.count ? MessagesCategory(rawValue: arguments[index + 1]) : nil) ?? .all
+        if LaunchArgument.openMessages.isPassed(in: arguments) {
+            let category = LaunchArgument.openMessages.value(in: arguments).flatMap { MessagesCategory(rawValue: $0) } ?? .all
             container.router.route(to: .messages(category))
         }
-        if let index = arguments.firstIndex(of: "-open-conversation"), index + 1 < arguments.count {
-            container.router.route(to: .conversation(ConversationID(arguments[index + 1])))
+        if let id = LaunchArgument.openConversation.value(in: arguments) {
+            container.router.route(to: .conversation(ConversationID(id)))
         }
         // `-open-conversation-settled <id>` fires the same route ~2s in —
         // after the Messages list has loaded — reproducing the tap-a-row
@@ -722,8 +723,8 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
         // and prints GAVE UP if it never is (pair with `-open-messages`
         // or `-select-tab 1`: from another tab there is no list to wait
         // for, and the push would not be the tap-a-row path anyway).
-        if let index = arguments.firstIndex(of: "-open-conversation-settled"), index + 1 < arguments.count {
-            let id = ConversationID(arguments[index + 1])
+        if let rawID = LaunchArgument.openConversationSettled.value(in: arguments) {
+            let id = ConversationID(rawID)
             let router = container.router
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak tabCoordinator] in
                 QAWait.until("-open-conversation-settled \(id.rawValue): a loaded Messages list", {
@@ -750,8 +751,8 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
                 }
             }
         }
-        if let index = arguments.firstIndex(of: "-message-user"), index + 1 < arguments.count {
-            container.router.route(to: .messageUser(ProfileID(arguments[index + 1]), stub: nil))
+        if let id = LaunchArgument.messageUser.value(in: arguments) {
+            container.router.route(to: .messageUser(ProfileID(id), stub: nil))
         }
         // `-auto-pop [seconds]` pops the active stack — pairs with
         // the `-open-*` args above to verify pop-side behavior (nav chrome,
@@ -762,8 +763,8 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
         // popped half a second after being pushed it never gets that far,
         // and the list underneath looks unchanged for a reason that has
         // nothing to do with the code under test.
-        if let index = arguments.firstIndex(of: "-auto-pop") {
-            let delay = arguments.dropFirst(index + 1).first.flatMap(Double.init) ?? 2.5
+        if LaunchArgument.autoPop.isPassed(in: arguments) {
+            let delay = LaunchArgument.autoPop.doubleValue(in: arguments) ?? 2.5
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak tabCoordinator] in
                 tabCoordinator?.activeNavigationController?.topViewController?.closeScreen()
             }
