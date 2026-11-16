@@ -2,6 +2,7 @@ import CoreModels
 import CoreNavigation
 import DesignSystem
 import EmoteKit
+import LaunchArguments
 import MediaCore
 import MediaPlayback
 import PostGrid
@@ -517,7 +518,7 @@ final class PreviewLaunch {
         }
         #if DEBUG
         // `-preview-launch-miss`: the card's path, to film it.
-        if ProcessInfo.processInfo.arguments.contains("-preview-launch-miss") { return nil }
+        if LaunchArgument.previewLaunchMiss.isPassed() { return nil }
         #endif
         let drawing = found.view
         postID = preview.post.id
@@ -636,7 +637,7 @@ final class PreviewLaunch {
     #endif
 
     #if DEBUG
-    static let logs = ProcessInfo.processInfo.arguments.contains("-preview-launch-log")
+    static let logs = LaunchArgument.previewLaunchLog.isPassed()
 
     /// `-preview-launch-log` (#1888): why no capture — no window, or no
     /// view of the lift's size after its container (with the sizes met).

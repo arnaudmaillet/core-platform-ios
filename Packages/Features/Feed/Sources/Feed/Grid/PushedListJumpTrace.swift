@@ -1,4 +1,5 @@
 #if DEBUG
+import LaunchArguments
 import UIKit
 
 /// `-list-jump-trace`: where a pushed list's first row is, frame by frame,
@@ -14,7 +15,7 @@ import UIKit
 @MainActor
 enum PushedListJumpTrace {
     static var isEnabled: Bool {
-        ProcessInfo.processInfo.arguments.contains("-list-jump-trace")
+        LaunchArgument.listJumpTrace.isPassed()
     }
 
     /// One reading, now.

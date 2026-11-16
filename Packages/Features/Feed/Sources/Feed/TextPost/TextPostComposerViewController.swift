@@ -4,6 +4,7 @@ import CoreNavigation
 import CoreStorage
 import DesignSystem
 import EntityStore
+import LaunchArguments
 import MediaCore
 import UIKit
 import VoiceKit
@@ -760,7 +761,7 @@ final class TextPostComposerViewController: UIViewController {
         view.endEditing(true)
         showPublishedBars(model, author: entry.author)
         #if DEBUG
-        if let text = Self.debugArgument("-text-post-comment") {
+        if let text = LaunchArgument.textPostComment.value() {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in self?.panel.debugSend(text) }
         }
         #endif
@@ -951,20 +952,12 @@ final class TextPostComposerViewController: UIViewController {
     private func runDebugHooks() {
         guard !didRunDebugHooks else { return }
         didRunDebugHooks = true
-        if let text = Self.debugArgument("-text-post-type") {
+        if let text = LaunchArgument.textPostType.value() {
             panel.composerText = text
         }
-        if let text = Self.debugArgument("-text-post-send") {
+        if let text = LaunchArgument.textPostSend.value() {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in self?.panel.debugSend(text) }
         }
-    }
-
-    private static func debugArgument(_ flag: String) -> String? {
-        let arguments = ProcessInfo.processInfo.arguments
-        guard let index = arguments.firstIndex(of: flag), arguments.indices.contains(index + 1) else {
-            return nil
-        }
-        return arguments[index + 1]
     }
     #endif
 }

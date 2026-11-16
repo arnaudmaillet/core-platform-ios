@@ -1,5 +1,6 @@
 import CoreNavigation
 import DesignSystem
+import LaunchArguments
 import MediaPlayback
 import PostGrid
 import UIKit
@@ -469,7 +470,7 @@ final class PostGridFlightCard: UIView {
             self.landingPane.alpha = target
         }
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-zoom-blend-log") {
+        if LaunchArgument.zoomBlendLog.isPassed() {
             print("[zoom-blend] late departure picture — dissolving to blend=\(target)")
         }
         #endif
@@ -720,7 +721,7 @@ final class PostGridFlightCard: UIView {
         refreshLandingPane()
         applyBlend()
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+        if LaunchArgument.zoomLiveLog.isPassed() {
             print(String(format: "[zoom-live] %.3f card LANDING LIVE installed pane=%@",
                          CACurrentMediaTime(), NSCoder.string(for: landingPane.bounds)))
         }
@@ -886,7 +887,7 @@ extension PostGridFlightCard: ZoomFlightCard {
         view.revealOnFirstFrame()
         #if DEBUG
         view.debugTracksFlight = true
-        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+        if LaunchArgument.zoomLiveLog.isPassed() {
             // Full state at adopt. `frames=0` says it was never primed;
             // `hidden=Y frames>0` says something hid it after; anything else
             // points at a later detach.
@@ -911,7 +912,7 @@ extension PostGridFlightCard: ZoomFlightCard {
         fliesHotLiveMedia = false
         applyContentFloor()
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+        if LaunchArgument.zoomLiveLog.isPassed() {
             print(String(format: "[zoom-live] %.3f card STALLED surface → cover back %@",
                          CACurrentMediaTime(), zoomLiveMediaDebugState))
         }
@@ -932,7 +933,7 @@ extension PostGridFlightCard: ZoomFlightCard {
         refreshLandingPane()
         applyBlend()
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+        if LaunchArgument.zoomLiveLog.isPassed() {
             print(String(format: "[zoom-live] %.3f card attached readyNow=%@",
                          CACurrentMediaTime(), videoRenderView.isReadyForDisplay ? "true" : "false"))
         }

@@ -1,3 +1,4 @@
+import LaunchArguments
 import UIKit
 
 /// The engaged caption card's surface: a genuine **Liquid Glass** bubble.
@@ -81,7 +82,7 @@ final class SnapGlassCardView: UIVisualEffectView {
             // those apart once (style was `.light` at every step while the
             // bubble looked dark).
             #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-glass-log") {
+            if LaunchArgument.glassLog.isPassed() {
                 print("GLASSLOG: materialize style=\(traitCollection.userInterfaceStyle.rawValue) "
                       + "inAnimation=\(UIView.inheritedAnimationDuration > 0) "
                       + "window=\(window != nil)")

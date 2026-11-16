@@ -23,6 +23,15 @@ struct LaunchArgumentTests {
         #expect(tab.intValue(in: ["-switch-tab", "maps"]) == nil)
     }
 
+    @Test func furtherValuesAreCountedFromTheFlag() {
+        let words = ["app", "-switch-tab", "3", "fast", "0.5"]
+        #expect(tab.value(at: 1, in: words) == tab.value(in: words))
+        #expect(tab.value(at: 2, in: words) == "fast")
+        #expect(tab.value(at: 3, in: words) == "0.5")
+        #expect(tab.value(at: 4, in: words) == nil)
+        #expect(tab.value(at: 2, in: ["app"]) == nil)
+    }
+
     @Test func itPrintsAsPassed() {
         #expect("\(tab)" == "-switch-tab")
     }

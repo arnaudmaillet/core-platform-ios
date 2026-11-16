@@ -13,6 +13,7 @@ import ShareSheet
 import ThreadKit
 import UIKit
 import VoiceKitUI
+import LaunchArguments
 
 /// The full-screen, page-snapping timeline. Drives the *same* `FeedViewModel`
 /// as the classic feed — pagination, likes, realtime, compose hand-off all come
@@ -234,7 +235,7 @@ final class SnapFeedViewController: UIViewController {
     /// Off by default until the film and the number say otherwise.
     static var defersRestingCommentsForFlight: Bool {
         #if DEBUG
-        ProcessInfo.processInfo.arguments.contains("-defer-resting-comments")
+        LaunchArgument.deferRestingComments.isPassed()
         #else
         false
         #endif
@@ -846,7 +847,7 @@ final class SnapFeedViewController: UIViewController {
         // `-grab-log`: a chevron tap, and whether the stack could act on it —
         // a pop asked for while a transition is still running is dropped by
         // UIKit without a word, which reads as "the chevron needed two taps".
-        if ProcessInfo.processInfo.arguments.contains("-grab-log") {
+        if LaunchArgument.grabLog.isPassed() {
             print(String(format: "[close] %.3f chevron top=%@ coordinator=%@", CACurrentMediaTime(),
                          navigationController?.topViewController === self ? "self" : "other",
                          navigationController?.transitionCoordinator == nil ? "none" : "LIVE"))
@@ -993,7 +994,7 @@ final class SnapFeedViewController: UIViewController {
         refreshVisibility()
         authorPillAwaitsLandingInstall = true
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-pill-probe") {
+        if LaunchArgument.pillProbe.isPassed() {
             authorIdentityView.debugProbe("willAppear")
             DispatchQueue.main.async { [weak self] in self?.authorIdentityView.debugProbe("willAppear+turn") }
         }
@@ -1056,7 +1057,7 @@ final class SnapFeedViewController: UIViewController {
         #if DEBUG
         // `-snap-side-list-open` (QA, #1509): the side list opens a beat
         // after the feed lands, to film or measure its open pose.
-        if ProcessInfo.processInfo.arguments.contains("-snap-side-list-open"), let sideList, !sideList.isEngaged {
+        if LaunchArgument.snapSideListOpen.isPassed(), let sideList, !sideList.isEngaged {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
                 self?.sideList?.debugOpen()
             }
@@ -1074,7 +1075,7 @@ final class SnapFeedViewController: UIViewController {
             tabBarController.hideTabBarNatively()
         }
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-pill-probe") { authorIdentityView.debugProbe("didAppear") }
+        if LaunchArgument.pillProbe.isPassed() { authorIdentityView.debugProbe("didAppear") }
         #endif
         hasAppeared = true
         observeDeviceAppearance()
@@ -1144,30 +1145,27 @@ final class SnapFeedViewController: UIViewController {
         // `-snap-auto-dismiss [delay]`: the delay (2.5s by default) lets a run
         // page first (`-snap-fling`, +3s) and film the close from another post
         // on any surface (#951), not only For You's (`-foryou-demo-close`).
-        if !didDebugAutoDismiss, let position = arguments.firstIndex(of: "-snap-auto-dismiss"), isClosable {
+        if !didDebugAutoDismiss, LaunchArgument.snapAutoDismiss.isPassed(in: arguments), isClosable {
             didDebugAutoDismiss = true
-            let delay = arguments.indices.contains(position + 1)
-                ? (Double(arguments[position + 1]) ?? 2.5) : 2.5
+            let delay = LaunchArgument.snapAutoDismiss.doubleValue(in: arguments) ?? 2.5
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                 self?.closeFeed()
             }
         }
         // `-snap-page-demo [delay]`: drive the page swipe once the feed has
         // settled, so the animated page change can be filmed.
-        if !didDebugPageSwipe, let position = arguments.firstIndex(of: "-snap-page-demo") {
+        if !didDebugPageSwipe, LaunchArgument.snapPageDemo.isPassed(in: arguments) {
             didDebugPageSwipe = true
-            let delay = arguments.indices.contains(position + 1)
-                ? (Double(arguments[position + 1]) ?? 3.0) : 3.0
+            let delay = LaunchArgument.snapPageDemo.doubleValue(in: arguments) ?? 3.0
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                 self?.debugDrivePageSwipe()
             }
         }
         // `-snap-page-back-demo [delay]`: the same drive downward — the
         // previous post (#2058). Pair with `-snap-start-index N`.
-        if !didDebugPageSwipe, let position = arguments.firstIndex(of: "-snap-page-back-demo") {
+        if !didDebugPageSwipe, LaunchArgument.snapPageBackDemo.isPassed(in: arguments) {
             didDebugPageSwipe = true
-            let delay = arguments.indices.contains(position + 1)
-                ? (Double(arguments[position + 1]) ?? 3.0) : 3.0
+            let delay = LaunchArgument.snapPageBackDemo.doubleValue(in: arguments) ?? 3.0
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                 self?.debugDrivePageSwipe(distance: -520)
             }
@@ -1183,11 +1181,10 @@ final class SnapFeedViewController: UIViewController {
         // hands (`updateViewportPlayback`). Read the run with `-media-log`: a
         // `[page-play]` between `[fling] begin` and `[fling] settle` is the
         // clip starting mid-scroll, which is the whole claim.
-        if !didDebugFling, let position = arguments.firstIndex(of: "-snap-fling") {
+        if !didDebugFling, LaunchArgument.snapFling.isPassed(in: arguments) {
             didDebugFling = true
-            let pages = arguments.indices.contains(position + 1)
-                ? (Int(arguments[position + 1]) ?? 1) : 1
-            let back = arguments.contains("-snap-fling-back") ? pages : 0
+            let pages = LaunchArgument.snapFling.intValue(in: arguments) ?? 1
+            let back = LaunchArgument.snapFlingBack.isPassed(in: arguments) ? pages : 0
             DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
                 self?.debugFlingPages(pages, back: back)
             }
@@ -1199,9 +1196,7 @@ final class SnapFeedViewController: UIViewController {
         // own settle); past it the jump waits for the data, and says so if it
         // never comes or the jump does not land.
         if !didDebugScroll,
-           let flagIndex = arguments.firstIndex(of: "-snap-start-index"),
-           arguments.indices.contains(flagIndex + 1),
-           let target = Int(arguments[flagIndex + 1]) {
+           let target = LaunchArgument.snapStartIndex.intValue(in: arguments) {
             didDebugScroll = true
             let label = "-snap-start-index \(target)"
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
@@ -1228,12 +1223,11 @@ final class SnapFeedViewController: UIViewController {
         // the sheet must not move) and comes back 3s after that. Pair with
         // `-sound-sheet-trace` for the collapsed detent's measures and the
         // reveal's progress.
-        if !Self.didDebugSoundSheet, let position = arguments.firstIndex(of: "-snap-sound-sheet") {
+        if !Self.didDebugSoundSheet, LaunchArgument.snapSoundSheet.isPassed(in: arguments) {
             Self.didDebugSoundSheet = true
-            let mode = arguments.indices.contains(position + 1) ? arguments[position + 1] : ""
+            let mode = LaunchArgument.snapSoundSheet.value(in: arguments) ?? ""
             let expands = mode == "large" || mode == "roundtrip"
-            let jumpTarget = arguments.firstIndex(of: "-snap-start-index")
-                .flatMap { arguments.indices.contains($0 + 1) ? Int(arguments[$0 + 1]) : nil }
+            let jumpTarget = LaunchArgument.snapStartIndex.intValue(in: arguments)
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
                 QAWait.until("-snap-sound-sheet", { [weak self] in
                     guard let self, let index = self.lifecycle.activeIndex else { return false }
@@ -1270,7 +1264,7 @@ final class SnapFeedViewController: UIViewController {
         // after settle — the header badge opens it on tap, which the sim
         // can't deliver. The map's `-open-wallet` stays separate: both
         // firing at once would race two presentations of one sheet.
-        if arguments.contains("-feed-open-wallet") {
+        if LaunchArgument.feedOpenWallet.isPassed(in: arguments) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
                 self?.presentWalletSheet()
             }
@@ -1281,22 +1275,20 @@ final class SnapFeedViewController: UIViewController {
         // deliver. Pair with `-wallet-log` for the ledger line and
         // `-wallet-balance 0` for the denied shake. `-wallet-demo-shot` fires
         // one ×100 shot instead (pair with `-wallet-stake-shots N`).
-        if arguments.contains("-wallet-demo-boost") || arguments.contains("-wallet-demo-shot") {
+        if LaunchArgument.walletDemoBoost.isPassed(in: arguments) || LaunchArgument.walletDemoShot.isPassed(in: arguments) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
                 guard let self else { return }
                 let index = self.lifecycle.activeIndex ?? 0
                 guard self.orderedIDs.indices.contains(index) else { return }
                 let amount: Int
-                if let flagIndex = arguments.firstIndex(of: "-wallet-demo-boost"),
-                   arguments.indices.contains(flagIndex + 1),
-                   let chosen = Int(arguments[flagIndex + 1]) {
+                if let chosen = LaunchArgument.walletDemoBoost.intValue(in: arguments) {
                     amount = chosen
                 } else {
                     amount = WalletStore.Policy.defaultStakeAmount
                 }
                 let cell = self.collectionView.visibleCells
                     .compactMap { $0 as? SnapFeedCell }.first
-                let spend: WalletStakeSpend = arguments.contains("-wallet-demo-shot") ? .shot : .likes(amount)
+                let spend: WalletStakeSpend = LaunchArgument.walletDemoShot.isPassed(in: arguments) ? .shot : .likes(amount)
                 self.performBoost(on: self.orderedIDs[index], spend: spend, feedbackCell: cell)
             }
         }
@@ -1304,7 +1296,7 @@ final class SnapFeedViewController: UIViewController {
         // ~2s after `-wallet-demo-boost` landed them — the menu's Undo
         // entry, minus the long-press the sim can't deliver. The pair
         // exercises the full loop: spend, receipt face, refund, glyph face.
-        if arguments.contains("-wallet-demo-undo") {
+        if LaunchArgument.walletDemoUndo.isPassed(in: arguments) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 4.5) { [weak self] in
                 guard let self else { return }
                 let index = self.lifecycle.activeIndex ?? 0
@@ -1319,9 +1311,9 @@ final class SnapFeedViewController: UIViewController {
         // card or a grid saves — never this screen's own toggle, which draws
         // its glyph itself. Only the saved fact's observation can redraw the
         // glyph; the log line reads it back right after the write.
-        if !Self.didDebugSaveElsewhere, let position = arguments.firstIndex(of: "-save-elsewhere") {
+        if !Self.didDebugSaveElsewhere, LaunchArgument.saveElsewhere.isPassed(in: arguments) {
             Self.didDebugSaveElsewhere = true
-            let delay = arguments.indices.contains(position + 1) ? Double(arguments[position + 1]) ?? 3 : 3
+            let delay = LaunchArgument.saveElsewhere.doubleValue(in: arguments) ?? 3
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                 QAWait.until("-save-elsewhere", { [weak self] in self?.activeModel != nil }) { [weak self] in
                     guard let self, let id = self.activeModel?.id else { return }
@@ -1335,7 +1327,7 @@ final class SnapFeedViewController: UIViewController {
         // after settle, so a page *transition* can be recorded in the sim
         // (scroll gestures can't be injected) — the comment ticker must be
         // flowing on both pages during the motion, not pop in at rest.
-        if !didDebugScrollDemo, arguments.contains("-snap-scroll-demo") {
+        if !didDebugScrollDemo, LaunchArgument.snapScrollDemo.isPassed(in: arguments) {
             didDebugScrollDemo = true
             DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) { [weak self] in
                 guard let self else { return }
@@ -1355,10 +1347,9 @@ final class SnapFeedViewController: UIViewController {
         // run the engagement opened on page 0 and the jump then scrolled away
         // under it. It now waits for the active page to BE the jump's target
         // (or, alone, for any active page), and says so if that never happens.
-        if !didDebugCommentsDemo, arguments.contains("-snap-comments-demo") {
+        if !didDebugCommentsDemo, LaunchArgument.snapCommentsDemo.isPassed(in: arguments) {
             didDebugCommentsDemo = true
-            let jumpTarget = arguments.firstIndex(of: "-snap-start-index")
-                .flatMap { arguments.indices.contains($0 + 1) ? Int(arguments[$0 + 1]) : nil }
+            let jumpTarget = LaunchArgument.snapStartIndex.intValue(in: arguments)
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
                 QAWait.until("-snap-comments-demo", { [weak self] in
                     guard let self, let index = self.lifecycle.activeIndex,
@@ -1376,9 +1367,7 @@ final class SnapFeedViewController: UIViewController {
                     // could only be reasoned about. Chained off the open rather
                     // than scheduled from appear, so the delay means what it
                     // says whatever the open cost.
-                    guard let flag = arguments.firstIndex(of: "-snap-comments-close"),
-                          arguments.indices.contains(flag + 1),
-                          let after = Double(arguments[flag + 1]) else { return }
+                    guard let after = LaunchArgument.snapCommentsClose.doubleValue(in: arguments) else { return }
                     DispatchQueue.main.asyncAfter(deadline: .now() + after) { [weak self] in
                         self?.dismissComments()
                         // `-snap-comments-reopen N`: taps the entry point again N
@@ -1386,9 +1375,7 @@ final class SnapFeedViewController: UIViewController {
                         // teardown kills — the page still looks right, and every
                         // comment surface is simply dead — so the QA path has to
                         // go all the way round.
-                        guard let flag = arguments.firstIndex(of: "-snap-comments-reopen"),
-                              arguments.indices.contains(flag + 1),
-                              let reopenAfter = Double(arguments[flag + 1]) else { return }
+                        guard let reopenAfter = LaunchArgument.snapCommentsReopen.doubleValue(in: arguments) else { return }
                         DispatchQueue.main.asyncAfter(deadline: .now() + reopenAfter) { [weak self] in
                             guard let self, let index = self.lifecycle.activeIndex,
                                   self.orderedIDs.indices.contains(index) else { return }
@@ -1402,13 +1389,13 @@ final class SnapFeedViewController: UIViewController {
         // alpha, hidden) plus each toolbar item's superview chain ~5s after
         // appear — the tool that pins down WHERE iOS 26 hosts the Liquid
         // Glass item platters (they are not in the toolbar's subtree).
-        if arguments.contains("-dump-bars") {
+        if LaunchArgument.dumpBars.isPassed(in: arguments) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
                 self?.dumpBarHierarchy()
             }
         }
         guard !didDebugPause,
-              ProcessInfo.processInfo.arguments.contains("-snap-start-paused") else { return }
+              LaunchArgument.snapStartPaused.isPassed() else { return }
         didDebugPause = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
             guard let self, let index = self.lifecycle.activeIndex,
@@ -1422,7 +1409,7 @@ final class SnapFeedViewController: UIViewController {
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-media-log") {
+        if LaunchArgument.mediaLog.isPassed() {
             print(String(format: "[page-play] %.3f screen willDisappear", CACurrentMediaTime()))
         }
         #endif
@@ -1538,7 +1525,7 @@ final class SnapFeedViewController: UIViewController {
     }()
 
     func publishViewportProbe() {
-        guard ProcessInfo.processInfo.arguments.contains("-viewport-probe"), let window = view.window else { return }
+        guard LaunchArgument.viewportProbe.isPassed(), let window = view.window else { return }
         let probe = Self.viewportProbe
         if probe.superview !== window { window.addSubview(probe) }
         window.bringSubviewToFront(probe)
@@ -1553,7 +1540,7 @@ final class SnapFeedViewController: UIViewController {
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-media-log") {
+        if LaunchArgument.mediaLog.isPassed() {
             print(String(format: "[page-play] %.3f screen didDisappear", CACurrentMediaTime()))
         }
         #endif
@@ -2358,7 +2345,7 @@ final class SnapFeedViewController: UIViewController {
     private func installAuthorPillAfterLanding() {
         guard authorPillAwaitsLandingInstall, !isAwaitingAnyFlight else { return }
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-pill-no-landing-install") { return }
+        if LaunchArgument.pillNoLandingInstall.isPassed() { return }
         #endif
         authorPillAwaitsLandingInstall = false
         // One turn later: out of the transition's completion and whatever
@@ -2587,7 +2574,7 @@ final class SnapFeedViewController: UIViewController {
         // Measured (push work, 3 runs): the floating bar's machinery costs ~45
         // ms cold and ~14 ms warm whatever is in it, against ~2 ms for one
         // platter fewer — the lever is architectural, not the item count.
-        if ProcessInfo.processInfo.arguments.contains("-no-toolbar") {
+        if LaunchArgument.noToolbar.isPassed() {
             defaultToolbarItems = []
         }
         #endif
@@ -2671,7 +2658,7 @@ final class SnapFeedViewController: UIViewController {
         #endif
         nav.setToolbarHidden(false, animated: transitionCoordinator != nil)
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-dock-trace") {
+        if LaunchArgument.dockTrace.isPassed() {
             view.layoutIfNeeded()
             print("[dock] feed toolbar shown animated=\(transitionCoordinator != nil)"
                 + " safeB \(safeBefore) -> \(view.safeAreaInsets.bottom)"
@@ -2984,7 +2971,7 @@ final class SnapFeedViewController: UIViewController {
         // cell's black floor — no media card involved, which is why tracing the
         // card showed it holding a poster the whole time. Under injected
         // latency this window is the injected latency long.
-        if ProcessInfo.processInfo.arguments.contains("-media-log") {
+        if LaunchArgument.mediaLog.isPassed() {
             // `reconfigured` is the half that is otherwise unobservable: a
             // second render with the same ids looks identical from outside, and
             // whether it redrew anything is exactly the question.
@@ -3177,7 +3164,7 @@ final class SnapFeedViewController: UIViewController {
                 }
             )
             #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-wallet-log"), let wallet {
+            if LaunchArgument.walletLog.isPassed(), let wallet {
                 print("[wallet] boosted post=\(id.rawValue) requested=\(spend) spent=\(spent) targetTotal=\(targetTotal) balance=\(wallet.balance) shots=\(wallet.stakeShots)")
             }
             #endif
@@ -3186,7 +3173,7 @@ final class SnapFeedViewController: UIViewController {
             Haptics.play(.error)
             feedbackCell?.playBoostDenied()
             #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-wallet-log"), let wallet {
+            if LaunchArgument.walletLog.isPassed(), let wallet {
                 switch refusal {
                 case .insufficientBalance(let balance):
                     print("[wallet] boost DENIED post=\(id.rawValue) spend=\(spend) balance=\(balance) shots=\(wallet.stakeShots)")
@@ -3205,7 +3192,7 @@ final class SnapFeedViewController: UIViewController {
     private func performBoostUndo(on id: PostID, feedbackCell: SnapFeedCell?) {
         guard let refund = takeBackSessionStake(on: id, feedbackCell: feedbackCell, withFeedback: true) else { return }
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-wallet-log") {
+        if LaunchArgument.walletLog.isPassed() {
             print("[wallet] boost UNDO post=\(id.rawValue) refunded=\(refund.refunded) targetTotal=\(refund.targetTotal) balance=\(refund.newBalance)")
         }
         #endif
@@ -3899,7 +3886,7 @@ final class SnapFeedViewController: UIViewController {
         handedOverLoadingPage = panel
         #if DEBUG
         debugPrewarmedRestingID = head
-        if ProcessInfo.processInfo.arguments.contains("-media-log") {
+        if LaunchArgument.mediaLog.isPassed() {
             print(String(format: "[media] %.3f loading-page retire handover=yes",
                          CACurrentMediaTime()))
         }
@@ -3916,7 +3903,7 @@ final class SnapFeedViewController: UIViewController {
         guard panel.view.superview === view else { return }
         restingWarm.remove(panel)
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-media-log") {
+        if LaunchArgument.mediaLog.isPassed() {
             print(String(format: "[media] %.3f loading-page adopted=no — faded",
                          CACurrentMediaTime()))
         }
@@ -4344,7 +4331,7 @@ final class SnapFeedViewController: UIViewController {
         // `-grab-log`: what the reconcile saw. An interface that survives its
         // page is invisible in every other line — the screen looks settled and
         // the pager is simply dead.
-        if ProcessInfo.processInfo.arguments.contains("-grab-log") {
+        if LaunchArgument.grabLog.isPassed() {
             print("[reconcile] active=\(activeID?.rawValue ?? "nil") text=\(activeIsText)"
                 + " engaged=\(commentsEngagedID?.rawValue ?? "nil")"
                 + " resting=\(commentsEngagementIsResting)"
@@ -4503,7 +4490,7 @@ final class SnapFeedViewController: UIViewController {
         // screen can move it. When it does not move, the question is whether
         // this ran at all and what it was allowed to reach — two answers no
         // other trace carries.
-        if ProcessInfo.processInfo.arguments.contains("-grab-log") {
+        if LaunchArgument.grabLog.isPassed() {
             print("[drive] \(phase) dy=\(Int(dy)) ceiling=\(reachableCeiling())"
                 + " settled=\(settledPageIndex) engaged=\(commentsEngagedID?.rawValue ?? "nil")")
         }
@@ -4596,7 +4583,7 @@ final class SnapFeedViewController: UIViewController {
         // will actually accept. A committed step that never moves the page is
         // either a target nobody applied or an offset something else is
         // holding, and the two look identical from outside.
-        if ProcessInfo.processInfo.arguments.contains("-grab-log") {
+        if LaunchArgument.grabLog.isPassed() {
             print("[drive] commit start=\(Int(start)) step=\(step) target=\(target)"
                 + " targetY=\(Int(targetOffset)) offsetY=\(Int(collectionView.contentOffset.y))"
                 + " contentH=\(Int(collectionView.contentSize.height))"
@@ -4611,7 +4598,7 @@ final class SnapFeedViewController: UIViewController {
         let settle = { self.collectionView.contentOffset.y = targetOffset }
         let settled: (Bool) -> Void = { [weak self] finished in
             #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-grab-log"), let self {
+            if LaunchArgument.grabLog.isPassed(), let self {
                 print("[drive] settled finished=\(finished)"
                     + " offsetY=\(Int(collectionView.contentOffset.y))")
             }
@@ -5197,7 +5184,7 @@ final class SnapFeedViewController: UIViewController {
             }
         }
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-pill-probe") {
+        if LaunchArgument.pillProbe.isPassed() {
             authorIdentityView.debugProbe("setAuthor \(model.authorName)")
         }
         #endif
@@ -6445,7 +6432,7 @@ extension SnapFeedViewController: SnapFeedSettleReporting {
         // this a caller cannot see. An inert blend has three quite different
         // causes — an unrealized cell, a text page, a video with neither a
         // decoded frame nor a poster — and they are the same nil.
-        if ProcessInfo.processInfo.arguments.contains("-zoom-blend-log"), still == nil {
+        if LaunchArgument.zoomBlendLog.isPassed(), still == nil {
             print("[zoom-blend] no still at page \(index):"
                 + " cell=\(cell == nil ? "unrealized" : "realized")"
                 + " media=\(modelsByID[orderedIDs[index]]?.mediaURL?.lastPathComponent ?? "none")")
@@ -6715,7 +6702,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         #endif
         applyPendingComments(animated: false)
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-engage-profile") {
+        if LaunchArgument.engageProfile.isPassed() {
             print(String(format: "[engage] pre-push engage %6.2f ms",
                          (CACurrentMediaTime() - __engaged) * 1000))
         }
@@ -6926,7 +6913,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         reapplyEngagedInsets()
 
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-media-log") {
+        if LaunchArgument.mediaLog.isPassed() {
             print(String(format: "[media] %.3f loading-page install id=%@ h=%.0f",
                          CACurrentMediaTime(), id.rawValue, view.bounds.height))
         }
@@ -7000,7 +6987,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         #if DEBUG
         // Why a landing is being held, in the surface's own words — a "no"
         // with every component healthy has already cost one wrong deduction.
-        if !rendering, ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+        if !rendering, LaunchArgument.zoomLiveLog.isPassed() {
             print(String(format: "[zoom-live] %.3f landing NOT rendering: %@",
                          CACurrentMediaTime(), cell?.debugMediaState ?? "no active cell"))
         }
@@ -7265,7 +7252,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // cell as it is realised (`apply` / `willDisplay`).
         activeSnapCell?.setChromeHeldForFlight(true)
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+        if LaunchArgument.zoomLiveLog.isPassed() {
             // Read against `[page-play] start` and the landing below: a start
             // BETWEEN these two lines is the page decoding during the flight.
             print(String(format: "[zoom-live] %.3f willBegin flyingPlayer=%@ defers=%@",
@@ -7367,13 +7354,13 @@ extension SnapFeedViewController: ZoomTransitionDestination {
 
     public func zoomTransitionDidEnd() {
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-zoom-profile") {
+        if LaunchArgument.zoomProfile.isPassed() {
             print("[feed-reuse] LANDED showing \(activePostID?.rawValue ?? "nil")"
                   + " of \(orderedIDs.prefix(3).map(\.rawValue))")
         }
         #endif
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+        if LaunchArgument.zoomLiveLog.isPassed() {
             print(String(format: "[zoom-live] %.3f landed", CACurrentMediaTime()))
         }
         #endif
@@ -7381,7 +7368,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // `-landing-probe`: the replica's caption against the page's, in
         // window space, at the instant one fades into the other. A delta here
         // is the "small jump at the end of the hero" a device shows.
-        if ProcessInfo.processInfo.arguments.contains("-landing-probe"),
+        if LaunchArgument.landingProbe.isPassed(),
            let window = view.window, let replica = flightChrome,
            let page = activeSnapCell?.debugChrome {
             let a = replica.debugCaptionFrame(in: window), b = page.debugCaptionFrame(in: window)
@@ -7391,7 +7378,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         }
         #endif
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-pill-probe") {
+        if LaunchArgument.pillProbe.isPassed() {
             authorIdentityView.debugProbe("landed")
             for delay in [0.016, 0.05, 0.1, 0.2, 0.4, 0.8, 1.6] {
                 DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
@@ -7459,7 +7446,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         guard let renderView = surface as? VideoRenderView,
               let cell = activeSnapCell else {
             #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            if LaunchArgument.zoomLiveLog.isPassed() {
                 print("[zoom-live] destination mirror refused: activeCell=\(activeSnapCell != nil)")
             }
             #endif
@@ -7467,7 +7454,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         }
         let mirrored = cell.mirrorPlayback(to: renderView)
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+        if LaunchArgument.zoomLiveLog.isPassed() {
             print("[zoom-live] destination mirror -> \(mirrored)")
         }
         #endif
@@ -7565,7 +7552,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // a boosted post must not flash back to the glyph mid-flight.
         chrome.setBoostTotal(boost.boostTotal(on: model.id) ?? 0)
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-zoom-profile") {
+        if LaunchArgument.zoomProfile.isPassed() {
             print("[flight-chrome] \(model.id.rawValue) hasMedia=\(model.mediaURL != nil)"
                   + " destinationEngaged=\(activeSnapCell?.isCommentsEngaged.description ?? "no cell")"
                   + " engagedID=\(commentsEngagedID?.rawValue ?? "nil")")
@@ -8183,7 +8170,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     public func zoomUpwardDismissalPermitted(at location: CGPoint, in view: UIView) -> Bool {
         #if DEBUG
         // `-grab-log`: why an upward swipe at the end did or did not close.
-        if ProcessInfo.processInfo.arguments.contains("-grab-log") {
+        if LaunchArgument.grabLog.isPassed() {
             print("[grab-up] loading=\(viewModel.isLoadingNextPage) page=\(settledPageIndex)/\(orderedIDs.count)"
                 + " keyboard=\(isKeyboardOnScreen) engaged=\(commentsEngagedID?.rawValue ?? "nil")"
                 + " resting=\(commentsEngagementIsResting)"
@@ -8331,7 +8318,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // one thing a scripted run CAN still establish is that a text post has
         // an engaged panel at swipe time, which is the assumption the forward
         // above rests on. A `stream=nil` here would mean the lock is a no-op.
-        if ProcessInfo.processInfo.arguments.contains("-dismiss-lock-log") {
+        if LaunchArgument.dismissLockLog.isPassed() {
             let carousels = visible.filter(\.hasMediaCarousel).count
             print("[dismiss-lock] contentScroll=\(enabled ? "on" : "OFF") "
                   + "stream=\(stream == nil ? "nil" : "engaged") "

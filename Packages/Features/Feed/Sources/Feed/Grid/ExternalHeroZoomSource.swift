@@ -2,6 +2,7 @@ import CoreModels
 import CoreNavigation
 import EmoteKit
 import FeedInterface
+import LaunchArguments
 import PostGrid
 import UIKit
 
@@ -165,7 +166,7 @@ final class ExternalHeroZoomSource: ZoomTransitionSource {
     /// blend is only correct if the two of them actually match.
     private func debugLogBlend() {
         #if DEBUG
-        guard ProcessInfo.processInfo.arguments.contains("-zoom-blend-log") else { return }
+        guard LaunchArgument.zoomBlendLog.isPassed() else { return }
         print("[zoom-blend] departure=\(settle?().id?.rawValue ?? "nil")"
             + " arrival=\(origin.post.id.rawValue)"
             + " cover=\(departurePicture == nil ? "none" : "picture")")

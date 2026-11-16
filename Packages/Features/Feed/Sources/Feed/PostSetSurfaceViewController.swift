@@ -2,6 +2,7 @@ import CoreContracts
 import CoreModels
 import DesignSystem
 import FeedInterface
+import LaunchArguments
 import MediaPlayback
 import PostGrid
 import MediaCore
@@ -551,9 +552,7 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
     /// there.
     private func openTileForQAIfRequested() {
         let arguments = ProcessInfo.processInfo.arguments
-        guard let position = arguments.firstIndex(of: "-search-open-post"),
-              position + 1 < arguments.count,
-              let index = Int(arguments[position + 1]),
+        guard let index = LaunchArgument.searchOpenPost.intValue(in: arguments),
               !didOpenForQA
         else { return }
         didOpenForQA = true
@@ -587,9 +586,7 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
     /// close from the row can be filmed and traced without a finger (#924).
     private func openCardForQAIfRequested() {
         let arguments = ProcessInfo.processInfo.arguments
-        guard let position = arguments.firstIndex(of: "-search-open-card"),
-              position + 1 < arguments.count,
-              let index = Int(arguments[position + 1]),
+        guard let index = LaunchArgument.searchOpenCard.intValue(in: arguments),
               !didOpenCardForQA
         else { return }
         didOpenCardForQA = true

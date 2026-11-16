@@ -1,4 +1,5 @@
 import CoreModels
+import LaunchArguments
 import MediaCore
 import PostGrid
 import ThreadKit
@@ -111,7 +112,7 @@ final class AuthorBadgeBinding {
     /// `-author-badge-trace` (DEBUG): binds, answers and viewer changes.
     private func trace(_ line: @autoclosure () -> String) {
         #if DEBUG
-        guard ProcessInfo.processInfo.arguments.contains("-author-badge-trace") else { return }
+        guard LaunchArgument.authorBadgeTrace.isPassed() else { return }
         print("[author-badge] \(line())")
         #endif
     }

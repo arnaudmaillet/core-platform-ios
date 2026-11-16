@@ -1,5 +1,6 @@
 import CoreVideo
 import DesignSystem
+import LaunchArguments
 import MediaCore
 import MediaPlayback
 import PostGrid
@@ -427,7 +428,7 @@ final class SnapMediaCardView: UIView {
     /// `-landing-surface-probe`: the adopted surface's geometry and running
     /// animations over the 300 ms after a landing hands it over (#539).
     private func probeLandingSurface(_ view: VideoRenderView) {
-        guard ProcessInfo.processInfo.arguments.contains("-landing-surface-probe") else { return }
+        guard LaunchArgument.landingSurfaceProbe.isPassed() else { return }
         func describe(_ label: String) {
             let layer = view.layer
             let keys = layer.animationKeys()?.joined(separator: ",") ?? "-"
@@ -781,7 +782,7 @@ final class SnapMediaCardView: UIView {
         renderView.isHidden = true
         applyFraming()
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-carousel-audit") {
+        if LaunchArgument.carouselAudit.isPassed() {
             print("[audit] hide by showCollection")
         }
         #endif
@@ -1095,7 +1096,7 @@ final class SnapMediaCardView: UIView {
         carousel?.evictHostedSurface()
         renderView.isHidden = true
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-carousel-audit") {
+        if LaunchArgument.carouselAudit.isPassed() {
             print("[audit] hide by releaseRenderViewFromPages")
         }
         #endif
@@ -1170,7 +1171,7 @@ final class SnapMediaCardView: UIView {
     /// long interval between a clearing call and the call that refills it.
     private func logMediaState(_ event: String) {
         #if DEBUG
-        guard ProcessInfo.processInfo.arguments.contains("-media-log") else { return }
+        guard LaunchArgument.mediaLog.isPassed() else { return }
         print(String(format: "[media] %.3f %-22@ image=%@ imageHidden=%@ framing=%@ aspect=%@ backdrop=%@ | render %@",
                      CACurrentMediaTime(), event,
                      imageView.image == nil ? "nil" : "set",

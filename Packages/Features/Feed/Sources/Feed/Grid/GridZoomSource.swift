@@ -2,6 +2,7 @@ import CoreModels
 import CoreNavigation
 import EmoteKit
 import FeedInterface
+import LaunchArguments
 import MediaPlayback
 import PostGrid
 import UIKit
@@ -143,7 +144,7 @@ final class GridZoomSource: ZoomTransitionSource {
         // `-zoom-live-log`: the centre is the answer of no answer, and on its
         // own it says nothing about WHY — no rect for this post, or no row on
         // screen at all. Reaching here at all means both.
-        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+        if LaunchArgument.zoomLiveLog.isPassed() {
             print("[zoom-live] NO RECT anchor=\(anchorID.rawValue)"
                 + " onScreen=\(zoomSourceIsOnScreen)"
                 + " inFeed=\(page?.post(for: anchorID) != nil)")
@@ -187,7 +188,7 @@ final class GridZoomSource: ZoomTransitionSource {
         // Said out loud because a refusal here hands the drag to the OTHER
         // driver, and if that one refuses too the screen leaves on UIKit's own
         // slide with nothing naming the handover that never happened.
-        if !accepts, ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+        if !accepts, LaunchArgument.zoomLiveLog.isPassed() {
             print(String(format: "[zoom-live] %.3f landing REFUSES hero post=%@"
                          + " (row not realized or has no cover)",
                          CACurrentMediaTime(), anchorID.rawValue))
@@ -295,7 +296,7 @@ final class GridZoomSource: ZoomTransitionSource {
         // assigns it immediately, so a bound cover is the expected case — this
         // exists to catch the exception, where the card is posed over the tile
         // with nothing but its own background colour.
-        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+        if LaunchArgument.zoomLiveLog.isPassed() {
             print(String(format: "[zoom-live] %.3f card FRAME0 cover=%@ style=%@",
                          CACurrentMediaTime(),
                          appearance?.cover == nil ? "NIL" : "bound",
@@ -380,7 +381,7 @@ final class GridZoomSource: ZoomTransitionSource {
 
     func setZoomSourceHidden(_ hidden: Bool) {
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+        if LaunchArgument.zoomLiveLog.isPassed() {
             print(String(format: "[zoom-live] %.3f source hidden=%@",
                          CACurrentMediaTime(), hidden ? "true" : "false"))
         }

@@ -4,6 +4,7 @@ import CoreNavigation
 import CoreStorage
 import DesignSystem
 import FeedInterface
+import LaunchArguments
 import MediaCore
 import MediaPlayback
 import PostGrid
@@ -1466,7 +1467,7 @@ final class SoundSheetViewController: UIViewController {
     /// value at every visit. Read-only: it moves nothing.
     private func traceSettledHeight(expanded: Bool) {
         #if DEBUG
-        guard ProcessInfo.processInfo.arguments.contains("-sound-sheet-trace") else { return }
+        guard LaunchArgument.soundSheetTrace.isPassed() else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
             guard let self, let window = view.window else { return }
             let settled = view.bounds.height - window.safeAreaInsets.bottom
@@ -1498,7 +1499,7 @@ final class SoundSheetViewController: UIViewController {
 
     private func trace(_ message: @autoclosure () -> String) {
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-sound-sheet-trace") {
+        if LaunchArgument.soundSheetTrace.isPassed() {
             // NSLog, not print: it reaches the unified log, which `simctl`
             // can read back without a pty (memory `upload-media-picker`).
             NSLog("[sound-sheet] %@", message())
@@ -2292,7 +2293,7 @@ extension SoundSheetViewController: UICollectionViewDelegate {
         #if DEBUG
         // `-sound-sheet-trace`: a finger that SCROLLED the posts. Below the
         // fullest detent there must be none — the drag is the sheet's.
-        if scrollView.isDragging, ProcessInfo.processInfo.arguments.contains("-sound-sheet-trace") {
+        if scrollView.isDragging, LaunchArgument.soundSheetTrace.isPassed() {
             trace("scrolled: offset \(scrollView.contentOffset.y) fullest \(isAtFullestDetent)")
         }
         #endif

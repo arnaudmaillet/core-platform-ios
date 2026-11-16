@@ -7,6 +7,7 @@ import CoreStorage
 import EntityStore
 import FeedInterface
 import Foundation
+import LaunchArguments
 import MediaCore
 import ThreadKit
 import UIKit
@@ -458,7 +459,7 @@ public final class FeedViewModel {
         // before the grid has prefetched anything — the streams land by the
         // load alone, after the flight. The ticker's pre-fill has to hold
         // on that path too, and this is how it is filmed on the simulator.
-        if ProcessInfo.processInfo.arguments.contains("-no-comment-seed") { return .empty }
+        if LaunchArgument.noCommentSeed.isPassed() { return .empty }
         #endif
         guard let entries = commentsProvider?.cachedTopComments(for: id), !entries.isEmpty else { return .empty }
         let seed = makeStreams(from: entries, for: id, isLoaded: false)
@@ -507,8 +508,7 @@ public final class FeedViewModel {
         // 2026: empty band, bubbles from the right). Pair with
         // `-no-comment-seed` so nothing arrives earlier from the cache.
         let arguments = ProcessInfo.processInfo.arguments
-        if let position = arguments.firstIndex(of: "-comment-streams-delay"),
-           let ms = arguments.dropFirst(position + 1).first.flatMap(Int.init) {
+        if let ms = LaunchArgument.commentStreamsDelay.intValue(in: arguments) {
             try? await Task.sleep(for: .milliseconds(ms))
         }
         #endif

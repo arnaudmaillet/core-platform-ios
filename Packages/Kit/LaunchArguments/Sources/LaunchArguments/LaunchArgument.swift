@@ -32,8 +32,16 @@ public struct LaunchArgument: Sendable, Hashable, CustomStringConvertible {
     /// The word passed after it (`-switch-tab 3` → `"3"`), or nil when it
     /// was not passed or nothing follows it.
     public func value(in arguments: [String] = ProcessInfo.processInfo.arguments) -> String? {
-        guard let index = arguments.firstIndex(of: name), arguments.indices.contains(index + 1) else { return nil }
-        return arguments[index + 1]
+        value(at: 1, in: arguments)
+    }
+
+    /// The `position`-th word passed after it, from 1 (`value`):
+    /// `-tile-card-close-demo 0.6 4` → `"4"` at 2. Nil when it was not
+    /// passed or the words stop short: a flag's further values.
+    public func value(at position: Int, in arguments: [String] = ProcessInfo.processInfo.arguments) -> String? {
+        precondition(position >= 1, "the first word after a flag is at 1")
+        guard let index = arguments.firstIndex(of: name), arguments.indices.contains(index + position) else { return nil }
+        return arguments[index + position]
     }
 
     /// `value`, read as an integer.

@@ -6,6 +6,7 @@ import DesignSystem
 import MediaPlayback
 import PostGrid
 import UIKit
+import LaunchArguments
 
 /// A full-screen snap cell: cover-fit media under a `SnapChromeView` overlay
 /// (scrim, full-width caption). Text-only posts render as an empty shell —
@@ -228,7 +229,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // on the other surface.
         let wasHosted = videoPlayback.hasPlayer(in: surface)
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-media-log") {
+        if LaunchArgument.mediaLog.isPassed() {
             print(String(format: "[page-play] %.3f page=%d hosted=%@ url=%@",
                          CACurrentMediaTime(), mediaCard.currentPage,
                          wasHosted ? "Y" : "N",
@@ -237,7 +238,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         #endif
         if wasHosted, videoPlayback.setPaused(false, in: surface) {
             #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-media-log") {
+            if LaunchArgument.mediaLog.isPassed() {
                 print(String(format: "[page-play] %.3f resumed", CACurrentMediaTime()))
             }
             auditPagePlayback()
@@ -1269,7 +1270,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         window.frame = card
         window.layer.cornerRadius = state.cornerRadius
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-grab-log") {
+        if LaunchArgument.grabLog.isPassed() {
             // The two rects that must be the same rect: where the window is,
             // and where the page actually landed after its transform. A gap
             // between them is the gap on screen, and nothing else can be.
@@ -1985,7 +1986,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // configured. Everything listed here is supposed to render at 0ms from
         // the grid's own projection; anything reported missing is arriving on a
         // later fetch and is what "instant metadata" is actually waiting on.
-        if ProcessInfo.processInfo.arguments.contains("-media-log") {
+        if LaunchArgument.mediaLog.isPassed() {
             print(String(format: "[media] %.3f page CONFIGURE author=%@ caption=%@ avatar=%@ audio=%@ likes=%@ age=%@",
                          CACurrentMediaTime(),
                          model.authorName.isEmpty ? "MISSING" : "yes",
@@ -2006,8 +2007,8 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // with no URL — or with one that never resolves — is a pipeline
         // failure, and the two are indistinguishable on screen. Both look like
         // "a solid colour where a photo should be".
-        if ProcessInfo.processInfo.arguments.contains("-media-audit") {
-            let rich = ProcessInfo.processInfo.arguments.contains("-rich-media")
+        if LaunchArgument.mediaAudit.isPassed() {
+            let rich = LaunchArgument.richMedia.isPassed()
             if !hasMedia {
                 print("[media-audit] \(model.id.rawValue) NO MEDIA PAYLOAD"
                       + " kind=\(model.mediaKind) rich=\(rich)"
@@ -2192,7 +2193,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         #if DEBUG
         // The async half. `isLoaded=false` is the known-zero flag, so a first
         // delivery with it false is the placeholder and the real one follows.
-        if ProcessInfo.processInfo.arguments.contains("-media-log") {
+        if LaunchArgument.mediaLog.isPassed() {
             print(String(format: "[media] %.3f page STREAMS loaded=%@ reactions=%d subtitles=%d count=%d",
                          CACurrentMediaTime(), streams.isLoaded ? "yes" : "NO",
                          streams.reactions.count, streams.subtitles.count, streams.commentCount))
@@ -2246,7 +2247,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             // on its floor — visually identical to a text page, and silent
             // until now. This is the failure the audit is for.
             #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-media-audit") {
+            if LaunchArgument.mediaAudit.isPassed() {
                 print("[media-audit] \(id.rawValue) IMAGE LOAD FAILED url=\(url.absoluteString)")
             }
             #endif
@@ -2282,7 +2283,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             // card mid-flight, so the start waits for the flight to land — see
             // `startDeferredPlayback`.
             #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            if LaunchArgument.zoomLiveLog.isPassed() {
                 // The PAGE matters as much as the flag: a collection warms
                 // `renderView`, and which surface that names is a function of
                 // the page the card believes it is on.
@@ -2482,7 +2483,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         mediaCard.hostRenderViewOnCurrentPage()
         let view = mediaCard.renderView
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-media-log") {
+        if LaunchArgument.mediaLog.isPassed() {
             // WHICH DOOR, and whether anything was there already. The whole
             // claim of the half-screen start is a matter of ORDER — read
             // against `[fling] begin`/`[fling] settle`, a line with `owns=Y
@@ -2723,7 +2724,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             #endif
             let attached = videoPlayback.attachSurface(card, alongsideSurface: mediaCard.renderView)
             #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            if LaunchArgument.zoomLiveLog.isPassed() {
                 print(String(format: "[zoom-live] %.3f producer FEED donateLiveRenderView -> %@ %@",
                              CACurrentMediaTime(), attached ? "attached" : "REFUSED",
                              card.debugSurfaceState))
@@ -2782,7 +2783,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             return
         }
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+        if LaunchArgument.zoomLiveLog.isPassed() {
             print(String(format: "[landing-adopt] %.3f alpha=%.2f pres=%.2f hidden=%@ anims=%@ frames=%d",
                          CACurrentMediaTime(), view.alpha, view.layer.presentation()?.opacity ?? -1,
                          view.isHidden ? "Y" : "N", (view.layer.animationKeys() ?? []).joined(separator: ","),
@@ -2800,7 +2801,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         if Self.keepsOwnSurface(incomingHasFrame: view.isReadyForDisplay,
                                 ownIsShowing: mediaCard.renderView.isCompositingContent) {
             #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            if LaunchArgument.zoomLiveLog.isPassed() {
                 print(String(format: "[landing-adopt] %.3f refused: the card's surface has no frame, the page shows its own",
                              CACurrentMediaTime()))
             }
@@ -3580,7 +3581,7 @@ extension SnapFeedCell {
     override public func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
         let hit = super.hitTest(point, with: event)
         #if DEBUG
-        if isCommentsEngaged, ProcessInfo.processInfo.arguments.contains("-gesture-log") {
+        if isCommentsEngaged, LaunchArgument.gestureLog.isPassed() {
             let chain = hit.map {
                 sequence(first: $0, next: { $0.superview })
                     .prefix(8).map { "\(type(of: $0))(\(Int($0.frame.minY)))" }

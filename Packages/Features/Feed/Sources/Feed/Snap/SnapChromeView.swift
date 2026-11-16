@@ -2,6 +2,7 @@ import CoreModels
 import CoreStorage
 import DesignSystem
 import EmoteKit
+import LaunchArguments
 import MediaCore
 import PostGrid
 import UIKit
@@ -606,7 +607,7 @@ final class SnapChromeView: UIView {
         #if DEBUG
         // `-scrim-white-page`: a flat white page under the scrim, to measure
         // it as the reference was measured (#2175).
-        if ProcessInfo.processInfo.arguments.contains("-scrim-white-page") {
+        if LaunchArgument.scrimWhitePage.isPassed() {
             let white = UIView()
             white.backgroundColor = .white
             white.isUserInteractionEnabled = false
@@ -1826,8 +1827,7 @@ final class SnapChromeView: UIView {
     private static var ranBrowseQA = false
     private func runBrowseQAIfAsked(count: Int) {
         let arguments = ProcessInfo.processInfo.arguments
-        guard count >= 2, !Self.ranBrowseQA, let flag = arguments.firstIndex(of: "-strip-browse"),
-              flag + 1 < arguments.count, let share = Double(arguments[flag + 1]) else { return }
+        guard count >= 2, !Self.ranBrowseQA, let share = LaunchArgument.stripBrowse.doubleValue(in: arguments) else { return }
         Self.ranBrowseQA = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
             guard let self else { return }
@@ -1836,7 +1836,7 @@ final class SnapChromeView: UIView {
             bar.debugScrub(.changed, atX: 2 + SnapMediaPageBarView.debugTravelThreshold + 1)
             bar.debugScrub(.changed, atX: bar.bounds.width * CGFloat(share))
             // `-strip-browse-release`: and lets go 4 s later.
-            guard arguments.contains("-strip-browse-release") else { return }
+            guard LaunchArgument.stripBrowseRelease.isPassed(in: arguments) else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
                 bar.debugScrub(.ended, atX: bar.bounds.width * CGFloat(share))
             }

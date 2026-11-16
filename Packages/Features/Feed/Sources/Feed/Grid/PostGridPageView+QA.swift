@@ -4,6 +4,7 @@ import CoreNavigation
 import CoreStorage
 import DesignSystem
 import FeedInterface
+import LaunchArguments
 import MediaCore
 import MediaPlayback
 import PostGrid
@@ -128,7 +129,7 @@ extension PostGridPageView {
     /// `-grid-playback-log`: report which ladder rung each playing tile settled
     /// on, once the streams have had time to choose one.
     func schedulePlaybackDiagnosticsIfNeeded() {
-        guard ProcessInfo.processInfo.arguments.contains("-grid-playback-log"),
+        guard LaunchArgument.gridPlaybackLog.isPassed(),
               let playback, !hasScheduledDiagnostics
         else { return }
         hasScheduledDiagnostics = true

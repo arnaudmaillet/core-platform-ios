@@ -3,6 +3,7 @@ import CoreStorage
 import EmoteKit
 import MediaCore
 import UIKit
+import LaunchArguments
 
 /// The danmaku band: `laneCount` lanes of micro-reactions conveying
 /// right-to-left over the page's media, directly above the caption.
@@ -346,7 +347,7 @@ final class SnapCommentTickerView: UIView {
         // mock corpus rarely has enough reaction-shaped comments to fill one,
         // and the letters' outline (#2339) has to be looked at over real
         // pictures.
-        if comments.isEmpty, ProcessInfo.processInfo.arguments.contains("-ticker-demo") {
+        if comments.isEmpty, LaunchArgument.tickerDemo.isPassed() {
             let samples = ["GG 🔥", "lol", "so good 😍", "W", "🔥🔥🔥", "no way 😂", "clean", "first!", "big mood", "😭😭",
                            "this light ✨", "again!!"]
             let demo = samples.enumerated().map { TickerCommentModel(id: "demo-\($0.offset)", text: $0.element) }
@@ -355,7 +356,7 @@ final class SnapCommentTickerView: UIView {
         }
         #endif
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-ticker-trace") {
+        if LaunchArgument.tickerTrace.isPassed() {
             print(String(format: "[ticker] %.3f setComments n=%d same=%@ active=%@ width=%.0f mode=%@ reserves=%@", CACurrentMediaTime(), comments.count, comments == queue ? "Y" : "N", isActive ? "Y" : "N", bounds.width, "\(mode)", reservesBand ? "Y" : "N"))
         }
         #endif
@@ -384,7 +385,7 @@ final class SnapCommentTickerView: UIView {
     /// backgrounding stop / foregrounding restart edge.
     func setActive(_ active: Bool) {
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-ticker-trace") {
+        if LaunchArgument.tickerTrace.isPassed() {
             print(String(format: "[ticker] %.3f setActive %@ (was %@) width=%.0f", CACurrentMediaTime(), active ? "Y" : "N", isActive ? "Y" : "N", bounds.width))
         }
         #endif
@@ -476,7 +477,7 @@ final class SnapCommentTickerView: UIView {
     private func startIfNeeded() {
         Self.refreshAppearance(from: appearanceStore)
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-ticker-trace") {
+        if LaunchArgument.tickerTrace.isPassed() {
             print(String(format: "[ticker] %.3f startIfNeeded active=%@ mode=%@ queue=%d width=%.0f held=%@ window=%@ alpha=%.2f hidden=%@", CACurrentMediaTime(), isActive ? "Y" : "N", "\(mode)", queue.count, bounds.width, isHeldForFlight ? "Y" : "N", window != nil ? "Y" : "N", alpha, isHidden ? "Y" : "N"))
         }
         #endif
@@ -1030,7 +1031,7 @@ final class SnapCommentTickerView: UIView {
         let onScreen = Set(laneBubbles.joined().map(\.itemID))
         let item = tape!.item(lane: lane, at: index, avoiding: onScreen)
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-ticker-trace") {
+        if LaunchArgument.tickerTrace.isPassed() {
             print(String(format: "[ticker] %.3f tape lane=%d index=%d id=%@", CACurrentMediaTime(), lane, index, item.id))
         }
         #endif
@@ -1063,7 +1064,7 @@ final class SnapCommentTickerView: UIView {
         askedMoreAtPoolSize = pool
         readsSinceAsk = 0
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-ticker-trace") {
+        if LaunchArgument.tickerTrace.isPassed() {
             print(String(format: "[ticker] %.3f runningLow shown=%d pool=%d", CACurrentMediaTime(), shownIDs.count, pool))
         }
         #endif
@@ -1187,12 +1188,11 @@ final class TickerBubbleView: UIView {
         // `-danmaku-outline-width 0.75` and `-danmaku-outline-ink grey`
         // (`black65`, `grey`, `black`): the comparisons, on the device.
         let arguments = ProcessInfo.processInfo.arguments
-        if let index = arguments.firstIndex(of: "-danmaku-outline-width"), arguments.indices.contains(index + 1),
-           let value = Double(arguments[index + 1]), value >= 0 {
+        if let value = LaunchArgument.danmakuOutlineWidth.doubleValue(in: arguments), value >= 0 {
             width = CGFloat(value)
         }
-        if let index = arguments.firstIndex(of: "-danmaku-outline-ink"), arguments.indices.contains(index + 1) {
-            switch arguments[index + 1] {
+        if let choice = LaunchArgument.danmakuOutlineInk.value(in: arguments) {
+            switch choice {
             case "grey": ink = UIColor(white: 0.23, alpha: 1)
             case "black": ink = UIColor(white: 0, alpha: 1)
             default: break

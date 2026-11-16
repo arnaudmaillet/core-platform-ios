@@ -4,6 +4,7 @@ import CoreNavigation
 import CoreStorage
 import DesignSystem
 import FeedInterface
+import LaunchArguments
 import MediaCore
 import MediaPlayback
 import PostGrid
@@ -64,7 +65,7 @@ extension SnapFeedViewController {
     /// (`applyBarPillWidths`), which leaves the wrapper nothing to drift from;
     /// the probe stays so a `DRIFT` line would say so if it ever came back.
     func debugProbeBarItemWidth(_ pill: UIView, slot: String) {
-        guard ProcessInfo.processInfo.arguments.contains("-pill-probe") else { return }
+        guard LaunchArgument.pillProbe.isPassed() else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak pill] in
             guard let pill, pill.window != nil else { return }
             // The author pill hugs its content (#925): its own fitted width.
@@ -124,16 +125,14 @@ extension SnapFeedViewController {
         // page), the speed #627 is about.
         var steps = 24
         let arguments = ProcessInfo.processInfo.arguments
-        if let index = arguments.firstIndex(of: "-snap-fling-steps"), index + 1 < arguments.count,
-           let asked = Int(arguments[index + 1]), asked > 0 {
+        if let asked = LaunchArgument.snapFlingSteps.intValue(in: arguments), asked > 0 {
             steps = asked
         }
         // `-snap-fling-dwell S`: seconds on each page before the next fling
         // (1.5 by default) — long enough, say 6, for the video lookahead to
         // warm +1 and preload the heads ahead (#895, read with `-cache-audit`).
         var dwell = 1.5
-        if let index = arguments.firstIndex(of: "-snap-fling-dwell"), index + 1 < arguments.count,
-           let asked = Double(arguments[index + 1]), asked > 0 {
+        if let asked = LaunchArgument.snapFlingDwell.doubleValue(in: arguments), asked > 0 {
             dwell = asked
         }
         print("[fling] begin from=\(Int(start)) to=\(Int(target))")

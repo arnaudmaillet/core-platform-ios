@@ -3,6 +3,7 @@ import CoreModels
 import DesignSystem
 import FeedInterface
 import UIKit
+import LaunchArguments
 
 /// The author identity (avatar + name/meta) hosted as a bar item's custom
 /// view: the post page's toolbar, the conversation's bar, the text composer.
@@ -195,7 +196,7 @@ final class SnapAuthorIdentityView: UIView {
         }
         var faceURL = model.avatarURL
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-pill-no-face") { faceURL = nil }
+        if LaunchArgument.pillNoFace.isPassed() { faceURL = nil }
         #endif
         contentTransition.perform(animated: animated) {
             self.pill.setName(model.authorName, handle: meta)
