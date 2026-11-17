@@ -23,12 +23,10 @@ struct LayeringGuardTests {
     /// The layers, lowest first, by folder under `Packages/`.
     static let layers = ["Kit", "Core", "FeatureInterfaces", "Features"]
 
-    /// Today's exceptions, each with its issue. The list may only shrink.
-    static let allowed: [String: String] = [
-        // Profile's tests draw the profile on For You's real grid; the grid
-        // moves to a Core package (#2379), then the edge goes (#2372).
-        "Features/Profile -> Features/Feed": "#2372",
-    ]
+    /// Today's exceptions, each with its issue. The list may only shrink,
+    /// and it is empty since HeroPage left FeedInterface (#2380) and
+    /// Profile's tests left Feed (#2372): keep it empty.
+    static let allowed: [String: String] = [:]
 
     /// Every local package dependency, as `Layer/Package -> Layer/Package`.
     static func edges() throws -> [(from: String, to: String)] {

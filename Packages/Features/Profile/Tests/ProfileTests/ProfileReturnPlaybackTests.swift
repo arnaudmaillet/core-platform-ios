@@ -6,7 +6,6 @@ import MediaPlayback
 import PostGrid
 import Testing
 import UIKit
-@testable import Feed
 @testable import Profile
 @testable import ProfileSettings
 @testable import PostSurfaces

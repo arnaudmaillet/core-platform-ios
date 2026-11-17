@@ -1,7 +1,6 @@
 import CoreModels
 import CoreNavigation
 import DesignSystem
-@testable import Feed
 import FeedInterface
 import Foundation
 import LaunchArguments
