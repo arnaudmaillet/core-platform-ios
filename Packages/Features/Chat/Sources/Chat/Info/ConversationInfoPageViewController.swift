@@ -4,6 +4,7 @@ import DesignSystem
 import FeedInterface
 import HeroPage
 import MediaCore
+import PostGrid
 import UIKit
 
 /// What a group's and a channel's info screens share (#2237): the profile's

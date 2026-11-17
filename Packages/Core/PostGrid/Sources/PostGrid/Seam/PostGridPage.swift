@@ -1,5 +1,4 @@
 import CoreModels
-import PostGrid
 import UIKit
 
 /// The shape a post grid page takes.

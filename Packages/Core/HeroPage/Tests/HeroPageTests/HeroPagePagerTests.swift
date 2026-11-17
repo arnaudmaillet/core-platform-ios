@@ -1,5 +1,4 @@
 import DesignSystem
-import FeedInterface
 import PostGrid
 import Testing
 import UIKit

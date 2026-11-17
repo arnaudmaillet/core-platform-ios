@@ -7,6 +7,7 @@ import FeedInterface
 import LaunchArguments
 import LocalStore
 import MediaCore
+import PostGrid
 import UIKit
 
 /// The chat feature's entry point, resolved by the composition root and

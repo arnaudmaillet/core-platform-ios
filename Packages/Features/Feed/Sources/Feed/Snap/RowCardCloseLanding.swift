@@ -1,6 +1,7 @@
 import CoreNavigation
 import FeedInterface
 import MediaCore
+import PostGrid
 import UIKit
 
 /// The landing of a card-shaped close for a surface that described its ROW

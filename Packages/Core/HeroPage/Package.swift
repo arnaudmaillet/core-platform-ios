@@ -16,7 +16,6 @@ let package = Package(
         // `HeaderIdentityFade`, the hero kit's primitives.
         .package(path: "../DesignSystem"),
         // The pages the pager hosts (`PostGridPage`, #1653).
-        .package(path: "../../FeatureInterfaces/FeedInterface"),
         // `MediaCarouselTouchRouting`: a carousel with somewhere to go keeps
         // its drag from the pager.
         .package(path: "../PostGrid"),
@@ -32,8 +31,8 @@ let package = Package(
     targets: [
         .target(name: "HeroPage", dependencies: [
             "LaunchArguments",
-            "DesignSystem", "FeedInterface", "PostGrid", "MediaCore", "MediaPlayback", "EmoteKit", "CoreNavigation"
+            "DesignSystem", "PostGrid", "MediaCore", "MediaPlayback", "EmoteKit", "CoreNavigation"
         ]),
-        .testTarget(name: "HeroPageTests", dependencies: ["HeroPage", "DesignSystem", "FeedInterface", "PostGrid", "MediaCore"])
+        .testTarget(name: "HeroPageTests", dependencies: ["HeroPage", "DesignSystem", "PostGrid", "MediaCore"])
     ]
 )

@@ -3,6 +3,7 @@ import FeedInterface
 import Foundation
 import MediaCore
 import MediaPlayback
+import PostGrid
 @testable import Profile
 @testable import ProfileSettings
 
