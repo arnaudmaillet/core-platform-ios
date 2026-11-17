@@ -4,6 +4,7 @@ import CoreStorage
 import DesignSystem
 import LaunchArguments
 import MediaCore
+import MediaUI
 import UIKit
 
 /// The Search tab.

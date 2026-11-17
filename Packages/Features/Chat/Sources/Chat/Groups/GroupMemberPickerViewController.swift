@@ -2,6 +2,7 @@ import CoreNavigation
 import CoreModels
 import DesignSystem
 import MediaCore
+import MediaUI
 import UIKit
 
 /// Picks a group's people (#2214): a search field, the people picked as

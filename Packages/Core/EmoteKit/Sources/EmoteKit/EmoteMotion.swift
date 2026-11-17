@@ -1,6 +1,7 @@
 import DesignSystem
 import Foundation
 import MediaCore
+import MediaUI
 import UIKit
 
 /// How an emote may move right now (`policy`): still under Reduce Motion

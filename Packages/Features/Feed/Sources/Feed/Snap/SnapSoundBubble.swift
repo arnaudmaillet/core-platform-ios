@@ -1,5 +1,6 @@
 import DesignSystem
 import MediaCore
+import MediaUI
 import UIKit
 
 /// What the sound bubble (and the composer's rail slot) draws for a post.

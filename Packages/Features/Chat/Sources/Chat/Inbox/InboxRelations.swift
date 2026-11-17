@@ -3,6 +3,7 @@ import CoreNavigation
 import DesignSystem
 import EntityStore
 import MediaCore
+import MediaUI
 import UIKit
 
 /// Where the viewer stands with each conversation's peer, for the rows'

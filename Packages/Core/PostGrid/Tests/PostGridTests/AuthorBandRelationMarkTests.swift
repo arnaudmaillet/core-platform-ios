@@ -1,5 +1,6 @@
 import CoreModels
 import MediaCore
+import MediaUI
 import Testing
 import UIKit
 @testable import PostGrid

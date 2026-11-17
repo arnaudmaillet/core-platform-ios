@@ -1,5 +1,6 @@
 import DesignSystem
 import MediaCore
+import MediaUI
 import PostSurfaces
 import ThreadKit
 import UIKit

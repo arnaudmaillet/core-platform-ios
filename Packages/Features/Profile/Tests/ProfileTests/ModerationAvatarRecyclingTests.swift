@@ -1,6 +1,7 @@
 import DesignSystem
 import Foundation
 import MediaCore
+import MediaUI
 import Testing
 import UIKit
 @testable import Profile

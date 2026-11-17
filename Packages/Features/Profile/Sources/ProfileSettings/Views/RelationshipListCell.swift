@@ -1,6 +1,7 @@
 import CoreModels
 import DesignSystem
 import MediaCore
+import MediaUI
 import UIKit
 
 /// A person row in the followers / following list: identity disc, display name

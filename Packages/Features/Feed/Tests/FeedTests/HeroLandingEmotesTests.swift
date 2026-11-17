@@ -4,6 +4,7 @@ import EmoteKit
 import FeedInterface
 import Foundation
 import MediaCore
+import MediaUI
 import PostGrid
 import Testing
 import UIKit

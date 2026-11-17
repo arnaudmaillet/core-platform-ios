@@ -1,6 +1,7 @@
 import DesignSystem
 import MediaCore
 import MediaPlayback
+import MediaUI
 import UIKit
 
 /// The pages of a collection post, scrolled horizontally inside a row's

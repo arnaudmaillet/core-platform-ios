@@ -1,6 +1,7 @@
 import CoreModels
 import DesignSystem
 import MediaCore
+import MediaUI
 import PostGrid
 import ProfileSettings
 import UIKit

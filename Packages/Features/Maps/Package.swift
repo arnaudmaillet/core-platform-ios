@@ -46,6 +46,7 @@ let package = Package(
                 "CoreStorage",
                 "DesignSystem",
                 "MediaCore",
+                .product(name: "MediaUI", package: "MediaCore"),
                 "MediaPlayback",
                 // `GalleryPost`: the text bubble's words (the text bubble, #2203).
                 "PostGrid",
@@ -71,6 +72,7 @@ let package = Package(
         .testTarget(
             name: "MapsTests",
             dependencies: [
+                .product(name: "MediaUI", package: "MediaCore"),
                 "LaunchArguments",
                 "Maps",
                 "MapsInterface",

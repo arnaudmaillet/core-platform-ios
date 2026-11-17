@@ -8,6 +8,7 @@ import MapKit
 import MapsInterface
 import MediaCore
 import MediaPlayback
+import MediaUI
 import UIKit
 
 // MARK: - QA hooks

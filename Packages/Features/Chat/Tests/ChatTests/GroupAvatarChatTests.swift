@@ -6,6 +6,7 @@ import CoreNetworkingMocks
 import FeedInterface
 import Foundation
 import MediaCore
+import MediaUI
 import Testing
 import UIKit
 @testable import Chat

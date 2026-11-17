@@ -2,6 +2,7 @@ import CoreModels
 import DesignSystem
 import Foundation
 import MediaCore
+import MediaUI
 import UIKit
 
 /// View-ready row for the conversation list.

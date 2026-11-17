@@ -1,5 +1,6 @@
 import DesignSystem
 import MediaCore
+import MediaUI
 import UIKit
 
 /// A message's photo or video in the conversation (#681), under its row and

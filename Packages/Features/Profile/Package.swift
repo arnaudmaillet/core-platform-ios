@@ -59,6 +59,7 @@ let package = Package(
                 // Its launch arguments, declared (#2374).
                 "LaunchArguments",
                 "MediaCore",
+                .product(name: "MediaUI", package: "MediaCore"),
                 "CoreNavigation",
                 "CoreStorage",
                 // The LocalStore's registration (#893), and Settings → Storage
@@ -104,6 +105,7 @@ let package = Package(
                 // Its launch arguments, declared (#2374).
                 "LaunchArguments",
                 "MediaCore",
+                .product(name: "MediaUI", package: "MediaCore"),
                 "CoreNavigation",
                 "CoreStorage",
                 // The LocalStore's registration (#893), and Settings → Storage
@@ -156,6 +158,7 @@ let package = Package(
                 // The Storage suite drives a real coordinator and image pipeline,
                 // and the video byte cache's namespaces.
                 "MediaCore",
+                .product(name: "MediaUI", package: "MediaCore"),
                 "MediaPlayback",
                 "EntityStore",
                 .product(name: "CoreNetworkingMocks", package: "CoreNetworking")

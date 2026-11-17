@@ -35,7 +35,7 @@ let package = Package(
             name: "PostGrid",
             dependencies: [
                 "LaunchArguments",
-                "CoreModels", "MediaCore", "MediaPlayback", "DesignSystem", "CoreNavigation",
+                "CoreModels", "MediaCore", .product(name: "MediaUI", package: "MediaCore"), "MediaPlayback", "DesignSystem", "CoreNavigation",
                 "CoreStorage", "EntityStore", "EmoteKit",
                 .product(name: "VoiceKitUI", package: "VoiceKit")
             ]
@@ -43,6 +43,7 @@ let package = Package(
         .testTarget(
             name: "PostGridTests",
             dependencies: [
+                .product(name: "MediaUI", package: "MediaCore"),
                 "PostGrid", "CoreStorage", "EntityStore", "EmoteKit", .product(name: "VoiceKitUI", package: "VoiceKit")
             ]
         )

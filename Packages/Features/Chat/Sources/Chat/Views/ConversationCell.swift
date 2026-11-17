@@ -1,6 +1,7 @@
 import CoreModels
 import DesignSystem
 import MediaCore
+import MediaUI
 import UIKit
 
 /// A conversation in the inbox list.

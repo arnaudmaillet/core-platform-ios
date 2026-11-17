@@ -2,6 +2,7 @@ import CoreModels
 import CoreStorage
 import DesignSystem
 import MediaCore
+import MediaUI
 import PostGrid
 import UIKit
 

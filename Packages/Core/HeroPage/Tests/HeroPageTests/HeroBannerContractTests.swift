@@ -1,5 +1,6 @@
 import DesignSystem
 import MediaCore
+import MediaUI
 import Testing
 import UIKit
 @testable import HeroPage

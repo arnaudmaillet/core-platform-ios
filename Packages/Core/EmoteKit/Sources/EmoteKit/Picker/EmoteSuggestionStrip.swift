@@ -1,4 +1,5 @@
 import MediaCore
+import MediaUI
 import UIKit
 
 /// The row of matches for an inline `:query`, floating just above the

@@ -1,5 +1,6 @@
 import Foundation
 @testable import MediaCore
+@testable import MediaUI
 import Testing
 import UIKit
 @testable import EmoteKit

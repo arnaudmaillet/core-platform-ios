@@ -6,6 +6,7 @@ import EmoteKit
 import MapsInterface
 import MediaCore
 import MediaPlayback
+import MediaUI
 import UIKit
 
 /// What the Shop draws its covers with (#1075): the app's image pipeline for

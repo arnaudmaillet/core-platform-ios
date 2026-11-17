@@ -6,6 +6,7 @@ import DesignSystem
 import Foundation
 import LaunchArguments
 import MediaCore
+import MediaUI
 import UIKit
 import VoiceKit
 

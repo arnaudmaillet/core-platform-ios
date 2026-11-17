@@ -5,6 +5,7 @@ import DesignSystem
 import EntityStore
 import FeedInterface
 import MediaCore
+import MediaUI
 import PostSurfaces
 import ThreadKit
 import UIKit

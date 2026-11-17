@@ -5,6 +5,7 @@ import CoreNavigation
 import DesignSystem
 import MediaCore
 import MediaPlayback
+import MediaUI
 import PostGrid
 import Testing
 import UIKit

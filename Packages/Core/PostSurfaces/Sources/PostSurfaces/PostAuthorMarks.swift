@@ -3,6 +3,7 @@ import CoreNavigation
 import DesignSystem
 import EntityStore
 import MediaCore
+import MediaUI
 import UIKit
 
 /// THE RELATION MARK ON THE LISTS' AUTHOR BANDS (#2300): a text post's author

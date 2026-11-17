@@ -1,6 +1,7 @@
 import CoreModels
 import DesignSystem
 import MediaCore
+import MediaUI
 import UIKit
 
 /// A conversation row in the inbox's search results.

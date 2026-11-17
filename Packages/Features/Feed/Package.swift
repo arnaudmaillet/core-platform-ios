@@ -53,6 +53,7 @@ let package = Package(
                 "CoreContracts",
                 "CoreModels",
                 "MediaCore",
+                .product(name: "MediaUI", package: "MediaCore"),
                 "MediaPlayback",
                 "VoiceKit",
                 // The voice component, shared with every surface that draws
@@ -83,6 +84,7 @@ let package = Package(
         .testTarget(
             name: "FeedTests",
             dependencies: [
+                .product(name: "MediaUI", package: "MediaCore"),
                 "ThreadKit",
                 "Feed",
                 "DesignSystem",

@@ -31,8 +31,8 @@ let package = Package(
     targets: [
         .target(name: "HeroPage", dependencies: [
             "LaunchArguments",
-            "DesignSystem", "PostGrid", "MediaCore", "MediaPlayback", "EmoteKit", "CoreNavigation"
+            "DesignSystem", "PostGrid", "MediaCore", .product(name: "MediaUI", package: "MediaCore"), "MediaPlayback", "EmoteKit", "CoreNavigation"
         ]),
-        .testTarget(name: "HeroPageTests", dependencies: ["HeroPage", "DesignSystem", "PostGrid", "MediaCore"])
+        .testTarget(name: "HeroPageTests", dependencies: ["HeroPage", "DesignSystem", "PostGrid", "MediaCore", .product(name: "MediaUI", package: "MediaCore")])
     ]
 )

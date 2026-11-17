@@ -2,6 +2,7 @@ import CoreModels
 import DesignSystem
 import LaunchArguments
 import MediaCore
+import MediaUI
 import UIKit
 
 /// The results screen's Users tab: the people a search matched.

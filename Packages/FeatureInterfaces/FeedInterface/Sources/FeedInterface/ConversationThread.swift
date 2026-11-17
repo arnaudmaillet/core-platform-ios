@@ -1,6 +1,7 @@
 @_exported import ThreadKit
 import CoreModels
 import MediaCore
+import MediaUI
 import UIKit
 
 // MARK: - The conversation, drawn by Feed and driven by Chat

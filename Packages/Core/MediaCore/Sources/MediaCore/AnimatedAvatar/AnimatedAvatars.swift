@@ -138,7 +138,7 @@ public final class AnimatedAvatars {
     }
 
     /// A sheet's last frame, the picture every animated avatar rests on.
-    nonisolated static func lastFrame(of sheet: AnimatedIconSheet) -> UIImage? {
+    package nonisolated static func lastFrame(of sheet: AnimatedIconSheet) -> UIImage? {
         guard let image = sheet.sheet.cgImage, let unit = sheet.frameRects.last else { return nil }
         let width = CGFloat(image.width)
         let height = CGFloat(image.height)

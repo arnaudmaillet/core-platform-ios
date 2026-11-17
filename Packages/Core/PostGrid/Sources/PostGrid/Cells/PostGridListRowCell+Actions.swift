@@ -4,6 +4,7 @@ import DesignSystem
 import EmoteKit
 import MediaCore
 import MediaPlayback
+import MediaUI
 import UIKit
 import VoiceKitUI
 

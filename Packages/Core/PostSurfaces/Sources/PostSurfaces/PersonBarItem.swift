@@ -1,6 +1,7 @@
 import CoreModels
 import Foundation
 import MediaCore
+import MediaUI
 import UIKit
 
 /// The app's person pill as a bar item (#1451): the post page's identity —

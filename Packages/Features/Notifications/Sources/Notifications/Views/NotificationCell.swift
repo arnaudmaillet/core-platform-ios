@@ -1,5 +1,6 @@
 import DesignSystem
 import MediaCore
+import MediaUI
 import UIKit
 
 /// One notification: who (one face, or two stacked for a row with several

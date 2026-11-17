@@ -3,6 +3,7 @@ import CoreNavigation
 import CoreNetworking
 import DesignSystem
 import MediaCore
+import MediaUI
 import UIKit
 
 /// Settings → Family and Teens → a supervision (#417): who the other side is,
