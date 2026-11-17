@@ -111,7 +111,7 @@ final class SearchResultsViewController: UIViewController {
     private let walletBadge = WalletBadgeButton()
     private var walletItem: UIBarButtonItem?
     private var fieldItem: UIBarButtonItem?
-    private let wallet: WalletStore?
+    private let wallet: (any WalletReading)?
     /// Nil in a composition without the shell's claim sheet — the badge is then
     /// a read-out, not a control.
     private let makeWalletSheet: (@MainActor () -> UIViewController)?
@@ -159,7 +159,7 @@ final class SearchResultsViewController: UIViewController {
         viewModel: SearchViewModel,
         imagePipeline: ImagePipeline,
         postSurfaces: (any SearchPostSurfaceProviding)?,
-        wallet: WalletStore? = nil,
+        wallet: (any WalletReading)? = nil,
         makeWalletSheet: (@MainActor () -> UIViewController)? = nil
     ) {
         self.viewModel = viewModel

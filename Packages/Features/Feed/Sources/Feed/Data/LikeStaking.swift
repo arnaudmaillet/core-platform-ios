@@ -155,7 +155,7 @@ public actor WalletLikeStaking: LikeStaking {
 @MainActor
 public final class LikeOutboxSender {
     private let outbox: LikeOutbox
-    private let wallet: WalletStore
+    private let wallet: any WalletStaking
     private let staking: any LikeStaking
     /// Waits after a failed commit, the last repeated.
     private let retryDelays: [TimeInterval]
@@ -169,7 +169,7 @@ public final class LikeOutboxSender {
     var connectivity: ConnectivityMonitor = .shared
 
     public init(
-        outbox: LikeOutbox, wallet: WalletStore, staking: any LikeStaking,
+        outbox: LikeOutbox, wallet: any WalletStaking, staking: any LikeStaking,
         retryDelays: [TimeInterval] = [2, 5, 15, 60]
     ) {
         self.outbox = outbox

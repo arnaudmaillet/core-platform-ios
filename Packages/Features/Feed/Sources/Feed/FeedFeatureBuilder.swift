@@ -43,7 +43,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     /// spends it (the map toolbar's badge, the rail's boost anchor, the
     /// comments bar). One instance app-wide — `WalletStore`'s change post is
     /// scoped to the instance. Nil leaves the boost buttons inert.
-    private let wallet: WalletStore?
+    private let wallet: (any WalletStaking)?
     /// Vends the wallet/claim sheet for the feed header's balance badge —
     /// injected because the sheet is shell-owned (it is the same one the
     /// map's badge presents, and the two must never diverge). Nil leaves
@@ -55,7 +55,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     /// guest only reaches by signing up.
     private let showsBalance: @MainActor () -> Bool
     /// The wallet a screen's BADGE reads: none for a guest.
-    private var balanceWallet: WalletStore? { showsBalance() ? wallet : nil }
+    private var balanceWallet: (any WalletStaking)? { showsBalance() ? wallet : nil }
     /// Files moderation reports raised from a post card's "..." menu. Nil
     /// withholds the Report row.
     private let reporting: (any ContentReporting)?
@@ -120,7 +120,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         imagePipeline: ImagePipeline,
         videoPlayback: VideoPlaybackController? = nil,
         makeProfileSwitcher: (@MainActor () -> (any ProfileSwitcherPresenting)?)? = nil,
-        wallet: WalletStore? = nil,
+        wallet: (any WalletStaking)? = nil,
         makeWalletSheet: (@MainActor () -> UIViewController)? = nil,
         showsBalance: @escaping @MainActor () -> Bool = { true },
         reporting: (any ContentReporting)? = nil,
@@ -1491,7 +1491,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         threadChrome: Bool,
         imagePipeline: ImagePipeline,
         makeProfileSwitcher: (@MainActor () -> (any ProfileSwitcherPresenting)?)?,
-        wallet: WalletStore?
+        wallet: (any WalletStaking)?
     ) -> PostDetailViewController {
         PostDetailViewController(
             viewModel: viewModel,

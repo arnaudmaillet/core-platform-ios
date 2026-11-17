@@ -393,7 +393,7 @@ final class PostDetailViewController: UIViewController {
     /// The viewer's point balance, spent by the compose bar's boost button.
     /// Injected (one instance app-wide — the map's badge watches it); nil
     /// leaves the button visible but inert.
-    private let wallet: WalletStore?
+    private let wallet: (any WalletStaking)?
     /// Keeps the compose bar's receipt honest when the SAME post is boosted
     /// through another surface (a text page shows this bar and the snap
     /// screen's spend path at once). Token bag, not deinit — the house
@@ -411,7 +411,7 @@ final class PostDetailViewController: UIViewController {
         viewModel: PostDetailViewModel,
         imagePipeline: ImagePipeline,
         profileSwitcher: (any ProfileSwitcherPresenting)? = nil,
-        wallet: WalletStore? = nil,
+        wallet: (any WalletStaking)? = nil,
         threadChrome: Bool = false,
         groupsByDay: Bool = false
     ) {

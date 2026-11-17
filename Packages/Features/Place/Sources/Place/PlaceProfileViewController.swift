@@ -181,7 +181,7 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab>,
     /// The viewer's spendable balance, in the same face it wears on the map,
     /// For You, the profile and the post screen.
     private let walletBadge = WalletBadgeButton()
-    private let wallet: WalletStore?
+    private let wallet: (any WalletStaking)?
     /// Whether the bar wears the balance: not for a guest (#1146). The wallet
     /// still backs the cards' likes.
     private let showsBalance: Bool
@@ -672,7 +672,7 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab>,
         imagePipeline: ImagePipeline,
         videoPlayback: VideoPlaybackController?,
         following: ClusterGalleryFollowing? = nil,
-        wallet: WalletStore? = nil,
+        wallet: (any WalletStaking)? = nil,
         makeWalletSheet: (@MainActor () -> UIViewController)? = nil,
         showsBalance: Bool = true,
         entities: EntityStore? = nil,

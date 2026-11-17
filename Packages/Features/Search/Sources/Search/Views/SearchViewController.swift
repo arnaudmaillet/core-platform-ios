@@ -58,7 +58,7 @@ final class SearchViewController: UIViewController {
     /// see `SearchPostSurfaceProviding`.
     private let postSurfaces: (any SearchPostSurfaceProviding)?
     /// Carried, not worn: the RESULTS screen this one builds wears the badge.
-    private let wallet: WalletStore?
+    private let wallet: (any WalletReading)?
     /// Whether the results header wears the balance: not for a guest
     /// (#1146), asked as each results screen is made.
     private let showsBalance: @MainActor () -> Bool
@@ -104,7 +104,7 @@ final class SearchViewController: UIViewController {
         viewModel: SearchViewModel,
         imagePipeline: ImagePipeline,
         postSurfaces: (any SearchPostSurfaceProviding)? = nil,
-        wallet: WalletStore? = nil,
+        wallet: (any WalletReading)? = nil,
         makeWalletSheet: (@MainActor () -> UIViewController)? = nil,
         showsBalance: @escaping @MainActor () -> Bool = { true },
         mode: Mode = .origin

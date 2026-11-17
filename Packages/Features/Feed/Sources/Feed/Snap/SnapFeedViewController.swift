@@ -130,7 +130,7 @@ final class SnapFeedViewController: UIViewController {
     /// move that number, and `WalletStore`'s change post is scoped to the
     /// instance that changed (see its doc). Nil (an unwired surface, or a
     /// unit-tested one) leaves the boost anchor visible but inert.
-    private let wallet: WalletStore?
+    private let wallet: (any WalletStaking)?
     /// Whether the bar wears the balance: not for a guest (#1146). The wallet
     /// still backs the rail's like, and its observer keeps the boost
     /// controls true once a guest signs up here.
@@ -576,7 +576,7 @@ final class SnapFeedViewController: UIViewController {
         videoPlayback: VideoPlaybackController? = nil,
         makeCommentsPanelContent: ((PostID) -> UIViewController)? = nil,
         makeRestingCommentsPanelContent: ((PostID) -> UIViewController)? = nil,
-        wallet: WalletStore? = nil,
+        wallet: (any WalletStaking)? = nil,
         makeWalletSheet: (@MainActor () -> UIViewController)? = nil,
         showsBalance: Bool = true,
         reporting: (any ContentReporting)? = nil,

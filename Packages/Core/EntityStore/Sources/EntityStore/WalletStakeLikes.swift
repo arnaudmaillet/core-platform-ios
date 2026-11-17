@@ -22,7 +22,7 @@ import Foundation
 /// ⚠️ A count read from the server before a stake was committed shows the
 /// count without it until the next read — what an optimistic count costs.
 public final class WalletStakeLikes: @unchecked Sendable {
-    private let wallet: WalletStore
+    private let wallet: any WalletReading
     private let entities: EntityStore
     private let scope: StorageScope
     private let lock = NSLock()
@@ -30,7 +30,7 @@ public final class WalletStakeLikes: @unchecked Sendable {
     private var owner: StorageScope.Owner
     private var observer: NSObjectProtocol?
 
-    public init(wallet: WalletStore, entities: EntityStore, scope: StorageScope = .shared) {
+    public init(wallet: any WalletReading, entities: EntityStore, scope: StorageScope = .shared) {
         self.wallet = wallet
         self.entities = entities
         self.scope = scope
@@ -69,7 +69,7 @@ public final class WalletStakeLikes: @unchecked Sendable {
         }
     }
 
-    private static func totals(of wallet: WalletStore) -> [String: Int] {
+    private static func totals(of wallet: any WalletReading) -> [String: Int] {
         Dictionary(wallet.stakes().map { ($0.targetID, $0.amount) }, uniquingKeysWith: +)
     }
 }

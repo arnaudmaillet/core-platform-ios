@@ -37,7 +37,7 @@ final class TextPostComposerViewController: UIViewController {
     private let drafts: PostDraftStore
     private let imagePipeline: ImagePipeline
     private let router: (any Router)?
-    private let wallet: WalletStore?
+    private let wallet: (any WalletReading)?
     private let makeWalletSheet: (@MainActor () -> UIViewController)?
 
     private let headerFrost = ProgressiveFrostView(
@@ -127,7 +127,7 @@ final class TextPostComposerViewController: UIViewController {
         drafts: PostDraftStore,
         imagePipeline: ImagePipeline,
         router: (any Router)?,
-        wallet: WalletStore?,
+        wallet: (any WalletReading)?,
         makeWalletSheet: (@MainActor () -> UIViewController)?,
         entities: EntityStore? = nil,
         bookmarks: PostBookmarkStore = .shared,
