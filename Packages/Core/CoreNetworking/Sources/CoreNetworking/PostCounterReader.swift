@@ -21,6 +21,19 @@ public struct PostCounters: Sendable, Equatable {
     }
 }
 
+/// What a surface reads of a page of posts' counters (#2377): one batched
+/// read, answered as a dictionary keyed by post id.
+///
+/// Features hold the counters through this protocol, never through the
+/// generated `counter.v1` client: only the app builds `PostCounterReader` over
+/// its RPC client, and a test hands a feature a dictionary instead.
+///
+/// Best-effort by contract: an outage answers an empty dictionary rather than
+/// throwing, so a grid still renders with its counters hidden.
+public protocol PostCounterReading: Sendable {
+    func counters(forPostIDs ids: [String]) async -> [String: PostCounters]
+}
+
 /// One batched `counter.v1` read for a page of posts.
 ///
 /// ⚠️ SHARED because it was about to exist twice. The profile gallery has read
@@ -34,14 +47,15 @@ public struct PostCounters: Sendable, Equatable {
 /// dictionary keyed by post id, and each caller maps it onto whatever it
 /// renders. That is what lets it live below both of them without either's view
 /// types coming with it.
-public enum PostCounterReader {
-    /// Best-effort: a counter outage answers an empty dictionary rather than
-    /// throwing, so a grid still renders with its counters hidden. A page of
-    /// posts is ONE round trip.
-    public static func counters(
-        forPostIDs ids: [String],
-        using client: any Counter_V1_CounterServiceClientInterface
-    ) async -> [String: PostCounters] {
+public struct PostCounterReader: PostCounterReading {
+    private let client: any Counter_V1_CounterServiceClientInterface
+
+    public init(client: any Counter_V1_CounterServiceClientInterface) {
+        self.client = client
+    }
+
+    /// A page of posts is ONE round trip.
+    public func counters(forPostIDs ids: [String]) async -> [String: PostCounters] {
         guard !ids.isEmpty else { return [:] }
         var request = Counter_V1_BatchGetCountersRequest()
         request.entities = ids.map { id in

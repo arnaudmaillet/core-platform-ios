@@ -203,7 +203,7 @@ struct EngagementTabsRepositoryTests {
         let gallery = ProfileGalleryRepository(
             postClient: Post_V1_PostServiceClient(client: client),
             searchClient: Search_V1_SearchServiceClient(client: client),
-            counterClient: Counter_V1_CounterServiceClient(client: client),
+            postCounters: PostCounterReader(client: Counter_V1_CounterServiceClient(client: client)),
             engagementClient: Engagement_V1_EngagementServiceClient(client: client)
         )
 

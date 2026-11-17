@@ -923,11 +923,15 @@ final class AppContainer {
 
     // MARK: - Feed
 
+    /// A page of posts' likes and comments, one batched `counter.v1` read
+    /// (#2377): the feed's cards, Discover, the place page and the profile
+    /// gallery read their counters through it.
+    private lazy var postCounters = PostCounterReader(client: Counter_V1_CounterServiceClient(client: authenticatedRPCClient))
+
     private lazy var feedRepository = FeedRepository(
         timelineClient: Timeline_V1_TimelineServiceClient(client: authenticatedRPCClient),
         postClient: Post_V1_PostServiceClient(client: authenticatedRPCClient),
         profileClient: Profile_V1_ProfileServiceClient(client: authenticatedRPCClient),
-        counterClient: Counter_V1_CounterServiceClient(client: authenticatedRPCClient),
         engagementClient: Engagement_V1_EngagementServiceClient(client: authenticatedRPCClient),
         likeStaking: likeStaking,
         authSession: sessionManager,
@@ -1044,7 +1048,7 @@ final class AppContainer {
         // counter.v1, so a card can show reach. The timeline read hydrates
         // likes only, and a card's counter chip shows VIEWS — without this it
         // has nothing to say and hides itself, which is what it did.
-        counterClient: Counter_V1_CounterServiceClient(client: authenticatedRPCClient),
+        postCounters: postCounters,
         postDrafts: postDraftStore,
         // The sound sheet's answers. Mock mode knows each clip's full sound;
         // the fleet's post contract carries no audio yet, so there every clip
@@ -1516,7 +1520,7 @@ final class AppContainer {
     private lazy var profileGalleryRepository = ProfileGalleryRepository(
         postClient: Post_V1_PostServiceClient(client: authenticatedRPCClient),
         searchClient: Search_V1_SearchServiceClient(client: authenticatedRPCClient),
-        counterClient: Counter_V1_CounterServiceClient(client: authenticatedRPCClient),
+        postCounters: postCounters,
         // Resolves whose posts the tiles are. The grid draws none of it; the
         // full-screen page a tile opens into is seeded from the tile's model,
         // and without this that page arrives with an anonymous author capsule
@@ -1673,7 +1677,7 @@ final class AppContainer {
     private lazy var exploreRepository = DiscoverExploreAdapter(
         repository: DiscoverRepository(
             feed: feedRepository,
-            counterClient: Counter_V1_CounterServiceClient(client: authenticatedRPCClient),
+            postCounters: postCounters,
             discovery: discoveryRepository
         )
     )

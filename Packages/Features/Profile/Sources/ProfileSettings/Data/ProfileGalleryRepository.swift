@@ -74,7 +74,7 @@ public extension ProfileGalleryProviding {
 public actor ProfileGalleryRepository: ProfileGalleryProviding {
     package let postClient: any Post_V1_PostServiceClientInterface
     private let searchClient: any Search_V1_SearchServiceClientInterface
-    private let counterClient: any Counter_V1_CounterServiceClientInterface
+    private let postCounters: any PostCounterReading
     /// Resolves the people whose posts these are. Optional so a composition
     /// root without one still gets a working grid — the tiles simply carry no
     /// author, which is what every tile did before this existed.
@@ -96,7 +96,7 @@ public actor ProfileGalleryRepository: ProfileGalleryProviding {
     public init(
         postClient: any Post_V1_PostServiceClientInterface,
         searchClient: any Search_V1_SearchServiceClientInterface,
-        counterClient: any Counter_V1_CounterServiceClientInterface,
+        postCounters: any PostCounterReading,
         profileClient: (any Profile_V1_ProfileServiceClientInterface)? = nil,
         engagementClient: (any Engagement_V1_EngagementServiceClientInterface)? = nil,
         pageLimit: Int32 = 30
@@ -104,7 +104,7 @@ public actor ProfileGalleryRepository: ProfileGalleryProviding {
         self.engagementClient = engagementClient
         self.postClient = postClient
         self.searchClient = searchClient
-        self.counterClient = counterClient
+        self.postCounters = postCounters
         self.profileClient = profileClient
         self.pageLimit = pageLimit
     }
@@ -277,11 +277,9 @@ public actor ProfileGalleryRepository: ProfileGalleryProviding {
 
     private func withCounters(_ posts: [GalleryPost]) async -> [GalleryPost] {
         guard !posts.isEmpty else { return posts }
-        // The read itself is `PostCounterReader`, shared with the feed since its
-        // cards started showing reach — one batch shape, not two.
-        let byPostID = await PostCounterReader.counters(
-            forPostIDs: posts.map(\.id.rawValue), using: counterClient
-        )
+        // The read itself is `PostCounterReading`, shared with the feed since
+        // its cards started showing reach — one batch shape, not two.
+        let byPostID = await postCounters.counters(forPostIDs: posts.map(\.id.rawValue))
         return posts.map { post in
             guard let counts = byPostID[post.id.rawValue] else { return post }
             var decorated = post

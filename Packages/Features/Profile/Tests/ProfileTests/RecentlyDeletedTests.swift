@@ -40,7 +40,7 @@ struct RecentlyDeletedTests {
         let gallery = ProfileGalleryRepository(
             postClient: Post_V1_PostServiceClient(client: client),
             searchClient: Search_V1_SearchServiceClient(client: client),
-            counterClient: Counter_V1_CounterServiceClient(client: client),
+            postCounters: PostCounterReader(client: Counter_V1_CounterServiceClient(client: client)),
             profileClient: Profile_V1_ProfileServiceClient(client: client)
         )
         let profiles = ProfileRepository(

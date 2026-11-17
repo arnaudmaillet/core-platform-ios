@@ -39,7 +39,6 @@ struct TakenDownPostTests {
             timelineClient: Timeline_V1_TimelineServiceClient(client: client),
             postClient: Post_V1_PostServiceClient(client: client),
             profileClient: Profile_V1_ProfileServiceClient(client: client),
-            counterClient: Counter_V1_CounterServiceClient(client: client),
             engagementClient: Engagement_V1_EngagementServiceClient(client: client),
             authSession: Member(),
             localCache: localCache

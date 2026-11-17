@@ -1,6 +1,7 @@
 import Connect
 import CoreContracts
 import CoreModels
+import CoreNetworking
 import Foundation
 import PostGrid
 import Testing
@@ -118,16 +119,43 @@ struct ProfileGalleryAuthorTests {
         #expect(tiles.first?.authorName == nil)
     }
 
+    /// The tiles carry what the counters answered, read once for the page
+    /// (#2377: the gallery over a fake `PostCounterReading`). A post the
+    /// counters do not answer for keeps no count, which hides its label.
+    @Test func tilesCarryThePagesCountersReadOnce() async throws {
+        let counters = FakePostCounters([
+            "p1": PostCounters(likes: 12, comments: 3),
+            "p2": PostCounters(likes: 0, comments: nil),
+        ])
+        let repository = makeRepository(
+            posts: [post("p1", author: "prof-1"), post("p2", author: "prof-1"), post("p3", author: "prof-1")],
+            profiles: nil,
+            counters: counters
+        )
+
+        let tiles = try await repository.authoredPosts(for: ProfileID("prof-1"))
+        let byID = Dictionary(uniqueKeysWithValues: tiles.map { ($0.id.rawValue, $0) })
+
+        #expect(counters.readIDs == [["p1", "p2", "p3"]])
+        #expect(byID["p1"]?.reactionCount == 12)
+        #expect(byID["p1"]?.commentCount == 3)
+        #expect(byID["p2"]?.reactionCount == 0)
+        #expect(byID["p2"]?.commentCount == nil)
+        #expect(byID["p3"]?.reactionCount == nil)
+        #expect(byID["p3"]?.commentCount == nil)
+    }
+
     // MARK: - Fixtures
 
     private func makeRepository(
         posts: [Post_V1_PostView],
-        profiles: StubProfileServiceClient?
+        profiles: StubProfileServiceClient?,
+        counters: FakePostCounters = FakePostCounters()
     ) -> ProfileGalleryRepository {
         ProfileGalleryRepository(
             postClient: StubPostClient(posts: posts),
             searchClient: StubSearchClient(),
-            counterClient: StubCounterClient(),
+            postCounters: counters,
             profileClient: profiles
         )
     }
@@ -268,24 +296,21 @@ private struct StubSearchClient: Search_V1_SearchServiceClientInterface {
     }
 }
 
-/// Answers nothing, which is a supported state: counters are best-effort and a
-/// nil count hides the label rather than failing the grid.
-private struct StubCounterClient: Counter_V1_CounterServiceClientInterface {
-    func batchGetCounters(
-        request: Counter_V1_BatchGetCountersRequest, headers: Connect.Headers
-    ) async -> ResponseMessage<Counter_V1_BatchGetCountersResponse> {
-        ResponseMessage(result: .success(Counter_V1_BatchGetCountersResponse()))
-    }
+/// A page's counters from a dictionary (#2377): the gallery reads them
+/// through `PostCounterReading`, never through the `counter.v1` client. Empty
+/// is a supported state: counters are best-effort and a nil count hides the
+/// label rather than failing the grid.
+private final class FakePostCounters: PostCounterReading, @unchecked Sendable {
+    private let lock = NSLock()
+    private let answers: [String: PostCounters]
+    private var asked: [[String]] = []
 
-    func getTrending(
-        request: Counter_V1_GetTrendingRequest, headers: Connect.Headers
-    ) async -> ResponseMessage<Counter_V1_GetTrendingResponse> {
-        ResponseMessage(result: .success(Counter_V1_GetTrendingResponse()))
-    }
+    init(_ answers: [String: PostCounters] = [:]) { self.answers = answers }
 
-    func getTimeSeries(
-        request: Counter_V1_GetTimeSeriesRequest, headers: Connect.Headers
-    ) async -> ResponseMessage<Counter_V1_GetTimeSeriesResponse> {
-        ResponseMessage(result: .success(Counter_V1_GetTimeSeriesResponse()))
+    var readIDs: [[String]] { lock.withLock { asked } }
+
+    func counters(forPostIDs ids: [String]) async -> [String: PostCounters] {
+        lock.withLock { asked.append(ids) }
+        return answers.filter { ids.contains($0.key) }
     }
 }
