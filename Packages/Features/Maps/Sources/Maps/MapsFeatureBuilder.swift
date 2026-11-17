@@ -7,6 +7,7 @@ import LocalStore
 import MapsInterface
 import MediaCore
 import MediaPlayback
+import PlaceInterface
 import UIKit
 
 /// The Maps feature's entry point, resolved by the composition root and
@@ -18,6 +19,7 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
     private let imagePipeline: ImagePipeline
     private let videoPlayback: VideoPlaybackController
     private let feedFeature: () -> any FeedFeatureBuilding
+    private let placeFeature: () -> any PlaceFeatureBuilding
     private let openProfile: (ProfileID, ProfileIdentityStub?) -> Void
     private let openConversation: (ProfileID, ProfileIdentityStub?) -> Void
     /// Curating the people rail, shared with whatever else pins a profile —
@@ -43,6 +45,8 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
     ///   - feedFeature: resolves the feed builder lazily, so the map can expand a
     ///     pin/cluster into the shared snap feed without the composition root
     ///     ordering the two features.
+    ///   - placeFeature: resolves the place page's builder lazily (#2381): the
+    ///     page a hierarchy cluster's feed closes down onto, and a place link's.
     ///   - openProfile: fires the app's profile destination for a person the map
     ///     surfaces (the sub-filter sheet's Profile swipe). Injected rather than
     ///     imported so Maps keeps knowing nothing about routes or the Profile
@@ -77,6 +81,7 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
         imagePipeline: ImagePipeline,
         videoPlayback: VideoPlaybackController,
         feedFeature: @escaping () -> any FeedFeatureBuilding,
+        placeFeature: @escaping () -> any PlaceFeatureBuilding,
         openProfile: @escaping (ProfileID, ProfileIdentityStub?) -> Void,
         openConversation: @escaping (ProfileID, ProfileIdentityStub?) -> Void,
         seedsMockPlaces: Bool = false,
@@ -122,6 +127,7 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
         self.imagePipeline = imagePipeline
         self.videoPlayback = videoPlayback
         self.feedFeature = feedFeature
+        self.placeFeature = placeFeature
         self.openProfile = openProfile
         self.openConversation = openConversation
         self.pinService = MapProfilePinService(
@@ -205,6 +211,7 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
 
     public func makeMapViewController() -> UIViewController {
         let feedFeature = feedFeature
+        let placeFeature = placeFeature
         let placeFollows = placeFollows
         let map = MapsViewController(
             viewModel: MapsViewModel(
@@ -248,11 +255,10 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
                 )
             },
             // The place gallery a hierarchy cluster's feed dismisses into —
-            // built by the Feed feature because the grid, the flight card and
-            // the retarget wiring are all its internals. `mapReturn` rides
-            // through so the page's own dismissal can fly home to the marker.
+            // built by the Place feature (#2381). `mapReturn` rides through so
+            // the page's own dismissal can fly home to the marker.
             makeClusterGallery: { postIDs, place, countryCode, centre, feed, mapReturn, markerClose in
-                feedFeature().makeClusterGallery(
+                placeFeature().makeClusterGallery(
                     postIDs: postIDs,
                     title: place.galleryTitle,
                     rank: place.rankBadge,
@@ -359,7 +365,7 @@ extension MapsFeatureBuilder {
     /// server page by page, its identity from the atlas — a country's name,
     /// flag and continent; a city's name, its country's flag and name. Nil
     /// for a country the atlas does not know.
-    public static func placePage(for link: PlaceLink, feed: any FeedFeatureBuilding) -> UIViewController? {
+    public static func placePage(for link: PlaceLink, place placeFeature: any PlaceFeatureBuilding) -> UIViewController? {
         let place: MapPlace
         let countryCode: String
         let centre: CLLocationCoordinate2D?
@@ -375,6 +381,6 @@ extension MapsFeatureBuilder {
             centre = CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
         }
         guard let identity = placeIdentity(of: place, countryCode: countryCode, centre: centre) else { return nil }
-        return feed.makePlacePage(title: place.galleryTitle, identity: identity)
+        return placeFeature.makePlacePage(title: place.galleryTitle, identity: identity)
     }
 }

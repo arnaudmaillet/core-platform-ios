@@ -4,6 +4,7 @@ import CoreStorage
 import DesignSystem
 import EntityStore
 import FeedInterface
+import PlaceInterface
 import HeroPage
 import LaunchArguments
 import MediaCore
@@ -43,7 +44,7 @@ import UIKit
 /// screen: the two-VC stack insertion is the map's, the vertical close is
 /// the card close's, and this type only has to host its column and say where
 /// that close lands (`CardCloseLanding`).
-final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> {
+final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab>, FeedBeneathLanding {
     /// The page: For You's own list (`.discover` — cards and mosaic
     /// stretches) over the place's posts in the `recent` order, led by
     /// `lead`, and the landing of every dismissal from the map. Not a
@@ -233,6 +234,11 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
     /// marker with a crossfade — the close a text post opened from the same
     /// marker already takes.
     var markerClose: ((UIViewController) -> RevealGeometry?)?
+
+    /// The feed's reveal down onto one of this page's text cards: the
+    /// reader's own (`FeedFeatureBuilding.textRevealGeometry`), handed in by
+    /// the builder. Nil: such a close falls back to the plain slide.
+    var revealGeometry: ((UIViewController, TextRevealOrigin) -> RevealGeometry?)?
     /// The window close's driver — built once (its pan attaches to the view),
     /// installed as the stack's delegate whenever this page is top.
     private var markerCloseDriver: InteractiveSlideDismissal?
@@ -815,7 +821,7 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
         shelf.heroContext = .init(page: activityPage, host: view, seedWindow: Self.seedWindow)
         shelf.shouldOpen = { [weak self] in
             guard let self else { return false }
-            return navigationController.map { FeedFeatureBuilder.canOpen(from: self, on: $0) } ?? true
+            return navigationController.map { PostOpening.canOpen(from: self, on: $0) } ?? true
         }
         shelf.onOpen = { [weak self] open in
             guard let self else { return }
@@ -866,7 +872,7 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
     private func pushPopularList() {
         guard let makePostList, let navigationController,
               navigationController.transitionCoordinator == nil,
-              FeedFeatureBuilder.canOpen(from: self, on: navigationController)
+              PostOpening.canOpen(from: self, on: navigationController)
         else { return }
         let list = makePostList()
         list.render(.content(Self.popular(self.corpus, limit: nil)), newPosts: [])
@@ -879,7 +885,7 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
     private func pushGallery() {
         guard let makeGallery, let navigationController,
               navigationController.transitionCoordinator == nil,
-              FeedFeatureBuilder.canOpen(from: self, on: navigationController)
+              PostOpening.canOpen(from: self, on: navigationController)
         else { return }
         let gallery = makeGallery()
         gallery.render(.content(GalleryFilter.Format.media.filtering(activityPage.posts)))
@@ -1540,7 +1546,13 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
     /// most-liked member's face, which is this page's banner AND its first
     /// Gallery tile.
     static func ranked(_ posts: [GalleryPost]) -> [GalleryPost] {
-        DiscoverySource.trending.ordering(posts)
+        // Most-reacted first; ties break on publication, then id, so a page
+        // append never reshuffles cards already on screen (`sorted(by:)` is
+        // not stable).
+        posts.sorted {
+            ($0.reactionCount ?? 0, $0.publishedAtMS, $0.id.rawValue)
+                > ($1.reactionCount ?? 0, $1.publishedAtMS, $1.id.rawValue)
+        }
     }
 
     /// Discover's corpus: the ranking, minus what a GRID cannot draw.
@@ -1739,7 +1751,7 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
     ) {
         // One opening at a time — before anything below claims the tile.
         guard let grid,
-              navigationController.map({ FeedFeatureBuilder.canOpen(from: self, on: $0) }) ?? true
+              navigationController.map({ PostOpening.canOpen(from: self, on: $0) }) ?? true
         else { return }
         let posts = grid.posts
         guard posts.indices.contains(index) else { return }
@@ -1879,7 +1891,7 @@ extension PlaceProfileViewController: CardCloseLanding {
         case .card(let origin):
             // Home to the Popular card it left, through the window its
             // origin described.
-            return TextRevealInstaller.geometry(feed: feed, origin: origin, pipeline: imagePipeline)
+            return revealGeometry?(feed, origin)
         case nil:
             break
         }
@@ -1895,7 +1907,7 @@ extension PlaceProfileViewController: CardCloseLanding {
         // the post read at its head (the old rule, kept below as the fallback
         // for a page with no Popular card).
         guard let origin = markerFlightLandingOrigin(sizedTo: bounds, settled: activePostID?()) else { return nil }
-        return TextRevealInstaller.geometry(feed: feed, origin: origin, pipeline: imagePipeline)
+        return revealGeometry?(feed, origin)
     }
 
     /// Where a post opened from a MARKER lands when it closes down onto this
@@ -2048,7 +2060,7 @@ extension PlaceProfileViewController: CardCloseLanding {
                 dismissalDidEnd: ended
             )
         }
-        return TextRevealInstaller.geometry(feed: feed, origin: origin, pipeline: imagePipeline)
+        return revealGeometry?(feed, origin)
     }
 }
 

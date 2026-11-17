@@ -5,7 +5,7 @@ import MediaCore
 import PostGrid
 import Testing
 import UIKit
-@testable import Feed
+@testable import Place
 
 /// The place page under a plain screen pushed over it (#1914): its clips play
 /// while it holds half the viewport, pause below, and come back at half on the

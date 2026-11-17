@@ -1,13 +1,14 @@
 import CoreModels
+import CoreNavigation
 import CoreStorage
 import DesignSystem
-import FeedInterface
+import PlaceInterface
 import HeroPage
 import MediaCore
 import PostGrid
 import Testing
 import UIKit
-@testable import Feed
+@testable import Place
 
 /// The PLACE PROFILE: a hero page (#1656) — the profile's header with the
 /// place's flag in its disc, Ranking and Likes, a band card wearing the top
@@ -37,7 +38,7 @@ struct PlaceProfileTests {
         posts: [GalleryPost] = [],
         rank: PlaceRankBadge? = nil
     ) -> PlaceProfileViewController {
-        PlaceProfileViewController(
+        let profile = PlaceProfileViewController(
             postIDs: posts.map(\.id),
             placeName: "Paris • City Cluster",
             rank: rank,
@@ -48,6 +49,13 @@ struct PlaceProfileTests {
             loadPosts: { posts },
             openPost: { _, _, _ in }
         )
+        // The reader's reveal, as `PlaceFeatureBuilder` wires it, reduced to
+        // the window it closes through: the origin's own frame (#2381: the
+        // reveal lives in Feed, which these tests no longer link).
+        profile.revealGeometry = { _, origin in
+            RevealGeometry(sourceFrame: origin.rowFrame, sourceCornerRadius: 0)
+        }
+        return profile
     }
 
     // MARK: - The landing

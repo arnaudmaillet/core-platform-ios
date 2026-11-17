@@ -4,7 +4,7 @@ import MediaCore
 import PostGrid
 import Testing
 import UIKit
-@testable import Feed
+@testable import Place
 
 /// The place page's Popular shelf keeps the drags it can spend (#1373): a
 /// rightward drag on the shelf scrolled past its first card scrolls it back,

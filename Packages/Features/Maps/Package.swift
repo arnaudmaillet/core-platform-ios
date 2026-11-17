@@ -11,6 +11,8 @@ let package = Package(
         .package(path: "../../Kit/LaunchArguments"),
         .package(path: "../../FeatureInterfaces/MapsInterface"),
         .package(path: "../../FeatureInterfaces/FeedInterface"),
+        // The place page's builder (#2381).
+        .package(path: "../../FeatureInterfaces/PlaceInterface"),
         .package(path: "../../Kit/CoreContracts"),
         .package(path: "../../Kit/CoreModels"),
         .package(path: "../../Core/CoreNavigation"),
@@ -34,6 +36,7 @@ let package = Package(
                 "LaunchArguments",
                 "MapsInterface",
                 "FeedInterface",
+                "PlaceInterface",
                 "CoreContracts",
                 "CoreModels",
                 "CoreNavigation",
@@ -71,6 +74,7 @@ let package = Package(
                 "LaunchArguments",
                 "Maps",
                 "MapsInterface",
+                "PlaceInterface",
                 // `AppRoute` / `PlaceLink`: a place's share link opens it (#985).
                 "CoreNavigation",
                 "DesignSystem",

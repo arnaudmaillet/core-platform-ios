@@ -65,15 +65,13 @@ struct HeroElectionTests {
     /// Two drivers, not three: the flight, armed on both axes, and the
     /// card-shaped close beside it for the pages the flight refuses. A THIRD
     /// slide would be the escape come back — which is what this counts.
+    ///
+    /// The place page lives in Place (#2381): what the feed sees of it is a
+    /// presenter that lands its own card-shaped close (`CardCloseLanding`),
+    /// which is all this stand-in is.
     @Test func aGalleryOpenedPostGoesHomeOnBothAxes() throws {
         let stack = Stack()
-        let gallery = stack.builder.makeClusterGallery(
-            postIDs: [PostID("g1")], title: "Paris", following: nil,
-            feed: UIViewController(),
-            // No map beneath this host: the page keeps the plain-slide
-            // fallback, which is exactly the axis-split under test.
-            mapReturn: { _ in nil }
-        )
+        let gallery = CardLandingPage()
         stack.nav.pushViewController(gallery, animated: false)
         #expect(gallery.navigationController === stack.nav, "precondition: gallery on the stack")
 
@@ -278,4 +276,13 @@ private final class StubFlightCard: UIView, ZoomFlightCard {
     var zoomRestingCornerRadius: CGFloat { 12 }
     var zoomRestingChrome: UIView? { nil }
     func setZoomCornerRadius(_ radius: CGFloat) {}
+}
+
+/// A page that lands its own card-shaped close, as the place page does
+/// (`CardCloseLanding`): no card to land on here, so the close falls back to
+/// its slide.
+@MainActor
+private final class CardLandingPage: UIViewController, CardCloseLanding {
+    func cardCloseGeometry(dismissing feed: UIViewController) -> RevealGeometry? { nil }
+    func clearLandingConcealment() {}
 }

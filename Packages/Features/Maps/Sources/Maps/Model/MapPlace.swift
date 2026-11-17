@@ -1,5 +1,6 @@
 import FeedInterface
 import Foundation
+import PlaceInterface
 
 /// A semantic place a pin belongs to — a city or a country. The active
 /// band's marker for one of these (a HIERARCHY marker) is a Case-B cluster:

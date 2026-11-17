@@ -25,7 +25,8 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     /// Every surface's warm of a post's first comments, before it is opened
     /// (#2002): one instance, so nothing is asked twice across surfaces.
     /// A class, so every copy of this builder shares it.
-    let postOpenWarm: PostOpenWarm?
+    /// Shared with the place page (#2381).
+    public let postOpenWarm: PostOpenWarm?
     private let realtime: (any FeedRealtimeSubscribing)?
     private let composedPosts: ComposedPostChannel?
     private let router: (any Router)?
@@ -84,7 +85,8 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     /// for every surface this root builds — For You, the place page, a post
     /// set, a profile's page — over the same store and follow as the feed's
     /// author rows. A reference, so every copy of this builder shares it.
-    private let authorMarks: PostAuthorMarks
+    /// Shared with the place page (#2381).
+    public let authorMarks: PostAuthorMarks
     /// The posts the server withholds from this viewer, learnt on any feed
     /// (#2048): every feed and the For You grid drop the ones not on show.
     private let unavailablePosts = UnavailablePosts.shared
@@ -144,14 +146,10 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         /// The app's entity store. Nil: this builder's screens share one of
         /// their own.
         entities: EntityStore? = nil,
-        /// A place's posts past the map's pins (#643). Nil: a place page shows
-        /// the pins it was handed.
-        placePosts: (any PlacePostsListing)? = nil,
         /// The post share sheet's quick-send row (#1710) — the profile
         /// sheet's own source. Nil: the sheet has no row of people.
         shareTargeting: (any ShareTargeting)? = nil
     ) {
-        self.placePosts = placePosts
         self.shareTargeting = shareTargeting
         self.entities = entities ?? EntityStore()
         self.discovery = discovery
@@ -255,12 +253,6 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         return post
     }
 
-    /// Every post, or none: a place's corpus drawn from what is held only
-    /// when it is whole (#1863). Pure.
-    nonisolated static func allHeld(_ posts: [GalleryPost?]) -> [GalleryPost] {
-        let held = posts.compactMap { $0 }
-        return held.count == posts.count ? held : []
-    }
 
     /// `ids`' posts, loaded together and returned in `ids`' order; a post
     /// that cannot be loaded is left out (#1863).
@@ -385,7 +377,6 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     #endif
 
     private let counterClient: (any Counter_V1_CounterServiceClientInterface)?
-    private let placePosts: (any PlacePostsListing)?
     private let discovery: (any FeedProviding)?
     private let shareTargeting: (any ShareTargeting)?
     private let localCache: FeedLocalCache?
@@ -679,7 +670,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                 // provider through the For You repository so every member is a
                 // cache hit, then ONE batched counter read for both counts.
                 // Three surfaces asking three different ways is how they come to
-                // disagree — see `makeClusterGallery`'s note.
+                // disagree — see `PlaceFeatureBuilder.makeClusterGallery`'s note (Place).
                 let provider = FixedPostsFeedProvider(base: base, ids: ids)
                 // A post deleted in this session is no result, whatever the
                 // index still answers (#896).
@@ -734,130 +725,15 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         return surface
     }
 
-    public func makePlacePage(title: String, identity: PlaceIdentity) -> UIViewController {
-        placeGallery(
-            postIDs: [], title: title, rank: nil, identity: identity, following: nil,
-            feed: nil, mapReturn: nil, markerClose: nil
-        )
+    public func textRevealGeometry(closing feed: UIViewController, onto origin: TextRevealOrigin) -> RevealGeometry {
+        TextRevealInstaller.geometry(feed: feed, origin: origin, pipeline: imagePipeline)
     }
 
-    public func makeClusterGallery(
-        postIDs: [PostID],
-        title: String,
-        rank: PlaceRankBadge?,
-        identity: PlaceIdentity?,
-        following: ClusterGalleryFollowing?,
-        feed: UIViewController,
-        mapReturn: @escaping (@escaping () -> UIImage?) -> (any ZoomTransitionSource)?,
-        markerClose: ((UIViewController) -> RevealGeometry?)?
-    ) -> UIViewController {
-        placeGallery(
-            postIDs: postIDs, title: title, rank: rank, identity: identity, following: following,
-            feed: feed, mapReturn: mapReturn, markerClose: markerClose
-        )
-    }
-
-    /// The place page, from the map (pins, the feed above it, a way home to
-    /// the marker) or alone (a link: none of those).
-    private func placeGallery(
-        postIDs: [PostID],
-        title: String,
-        rank: PlaceRankBadge?,
-        identity: PlaceIdentity?,
-        following: ClusterGalleryFollowing?,
-        feed: UIViewController?,
-        mapReturn: ((@escaping () -> UIImage?) -> (any ZoomTransitionSource)?)?,
-        markerClose: ((UIViewController) -> RevealGeometry?)?
-    ) -> UIViewController {
-        let base = repository
-        let gallery = PlaceProfileViewController(
-            postIDs: postIDs,
-            placeName: title,
-            rank: rank,
-            identity: identity,
-            imagePipeline: imagePipeline,
-            videoPlayback: videoPlayback,
-            following: following,
-            // The same balance the map's toolbar shows under this page, and
-            // the same sheet it opens — one wallet instance app-wide, because
-            // `WalletStore`'s change post is scoped to the instance.
-            wallet: wallet,
-            makeWalletSheet: makeWalletSheet,
-            showsBalance: showsBalance(),
-            entities: entities,
-            // Every member the app already holds, drawn before the hydration
-            // (#1863) — all of them or none (`PlaceProfileViewController`).
-            heldMembers: Self.allHeld(postIDs.map { heldGalleryPost($0) }),
-            loadPosts: { [counterClient] in
-                // One hydration over the same provider shape the feed above
-                // uses, so every member is a cache hit. Unranked: the
-                // profile applies its own popularity order
-                // (`PlaceProfileViewController.ranked`).
-                try await Self.placeGalleryPosts(postIDs, base: base, counterClient: counterClient)
-            },
-            // Past the pins (#643): the place's own pages, hydrated the same way.
-            loadMore: identity?.query.flatMap { query in
-                placePosts.map { listing in
-                    { [counterClient] token in
-                        let page = try await listing.placePostIDs(query, after: token)
-                        let posts = page.ids.isEmpty
-                            ? []
-                            : try await Self.placeGalleryPosts(page.ids, base: base, counterClient: counterClient)
-                        return PlacePostsPage(posts: posts, nextPageToken: page.next)
-                    }
-                }
-            },
-            openPost: { presenter, origin, ids in
-                presentSnapFeedHero(postIDs: ids, from: presenter, origin: origin)
-            }
-        )
-        // No `gallery.title`: the place's name lives on the BANNER, in its
-        // identity row, and does not dock — a bar title set here would sit at
-        // full strength over it.
-        gallery.activePostID = { [weak feed] in
-            (feed as? SnapFeedViewController)?.activePostID
-        }
-        // Eager on purpose: the gallery lives its early life invisible under
-        // the feed (a mid-stack insertion never loads its view), and the
-        // first anyone sees of it is a dismissal LANDING on it.
-        gallery.beginLoading()
-        // The page's own way home — staged when it becomes top
-        // (`installMapReturnIfTop`): hero to the marker, slide as fallback.
-        gallery.mapReturn = mapReturn
-        gallery.markerClose = markerClose
-        // The cards' author bands wear the relation mark (#2300).
-        gallery.authorMarks = authorMarks
-        // The titles' pushes — For You's own pushed screens, with the header
-        // they wear there (`PushedScreenHeader`).
-        let staking = wallet.map { PostCardStaking(wallet: $0, entities: entities) }
-        let openHero: (UIViewController, SnapFeedHeroOrigin, [PostID]) -> Void = { [self] presenter, origin, ids in
-            presentSnapFeedHero(postIDs: ids, from: presenter, origin: origin)
-        }
-        gallery.makePostList = { [self] in
-            let list = PushedPostListViewController(
-                kind: .popular, imagePipeline: imagePipeline, videoPlayback: videoPlayback,
-                staking: staking,
-                header: PushedScreenHeader(wallet: balanceWallet, makeWalletSheet: makeWalletSheet, router: router),
-                openPost: openHero
-            )
-            list.postOpenWarm = postOpenWarm
-            list.authorMarks = authorMarks
-            return list
-        }
-        gallery.makeGallery = { [self] in
-            let pushed = DiscoverGalleryViewController(
-                imagePipeline: imagePipeline, videoPlayback: videoPlayback,
-                header: PushedScreenHeader(wallet: balanceWallet, makeWalletSheet: makeWalletSheet, router: router),
-                staking: staking,
-                openPost: openHero
-            )
-            pushed.postOpenWarm = postOpenWarm
-            return pushed
-        }
-        // A place's tiles, and a cluster's, warm their posts' first comments
-        // (#2002).
-        gallery.postOpenWarm = postOpenWarm
-        return gallery
+    /// A place's posts as its page draws them (#2381: the place page lives in
+    /// Place; its posts are still hydrated by the feed, so every post the
+    /// feed above holds is a cache hit). See `placeGalleryPosts(_:base:counterClient:)`.
+    nonisolated public func placeGalleryPosts(_ ids: [PostID]) async throws -> [GalleryPost] {
+        try await Self.placeGalleryPosts(ids, base: repository, counterClient: counterClient)
     }
 
     /// A place's posts as its page draws them: the feed's hydration (so
@@ -870,7 +746,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     /// one batched read of likes and comments, through the same
     /// `PostCounterReader` For You and the profile gallery use. Fail-open: a
     /// missing read leaves every count as the timeline gave it.
-    static func placeGalleryPosts(
+    nonisolated static func placeGalleryPosts(
         _ ids: [PostID], base: any FeedProviding, counterClient: (any Counter_V1_CounterServiceClientInterface)?
     ) async throws -> [GalleryPost] {
         let provider = FixedPostsFeedProvider(base: base, ids: ids)
@@ -1093,7 +969,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         if let beneath {
             // Built NOW and captured STRONGLY: until a vertical swipe
             // inserts it, this closure chain is the page's only owner.
-            // Hydration starts inside the builder (`makeClusterGallery`
+            // Hydration starts inside the builder (`PlaceFeatureBuilder.makeClusterGallery`
             // begins loading), so the first dismissal lands on cards rather
             // than a skeleton.
             let landing = beneath(destination)
@@ -1118,10 +994,10 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                     return
                 }
                 // Staged off the stack, under the chrome it is about to wear.
-                (landing as? PlaceProfileViewController)?.stagingChromeTop = nav.navigationBar.frame.maxY
+                (landing as? any FeedBeneathLanding)?.stagingChromeTop = nav.navigationBar.frame.maxY
                 // Nil origin — no card to land on — leaves the geometry nil,
                 // which is exactly how the driver selects the plain slide.
-                dismissal.revealGeometry = (landing as? PlaceProfileViewController)?
+                dismissal.revealGeometry = (landing as? any FeedBeneathLanding)?
                     .markerFlightLandingOrigin(
                         sizedTo: nav.view.bounds,
                         // The post the viewer is on: its kind picks Popular's

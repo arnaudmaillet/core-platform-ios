@@ -4,7 +4,7 @@ import MediaCore
 import PostGrid
 import Testing
 import UIKit
-@testable import Feed
+@testable import Place
 
 /// A place opened from a warm pin draws what the app already holds of it
 /// (#1863): its posts, Popular, Recent, the Likes total and the banner, before
@@ -68,8 +68,8 @@ struct PlaceHeldCorpusTests {
     /// Nothing held, or not all of it: the page as before.
     @Test func aPartialCorpusIsNotDrawn() {
         let full = [post("a", reactions: 1), post("b", reactions: 1)]
-        #expect(FeedFeatureBuilder.allHeld([full[0], nil]).isEmpty, "a partial corpus was drawn")
-        #expect(FeedFeatureBuilder.allHeld(full) == full)
+        #expect(PlaceFeatureBuilder.allHeld([full[0], nil]).isEmpty, "a partial corpus was drawn")
+        #expect(PlaceFeatureBuilder.allHeld(full) == full)
         let gate = Gate()
         let page = place(held: [], loaded: full, gate: gate)
         page.beginLoading()

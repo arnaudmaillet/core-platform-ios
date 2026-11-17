@@ -122,22 +122,4 @@ struct ListRowsPageTests {
         #expect(!photoOrigin.opensWithNativePush)
         page.endPlaybackHandoff()
     }
-
-    // MARK: - The header's hairline (#2289)
-
-    /// The place page's header closes with the posts' hairline, as the
-    /// profile's does: the list's first row draws none above it.
-    @Test func thePlacesHeaderClosesWithTheHairline() {
-        let place = PlaceProfileViewController(
-            postIDs: [],
-            placeName: "Paris • City Cluster",
-            imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
-            videoPlayback: nil,
-            loadPosts: { [] },
-            openPost: { _, _, _ in }
-        )
-        #expect(place.debugHeader.drawsFootHairline)
-        let rows = page(corpus(3, allText: true), style: .list)
-        #expect(rows.rowSeparators(at: IndexPath(item: 0, section: 0)).top == .none, "a second line under the header")
-    }
 }

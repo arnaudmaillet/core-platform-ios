@@ -31,6 +31,8 @@ import MapsInterface
 import Notifications
 import NotificationsInterface
 import OSLog
+import Place
+import PlaceInterface
 import PostGrid
 import Profile
 import ProfileInterface
@@ -998,7 +1000,12 @@ final class AppContainer {
         return repository
     }
 
-    private(set) lazy var feedFeature: any FeedFeatureBuilding = FeedFeatureBuilder(
+    private(set) lazy var feedFeature: any FeedFeatureBuilding = feedBuilder
+
+    /// The feed's builder itself: the place page (#2381) takes its hydration,
+    /// its relation marks and its comment warm-up, which the interface does
+    /// not carry.
+    private lazy var feedBuilder = FeedFeatureBuilder(
         repository: feedRepository,
         engagementProvider: feedRepository,
         commentsProvider: commentsRepository,
@@ -1049,10 +1056,29 @@ final class AppContainer {
         discovery: discoveryRepository,
         localCache: feedLocalCache,
         entities: entityStore,
-        // A place page pages the place's posts past the map's pins (#643).
-        placePosts: PlacePostsRepository(geoClient: GeoDiscovery_V1_GeoDiscoveryServiceClient(client: authenticatedRPCClient)),
         // A post's share sheet sends to the profile sheet's people (#1710).
         shareTargeting: profileShareTargetsRepository
+    )
+
+    /// The place page (#2381): opened by the map (under a cluster's feed) and
+    /// by a place link. It opens posts in the feed's reader and draws the
+    /// feed's hydration, so every post the feed above holds is a cache hit.
+    private(set) lazy var placeFeature: any PlaceFeatureBuilding = PlaceFeatureBuilder(
+        feed: feedBuilder,
+        hydrate: { [feedBuilder] ids in try await feedBuilder.placeGalleryPosts(ids) },
+        // A place page pages the place's posts past the map's pins (#643).
+        placePosts: PlacePostsRepository(geoClient: GeoDiscovery_V1_GeoDiscoveryServiceClient(client: authenticatedRPCClient)),
+        imagePipeline: imagePipeline,
+        videoPlayback: videoPlayback,
+        // The same balance the map's toolbar shows under the page, and the
+        // same sheet: one wallet instance app-wide.
+        wallet: walletStore,
+        makeWalletSheet: { [unowned self] in self.makeWalletSheet() },
+        showsBalance: { [unowned self] in self.memberGate.isMember },
+        entities: entityStore,
+        router: routeResolver,
+        authorMarks: feedBuilder.authorMarks,
+        postOpenWarm: feedBuilder.postOpenWarm
     )
 
     /// Discover's pool (`timeline.v1.GetDiscoveryFeed`, backend B3 / #512):
@@ -1197,6 +1223,7 @@ final class AppContainer {
         imagePipeline: imagePipeline,
         videoPlayback: mapsVideoPlayback,
         feedFeature: { [unowned self] in self.feedFeature },
+        placeFeature: { [unowned self] in self.placeFeature },
         openProfile: { [unowned self] id, stub in
             self.router.route(to: .profile(id, stub: stub))
         },
@@ -1934,7 +1961,7 @@ final class AppContainer {
         // code and a `core-platform.click/s/<token>` link (#412).
         lookupProfile: { [weak self] reference in await self?.profileID(for: reference) ?? .unavailable },
         // A shared place link (#985).
-        makePlacePage: { [unowned self] link in MapsFeatureBuilder.placePage(for: link, feed: self.feedFeature) },
+        makePlacePage: { [unowned self] link in MapsFeatureBuilder.placePage(for: link, place: self.placeFeature) },
         // A channel's "Share as a Post" (#2216): the Text Post screen with
         // its card, publishing through the one pipeline.
         makeShowcaseComposer: { [unowned self] embed in self.uploadFeature.makeShowcaseComposer(attaching: embed) }
