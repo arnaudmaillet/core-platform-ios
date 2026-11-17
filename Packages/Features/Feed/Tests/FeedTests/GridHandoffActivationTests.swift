@@ -6,6 +6,7 @@ import PostGrid
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// ⚠️ ACTIVATING A FEED HOST'S PAGE NEVER ENDS A FLIGHT'S HANDOFF (#1292).
 ///

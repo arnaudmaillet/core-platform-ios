@@ -6,6 +6,7 @@ import PostGrid
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// For You's rows come to rest on an item's edge, the side picked by the
 /// gesture (2026-09-29): forward puts an item's trailing edge on the right

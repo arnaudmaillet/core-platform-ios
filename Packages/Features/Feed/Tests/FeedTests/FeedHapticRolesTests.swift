@@ -7,6 +7,7 @@ import PostGrid
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// FEED SPEAKS IN ROLES (#1883): every haptic in Feed names the moment it
 /// plays (`Haptics.play`), and turning a state off is silent (#1881).

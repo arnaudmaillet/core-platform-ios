@@ -9,6 +9,7 @@ import EntityStore
 import FeedInterface
 import MediaPlayback
 import PostGrid
+import PostSurfaces
 import ShareSheet
 import ThreadKit
 import UIKit

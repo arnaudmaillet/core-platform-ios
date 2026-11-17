@@ -7,6 +7,7 @@ import MediaPlayback
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// A post opened full screen always plays (#702): Autoplay and Low Power Mode
 /// govern grids, rails and previews, never the post the viewer opened.

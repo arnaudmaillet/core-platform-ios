@@ -4,6 +4,7 @@ import MediaCore
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// THE PILL'S "+" FOLLOWS, AND IS ONLY THERE FOR SOMEONE TO FOLLOW.
 ///

@@ -5,6 +5,7 @@ import FeedInterface
 import LaunchArguments
 import MediaCore
 import PostGrid
+import PostSurfaces
 import UIKit
 
 /// Builds the reveal's geometry for any surface that shows a post as a LIST ROW.

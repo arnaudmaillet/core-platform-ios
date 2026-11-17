@@ -4,6 +4,7 @@ import Foundation
 import PostGrid
 import Testing
 @testable import Feed
+@testable import PostSurfaces
 
 // One kind per vertical feed (#1421): the opening post's.
 

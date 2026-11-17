@@ -5,6 +5,7 @@ import MediaCore
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// The composer's rail slot wears the post's sound (#671) and answers as the
 /// page's sound bubble does: a TAP opens the sound sheet, a LONG PRESS toggles

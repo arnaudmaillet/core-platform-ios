@@ -6,6 +6,7 @@ import PostGrid
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// The Rows page (#2170, the profile's History): one section of rows per
 /// titled group, the group under the bar named, each row's view date kept on

@@ -8,6 +8,7 @@ import PostGrid
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// Three defects filmed on For You's rows after #314, each pinned at the seam
 /// that decides it.

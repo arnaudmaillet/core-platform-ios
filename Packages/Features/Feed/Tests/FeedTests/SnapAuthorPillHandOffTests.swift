@@ -5,6 +5,7 @@ import MediaCore
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// Hydrates every id as a photo post by its own author ("author-<id>").
 private final class AuthoredPhotos: FeedProviding, @unchecked Sendable {

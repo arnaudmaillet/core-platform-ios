@@ -7,6 +7,7 @@ import PostGrid
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// A SHELF OF POSTS (#1271): a titled section with a media row and a text
 /// row, drawn by itself — the host only says what it is called and what it

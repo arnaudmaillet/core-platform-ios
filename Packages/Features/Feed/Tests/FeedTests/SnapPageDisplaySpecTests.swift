@@ -4,6 +4,7 @@ import MediaPlayback
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// **The specification for what the full-screen pager shows.**
 ///

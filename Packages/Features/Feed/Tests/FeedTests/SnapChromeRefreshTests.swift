@@ -3,6 +3,7 @@ import MediaCore
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// THE BARS ARE NOT IN THE CELL, AND THEY CACHE.
 ///

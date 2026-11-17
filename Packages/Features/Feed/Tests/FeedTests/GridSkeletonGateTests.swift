@@ -6,6 +6,7 @@ import PostGrid
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// The For You grid's cold skeleton on the kit's timing (#1770): nothing for
 /// the delay, the bones after it, and "Taking longer than usual" with Try

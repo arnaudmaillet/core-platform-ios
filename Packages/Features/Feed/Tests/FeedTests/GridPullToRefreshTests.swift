@@ -6,6 +6,7 @@ import PostGrid
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// FOR YOU'S PULL TAKES THE APP'S ONE RULE (#2235). The owner felt For You's
 /// Feed page fire "as soon as I slide down from the top", next to Messages:

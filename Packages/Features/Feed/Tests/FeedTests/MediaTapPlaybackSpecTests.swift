@@ -5,6 +5,7 @@ import PostGrid
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// **THE SPECIFICATION FOR A FINGER ON A CLIP.**
 ///

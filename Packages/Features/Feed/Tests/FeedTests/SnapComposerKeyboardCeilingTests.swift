@@ -3,6 +3,7 @@ import MediaCore
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// The composer's keyboard ceiling (`CommentsInputBar.tracksKeyboard`) belongs
 /// to the panel of the page being READ, whichever route made it the engagement

@@ -4,6 +4,7 @@ import MediaPlayback
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// **THE SPECIFICATION FOR WHEN A CLIP PLAYS: the page that owns the screen
 /// plays, and the settle has nothing to do with it.**

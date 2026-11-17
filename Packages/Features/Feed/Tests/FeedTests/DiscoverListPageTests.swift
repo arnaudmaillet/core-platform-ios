@@ -8,6 +8,7 @@ import PostGrid
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// For You's Discover as a list with mosaic chunks: the tab order, what the
 /// page is handed, how its stretches become sections, cards and tiles, and the

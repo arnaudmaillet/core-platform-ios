@@ -2,6 +2,7 @@ import CoreModels
 import DesignSystem
 import FeedInterface
 import Foundation
+import PostSurfaces
 
 /// The page's sound, without the screen: which sound a post is set to, what
 /// its attribution and its sound bubble draw, whether its song may be heard,

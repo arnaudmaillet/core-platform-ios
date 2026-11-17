@@ -8,6 +8,7 @@ import Testing
 import UIKit
 @testable import Feed
 @testable import ThreadKit
+@testable import PostSurfaces
 
 /// How a shelf leading a grid answers a finger (2026-09-29 follow-up): the
 /// headers push through their OWN tap path, a long press lifts a preview whose

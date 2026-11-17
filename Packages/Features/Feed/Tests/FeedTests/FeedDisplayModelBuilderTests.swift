@@ -2,6 +2,7 @@ import CoreModels
 import Foundation
 import Testing
 @testable import Feed
+@testable import PostSurfaces
 
 private func entry(caption: String, publishedAt: Date = .init(timeIntervalSince1970: 0)) -> FeedEntry {
     FeedEntry(

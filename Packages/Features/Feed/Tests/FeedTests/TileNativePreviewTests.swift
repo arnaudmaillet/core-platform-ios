@@ -7,6 +7,7 @@ import PostGrid
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// Every tile of every grid lifts its post with UIKit's own preview, and a
 /// clip plays inside it (#1318).

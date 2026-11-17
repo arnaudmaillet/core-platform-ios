@@ -1,5 +1,6 @@
 import Testing
 @testable import Feed
+@testable import PostSurfaces
 
 /// HOW MANY VIDEOS EACH SHAPE MAY PLAY AT ONCE.
 ///

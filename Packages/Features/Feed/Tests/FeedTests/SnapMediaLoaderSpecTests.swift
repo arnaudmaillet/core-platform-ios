@@ -5,6 +5,7 @@ import PostGrid
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// **THE SPECIFICATION FOR "IT IS COMING": a page whose media has not arrived
 /// says so.**

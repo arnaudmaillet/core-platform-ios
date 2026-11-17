@@ -2,6 +2,7 @@ import CoreModels
 import FeedInterface
 import Foundation
 import PostGrid
+import PostSurfaces
 
 /// A `FeedProviding` whose "first page" is a fixed, ordered set of post ids —
 /// the backing store for a snap feed opened from a Maps pin or cluster, rather

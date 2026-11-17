@@ -6,6 +6,7 @@ import DesignSystem
 import EntityStore
 import LaunchArguments
 import MediaCore
+import PostSurfaces
 import UIKit
 import VoiceKit
 import VoiceKitUI

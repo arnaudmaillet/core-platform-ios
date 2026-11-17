@@ -5,6 +5,7 @@ import MediaCore
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// THE PULL TO GO BACK LIFTS NOTHING ON A TEXT PAGE (#2187, the owner): on a
 /// text post opened with the native push, the pull up from the end (#2045)

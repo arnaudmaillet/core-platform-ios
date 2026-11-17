@@ -1,4 +1,5 @@
 import CoreModels
+import PostSurfaces
 
 /// WHICH PAGES A DIFFABLE SNAPSHOT WOULD SILENTLY LEAVE ALONE.
 ///

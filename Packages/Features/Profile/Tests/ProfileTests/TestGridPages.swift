@@ -6,6 +6,7 @@ import MediaPlayback
 import PostGrid
 @testable import Profile
 @testable import ProfileSettings
+@testable import PostSurfaces
 
 /// The profile's pages are For You's grid (#1273): the suites draw the
 /// profile on the real page, built the way the composition root builds it.

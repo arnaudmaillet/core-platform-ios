@@ -10,7 +10,7 @@ let package = Package(
     dependencies: [
         .package(path: "../../Kit/CoreModels"),
         .package(path: "../../Core/PostGrid"),
-        // `PersonBarItem` speaks `PersonPill.Badge` and `ImagePipeline` (#1451).
+        // The conversation thread's group faces (`GroupAvatarFace`).
         .package(path: "../../Core/MediaCore"),
         .package(path: "../../Core/CoreNavigation"),
         // `OverSheetFeedHost` closes its sheet once (`closePresentation`, #1144).

@@ -8,6 +8,7 @@ import Testing
 import UIKit
 @testable import Feed
 @testable import ThreadKit
+@testable import PostSurfaces
 
 /// **THE "+" MENU'S TEXT POST IS A TEXT POST'S OWN PAGE, BORN EMPTY — IN A SHEET.**
 ///

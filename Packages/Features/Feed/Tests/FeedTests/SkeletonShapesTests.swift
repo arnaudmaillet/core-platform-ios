@@ -6,6 +6,7 @@ import PostGrid
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// A skeleton has the shape of what will land (#1773): Discover's mosaic,
 /// the Following shelf's text row; and the lead row's bones wait for the

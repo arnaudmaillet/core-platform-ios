@@ -3,6 +3,7 @@ import MediaCore
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// The day on the feed's bar (#757) belongs to the page being read: only the
 /// panel that holds the engagement drives it, and a tap on it reaches that

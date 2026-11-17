@@ -10,6 +10,7 @@ import Testing
 import UIKit
 @testable import Feed
 @testable import ThreadKit
+@testable import PostSurfaces
 
 /// The comments engagement's geometry and choreography contracts: one
 /// authority (`SnapCommentsLayout`) sizes the expanded caption card and the

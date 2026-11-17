@@ -4,6 +4,7 @@ import Testing
 import UIKit
 @testable import Feed
 @testable import ThreadKit
+@testable import PostSurfaces
 
 /// The caption row is the gallery card's TWIN — a reveal opens the row into the
 /// page, so the row's closing line and the page's first line are one line seen

@@ -5,6 +5,7 @@ import PostGrid
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// The card is held over the landing tile until it has something to show. What
 /// counts as "something" is the whole subject: the gate used to answer only

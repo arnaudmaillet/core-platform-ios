@@ -8,6 +8,7 @@ import PostGrid
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// A close that pages on and comes home to the tile that opened the feed
 /// (#923): which picture the tile ends up showing, and how the tile's own

@@ -4,6 +4,7 @@ import MediaPlayback
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// **A FEED PUSHED BEFORE ITS CORPUS ARRIVES SHOWS THE SCREEN IT IS OPENING
 /// ONTO, in the state that screen is actually in.**

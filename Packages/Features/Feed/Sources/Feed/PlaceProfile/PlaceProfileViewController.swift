@@ -9,6 +9,7 @@ import LaunchArguments
 import MediaCore
 import MediaPlayback
 import PostGrid
+import PostSurfaces
 import ShareSheet
 import UIKit
 
@@ -583,11 +584,10 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
                     let post = grid?.posts.indices.contains(index) == true
                         ? grid?.posts[index] : nil
                     let window = post.flatMap { p in grid.flatMap { textTileReveal(for: p, in: $0) } }
-                    print("[place] opening tile \(index) from tab \(activeIndex)"
-                        + " posts=\(grid?.posts.count ?? -1)"
-                        + " post=\(post?.id.rawValue ?? "nil")"
-                        + " hero=\(post.flatMap { grid?.heroAppearance(for: $0.id) } != nil)"
-                        + " window=\(window != nil)")
+                    let postCount = grid?.posts.count ?? -1
+                    let postName = post?.id.rawValue ?? "nil"
+                    let hasHero = post.flatMap { grid?.heroAppearance(for: $0.id) } != nil
+                    print("[place] opening tile \(index) from tab \(activeIndex) posts=\(postCount) post=\(postName) hero=\(hasHero) window=\(window != nil)")
                     // ⚠️ THROUGH THE DELEGATE, NOT THE HOST'S OWN METHOD. Calling
                     // `openTile` directly skips `didSelectItemAt` and therefore
                     // `PostGridPageView.open(at:)`, which is where a tap REMEMBERS

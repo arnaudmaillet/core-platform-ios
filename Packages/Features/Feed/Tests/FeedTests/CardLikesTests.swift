@@ -7,6 +7,7 @@ import PostGrid
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// The hearts on For You's compact cards — the paired half-width cards and
 /// chunk tiles of the Discover list, the pushed gallery's tiles, and the

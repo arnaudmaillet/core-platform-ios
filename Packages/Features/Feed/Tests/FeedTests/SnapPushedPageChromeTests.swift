@@ -4,6 +4,7 @@ import MediaCore
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// The full-screen reader as the map, profiles and conversations push it:
 /// the author pill in the toolbar, the danmaku over the stream, the bottom

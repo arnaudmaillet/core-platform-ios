@@ -3,6 +3,7 @@ import DesignSystem
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// THE STREAM UNDER THE BAND (the owner, 2026-10-16 — the experiment of
 /// #1244, kept): the streaming comments on the caption, the danmaku band

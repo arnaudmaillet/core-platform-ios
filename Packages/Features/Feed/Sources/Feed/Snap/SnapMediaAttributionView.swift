@@ -1,6 +1,7 @@
 import MediaCore
 import CoreModels
 import DesignSystem
+import PostSurfaces
 import UIKit
 
 /// The media attribution (mini circular cover + author name + audio line)

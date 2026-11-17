@@ -1,5 +1,6 @@
 import AuthInterface
 import CacheKit
+import CoreModels
 import Foundation
 import Testing
 import UIKit

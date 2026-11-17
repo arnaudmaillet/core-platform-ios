@@ -3,6 +3,7 @@ import MediaCore
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// A full-screen page's photograph on the loading rules (#1088): a page
 /// reconfigured for another post never draws the previous post's picture,

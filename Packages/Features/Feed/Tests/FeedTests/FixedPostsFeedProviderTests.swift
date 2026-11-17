@@ -3,6 +3,7 @@ import CoreNetworking
 import Foundation
 import Testing
 @testable import Feed
+@testable import PostSurfaces
 
 struct FixedPostsFeedProviderTests {
     @Test func loadFirstPagePreservesRequestedOrder() async throws {

@@ -5,6 +5,7 @@ import PostGrid
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// The next-page spinner reserves a band below the content. Its whole
 /// requirement is that opening and closing that band never moves the scroll,

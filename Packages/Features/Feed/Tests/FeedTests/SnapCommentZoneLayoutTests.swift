@@ -3,6 +3,7 @@ import DesignSystem
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// The comment zone's VERTICAL SEATING, and the pill shape that follows from
 /// the zone now carrying reaction-shaped comments as well as sentences.

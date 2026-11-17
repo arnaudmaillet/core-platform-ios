@@ -6,6 +6,7 @@ import PostGrid
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// A grid hosted by another screen — a profile's gallery — never shows a post
 /// the server withholds (#2048): not the ones already learnt when it is

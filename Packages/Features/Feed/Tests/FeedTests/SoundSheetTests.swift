@@ -9,6 +9,7 @@ import PostGrid
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// The sound sheet's rules: how it opens (the close item in its bar, the
 /// content behind the bar, the sound `headerInset` under its top edge and

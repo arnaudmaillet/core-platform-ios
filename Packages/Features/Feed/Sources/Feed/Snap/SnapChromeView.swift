@@ -5,6 +5,7 @@ import EmoteKit
 import LaunchArguments
 import MediaCore
 import PostGrid
+import PostSurfaces
 import UIKit
 
 /// The snap *page's* UI chrome — the caption over the bottom scrim.

@@ -6,6 +6,7 @@ import PostGrid
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// ⚠️ ONE CONTRACT FOR EVERY MEDIA TILE (#1270, epic #1269): every host of a
 /// `PostGridPageView` other than For You describes a tile's opening through

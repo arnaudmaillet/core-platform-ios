@@ -5,6 +5,7 @@ import EntityStore
 import Foundation
 import Testing
 @testable import Feed
+@testable import PostSurfaces
 
 // MARK: - Fakes
 

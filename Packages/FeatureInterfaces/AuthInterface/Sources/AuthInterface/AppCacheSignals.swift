@@ -1,4 +1,5 @@
 import CacheKit
+import CoreModels
 import Foundation
 
 /// The signals the app's one `CacheCoordinator` listens to (epic #890).

@@ -4,6 +4,7 @@ import PostGrid
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// CONCEAL EXACTLY WHAT THE FLIGHT REPRODUCES.
 ///

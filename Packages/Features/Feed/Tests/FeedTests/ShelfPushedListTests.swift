@@ -6,6 +6,7 @@ import PostGrid
 import Testing
 import UIKit
 @testable import Feed
+@testable import PostSurfaces
 
 /// The shelf's row (2026-09-29) and the lists its header pushes. For You's
 /// Friends row and its ordering went with the tab (#2453).

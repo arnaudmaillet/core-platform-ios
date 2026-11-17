@@ -5,6 +5,7 @@ import CoreNavigation
 import DesignSystem
 import MediaPlayback
 import PostGrid
+import PostSurfaces
 import UIKit
 import LaunchArguments
 

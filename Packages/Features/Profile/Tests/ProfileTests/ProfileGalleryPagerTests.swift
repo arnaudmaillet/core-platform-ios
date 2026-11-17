@@ -8,6 +8,7 @@ import UIKit
 @testable import Feed
 @testable import Profile
 @testable import ProfileSettings
+@testable import PostSurfaces
 
 /// Where a scrub lands when the finger lets go.
 ///
