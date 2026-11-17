@@ -2,6 +2,7 @@
 import CoreNavigation
 import CoreNetworkingMocks
 #endif
+import AppPreferences
 import DebugTools
 import DesignSystem
 import LaunchArguments

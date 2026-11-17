@@ -24,6 +24,8 @@ let package = Package(
         .package(path: "../../Core/CacheKit"),
         .package(path: "../../Core/LocalStore"),
         .package(path: "../../Core/DesignSystem"),
+        // App Lock and the appearance, out of DesignSystem (#2383).
+        .package(path: "../../Core/AppPreferences"),
         // The hero page's shared mechanics (#1651).
         .package(path: "../../Core/HeroPage"),
         .package(path: "../../Core/EmoteKit"),
@@ -51,6 +53,7 @@ let package = Package(
                 "AuthInterface",
                 "FeedInterface",
                 "MapsInterface",
+                "AppPreferences",
                 "CoreContracts",
                 "CoreModels",
                 // Its launch arguments, declared (#2374).
@@ -95,6 +98,7 @@ let package = Package(
                 "AuthInterface",
                 "FeedInterface",
                 "MapsInterface",
+                "AppPreferences",
                 "CoreContracts",
                 "CoreModels",
                 // Its launch arguments, declared (#2374).
@@ -129,6 +133,7 @@ let package = Package(
         .testTarget(
             name: "ProfileTests",
             dependencies: [
+                "AppPreferences",
                 "LaunchArguments",
                 "Profile",
                 "ProfileSettings",
