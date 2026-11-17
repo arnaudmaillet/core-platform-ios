@@ -220,10 +220,12 @@ def batched(small):
     return out
 
 
-def entries(pkgs, dirs, hosted_only=False):
+def entries(pkgs, dirs, hosted_only=False, mac_only=False):
     """(self-hosted Mac jobs, hosted jobs), each longest first.
 
     `hosted_only` (MACOS_RUNNER=github, the Mac off): every lane is hosted.
+    `mac_only` (HOSTED_LANES_ON_MAC=1, GitHub's macOS capacity out): every lane
+    is the Mac's, `HOSTED_LANES` included. `hosted_only` wins when both are set.
     """
     out = []
     for d in sorted(dirs):
@@ -263,7 +265,7 @@ def entries(pkgs, dirs, hosted_only=False):
         return [with_lanes(e) for e in lanes]
 
     # Split before batching, so a batch never mixes the two machines.
-    hosted = [e for e in out if hosted_only or e["name"] in HOSTED_LANES]
+    hosted = [e for e in out if hosted_only or (not mac_only and e["name"] in HOSTED_LANES)]
     return jobs([e for e in out if e not in hosted]), jobs(hosted)
 
 
@@ -313,11 +315,17 @@ def main():
         chosen = set(chosen) | {d for d in ALWAYS if d in testable}
 
     hosted_only = os.environ.get("MACOS_RUNNER", "").strip() == "github"
-    matrix, hosted = entries(pkgs, chosen, hosted_only=hosted_only)
+    # GitHub's hosted macOS capacity out (#2484's runs, 2026-11-17: lanes
+    # cancelled with "not acquired by Runner of type hosted"): the hosted lanes
+    # join the Mac's. `compile tests` covers every Mac lane, so they still
+    # compile on Xcode 26 there.
+    mac_only = not hosted_only and os.environ.get("HOSTED_LANES_ON_MAC", "").strip() == "1"
+    matrix, hosted = entries(pkgs, chosen, hosted_only=hosted_only, mac_only=mac_only)
     print(f"Reason: {why}")
     print(f"App build: {'yes' if build_app else 'no'}")
     print(f"Jobs: {len(matrix)} on the self-hosted Mac, {len(hosted)} on GitHub's hosted Macs"
-          + (" (MACOS_RUNNER=github: every lane hosted)" if hosted_only else ""))
+          + (" (MACOS_RUNNER=github: every lane hosted)" if hosted_only else "")
+          + (" (HOSTED_LANES_ON_MAC=1: every lane on the Mac)" if mac_only else ""))
     for where, jobs in (("Mac", matrix), ("hosted", hosted)):
         for e in jobs:
             print(f"  - [{where}] {e['label']}")
