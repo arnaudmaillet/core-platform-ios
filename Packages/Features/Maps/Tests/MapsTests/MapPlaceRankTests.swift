@@ -1,4 +1,5 @@
 import FeedInterface
+import PlaceInterface
 import Testing
 @testable import Maps
 

@@ -8,6 +8,7 @@ import MapKit
 import MapsInterface
 import MediaCore
 import MediaPlayback
+import PlaceInterface
 import PostGrid
 import UIKit
 

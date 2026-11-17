@@ -2,13 +2,13 @@ import CoreContracts
 import CoreModels
 import CoreNetworking
 import CoreNetworkingMocks
-import FeedInterface
+import PlaceInterface
 import Foundation
 import MediaCore
 import PostGrid
 import Testing
 import UIKit
-@testable import Feed
+@testable import Place
 
 /// A place's posts past the map's pins, page by page (#643): geo_discovery.v1
 /// `ListPlacePosts` over the mock, then the place page that appends them.

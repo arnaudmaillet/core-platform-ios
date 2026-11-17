@@ -1,9 +1,15 @@
 import CoreContracts
 import CoreModels
 import CoreNetworking
-import FeedInterface
 import Foundation
+import PlaceInterface
 import PostGrid
+
+/// Why a page of a place's posts did not come: the call failed on the way to
+/// or at the server, and `failure` keeps why (#794).
+public enum PlacePostsError: Error, Equatable, Sendable {
+    case transport(message: String, failure: NetworkFailure? = nil)
+}
 
 /// A page of a place's posts past the map's pins (#643).
 struct PlacePostsPage: Equatable, Sendable {
@@ -53,7 +59,7 @@ public struct PlacePostsRepository: PlacePostsListing {
             let ids = body.cards.map(\.postID).filter { seen.insert($0).inserted }.map { PostID($0) }
             return (ids, body.nextPageToken.isEmpty ? nil : body.nextPageToken)
         case .failure(let error):
-            throw FeedError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
+            throw PlacePostsError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 }

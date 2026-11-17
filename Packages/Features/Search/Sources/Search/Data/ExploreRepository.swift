@@ -46,8 +46,8 @@ public struct ExplorePost: Equatable, Sendable {
 /// `dev/BACKEND_GAPS.md` §14. `timeline.v1` exposes `GetFollowingFeed` and
 /// `GetAudioFeed`, neither of which is a ranked or curated corpus, so what
 /// this vends today is the viewer's own following timeline and "trending" is
-/// an ORDERING of it applied on the client. `DiscoverySource.trending` already
-/// stands on exactly this footing for the For You tab, and this is the same
+/// an ORDERING of it applied on the client. The place page's ranking already
+/// stands on exactly this footing (`PlaceProfileViewController.ranked`), and this is the same
 /// compromise made twice rather than a second, different one.
 ///
 /// The protocol asks for a corpus and not for "creators", deliberately: the
