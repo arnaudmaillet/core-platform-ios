@@ -90,6 +90,9 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           # `github` (the Mac off): every lane goes to the hosted job.
           MACOS_RUNNER: ${{ vars.MACOS_RUNNER }}
+          # `1` (GitHub's macOS capacity out): the hosted lanes go to the Mac
+          # too. MACOS_RUNNER=github wins when both are set.
+          HOSTED_LANES_ON_MAC: ${{ vars.HOSTED_LANES_ON_MAC }}
         run: python3 .github/scripts/select_packages.py
 
   # ── The app itself ───────────────────────────────────────────────────────
@@ -262,6 +265,13 @@ jobs:
   # Mac off, asleep or busy for good: set the repository variable
   # MACOS_RUNNER=github (Settings → Secrets and variables → Actions →
   # Variables) and every lane goes to `test-hosted`, Xcode 26.
+  #
+  # GitHub's hosted macOS capacity out (jobs cancelled with "not acquired by
+  # Runner of type hosted"): set HOSTED_LANES_ON_MAC=1 and the hosted lanes
+  # run here too. `compile tests` still compiles them on Xcode 26, since it
+  # covers every lane of this job. `build app` and `compile tests` stay
+  # hosted: the Mac has no Xcode 26. A rerun keeps the variables of the run
+  # it reruns, so a run started before the change needs a new push.
   test:
     name: test ${{ matrix.pkg.label }}
     needs: discover
