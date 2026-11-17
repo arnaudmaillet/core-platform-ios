@@ -2,7 +2,9 @@
 import PackageDescription
 
 // The app's debug tools (#2386, epic #2366): the audits that print a frame's
-// measures, the labs that tune a material live, the traces and the benches.
+// measures, the labs that tune a material live, the traces and the benches,
+// and the QA screens that left DesignSystem (#2383): the haptics playground
+// and the button gallery.
 // Every source is `#if DEBUG`, so a Release build compiles this module empty;
 // they lived in App, interleaved with the shell's production files. A Core
 // package: it reads Core's types and no feature's.
@@ -41,6 +43,17 @@ let package = Package(
                 "CacheKit", "LocalStore",
                 .product(name: "VoiceKitUI", package: "VoiceKit")
             ],
+            swiftSettings: [
+                .defaultIsolation(MainActor.self),
+                .enableUpcomingFeature("NonisolatedNonsendingByDefault"),
+                .enableUpcomingFeature("InferIsolatedConformances")
+            ]
+        ),
+        // The screens that moved from DesignSystem (#2383) brought their
+        // tests: the haptics playground's.
+        .testTarget(
+            name: "DebugToolsTests",
+            dependencies: ["DebugTools", "DesignSystem"],
             swiftSettings: [
                 .defaultIsolation(MainActor.self),
                 .enableUpcomingFeature("NonisolatedNonsendingByDefault"),

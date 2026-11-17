@@ -1,5 +1,6 @@
 // ⚠️ THE WHOLE FILE: DEBUG only — the haptics playground (#2193).
 #if DEBUG
+import DesignSystem
 import UIKit
 
 /// THE HAPTICS PLAYGROUND (#2193, was the catalog of #1882): every haptic the
