@@ -299,7 +299,7 @@ final class ConversationThreadViewController: UIViewController {
     /// (#2049): the pill starts from what is known there — the inbox row
     /// that opened the thread knew it — and follows every change to it, a
     /// follow from a profile card included.
-    private let entities: EntityStore?
+    private let entities: (any ProfileEntityReading & ProfileEntityWriting)?
     private var peerObservation: EntityObservation?
     private var peerRelation: FollowRelation?
     /// Whom `peerRelation` was asked for, so a peer is asked once.
@@ -380,7 +380,7 @@ final class ConversationThreadViewController: UIViewController {
         imagePipeline: ImagePipeline,
         socialGraph: (any SocialGraphWriting)? = nil,
         followRelations: (any SocialGraphReading)? = nil,
-        entities: EntityStore? = nil
+        entities: (any ProfileEntityReading & ProfileEntityWriting)? = nil
     ) {
         self.entities = entities
         self.driver = driver

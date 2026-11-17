@@ -129,7 +129,7 @@ final class TextPostComposerViewController: UIViewController {
         router: (any Router)?,
         wallet: (any WalletReading)?,
         makeWalletSheet: (@MainActor () -> UIViewController)?,
-        entities: EntityStore? = nil,
+        entities: (any EntityReading & EntityWriting)? = nil,
         bookmarks: PostBookmarkStore = .shared,
         attaching embed: PostEmbed? = nil
     ) {

@@ -114,7 +114,7 @@ public final class FeedViewModel {
     /// realtime ticks, the reconciles, and every point the viewer stakes,
     /// from any screen. The view model writes what it loads and re-draws
     /// what changed, whoever changed it.
-    private let entities: EntityStore
+    private let entities: any EntityReading & EntityWriting
     private var entityObservation: EntityObservation?
     /// Keeps the active page's post in the store, whatever a memory trim
     /// takes: a stake on it needs a count to move.
@@ -210,7 +210,7 @@ public final class FeedViewModel {
         composedPosts: ComposedPostChannel? = nil,
         router: (any Router)? = nil,
         commentPreferences: MediaCommentPreferencesStore = .standard,
-        entities: EntityStore? = nil,
+        entities: (any EntityReading & EntityWriting)? = nil,
         unavailablePosts: UnavailablePosts? = nil,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
@@ -906,7 +906,7 @@ public final class FeedViewModel {
     private func reconcileCounts() async {
         guard let engagementProvider, !items.isEmpty else { return }
         guard let counts = try? await engagementProvider.likeCounts(for: items.map(\.id)) else { return }
-        entities.mergeCounts(counts.mapValues { PostCounts(likes: $0) })
+        entities.mergeCounts(counts.mapValues { PostCounts(likes: $0) }, tier: .recent, freshness: .fresh)
     }
 
     /// What a page loaded goes into the store — one entity per post, shared
@@ -918,7 +918,7 @@ public final class FeedViewModel {
             let id = entry.post.id
             engagement[id] = EngagementState(likeCount: entry.likeCount, isLiked: engagement[id]?.isLiked ?? false)
         }
-        entities.upsert(entries, counts: freshness)
+        entities.upsert(entries, tier: .recent, counts: freshness)
     }
 
     private func build(_ entries: [FeedEntry]) async -> [FeedItemDisplayModel]? {

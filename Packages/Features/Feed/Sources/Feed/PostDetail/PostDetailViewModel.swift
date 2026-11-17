@@ -247,7 +247,7 @@ public final class PostDetailViewModel {
     /// The post's live count (#896): a like placed in the feed, on a card or
     /// in this page's own comments bar, and every realtime tick, all reach
     /// this page through it.
-    private let entities: EntityStore
+    private let entities: any EntityReading & EntityWriting
     private var entityObservation: EntityObservation?
     private var likeInFlight = false
     private var authorID: ProfileID?
@@ -290,7 +290,7 @@ public final class PostDetailViewModel {
         engagementProvider: (any EngagementProviding)? = nil,
         commentsProvider: (any CommentsProviding)? = nil,
         router: (any Router)? = nil,
-        entities: EntityStore? = nil,
+        entities: (any EntityReading & EntityWriting)? = nil,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.postID = postID
@@ -313,7 +313,7 @@ public final class PostDetailViewModel {
         engagementProvider: (any EngagementProviding)? = nil,
         commentsProvider: (any CommentsProviding)? = nil,
         router: (any Router)? = nil,
-        entities: EntityStore? = nil,
+        entities: (any EntityReading & EntityWriting)? = nil,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.postID = nil
@@ -724,7 +724,7 @@ public final class PostDetailViewModel {
         authorStub = ProfileIdentityStub(handle: entry.author.handle, displayName: entry.author.displayName)
         engagement = EngagementState(likeCount: entry.likeCount, isLiked: false)
         observeEntity(entry.post.id)
-        entities.upsert([entry])
+        entities.upsert([entry], tier: .recent, counts: .fresh)
         phase = .content(PostDetailDisplayModel(entry: entry, now: now()))
         comments = []
         resetPaging()
@@ -851,7 +851,7 @@ public final class PostDetailViewModel {
         engagement = EngagementState(likeCount: entry.likeCount, isLiked: false)
         // The repository's copy may be older than the store's count (its
         // cache keeps a post as it was fetched): it only fills one.
-        entities.upsert([entry], counts: .ifUnknown)
+        entities.upsert([entry], tier: .recent, counts: .ifUnknown)
         phase = .content(PostDetailDisplayModel(entry: entry, now: now()))
         onEngagementChange?(engagementState)
     }

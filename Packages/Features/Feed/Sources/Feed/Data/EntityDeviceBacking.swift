@@ -30,13 +30,13 @@ public final class EntityDeviceBacking: Sendable {
     /// start shows.
     public static let restoreLimit = 300
 
-    private let entities: EntityStore
+    private let entities: any PostEntityReading & PostEntityWriting
     private let cache: FeedLocalCache
     private let observation: EntityObservation
     /// The device writes, in order, off the main thread.
     private static let queue = DispatchQueue(label: "cn.wynn.entity-device-backing", qos: .utility)
 
-    public init(entities: EntityStore, cache: FeedLocalCache) {
+    public init(entities: any PostEntityReading & PostEntityWriting, cache: FeedLocalCache) {
         self.entities = entities
         self.cache = cache
         observation = entities.observePosts { [weak entities] change in

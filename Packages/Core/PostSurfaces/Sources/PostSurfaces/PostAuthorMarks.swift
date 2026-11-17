@@ -33,7 +33,7 @@ final public class PostAuthorMarks {
     private var followSubscription: FollowGraphSubscription?
 
     public init(
-        writer: (any SocialGraphWriting)?, reader: (any SocialGraphReading)?, entities: EntityStore,
+        writer: (any SocialGraphWriting)?, reader: (any SocialGraphReading)?, entities: any ProfileEntityReading & ProfileEntityWriting,
         followEvents: FollowGraphEvents? = nil,
         viewer: @escaping @MainActor () -> ProfileID? = SnapAuthorFollowStore.activeProfile
     ) {
