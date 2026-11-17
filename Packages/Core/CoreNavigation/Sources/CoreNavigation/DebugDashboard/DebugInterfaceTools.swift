@@ -529,6 +529,9 @@ public extension DebugDashboard {
     private static var slowAnimations = false
     private static var largestText = false
     private static var forcedDark = false
+    /// The style "Dark" replaced: the stored appearance, which the scene
+    /// applies to every window alike (AppPreferences, #2383).
+    private static var styleBeforeDark: UIUserInterfaceStyle = .unspecified
     private static var rightToLeft = false
 
     private static func interfaceSections() -> [DebugSection] {
@@ -557,9 +560,10 @@ public extension DebugDashboard {
                                     isOn: { forcedDark }, set: { on in
                                         forcedDark = on
                                         if on {
+                                            styleBeforeDark = DebugWindows.app.first?.overrideUserInterfaceStyle ?? .unspecified
                                             DebugWindows.app.forEach { $0.overrideUserInterfaceStyle = .dark }
                                         } else {
-                                            AppearancePreference.apply(to: DebugWindows.app)
+                                            DebugWindows.app.forEach { $0.overrideUserInterfaceStyle = styleBeforeDark }
                                         }
                                     })),
                 .toggle(DebugToggle(title: "Right to left", detail: "A layout-direction override: a relaunch in an RTL language is the full check",

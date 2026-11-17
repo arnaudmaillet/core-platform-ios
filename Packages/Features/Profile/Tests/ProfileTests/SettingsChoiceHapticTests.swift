@@ -1,3 +1,4 @@
+import AppPreferences
 import DesignSystem
 import Foundation
 import Testing

@@ -4,7 +4,8 @@ import UIKit
 @testable import DesignSystem
 
 /// Settings → App and Device → Display (#468): the app-level Reduce Motion
-/// every animation reads, and the stored appearance.
+/// every animation reads, Low Power Mode and the emojis' switch. The stored
+/// appearance is AppPreferences' (#2383).
 @MainActor
 @Suite(.serialized)
 struct DisplayPreferencesTests {
@@ -145,27 +146,5 @@ struct DisplayPreferencesTests {
         #expect(!LowPowerMode.savesBattery, "a stored Power Saving still applied")
         LowPowerMode.forgetPowerSaving()
         #expect(defaults.object(forKey: LowPowerMode.powerSavingKey) == nil)
-    }
-
-    @Test func appearanceDefaultsToSystemAndMapsToInterfaceStyles() {
-        let previous = AppearancePreference.defaults
-        defer { AppearancePreference.defaults = previous }
-        AppearancePreference.defaults = isolated()
-        #expect(AppearancePreference.current == .system)
-        AppearancePreference.current = .dark
-        #expect(AppearancePreference.current == .dark)
-        #expect(AppearancePreference.system.interfaceStyle == .unspecified)
-        #expect(AppearancePreference.light.interfaceStyle == .light)
-        #expect(AppearancePreference.dark.interfaceStyle == .dark)
-    }
-
-    @Test func applyingSetsEveryWindowsOverride() {
-        let previous = AppearancePreference.defaults
-        defer { AppearancePreference.defaults = previous }
-        AppearancePreference.defaults = isolated()
-        AppearancePreference.current = .light
-        let windows = [UIWindow(), UIWindow()]
-        AppearancePreference.apply(to: windows)
-        #expect(windows.allSatisfy { $0.overrideUserInterfaceStyle == .light })
     }
 }

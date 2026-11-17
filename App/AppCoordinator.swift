@@ -1,3 +1,4 @@
+import AppPreferences
 import Auth
 import AuthInterface
 import CoreModels

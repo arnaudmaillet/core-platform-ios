@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import DesignSystem
+@testable import AppPreferences
 
 /// Settings → Security and Login → App Lock (#418): when returning to the app
 /// asks for Face ID / the passcode.

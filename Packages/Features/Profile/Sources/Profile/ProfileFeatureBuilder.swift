@@ -1,3 +1,4 @@
+import AppPreferences
 import AuthInterface
 import CacheKit
 import MediaCore
