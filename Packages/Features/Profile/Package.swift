@@ -36,9 +36,7 @@ let package = Package(
         // Tests only: the profile's pages are the post surfaces' grid (#1273,
         // #2379), built through `PostGridPages.make` — the real page, not a
         // stand-in.
-        .package(path: "../../Core/PostSurfaces"),
-        // Tests only, until #2372: some suites still reach Feed.
-        .package(path: "../Feed")
+        .package(path: "../../Core/PostSurfaces")
     ],
     targets: [
         // Settings and Account, with the data layer they share with the
@@ -134,7 +132,6 @@ let package = Package(
                 "LaunchArguments",
                 "Profile",
                 "ProfileSettings",
-                "Feed",
                 // The feed's interface the suites' grid pages and hero
                 // origins are built against.
                 "FeedInterface",

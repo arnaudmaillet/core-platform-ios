@@ -1,4 +1,3 @@
-import Feed
 import FeedInterface
 import Foundation
 import MediaCore
