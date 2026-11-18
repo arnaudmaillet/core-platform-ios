@@ -2,6 +2,7 @@ import CoreModels
 import Testing
 import UIKit
 @testable import Feed
+@testable import ThreadKit
 
 /// The action column as one glass (#1872): which items stand in which
 /// bubble, the fold into the sound, and that each item stays a live view in

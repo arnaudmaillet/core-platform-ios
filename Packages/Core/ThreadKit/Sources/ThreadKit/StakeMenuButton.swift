@@ -9,8 +9,8 @@ import UIKit
 /// itself up the responder chain (`MemberGates`), so a viewer who signs up
 /// mid-session has the menu on their next press, with nothing to re-install.
 /// Their tap still runs the control's action, which asks them to sign up.
-class StakeMenuButton: UIButton {
-    override func contextMenuInteraction(
+open class StakeMenuButton: UIButton {
+    override open func contextMenuInteraction(
         _ interaction: UIContextMenuInteraction, configurationForMenuAtLocation location: CGPoint
     ) -> UIContextMenuConfiguration? {
         guard !MemberGates.isGuest(self) else { return nil }

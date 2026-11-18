@@ -5,6 +5,7 @@ import MediaCore
 import Testing
 import UIKit
 @testable import Feed
+@testable import ThreadKit
 
 /// SECTIONS BY PRESENCE (#1773, the rule of #1756): no skeleton for a section
 /// known to be empty — never bones that turn into an empty state.

@@ -33,15 +33,15 @@ import DesignSystem
 /// figure below is a measured platter and the result leaves slack; there is no
 /// floor that could out-argue the bar. Pure arithmetic, pinned by
 /// `SnapBarPillWidthsTests` at 375 / 393 / 402 / 440.
-struct SnapBarPillWidths: Equatable {
+public struct SnapBarPillWidths: Equatable {
     /// The author pill's width in the TOOLBAR's leading slot (#671): what the
     /// footer's stock items leave (`toolbarReserve(icon:)`), capped, so the
     /// run never folds into `•••`.
-    var toolbarAuthor: CGFloat
+    public var toolbarAuthor: CGFloat
     /// The same on a text post's footer (#1924): `[author] [♥ n] [☆]`, the
     /// like in repost's place and Share in the comment field's slot (#1999,
     /// `textToolbarReserve`).
-    var toolbarAuthorBesideLike: CGFloat
+    public var toolbarAuthorBesideLike: CGFloat
 
     // MARK: - Navigation bar (measured, iOS 26/27)
 
@@ -57,13 +57,13 @@ struct SnapBarPillWidths: Equatable {
     static let backButtonWidth: CGFloat = 36
     /// What the arithmetic keeps back, so a rounding or an unmeasured point
     /// is never the one that folds the run.
-    static let slack: CGFloat = 8
+    public static let slack: CGFloat = 8
 
     // MARK: - Toolbar (measured, iOS 27, `-dump-bars`, #1679)
 
     /// A stock glyph item's width at the default text size: what the
     /// footer's ☆, ⇄ and ⋯ draw (`BarItems.icon`, since #1683).
-    static let defaultToolbarIcon: CGFloat = 38
+    public static let defaultToolbarIcon: CGFloat = 38
 
     /// Everything on the footer but the author pill, for glyph items `icon`
     /// wide — read off the bar's own frames on iOS 27 (iPhone SE and 18 Pro,
@@ -76,14 +76,14 @@ struct SnapBarPillWidths: Equatable {
     /// ⚠️ It was a fixed 280 against an 86pt platter — the custom buttons'
     /// before the stock items (#1683) — and a long name on an SE folded ⇄
     /// away, at any text size and at once at XXXL.
-    static func toolbarReserve(icon: CGFloat) -> CGFloat {
+    public static func toolbarReserve(icon: CGFloat) -> CGFloat {
         toolbarReserve(icon: icon, platter: true)
     }
 
     /// The same footer with (`platter`) or without the two-glyph platter: a
     /// footer that wears only ⋯ (#1679: its own arithmetic left the peer
     /// pill 163pt on an SE, and a second glyph folded into `•••` at XXXL).
-    static func toolbarReserve(icon: CGFloat, platter: Bool) -> CGFloat {
+    public static func toolbarReserve(icon: CGFloat, platter: Bool) -> CGFloat {
         28 + 10 + 13 + (platter ? (2 * icon + 31) + 13 : 0) + 48 + 28 + slack
     }
 
@@ -93,7 +93,7 @@ struct SnapBarPillWidths: Equatable {
     /// The margins, the pill's glass and ⋯ as above; each lone bubble its
     /// glyph and the bar's 10 (☆ alone measured 59 at XXXL: 49 + 10) and the
     /// 13pt gap before it.
-    static func toolbarReserve(icon: CGFloat, lone: Int) -> CGFloat {
+    public static func toolbarReserve(icon: CGFloat, lone: Int) -> CGFloat {
         28 + 10 + 13 + CGFloat(max(0, lone)) * (icon + 10 + 13) + 48 + 28 + slack
     }
 
@@ -114,7 +114,7 @@ struct SnapBarPillWidths: Equatable {
 
     /// A stock glyph item's width at `traits`' text size.
     @MainActor
-    static func toolbarIcon(for traits: UITraitCollection) -> CGFloat {
+    public static func toolbarIcon(for traits: UITraitCollection) -> CGFloat {
         UIFontMetrics(forTextStyle: .body).scaledValue(for: defaultToolbarIcon, compatibleWith: traits)
     }
 
@@ -125,14 +125,14 @@ struct SnapBarPillWidths: Equatable {
     /// breathing. Not a floor that keeps text readable — only one that keeps
     /// a pathological input (an accessibility-size glyph on a narrow bar)
     /// from asking for a negative width.
-    static let minimum: CGFloat = 36
+    public static let minimum: CGFloat = 36
 
     /// - Parameters:
     ///   - toolbarWidth: the toolbar's (the screen's, on a phone).
     ///   - toolbarIcon: a stock glyph item's width at the screen's text size.
     ///   - toolbarLike: a text post's footer like, its bubble's width
     ///     (`SnapFooterToolbar.likeBubbleWidth`); nil with no such footer.
-    static func resolve(
+    public static func resolve(
         toolbarWidth: CGFloat,
         toolbarIcon: CGFloat = defaultToolbarIcon,
         toolbarLike: CGFloat? = nil

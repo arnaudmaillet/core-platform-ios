@@ -5,6 +5,7 @@ import Testing
 import UIKit
 @testable import Feed
 @testable import PostSurfaces
+@testable import ThreadKit
 
 /// The owner's second device check of the single layout (#683): the like pill
 /// and the sound bubble fly in with the toolbar's ink, the record follows the

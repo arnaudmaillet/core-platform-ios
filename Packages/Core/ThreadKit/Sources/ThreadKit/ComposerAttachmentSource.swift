@@ -12,15 +12,22 @@ import UIKit
 /// library, later a GIF picker — is the host's: the composer only calls
 /// `action`, and never uploads anything itself. A new source is one more
 /// entry, with no change to the composer.
-struct ComposerAttachmentSource {
+public struct ComposerAttachmentSource {
     /// Stable, by function ("conversation.camera"): the bubble's
     /// accessibility identifier, and what tells a list that only changed its
     /// actions from one that changed its entries.
-    let id: String
+    public let id: String
     /// The SF Symbol the bubble wears.
-    let symbol: String
+    public let symbol: String
     /// What VoiceOver says ("Camera").
-    let accessibilityLabel: String
+    public let accessibilityLabel: String
     /// The tap: the host's.
-    let action: @MainActor () -> Void
+    public let action: @MainActor () -> Void
+
+    public init(id: String, symbol: String, accessibilityLabel: String, action: @escaping @MainActor () -> Void) {
+        self.id = id
+        self.symbol = symbol
+        self.accessibilityLabel = accessibilityLabel
+        self.action = action
+    }
 }

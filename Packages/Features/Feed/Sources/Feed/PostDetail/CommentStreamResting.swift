@@ -1,3 +1,4 @@
+import DesignSystem
 import UIKit
 
 /// WHERE A COMMENT STREAM RESTS: one contract of the comments panel (#2287

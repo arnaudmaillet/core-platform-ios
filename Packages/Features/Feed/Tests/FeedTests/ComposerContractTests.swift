@@ -5,6 +5,7 @@ import UIKit
 import VoiceKit
 import VoiceKitUI
 @testable import Feed
+@testable import ThreadKit
 
 /// #2308: ONE composer contract for a conversation and a post's comments.
 /// Each host declares only what differs (`ComposerConfiguration`: its voice,

@@ -5,6 +5,7 @@ import Testing
 import UIKit
 @testable import Feed
 @testable import PostSurfaces
+@testable import ThreadKit
 
 /// A NEW AUTHOR IS A NEW ITEM, UNDER THE AUTHOR'S IDENTIFIER (#1791).
 ///

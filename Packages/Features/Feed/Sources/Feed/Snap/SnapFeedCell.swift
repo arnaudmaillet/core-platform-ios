@@ -9,6 +9,7 @@ import PostGrid
 import PostSurfaces
 import UIKit
 import LaunchArguments
+import ThreadKit
 
 /// A full-screen snap cell: cover-fit media under a `SnapChromeView` overlay
 /// (scrim, full-width caption). Text-only posts render as an empty shell —

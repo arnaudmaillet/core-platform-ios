@@ -1,6 +1,7 @@
 import DesignSystem
 import MediaCore
 import MediaUI
+import ThreadKit
 import UIKit
 
 /// The sound sheet's head: the RECORD of the post the sheet opened over, and

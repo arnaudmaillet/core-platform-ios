@@ -22,24 +22,24 @@ import UIKit
 /// It used to be custom-view `UIButton`s in a `UIStackView` — each a circle
 /// with a shadow, re-implementing what the bar draws (R1).
 @MainActor
-enum SnapFooterToolbar {
+public enum SnapFooterToolbar {
     /// Identifiers by function, the same on every screen that wears the
     /// footer, so a push from the feed to a text post keeps them in place.
-    enum ID {
-        static let save = "feed.snap.save"
-        static let repost = "feed.snap.repost"
-        static let more = "feed.snap.more"
-        static let share = "feed.snap.share"
+    public enum ID {
+        public static let save = "feed.snap.save"
+        public static let repost = "feed.snap.repost"
+        public static let more = "feed.snap.more"
+        public static let share = "feed.snap.share"
         /// The post's sound, the footer's trailing item on a media page (#1999).
-        static let sound = "feed.snap.sound"
-        static let like = "feed.snap.like"
+        public static let sound = "feed.snap.sound"
+        public static let like = "feed.snap.like"
     }
 
     /// The bar's items, left to right: the leading container under
     /// `leadingID`, the actions sharing one platter, and ⋯ in its own bubble.
     /// No actions, no platter (nothing there to save or repost); no `more`,
     /// no ⋯.
-    static func items(
+    public static func items(
         leading: UIView, leadingID: String, actions: [UIBarButtonItem], more: UIBarButtonItem?
     ) -> [UIBarButtonItem] {
         [BarItems.container(id: leadingID, view: leading)] + trailingItems(actions: actions, more: more)
@@ -51,9 +51,9 @@ enum SnapFooterToolbar {
     /// simulator, iOS 27.2: the save-and-repost platter and the author pill
     /// stand 44 pt tall), which a custom item that draws its own glass
     /// matches — the sound's record (#1999). At 36 pt it read a size smaller.
-    static let bubbleSide: CGFloat = 44
+    public static let bubbleSide: CGFloat = 44
 
-    static func trailingItems(actions: [UIBarButtonItem], more: UIBarButtonItem?) -> [UIBarButtonItem] {
+    public static func trailingItems(actions: [UIBarButtonItem], more: UIBarButtonItem?) -> [UIBarButtonItem] {
         var items: [UIBarButtonItem] = [.flexibleSpace()]
         items.append(contentsOf: actions)
         if let more {
@@ -66,18 +66,18 @@ enum SnapFooterToolbar {
     /// The save star, outline at rest (`SaveStar`); `saveImage(saved:)` turns
     /// it gold once saved — on the ITEM, never through its action, whose
     /// image a `UIAction` would re-apply when it fires.
-    static func makeSaveItem(action: @escaping () -> Void) -> UIBarButtonItem {
+    public static func makeSaveItem(action: @escaping () -> Void) -> UIBarButtonItem {
         BarItems.icon(id: ID.save, image: saveImage(saved: false), label: "Save", action: action)
     }
 
-    static func saveImage(saved: Bool) -> UIImage? {
+    public static func saveImage(saved: Bool) -> UIImage? {
         SaveStar.image(saved: saved)
     }
 
     /// ⚠️ Drawn without an action — `PostComposer` takes no parent, so there
     /// is no client path to publish a repost yet (see the feed's note). A
     /// stock item with no target does nothing when tapped.
-    static func makeRepostItem() -> UIBarButtonItem {
+    public static func makeRepostItem() -> UIBarButtonItem {
         let item = UIBarButtonItem(
             image: UIImage.symbol(named: PostActionSymbol.repost), style: .plain, target: nil, action: nil
         )
@@ -87,7 +87,7 @@ enum SnapFooterToolbar {
     }
 
     /// ⋯ — the thread's and the text composer's menu.
-    static func makeMoreItem(menu: UIMenu) -> UIBarButtonItem {
+    public static func makeMoreItem(menu: UIMenu) -> UIBarButtonItem {
         BarItems.icon(id: ID.more, image: UIImage(systemName: "ellipsis"), label: "More actions", menu: menu)
     }
 
@@ -99,13 +99,13 @@ enum SnapFooterToolbar {
     ///
     /// ⚠️ ITS WORD AND GLYPH ARE FIXED (R3): a new count or a new face is a
     /// new item under `ID.like`, which the bar animates.
-    static func makeLikeItem(count: Int64?, spent: Int, action: @escaping () -> Void) -> UIBarButtonItem {
+    public static func makeLikeItem(count: Int64?, spent: Int, action: @escaping () -> Void) -> UIBarButtonItem {
         let heart = LikesSymbol.likeImage(staked: spent > 0, likeGlyph)
         let item: UIBarButtonItem
         if let count {
             let (labeled, label) = BarItems.labeled(id: ID.like, title: count.formattedCompact(), image: heart, action: action)
             label.accessibilityLabel = "Like"
-            label.accessibilityValue = SnapRailBoostButton.accessibilityValue(likeCount: count, staked: spent)
+            label.accessibilityValue = SnapActionColumn.likeAccessibilityValue(likeCount: count, staked: spent)
             item = labeled
         } else {
             item = BarItems.icon(id: ID.like, image: heart, label: "Like", action: action)
@@ -118,7 +118,7 @@ enum SnapFooterToolbar {
 
     /// The like's bubble on a text post's footer at a wide count ("999K"),
     /// the glass around it included — measured at `traits`' text size.
-    static func likeBubbleWidth(for traits: UITraitCollection) -> CGFloat {
+    public static func likeBubbleWidth(for traits: UITraitCollection) -> CGFloat {
         let probe = StretchedBarLabel(
             title: Int64(999_000).formattedCompact(), image: LikesSymbol.likeImage(staked: false, likeGlyph),
             ink: .label, weight: .regular, action: {}

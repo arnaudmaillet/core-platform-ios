@@ -8,6 +8,7 @@ import Testing
 import Transitions
 import UIKit
 @testable import Feed
+@testable import ThreadKit
 
 // A swipe up past the true last post closes the feed (#628) — and only there.
 

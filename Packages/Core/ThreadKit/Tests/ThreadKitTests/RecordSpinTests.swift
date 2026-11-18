@@ -1,6 +1,6 @@
 import QuartzCore
 import Testing
-@testable import Feed
+@testable import ThreadKit
 
 /// The cover turning like a record while its sound plays (#580).
 @MainActor

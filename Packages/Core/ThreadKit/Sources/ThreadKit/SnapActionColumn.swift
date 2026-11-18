@@ -56,11 +56,11 @@ import UIKit
 /// field sits `glassGap` above the toolbar's glass, and the lower bubble sits
 /// on the same line (#669): the field, its avatar and the rail slot are one
 /// row of `bubbleSize` (#680).
-enum SnapActionColumn {
+public enum SnapActionColumn {
     /// The bubbles' side: the comment band's height — the like anchor's
     /// square, which the band has always sized. Font-derived, so it follows
     /// the text size the way the anchor does.
-    @MainActor static var bubbleSize: CGFloat { SnapCommentTickerView.bandHeight }
+    @MainActor public static var bubbleSize: CGFloat { CommentBandMetrics.bandHeight }
 
     /// From the screen's trailing edge (the chrome's margin) to the column —
     /// the like anchor's inset.
@@ -68,12 +68,12 @@ enum SnapActionColumn {
     /// had moved the whole column inboard to clear the edge strip — "il faut
     /// remettre où ils étaient avant"). A leftward drag born on the column
     /// counts as one born at the edge instead (`isOnTrailingColumn`).
-    static let trailingInset: CGFloat = Spacing.md
+    public static let trailingInset: CGFloat = Spacing.md
 
     /// Between the like bubble and the bubble under it. The like anchor's
     /// bottom is the band's, and the repost bubble's top is the caption
     /// floor's — the band → caption seam.
-    static let gap: CGFloat = Spacing.md
+    public static let gap: CGFloat = Spacing.md
 
     /// How far the LOWER bubble's bottom stands above the bottom margin line
     /// (the line the feed's safe area stops at, just above the toolbar).
@@ -82,7 +82,17 @@ enum SnapActionColumn {
     /// which stands `xl` (the caption's bottom gap) + the floor's two lines
     /// above that line; its bottom is one bubble lower.
     @MainActor static var restingLift: CGFloat {
-        Spacing.xl + SnapChromeView.captionFloorHeight - bubbleSize
+        Spacing.xl + captionFloorHeight - bubbleSize
+    }
+
+    /// The caption's locked box height — exactly TWO primary (body) lines,
+    /// matching the composed caption's geometry lock. Reserved by
+    /// `captionFloorGuide` on every format so the engagement corner (ticker /
+    /// rail / "+") is anchored to a single font-derived constant, agnostic of
+    /// whether the caption is a real two-line media caption or a collapsed
+    /// text-only placeholder.
+    @MainActor public static var captionFloorHeight: CGFloat {
+        2 * UIFont.appFont(forTextStyle: .body).lineHeight
     }
 
     /// ⚠️ MEASURED: how far the floating toolbar's GLASS stands below the
@@ -128,46 +138,57 @@ enum SnapActionColumn {
     /// The composer's INPUT ROW (its bottom edge) above the bottom margin line
     /// at rest: `glassGap` above the toolbar's glass — which is below the
     /// line, so this is the glass drop short of the gap (and may be negative).
-    static var inputRestingGap: CGFloat { glassGap - toolbarGlassDrop }
+    public static var inputRestingGap: CGFloat { glassGap - toolbarGlassDrop }
 
     /// ⚠️ THE STRIP'S SEAT (#2301, the owner 2026-11-11): the page strip's
     /// line stands this far above the top of the toolbar's glass — it
     /// belongs to the bottom of the screen, as TikTok's progress bar does. No longer the midpoint between
     /// the caption and the glass (#2252).
-    static let stripAboveGlass: CGFloat = 10
+    public static let stripAboveGlass: CGFloat = 10
 
     /// The caption's letters end this far above the strip's top (#2301): a
     /// 2 pt line ~10 pt under a line of text read as its underline. Measured
     /// from the letters (`captionLetterDrop`), so it holds at every size.
-    static let captionAboveStrip: CGFloat = 16
+    public static let captionAboveStrip: CGFloat = 16
 
     /// The breath over the bottom bar (#1722, the owner): every feed's whole
     /// bottom block — strip, cover, caption, column — stands this much higher
     /// over its toolbar, and the comments' composer rises by it too, so the
     /// column keeps its place. 6 pt: 12 was too much over a toolbar (the
     /// owner tries 4, 6 or 8).
-    static let bottomBreath: CGFloat = 6
+    public static let bottomBreath: CGFloat = 6
 
     /// Where the bottom bar's glass begins below the chrome's margins line
     /// (#2252): the breath the margins add over the safe-area line, plus the
     /// toolbar's own drop under it. `breathApplied` is false before a feed hands the
     /// chrome its insets: the margins are then the bare safe area.
-    static func glassBelowMargins(breathApplied: Bool = true) -> CGFloat {
+    public static func glassBelowMargins(breathApplied: Bool = true) -> CGFloat {
         let breath: CGFloat = breathApplied ? bottomBreath : 0
         return breath + toolbarGlassDrop
     }
 
     // MARK: - The like pill (#669)
 
+    /// "1.2K likes, you staked 3 points" — the post's count when it is shown,
+    /// the viewer's stake when there is any. Nil when there is neither.
+    public static func likeAccessibilityValue(likeCount: Int64?, staked: Int) -> String? {
+        var parts: [String] = []
+        if let likeCount {
+            parts.append(likeCount == 1 ? "1 like" : "\(likeCount.formattedCompact()) likes")
+        }
+        if staked > 0 { parts.append("you staked \(StakeMenu.likes(staked))") }
+        return parts.isEmpty ? nil : parts.joined(separator: ", ")
+    }
+
     /// The like pill's height: from the band's top down to `gap` above the
     /// lower bubble, which rests on the field line. The same on a text page as
     /// on a media one: derived from the margin line, never from the lower
     /// bubble, which a text page's chrome does not show.
-    @MainActor static var likePillHeight: CGFloat { bubbleSize + restingLift - inputRestingGap }
+    @MainActor public static var likePillHeight: CGFloat { bubbleSize + restingLift - inputRestingGap }
 
     /// The heart's symbol: an OUTLINE at rest, the points' red FILL once the
     /// viewer has staked (#680).
-    static let heartConfiguration = UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
+    public static let heartConfiguration = UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
 
     /// The heart's drawn height at `heartConfiguration` — the taller of the
     /// two faces it wears (outline at rest, filled once staked), which the
@@ -198,7 +219,7 @@ enum SnapActionColumn {
     /// it: a sibling sat on the glass without being part of it — it did not
     /// move with the press and was not drawn as the glass's content, and it
     /// read as pasted on (the owner, on a device).
-    @MainActor static func likeConfiguration(
+    @MainActor public static func likeConfiguration(
         _ base: UIButton.Configuration, staked: Bool, count: Int64?, ink: UIColor
     ) -> UIButton.Configuration {
         var config = base
@@ -238,8 +259,8 @@ enum SnapActionColumn {
 
 /// The layer the action column's two buttons live in (#695): mounted by the
 /// cell above the page's chrome, transparent to every touch but the buttons'.
-final class SnapActionColumnLayer: UIView {
-    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+public final class SnapActionColumnLayer: UIView {
+    public override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
         let hit = super.hitTest(point, with: event)
         return hit === self ? nil : hit
     }

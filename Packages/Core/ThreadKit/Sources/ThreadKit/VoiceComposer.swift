@@ -1,5 +1,4 @@
 import DesignSystem
-import FeedInterface
 import UIKit
 import VoiceKit
 import VoiceKitUI
@@ -15,8 +14,8 @@ import VoiceKitUI
 /// (it grows into the mic while the field is held,
 /// `CommentsInputBar.beginVoiceHold`) and over the content (the lock).
 @MainActor
-final class VoiceComposer {
-    enum Phase: Equatable {
+public final class VoiceComposer {
+    public enum Phase: Equatable {
         case idle
         /// The finger is down; the UI shows `revealDelay` after touch-down.
         case holding(revealed: Bool)
@@ -31,12 +30,12 @@ final class VoiceComposer {
         didSet { onPhaseChange?(phase) }
     }
 
-    var onSend: ((ConversationThreadVoiceTake) -> Void)?
+    public var onSend: ((ConversationThreadVoiceTake) -> Void)?
     /// Refused before: the screen offers Settings.
-    var onPermissionDenied: (() -> Void)?
+    public var onPermissionDenied: (() -> Void)?
     /// "Hold to record, release to send": a tap, or a take under 1 s.
-    var onHint: ((String) -> Void)?
-    var onPhaseChange: ((Phase) -> Void)?
+    public var onHint: ((String) -> Void)?
+    public var onPhaseChange: ((Phase) -> Void)?
 
     static let hint = "Hold to record, release to send"
 
@@ -64,7 +63,7 @@ final class VoiceComposer {
     private(set) var isJoining = false
     private var clock: Timer?
 
-    init(
+    public init(
         recorder: VoiceRecorder = VoiceRecorder(), draftKey: String?, now: @escaping () -> Date = Date.init,
         limit: TimeInterval = VoiceRecorder.maximumDuration,
         timerStyle: VoiceView.TimerStyle = .clock,
@@ -94,14 +93,14 @@ final class VoiceComposer {
 
     /// A recorder for the voice a host declares in its composer contract
     /// (`ComposerConfiguration.voice`, #2308): its limit and its timer.
-    convenience init(for voice: ComposerConfiguration.Voice, draftKey: String?) {
+    public convenience init(for voice: ComposerConfiguration.Voice, draftKey: String?) {
         self.init(draftKey: draftKey, limit: voice.limit, timerStyle: voice.timerStyle)
     }
 
     /// The bar it records from and the view the mic and the lock float in.
     /// The bar records where its host's contract declares a voice
     /// (`ComposerConfiguration.voice`): this only listens to its hold.
-    func attach(to bar: CommentsInputBar, host: UIView) {
+    public func attach(to bar: CommentsInputBar, host: UIView) {
         self.bar = bar
         self.host = host
         bar.onVoiceHold = { [weak self] event in self?.handle(event) }
@@ -419,7 +418,7 @@ final class VoiceComposer {
     // MARK: - A post's draft (#2209)
 
     /// Whether the bar holds a take a draft could keep: locked or paused.
-    var hasTake: Bool {
+    public var hasTake: Bool {
         switch phase {
         case .locked, .paused: true
         case .idle, .holding: false
@@ -428,12 +427,12 @@ final class VoiceComposer {
 
     /// The closed take on the bar, when it is one: a take put back by
     /// `restore(_:)` keeps its file until something is recorded on.
-    var closedTakeURL: URL? { draft?.fileURL }
+    public var closedTakeURL: URL? { draft?.fileURL }
 
     /// The take on the bar, closed, for a post's draft to keep — and the bar
     /// idle again. Nil when there is no take, or one under a second. A take
     /// still under the finger goes, as it does on leaving.
-    func takeForDraft(_ done: @escaping (VoiceDraft?) -> Void) {
+    public func takeForDraft(_ done: @escaping (VoiceDraft?) -> Void) {
         switch phase {
         case .locked, .paused:
             guard !isJoining else { return done(nil) }
@@ -458,7 +457,7 @@ final class VoiceComposer {
     /// A post's draft reopened with its voice: the take on the paused bar,
     /// as a conversation's kept take comes back (`attach`). Whatever was on
     /// the bar goes.
-    func restore(_ take: VoiceDraft) {
+    public func restore(_ take: VoiceDraft) {
         guard bar != nil else { return }
         if phase != .idle { discard() }
         draft = take
@@ -466,7 +465,7 @@ final class VoiceComposer {
     }
 
     /// The take goes without a word: another draft takes the composer.
-    func clearTake() {
+    public func clearTake() {
         guard phase != .idle else { return }
         discard()
     }
@@ -524,7 +523,7 @@ final class VoiceComposer {
 
     /// Leaving the conversation: a locked or paused take is kept as its
     /// draft for the app's session; one still under the finger goes.
-    func leave() {
+    public func leave() {
         switch phase {
         case .locked, .paused:
             let key = draftKey

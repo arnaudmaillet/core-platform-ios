@@ -18,17 +18,17 @@ import UIKit
 ///
 /// One helper for every host, so no screen grows its own arithmetic: the
 /// conversation (phase 1), the comments (phase 2).
-enum StreamBottomAnchor {
+public enum StreamBottomAnchor {
     /// The room above a stream of `contentHeight` in a `viewport` — the
     /// stream's bounds less its top and bottom insets, the composer's
     /// clearance included, and WITHOUT any slack already applied.
-    static func slack(viewport: CGFloat, contentHeight: CGFloat) -> CGFloat {
+    public static func slack(viewport: CGFloat, contentHeight: CGFloat) -> CGFloat {
         max(0, viewport - contentHeight)
     }
 
     /// `scrollView`'s slack, given the slack it wears now (`current`, part of
     /// its top inset): the viewport is measured as if it wore none.
-    static func slack(for scrollView: UIScrollView, wearing current: CGFloat) -> CGFloat {
+    public static func slack(for scrollView: UIScrollView, wearing current: CGFloat) -> CGFloat {
         let insets = scrollView.adjustedContentInset
         let viewport = scrollView.bounds.height - (insets.top - current) - insets.bottom
         return slack(viewport: viewport, contentHeight: scrollView.contentSize.height)

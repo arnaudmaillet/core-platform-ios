@@ -1,6 +1,6 @@
 import Testing
 import UIKit
-@testable import Feed
+@testable import ThreadKit
 
 /// The composer's field answers a touch natively (#730): interactive Liquid
 /// Glass, as the avatar bubble beside it already was.

@@ -4,6 +4,7 @@ import Testing
 import UIKit
 @testable import Feed
 @testable import PostSurfaces
+@testable import ThreadKit
 
 /// The like pill (#669, the layout since #680): the lower bubble sits on the
 /// composer's field line and the like button is a vertical pill above it —

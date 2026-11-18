@@ -5,6 +5,7 @@ import Testing
 import UIKit
 @testable import Feed
 @testable import PostSurfaces
+@testable import ThreadKit
 
 /// The full-screen reader as the map, profiles and conversations push it:
 /// the author pill in the toolbar, the danmaku over the stream, the bottom

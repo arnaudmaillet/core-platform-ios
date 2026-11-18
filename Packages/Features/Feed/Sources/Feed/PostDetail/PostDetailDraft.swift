@@ -1,5 +1,6 @@
 import CoreModels
 import FeedInterface
+import ThreadKit
 
 /// How a post that does not exist yet comes to exist: its first message,
 /// published as the post, comes back as the entry it became.

@@ -5,6 +5,7 @@ import MediaCore
 import MediaUI
 import UIKit
 import LaunchArguments
+import ThreadKit
 
 /// The danmaku band: `laneCount` lanes of micro-reactions conveying
 /// right-to-left over the page's media, directly above the caption.
@@ -51,7 +52,7 @@ import LaunchArguments
 /// backgrounded apps) and cell reuse leak-proof. Every deactivation path
 /// also takes the band off screen, so nothing is ever seen stopping.
 final class SnapCommentTickerView: UIView {
-    static let laneCount = 2
+    static let laneCount = CommentBandMetrics.laneCount
     /// Per-lane speeds (pt/s). Deliberately staggered and incommensurate so
     /// the lanes drift out of phase instead of moving as a block.
     /// Calibrated low: the band is a micro-reaction dump and should glide
@@ -82,7 +83,7 @@ final class SnapCommentTickerView: UIView {
     /// Minimum horizontal daylight between two bubbles in the same lane —
     /// generous, so the slow glide reads sparse rather than congested.
     static let interItemGap: CGFloat = 16
-    private static let laneSpacing: CGFloat = 3
+    private static let laneSpacing = CommentBandMetrics.laneSpacing
 
     // MARK: Interaction tuning
 
@@ -292,25 +293,13 @@ final class SnapCommentTickerView: UIView {
         )
     }
 
-    /// One lane's height: it fits BOTH the caption line (+ insets) and the
-    /// compact avatar, so a leading circle sits centered without growing the
-    /// lane. Read once per band, at init (the band never re-measures).
-    private static var laneBubbleHeight: CGFloat {
-        max(
-            TickerBubbleView.avatarDiameter,
-            ceil(UIFont.appFont(forTextStyle: .caption1).lineHeight)
-                + TickerBubbleView.textInsets.top + TickerBubbleView.textInsets.bottom
-        )
-    }
+    /// One lane's height: `CommentBandMetrics.laneBubbleHeight` (#2380).
+    /// Read once per band, at init (the band never re-measures).
+    private static var laneBubbleHeight: CGFloat { CommentBandMetrics.laneBubbleHeight }
 
-    /// The band's height in the current text size — what a band built now
-    /// would report as its intrinsic height. The engagement corner's HEIGHT
-    /// AUTHORITY (the boost anchor's square is this tall), stated without a
-    /// band in hand, for a surface that has to stand a control the same size
-    /// somewhere else (`SnapActionColumn`).
-    static var bandHeight: CGFloat {
-        CGFloat(laneCount) * laneBubbleHeight + CGFloat(laneCount - 1) * laneSpacing
-    }
+    /// The band's height in the current text size: `CommentBandMetrics.bandHeight`
+    /// (#2380), which the action column reads too.
+    static var bandHeight: CGFloat { CommentBandMetrics.bandHeight }
 
     // MARK: - Content & lifecycle
 
@@ -1145,16 +1134,14 @@ private final class DisplayLinkProxy: NSObject {
 /// bubble over the video. The bubble is the lane's height: a roomier one
 /// grows the band and the whole corner sized from it (#1990, declined).
 final class TickerBubbleView: UIView {
-    /// Sized to fit within the lane (the band height is derived from the
-    /// caption line + text insets, so a compact circle sits centered without
-    /// growing the band).
-    static let avatarDiameter: CGFloat = 20
+    /// Sized to fit within the lane: `CommentBandMetrics.bubbleAvatarDiameter`.
+    static let avatarDiameter = CommentBandMetrics.bubbleAvatarDiameter
     /// The avatar's inset from the bubble's leading edge.
     static let avatarInset: CGFloat = 1
     static let avatarGap: CGFloat = 6
     /// The room after the text: the next bubble keeps `interItemGap` beyond.
     static let trailingPadding: CGFloat = Spacing.sm
-    static let textInsets = UIEdgeInsets(top: 3, left: 0, bottom: 3, right: 0)
+    static let textInsets = CommentBandMetrics.bubbleTextInsets
     static let font = UIFont.scaledFont(forTextStyle: .caption1, weight: .semibold)
 
     // MARK: The letters' outline and shadow (#2339)

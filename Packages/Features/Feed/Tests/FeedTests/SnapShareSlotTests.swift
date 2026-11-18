@@ -2,6 +2,7 @@ import CoreModels
 import Testing
 import UIKit
 @testable import Feed
+@testable import ThreadKit
 
 /// A pushed text page's Share, in the slot right of the comment field
 /// (#1999): the toolbar's action, the way back over it (#1929), and

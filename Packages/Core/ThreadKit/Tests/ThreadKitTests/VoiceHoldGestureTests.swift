@@ -1,6 +1,6 @@
 import CoreGraphics
 import Testing
-@testable import Feed
+@testable import ThreadKit
 
 /// The hold's thresholds (#2102): 200 ms, 100 pt to cancel, 55 % on
 /// release, 20 + 80 pt to lock, no lock past 30 % of the way to cancel.
