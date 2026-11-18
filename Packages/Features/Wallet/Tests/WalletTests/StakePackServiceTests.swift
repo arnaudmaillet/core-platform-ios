@@ -9,11 +9,19 @@ import WalletInterface
 @MainActor
 @Suite(.serialized)
 struct StakePackServiceTests {
+    /// Every wallet this suite makes, kept for the process. A seller keeps
+    /// its observer for the app's lifetime, filtered on its wallet's
+    /// address; a wallet freed here could hand that address to a later one,
+    /// and a dead seller would answer for it.
+    private static var wallets: [WalletStore] = []
+
     private static func freshWallet() -> WalletStore {
-        WalletStore(
+        let wallet = WalletStore(
             defaults: UserDefaults(suiteName: "stake-pack-\(UUID().uuidString)")!,
             scope: StorageScope(owner: .member(account: "account-1", profile: "profile-1"))
         )
+        wallets.append(wallet)
+        return wallet
     }
 
     /// One offer per tier of the catalogue, at the wallet's prices. With no

@@ -17,6 +17,7 @@ import MediaCore
 import UIKit
 import VoiceKit
 import VoiceKitUI
+import Wallet
 #if DEBUG
 import CoreNetworkingMocks
 #endif
@@ -24,7 +25,6 @@ import Upload
 #if DEBUG
 import ChatInterface
 import LaunchArguments
-import Wallet
 #endif
 
 /// Root coordinator. Owns the window and the top-level state machine:
