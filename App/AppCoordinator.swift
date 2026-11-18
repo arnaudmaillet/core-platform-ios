@@ -2,7 +2,6 @@ import AppPreferences
 import Auth
 import AuthInterface
 import CoreModels
-import DebugTools
 import FeedInterface
 import CoreNavigation
 import Transitions
@@ -24,6 +23,7 @@ import CoreNetworkingMocks
 import Upload
 #if DEBUG
 import ChatInterface
+import DebugTools
 import LaunchArguments
 #endif
 

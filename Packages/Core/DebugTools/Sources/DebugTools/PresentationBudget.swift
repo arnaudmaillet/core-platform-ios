@@ -1,5 +1,4 @@
 import Darwin
-import DebugTools
 import LaunchArguments
 import MachO
 import ObjectiveC
@@ -52,7 +51,7 @@ import UIKit
 /// gives a UI test the denominator: how many screen turns were measured, how
 /// many were over, and the worst one.
 @MainActor
-enum PresentationBudget {
+public enum PresentationBudget {
     private static var isInstalled = false
     nonisolated(unsafe) private static var budgetMs: Double = 8
     private static var traps = false
@@ -114,15 +113,15 @@ enum PresentationBudget {
 
     /// Measuring now: installed once, it goes inert when the debug dashboard
     /// turns it off (#2132) — no turn timed, the sampler never armed.
-    private(set) static var isActive = false
+    public private(set) static var isActive = false
 
-    static func installIfRequested() {
+    public static func installIfRequested() {
         guard LaunchArgument.presentationBudget.isPassed() else { return }
         install()
     }
 
     /// Turns the budget on or off at run time (the debug dashboard).
-    static func setActive(_ on: Bool) {
+    public static func setActive(_ on: Bool) {
         if on, !isInstalled { return install() }
         isActive = on
         emit(on ? "[budget] RESUMED" : "[budget] STOPPED")

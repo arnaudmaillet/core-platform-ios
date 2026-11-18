@@ -18,7 +18,6 @@ import CoreNetworkingMocks
 import CoreRealtime
 import CoreRealtimeMocks
 import CoreStorage
-import DebugTools
 import DesignSystem
 import EmoteKit
 import EntityStore
@@ -42,6 +41,9 @@ import SearchInterface
 import Upload
 import Wallet
 import WalletInterface
+#if DEBUG
+import DebugTools
+#endif
 
 /// Composition root. The only place concrete implementations are chosen and
 /// wired; everything downstream receives protocols via initializer injection.
