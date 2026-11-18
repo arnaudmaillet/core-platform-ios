@@ -18,32 +18,3 @@ public protocol ProfileItemSelling: AnyObject {
 public extension ProfileItemSelling {
     func price(of item: ProfileItem) -> Int { item.gemPrice }
 }
-
-extension ProfileItem {
-    /// The Shop's name for it.
-    var shopTitle: String {
-        switch self {
-        case .videoBanner: "Video Banner"
-        }
-    }
-
-    /// What it does, in a line.
-    var shopDetail: String {
-        switch self {
-        case .videoBanner: "A loop from one of your videos at the top of your profile"
-        }
-    }
-
-    /// Where it is used once owned.
-    var whereToUse: String {
-        switch self {
-        case .videoBanner: "Choose its video in Edit Profile"
-        }
-    }
-
-    var shopSymbol: String {
-        switch self {
-        case .videoBanner: "play.rectangle.fill"
-        }
-    }
-}

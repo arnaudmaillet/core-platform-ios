@@ -6,7 +6,7 @@ import CoreNetworkingMocks
 import CoreStorage
 import Foundation
 import Testing
-@testable import Feed
+@testable import Wallet
 
 private struct WalletSession: AuthSessionProviding {
     func currentState() async -> AuthState { .authenticated(AccountID(MockAuthService.accountID)) }

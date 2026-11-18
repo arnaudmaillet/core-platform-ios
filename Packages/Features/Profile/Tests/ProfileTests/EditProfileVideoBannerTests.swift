@@ -6,6 +6,7 @@ import Foundation
 import PostGrid
 import Testing
 import UIKit
+import ProfileInterface
 @testable import Profile
 @testable import ProfileSettings
 

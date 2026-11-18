@@ -40,6 +40,8 @@ import ProfileInterface
 import Search
 import SearchInterface
 import Upload
+import Wallet
+import WalletInterface
 
 /// Composition root. The only place concrete implementations are chosen and
 /// wired; everything downstream receives protocols via initializer injection.
@@ -843,10 +845,9 @@ final class AppContainer {
     /// an empty member wallet.
     func makeWalletSheet() -> UIViewController {
         assert(memberGate.isMember, "the wallet sheet was asked for a guest (#1146)")
-        let shopMedia = ShopMedia(images: imagePipeline, videos: videoPlayback)
         // One sheet with two heights (#1494): the daily glance, and the rest
         // of the wallet below it.
-        return WalletSheetViewController(
+        return WalletScreens.sheet(
             wallet: walletStore,
             lookUpPosts: { [unowned self] ids in await self.feedFeature.galleryPosts(ids) },
             imagePipeline: imagePipeline,
@@ -857,12 +858,18 @@ final class AppContainer {
             },
             // "Find a post to stake": the feed, the sheet down.
             findPosts: { [unowned self] in self.router.route(to: .feed) },
-            countries: countryAccess,
-            stakePacks: stakePacks,
-            profileItems: profileItems,
-            shopMedia: shopMedia,
+            // The Shop door: Maps' storefront, with the account's countries,
+            // the Boosts and the profile items. None without countries.
+            makeShop: countryAccess.map { countries in
+                { [unowned self] in
+                    CountryShopViewController.storefront(
+                        access: countries, stakePacks: self.stakePacks, profileItems: self.profileItems,
+                        media: ShopMedia(images: self.imagePipeline, videos: self.videoPlayback)
+                    )
+                }
+            },
             historyCache: walletHistoryCache
-        ).wrappedInSheet()
+        )
     }
 
     /// The Shop opened on its Boosts — where the stake menu's "Get ×100
@@ -1604,7 +1611,7 @@ final class AppContainer {
         builder.wallet = walletStore
         // Settings → Wallet and Purchases: the server wallet's history (#400).
         builder.makeWalletSection = { [unowned self] in
-            WalletHistoryViewController(wallet: self.walletStore, deviceCache: self.walletHistoryCache)
+            WalletScreens.history(wallet: self.walletStore, deviceCache: self.walletHistoryCache)
         }
         // …and draw their posts' live counts (#896).
         // A person opens with what the app already knows of them (#1859).

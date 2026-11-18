@@ -8,12 +8,14 @@ let package = Package(
         .library(name: "ProfileInterface", targets: ["ProfileInterface"])
     ],
     dependencies: [
-        .package(path: "../../Kit/CoreModels")
+        .package(path: "../../Kit/CoreModels"),
+        // `ProfileItem`, for `ProfileItemAccess` (#2385).
+        .package(path: "../../Core/CoreStorage")
     ],
     targets: [
         .target(
             name: "ProfileInterface",
-            dependencies: ["CoreModels"]
+            dependencies: ["CoreModels", "CoreStorage"]
         )
     ]
 )

@@ -5,8 +5,6 @@ import CoreStorage
 import DesignSystem
 import FeedInterface
 import LaunchArguments
-import Maps
-import MapsInterface
 import MediaCore
 import PostGrid
 import UIKit
@@ -81,13 +79,10 @@ final class WalletSheetViewController: UIViewController {
     private let openFeedHero: OpenFeedHero?
     /// "Find a post to stake": the feed, the sheet down (`AppRoute.feed`).
     private let findPosts: (() -> Void)?
-    /// The account's countries — what the Shop sells. Nil: no Shop door.
-    private let countries: (any CountryAccess)?
-    /// The Shop's Boosts — the ×100 cartridge pack. Nil sells none.
-    private let stakePacks: (any StakePackSelling)?
-    private let profileItems: (any ProfileItemSelling)?
-    /// The Shop's posters and preview loops (#1075).
-    private let shopMedia: ShopMedia?
+    /// The Shop, built by the app from Maps' storefront (the account's
+    /// countries, the Boosts, the profile items, the posters and loops).
+    /// Nil: no Shop door. The wallet never names Maps (#2385).
+    private let makeShop: (() -> UIViewController)?
 
     private nonisolated enum Section: Hashable { case top, active }
     private nonisolated enum Item: Hashable {
@@ -142,10 +137,7 @@ final class WalletSheetViewController: UIViewController {
         imagePipeline: ImagePipeline? = nil,
         openFeedHero: OpenFeedHero? = nil,
         findPosts: (() -> Void)? = nil,
-        countries: (any CountryAccess)? = nil,
-        stakePacks: (any StakePackSelling)? = nil,
-        profileItems: (any ProfileItemSelling)? = nil,
-        shopMedia: ShopMedia? = nil,
+        makeShop: (() -> UIViewController)? = nil,
         historyCache: WalletHistoryLocalCache? = nil
     ) {
         self.historyCache = historyCache
@@ -155,10 +147,7 @@ final class WalletSheetViewController: UIViewController {
         self.imagePipeline = imagePipeline
         self.openFeedHero = openFeedHero
         self.findPosts = findPosts
-        self.countries = countries
-        self.stakePacks = stakePacks
-        self.profileItems = profileItems
-        self.shopMedia = shopMedia
+        self.makeShop = makeShop
         self.snapshot = wallet.snapshot()
         super.init(nibName: nil, bundle: nil)
     }
@@ -594,15 +583,9 @@ final class WalletSheetViewController: UIViewController {
     /// The Shop — where the gems go, from the Shop door: this sheet comes
     /// down and the Shop is pushed on the stack under it (`StakeShop.push`).
     func openShop() {
-        guard let countries, presentedViewController == nil,
+        guard let makeShop, presentedViewController == nil,
               let root = view.window?.rootViewController else { return }
-        StakeShop.push(
-            CountryShopViewController.storefront(
-                access: countries, stakePacks: stakePacks, profileItems: profileItems,
-                media: shopMedia
-            ),
-            over: root
-        )
+        StakeShop.push(makeShop(), over: root)
     }
 
     private func claim() {
@@ -616,7 +599,7 @@ final class WalletSheetViewController: UIViewController {
     }
 
     private func configureHeader(_ header: WalletHeaderView) {
-        header.configure(with: snapshot, sellsShop: countries != nil)
+        header.configure(with: snapshot, sellsShop: makeShop != nil)
         header.applyClaim(
             title: WalletClaimer.title(for: snapshot, pending: claimer.isPending),
             canClaim: snapshot.claimAvailable && !claimer.isPending

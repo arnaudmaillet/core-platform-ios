@@ -8,6 +8,7 @@ import MediaCore
 import MediaPlayback
 import MediaUI
 import UIKit
+import WalletInterface
 
 /// What the Shop draws its covers with (#1075): the app's image pipeline for
 /// posters, and its player pool for the one preview loop that plays. Nil

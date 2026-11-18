@@ -3,6 +3,7 @@ import MapsInterface
 import UIKit
 import CoreModels
 import CoreNavigation
+import WalletInterface
 
 /// Every country, and unlocking them: the Shop behind the Rewards sheet's
 /// Shop tile (#1494) and the stake menu's empty-pack row.

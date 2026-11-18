@@ -1,12 +1,8 @@
-import AuthInterface
-import Connect
 import CoreContracts
 import CoreLocation
 import CoreModels
-import CoreNetworkingMocks
 import CoreStorage
 import Foundation
-import Maps
 
 /// Which countries the account has unlocked on the map, and unlocking more
 /// with gems — the shell's answer to `CountryAccess`.
@@ -26,9 +22,9 @@ import Maps
 ///   country, over a baseline from the country's population so that every
 ///   country has a plausible standing and the rank ladder is stable.
 @MainActor
-final class CountryAccessService: CountryAccess {
+public final class CountryAccessService: CountryAccess {
     /// Teen protections (#401): no country unlocks or packs for 13–17.
-    var purchasesRestricted: Bool { TeenProtections.shared.restrictsPurchases }
+    public var purchasesRestricted: Bool { TeenProtections.shared.restrictsPurchases }
 
     /// The member's home country — what `homeCountry` answers for a member.
     private let accountHomeCountry: String
@@ -50,7 +46,7 @@ final class CountryAccessService: CountryAccess {
     /// The countries the server last listed for the account, home included.
     private var serverUnlocks: Set<String>?
 
-    init(
+    public init(
         accountID: String, homeCountry: String, wallet: WalletStore, unlocks: CountryUnlockStore,
         activity: [String: (likes: Int64, posts: Int)],
         isMember: @escaping @MainActor () -> Bool = { true },
@@ -95,7 +91,7 @@ final class CountryAccessService: CountryAccess {
     private var isServerBacked: Bool { geo != nil && isMember() && wallet.isServerBacked }
 
     /// Reads the account's countries from the server.
-    func refreshUnlocks() {
+    public func refreshUnlocks() {
         guard isServerBacked, let geo else { return }
         var request = GeoDiscovery_V1_GetCountryUnlocksRequest()
         request.accountID = accountID
@@ -107,15 +103,15 @@ final class CountryAccessService: CountryAccess {
         }
     }
 
-    var homeCountry: String? { isMember() ? accountHomeCountry : nil }
+    public var homeCountry: String? { isMember() ? accountHomeCountry : nil }
 
-    var currentCountry: String? { locator?.currentCountry }
+    public var currentCountry: String? { locator?.currentCountry }
 
-    var gems: Int { wallet.snapshot().gems }
+    public var gems: Int { wallet.snapshot().gems }
 
-    func cover(of code: String) -> CountryCover? { covers[code.uppercased()] }
+    public func cover(of code: String) -> CountryCover? { covers[code.uppercased()] }
 
-    func isUnlocked(_ code: String) -> Bool {
+    public func isUnlocked(_ code: String) -> Bool {
         let code = code.uppercased()
         if code == currentCountry { return true }
         guard isMember() else { return false }
@@ -125,16 +121,16 @@ final class CountryAccessService: CountryAccess {
         return unlocks.unlocked(for: accountID).contains(code)
     }
 
-    func standing(of code: String) -> CountryStanding? { byCode[code.uppercased()] }
+    public func standing(of code: String) -> CountryStanding? { byCode[code.uppercased()] }
 
-    func standings() -> [CountryStanding] { ordered }
+    public func standings() -> [CountryStanding] { ordered }
 
     /// The corpus's own posts, NOT the standing's count: a standing's posts
     /// carry a population baseline so every country ranks plausibly, and
     /// would say every country has some.
-    func hasPosts(in code: String) -> Bool { postedCountries.contains(code.uppercased()) }
+    public func hasPosts(in code: String) -> Bool { postedCountries.contains(code.uppercased()) }
 
-    func unlock(_ code: String) async -> CountryUnlockOutcome {
+    public func unlock(_ code: String) async -> CountryUnlockOutcome {
         guard let standing = standing(of: code) else { return .unknownCountry }
         guard !isUnlocked(code) else { return .alreadyUnlocked }
         // The sheet refuses first (#401); never spend a teen's gems regardless,
@@ -197,47 +193,6 @@ final class CountryAccessService: CountryAccess {
             )
         }
     }
-
-    /// Each country's most liked post, as its Shop card's cover (#1075) — what
-    /// backend #942's `CountryStanding.cover` will carry.
-    static func mockCovers(in backend: MockBackend) -> [String: CountryCover] {
-        var best: [String: (postID: String, likes: Int64)] = [:]
-        for placement in backend.geoDiscovery.placements() {
-            let coordinate = CLLocationCoordinate2D(latitude: placement.latitude, longitude: placement.longitude)
-            guard let code = CountryAtlas.shared.country(owning: coordinate)?.code else { continue }
-            let likes = backend.counterStore.likeCount(for: placement.postID)
-            if let current = best[code], current.likes >= likes { continue }
-            best[code] = (placement.postID, likes)
-        }
-        let posts = Dictionary(backend.dataset.posts.map { ($0.postID, $0) }, uniquingKeysWith: { first, _ in first })
-        return best.compactMapValues { top -> CountryCover? in
-            guard let post = posts[top.postID] else { return nil }
-            guard let media = post.media else {
-                return .text(postID: post.postID, caption: post.caption)
-            }
-            let poster = URL(string: MockGeoDiscoveryService.pinURL(
-                forMediaURL: media.url, catalog: backend.dataset.mediaCatalog
-            ))
-            if MockMediaFixtures.isVideoURL(media.url), let preview = URL(string: media.url) {
-                return .video(postID: post.postID, poster: poster, preview: preview)
-            }
-            return poster.map { .image(postID: post.postID, poster: $0) }
-        }
-    }
-
-    /// The mock corpus's likes and posts per country: where each post stands,
-    /// and the likes it holds.
-    static func mockActivity(in backend: MockBackend) -> [String: (likes: Int64, posts: Int)] {
-        var activity: [String: (likes: Int64, posts: Int)] = [:]
-        for placement in backend.geoDiscovery.placements() {
-            let coordinate = CLLocationCoordinate2D(latitude: placement.latitude, longitude: placement.longitude)
-            guard let code = CountryAtlas.shared.country(owning: coordinate)?.code else { continue }
-            let likes = backend.counterStore.likeCount(for: placement.postID)
-            let current = activity[code] ?? (0, 0)
-            activity[code] = (current.likes + likes, current.posts + 1)
-        }
-        return activity
-    }
 }
 
 /// The device's country, as the server lets it open (backend B10, #455):
@@ -245,10 +200,14 @@ final class CountryAccessService: CountryAccess {
 /// GeoIP country (roaming tolerated). Only a granted code opens; a refusal,
 /// or no answer, opens nothing. The same call with nothing sent closes the
 /// country left behind on the server's side too — what filters a guest's map.
-struct GeoCountryAccessVerifier: CurrentCountryVerifying {
+public struct GeoCountryAccessVerifier: CurrentCountryVerifying {
     let geoClient: any GeoDiscovery_V1_GeoDiscoveryServiceClientInterface
 
-    func verify(_ code: String?) async -> String? {
+    public init(geoClient: any GeoDiscovery_V1_GeoDiscoveryServiceClientInterface) {
+        self.geoClient = geoClient
+    }
+
+    public func verify(_ code: String?) async -> String? {
         var request = GeoDiscovery_V1_GetCountryAccessRequest()
         request.currentCountry = code ?? ""
         guard let response = await geoClient.getCountryAccess(request: request, headers: [:]).message,
