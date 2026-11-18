@@ -15,20 +15,26 @@ from fighting over `develop` and over CI.
 - So open (or push to) a pull request only when the work is finished:
   - **rebase on a fresh `origin/develop` first**, so the run tests something
     close to what will land;
-  - locally, run **a Release build and the tests you changed or that cover
-    the code you changed** (`-only-testing` on those suites), not the whole
-    lanes: the pull request's CI runs every lane the change reaches, and
-    running them twice made each change wait for a free Mac (owner,
-    2026-11-14). CI builds the app with Xcode 26, which can reject Swift
-    that a local Xcode 27 accepts, and it builds Debug and Release.
-  - **Only those `-only-testing` runs may run beside a CI job on the Mac**,
-    in the background QoS (`taskpolicy -b xcodebuild …`). An **app build**
-    (Release, or Debug for screenshots) and simulator captures wait until
-    the self-hosted runner is idle **and** no workflow run is in progress:
-    the background QoS limits CPU and disk, not memory. A Debug app build
-    beside a Mac job turned #2449's Upload lane red (a video poster that
-    failed to decode, 2026-11-14).
-  - A test-only change needs no Release build: no app target compiles tests.
+  - locally, **build the app in Debug, and run no test suite** (owner,
+    2026-11-18). The Debug build, `#if DEBUG` code included, keeps a CI run
+    from being spent on a compile error. The rest is CI's job: `build app`
+    builds Debug and Release, and the lanes run every suite the change
+    reaches. Running those locally as well did the work twice and made every
+    change wait for a free Mac. A test-only change needs no app build: build
+    its package's tests (`build-for-testing`) and push.
+  - CI compiles with Xcode 26, which can reject Swift that a local Xcode 27
+    accepts.
+  - An **app build** and simulator captures wait until the self-hosted
+    runner is idle **and** no workflow run is in progress. The background
+    QoS (`taskpolicy -b xcodebuild …`) limits CPU and disk, not memory: a
+    Debug app build beside a Mac job turned #2449's Upload lane red (a video
+    poster that failed to decode, 2026-11-14).
+- **Group a large piece of work into a few pull requests by area**, one
+  commit per issue (owner, 2026-11-18, for audit #2366). Every pull request
+  costs a local pass, its CI run and a full `develop` run on the one Mac, and
+  every merge sends the next branch back to a rebase. One pull request per
+  small issue multiplies all three. Keep the riskiest piece in a pull request
+  of its own.
 - Prefer independent pull requests based on `develop`. **Stack only for a real
   dependency.** A stacked pull request has to be replayed and tested again once
   its predecessor lands. When two sessions touch the same files, coordinate:
@@ -47,10 +53,9 @@ from fighting over `develop` and over CI.
 
 - **Commit locally; push only when the pull request's current CI run has
   finished, or when the work is ready for review.** Each push restarts that pull
-  request's CI. Most test lanes queue on **one self-hosted Mac that runs one
-  job at a time**, the rest on GitHub's five hosted macOS slots shared by the
-  whole account (see CI shape). A stale push makes every other session's
-  lanes wait behind it.
+  request's CI. Its lanes share a few macOS runners, four GitHub slots or
+  one self-hosted Mac (see CI shape). A stale push makes every other
+  session's lanes wait behind it.
 - Batch a round of iterations into a single push.
 - Stacked pull requests (base other than `develop`) run no CI, so pushing
   those is cheap.
@@ -71,15 +76,22 @@ from fighting over `develop` and over CI.
   - `build app` (Debug + Release) and `compile tests (Xcode 26)` on GitHub's
     `macos-latest`, **Xcode 26**: the guard against Swift only Xcode 27
     accepts, for the app and for the Mac lanes' tests.
-  - the data-and-logic lanes (`HOSTED_LANES` in `select_packages.py`: models,
-    storage, networking, Chat, Search, Auth…) on GitHub's `macos-latest`,
-    **Xcode 26**, as `test … (hosted)`, three at a time for a pull request
-    (#2370).
-  - every other lane (and `hero-uitests.yml`) on a **self-hosted Mac, Xcode
-    27**, one job at a time: the suites that measure time, play media or
-    animate. Every package builds from scratch there: DerivedData lives in the
-    job's temporary directory and is deleted after the package's tests, so no
-    lane is green on a stale module.
-  - If that Mac is off, its lanes wait in the queue and the required
-    `build-test` check never arrives. Setting the repository variable
-    `MACOS_RUNNER=github` sends every lane to `macos-latest` with Xcode 26.
+  - **The test lanes, by repository variable:**
+    - `MACOS_RUNNER=github` (set since 2026-11-18, the owner: one session
+      works on the repository during audit #2366): **every lane runs on
+      GitHub's `macos-latest`, Xcode 26**, four at a time for a pull request
+      and three for `develop`. `compile tests (Xcode 26)` is skipped, since the
+      lanes are Xcode 26 themselves. The self-hosted Mac stays free for local
+      builds.
+    - Unset: the data-and-logic lanes (`HOSTED_LANES` in
+      `select_packages.py`) run on `macos-latest`. Every other lane runs on
+      the **self-hosted Mac, Xcode 27**, one job at a time: the suites that
+      measure time, play media or animate. `HOSTED_LANES_ON_MAC=1` sends the
+      hosted lanes to the Mac too, for when GitHub has no macOS capacity
+      (#2486).
+    - On the Mac, every package builds from scratch: DerivedData lives in the
+      job's temporary directory and is deleted after the package's tests, so
+      no lane is green on a stale module. If the Mac is off, its lanes wait
+      in the queue and the required `build-test` check never arrives.
+  - A rerun keeps the original run's variables. To pick up a changed
+    variable, push a new commit (an empty one will do).
