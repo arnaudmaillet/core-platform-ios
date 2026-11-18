@@ -1,16 +1,22 @@
-# The hero-transition UI suites (UITests/Hero*), on demand.
+# The app's UI suites (UITests/): a nightly smoke on develop, and any suite
+# on demand.
 #
 # Deliberately NOT part of the PR-gating `build-test` loop: these boot a
 # simulator, drive real gestures and record evidence — minutes of runner time
-# per suite, and the package-level hero suites already gate every PR for
-# free. Trigger this manually (or from a branch) when the transition stack
-# changes in ways only a finger can vouch for.
+# per suite, and the package-level suites already gate every PR. The nightly
+# run (#2389) is the smoke: guest mode end to end and the hero card and
+# fallback. A red night comes back to whoever last touched what it drives.
+# Trigger it by hand (or from a branch) when the transition stack or the
+# guest flow changes in ways only a finger can vouch for.
 name: hero-uitests
 on:
+  schedule:
+    # 03:00 UTC, when no pull request is waiting for a macOS runner.
+    - cron: "0 3 * * *"
   workflow_dispatch:
     inputs:
       suite:
-        description: "One suite (e.g. HeroMatrixUITests) or empty for all Hero suites"
+        description: "Suites, space-separated (e.g. HeroMatrixUITests GuestModeUITests); empty runs every UI suite"
         required: false
         default: ""
 
@@ -53,10 +59,14 @@ jobs:
 
       - name: Run Hero UI suites
         run: |
-          ONLY="-only-testing:core-platform-iosUITests"
-          if [ -n "${{ inputs.suite }}" ]; then
-            ONLY="-only-testing:core-platform-iosUITests/${{ inputs.suite }}"
+          # The nightly smoke when scheduled; the dispatch's suites otherwise.
+          SUITES="${{ inputs.suite }}"
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            SUITES="GuestModeUITests HeroCardUITests HeroFallbackUITests"
           fi
+          ONLY=()
+          for suite in $SUITES; do ONLY+=("-only-testing:core-platform-iosUITests/$suite"); done
+          if [ ${#ONLY[@]} -eq 0 ]; then ONLY=("-only-testing:core-platform-iosUITests"); fi
           xcodebuild test -project core-platform-ios.xcodeproj \
             -scheme core-platform-ios \
             -destination "id=${{ steps.sim.outputs.id }}" \
@@ -64,7 +74,8 @@ jobs:
             -skipMacroValidation \
             CODE_SIGNING_ALLOWED=NO \
             -resultBundlePath hero-uitests.xcresult \
-            "$ONLY"
+            -parallel-testing-enabled NO \
+            "${ONLY[@]}"
 
       - name: Keep the evidence
         if: always()
