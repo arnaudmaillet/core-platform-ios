@@ -39,7 +39,7 @@ let package = Package(
                 "PlaceInterface",
                 "CoreContracts",
                 "CoreModels",
-                "CoreNavigation",
+                "CoreNavigation", .product(name: "Instrumentation", package: "CoreNavigation"), .product(name: "Transitions", package: "CoreNavigation"),
                 // `NetworkFailure`: the repository error keeps why a call
                 // failed, so the screen can say "You're offline" (#794).
                 "CoreNetworking",

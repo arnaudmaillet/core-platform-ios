@@ -3,6 +3,7 @@ import CoreStorage
 import MediaCore
 import CoreModels
 import CoreNavigation
+import Transitions
 import DesignSystem
 import EmoteKit
 import EntityStore

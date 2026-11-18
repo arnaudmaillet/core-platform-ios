@@ -1,5 +1,6 @@
 #if DEBUG
 import CoreNavigation
+import DebugDashboard
 import CoreNetworkingMocks
 #endif
 import AppPreferences

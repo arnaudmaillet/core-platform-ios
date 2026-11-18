@@ -1,5 +1,6 @@
 import Testing
 @testable import CoreNavigation
+@testable import Transitions
 
 /// The one rule every dismissal driver asks (`DismissalArbiter`), as a table.
 struct DismissalArbiterTests {

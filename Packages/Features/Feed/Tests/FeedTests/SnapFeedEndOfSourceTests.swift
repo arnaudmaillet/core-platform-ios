@@ -5,6 +5,7 @@ import Foundation
 import MediaCore
 import PostGrid
 import Testing
+import Transitions
 import UIKit
 @testable import Feed
 

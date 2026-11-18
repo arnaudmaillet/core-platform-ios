@@ -1,5 +1,6 @@
 import CoreModels
 import CoreNavigation
+import Transitions
 import UIKit
 
 /// Entry point contract for the Place feature (#2381): a place's page, from

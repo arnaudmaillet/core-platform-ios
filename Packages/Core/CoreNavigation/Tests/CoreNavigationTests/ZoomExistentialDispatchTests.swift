@@ -1,6 +1,7 @@
 import Testing
 import UIKit
 @testable import CoreNavigation
+@testable import Transitions
 
 /// Every defaulted member of the three hero protocols, observed THROUGH the
 /// existential a conformer is actually held as.

@@ -1,6 +1,7 @@
 import Testing
 import UIKit
 @testable import CoreNavigation
+@testable import Transitions
 
 /// `HeroPushSession`: the orchestration three presenters used to write for
 /// themselves, and the rules their copies drifted on.

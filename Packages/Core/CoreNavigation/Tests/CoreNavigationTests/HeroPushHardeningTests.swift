@@ -1,6 +1,7 @@
 import Testing
 import UIKit
 @testable import CoreNavigation
+@testable import Transitions
 
 /// The terminal branches of the hero push, pinned one defect at a time
 /// (`dev/HERO_PUSH_AUDIT_PLAN.md`, Phase 1).

@@ -2,6 +2,7 @@ import QuartzCore
 import Testing
 import UIKit
 @testable import CoreNavigation
+@testable import Transitions
 
 /// The held card's give: a light stretch along the travel, a thinning across
 /// it, nothing at rest — drawn in the render tree only.

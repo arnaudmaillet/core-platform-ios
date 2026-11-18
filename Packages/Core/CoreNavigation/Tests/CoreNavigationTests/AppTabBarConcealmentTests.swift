@@ -1,6 +1,7 @@
 import Testing
 import UIKit
 @testable import CoreNavigation
+@testable import Transitions
 
 /// WHO OWNS THE DOCK WHILE A SCREEN IS UP.
 ///

@@ -1,6 +1,7 @@
 // ⚠️ THE WHOLE FILE: DEBUG only — the debug dashboard (#2131).
 #if DEBUG
 import DesignSystem
+import Instrumentation
 import UIKit
 
 /// The in-app debug dashboard (#2131, #2132): shake the device (the

@@ -1,6 +1,7 @@
 import Testing
 import UIKit
 @testable import CoreNavigation
+@testable import Transitions
 
 /// The stack's cross-dissolve (#2246): the outgoing navigation view fades as
 /// a PICTURE laid over it, the change runs as a cut underneath, unanimated,

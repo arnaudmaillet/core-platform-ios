@@ -1,6 +1,7 @@
 import Testing
 import UIKit
 @testable import CoreNavigation
+@testable import Transitions
 
 /// "Not on the stack" is not "popped" — a feed that has never BEEN on the
 /// stack cannot have left it.

@@ -223,11 +223,11 @@ public final class ViewportShare {
         // share on gone. The departure, tracked from its start, settles it.
         if coordinator.isCancelled { return .followed }
         if screen.isMovingToParent {
-            guard !(screen is any ZoomTransitionDestination) else { return .now }
+            guard !(screen is any FlightDestination) else { return .now }
             trackArrival(coordinator)
             return .followed
         }
-        guard !(coordinator.viewController(forKey: .from) is any ZoomTransitionDestination),
+        guard !(coordinator.viewController(forKey: .from) is any FlightDestination),
               let cover = Self.cover(of: coordinator, .from)
         else { return .now }
         track(coordinator, cover: cover, coversAtEnd: false)
@@ -253,7 +253,7 @@ public final class ViewportShare {
             trackDeparture(coordinator)
             return .followed
         }
-        if screen.navigationController?.topViewController is any ZoomTransitionDestination {
+        if screen.navigationController?.topViewController is any FlightDestination {
             return .flight
         }
         if let coordinator, let cover = Self.cover(of: coordinator, .to) {

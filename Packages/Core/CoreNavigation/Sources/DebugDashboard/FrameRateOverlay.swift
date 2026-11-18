@@ -3,6 +3,7 @@
 import DesignSystem
 import Darwin
 import UIKit
+import Instrumentation
 
 /// The process's footprint and CPU, read from the kernel (#2133).
 public enum DebugSystemStats {

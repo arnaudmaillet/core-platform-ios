@@ -1,6 +1,7 @@
 import Testing
 import UIKit
 @testable import CoreNavigation
+@testable import Transitions
 
 /// The page-window hero: a destination that FITS its picture
 /// (`zoomPageFraming`) gets a flight whose moving unit is a page-shaped window

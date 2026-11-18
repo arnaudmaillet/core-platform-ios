@@ -1,6 +1,7 @@
 #if DEBUG
 import CoreModels
 import CoreNavigation
+import DebugDashboard
 import DesignSystem
 import FeedInterface
 import LaunchArguments

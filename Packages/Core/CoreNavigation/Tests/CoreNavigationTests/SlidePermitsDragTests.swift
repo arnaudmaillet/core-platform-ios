@@ -1,6 +1,7 @@
 import Testing
 import UIKit
 @testable import CoreNavigation
+@testable import Transitions
 
 /// The slide's location-aware veto (#691): an owner that is not a
 /// `ZoomTransitionDestination` — a pushed profile — still decides by WHERE

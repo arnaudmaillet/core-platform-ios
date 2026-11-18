@@ -37,7 +37,7 @@ let package = Package(
             name: "Place",
             dependencies: [
                 "LaunchArguments", "CoreContracts", "CoreModels", "PlaceInterface", "FeedInterface",
-                "MediaCore", "MediaPlayback", "CoreNavigation", "CoreNetworking", "CoreStorage", "EntityStore",
+                "MediaCore", "MediaPlayback", "CoreNavigation", .product(name: "Transitions", package: "CoreNavigation"), "CoreNetworking", "CoreStorage", "EntityStore",
                 "DesignSystem", "PostGrid", "PostSurfaces", "ShareSheet", "HeroPage"
             ]
         ),
@@ -45,7 +45,7 @@ let package = Package(
         .testTarget(
             name: "PlaceTests",
             dependencies: [
-                "Place", "PlaceInterface", "CoreContracts", "CoreModels", "CoreNavigation", "CoreNetworking",
+                "Place", "PlaceInterface", "CoreContracts", "CoreModels", "CoreNavigation", .product(name: "Transitions", package: "CoreNavigation"), "CoreNetworking",
                 .product(name: "CoreNetworkingMocks", package: "CoreNetworking"),
                 "CoreStorage", "DesignSystem", "HeroPage", "MediaCore", "MediaPlayback", "PostGrid", "PostSurfaces"
             ]

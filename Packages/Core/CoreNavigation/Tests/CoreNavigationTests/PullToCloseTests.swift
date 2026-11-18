@@ -2,6 +2,7 @@ import DesignSystem
 import Testing
 import UIKit
 @testable import CoreNavigation
+@testable import Transitions
 
 /// On a native push, a vertical close is a PULL (#2045, #2046): no pop at
 /// the drag's begin; a release past the threshold of visible lift pops

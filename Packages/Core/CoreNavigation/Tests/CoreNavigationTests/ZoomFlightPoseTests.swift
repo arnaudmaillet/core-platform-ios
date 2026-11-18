@@ -1,6 +1,7 @@
 import Testing
 import UIKit
 @testable import CoreNavigation
+@testable import Transitions
 
 /// `ZoomFlight.build`'s media contract and the poses' geometry — the flying
 /// unit both drivers share, pinned without a live transition.

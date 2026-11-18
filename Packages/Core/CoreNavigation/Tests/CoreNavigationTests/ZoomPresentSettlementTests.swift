@@ -1,6 +1,7 @@
 import QuartzCore
 import Testing
 @testable import CoreNavigation
+@testable import Transitions
 
 /// The present's settlement, pinned as two phases that must not merge.
 ///

@@ -1,7 +1,9 @@
 #if DEBUG
 import CoreNavigation
+import Instrumentation
 import LaunchArguments
 import MediaPlayback
+import Transitions
 import UIKit
 
 /// `-hero-audit`: the hero machinery's census, sampled continuously and

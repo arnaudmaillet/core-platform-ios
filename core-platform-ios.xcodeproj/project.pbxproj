@@ -8,6 +8,9 @@
 
 /* Begin PBXBuildFile section */
 		5F00000000000000000000B1 /* CoreNavigation in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000C1 /* CoreNavigation */; };
+		5F0000000000000000238410 /* Transitions in Frameworks */ = {isa = PBXBuildFile; productRef = 5F0000000000000000238411 /* Transitions */; };
+		5F0000000000000000238412 /* Instrumentation in Frameworks */ = {isa = PBXBuildFile; productRef = 5F0000000000000000238413 /* Instrumentation */; };
+		5F0000000000000000238414 /* DebugDashboard in Frameworks */ = {isa = PBXBuildFile; productRef = 5F0000000000000000238415 /* DebugDashboard */; };
 		5F00000000000000000000B2 /* CoreNetworking in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000C2 /* CoreNetworking */; };
 		5F00000000000000000000B3 /* DesignSystem in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000C3 /* DesignSystem */; };
 		5F00000000000000000000B4 /* FeedInterface in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000C4 /* FeedInterface */; };
@@ -94,6 +97,9 @@
 			buildActionMask = 2147483647;
 			files = (
 				5F00000000000000000000B1 /* CoreNavigation in Frameworks */,
+				5F0000000000000000238410 /* Transitions in Frameworks */,
+				5F0000000000000000238412 /* Instrumentation in Frameworks */,
+				5F0000000000000000238414 /* DebugDashboard in Frameworks */,
 				5F00000000000000000000B2 /* CoreNetworking in Frameworks */,
 				5F00000000000000000000B3 /* DesignSystem in Frameworks */,
 				5F00000000000000000000B4 /* FeedInterface in Frameworks */,
@@ -183,6 +189,9 @@
 			name = "core-platform-ios";
 			packageProductDependencies = (
 				5F00000000000000000000C1 /* CoreNavigation */,
+				5F0000000000000000238411 /* Transitions */,
+				5F0000000000000000238413 /* Instrumentation */,
+				5F0000000000000000238415 /* DebugDashboard */,
 				5F00000000000000000000C2 /* CoreNetworking */,
 				5F00000000000000000000C3 /* DesignSystem */,
 				5F00000000000000000000C4 /* FeedInterface */,
@@ -769,6 +778,18 @@
 		5F00000000000000000000C1 /* CoreNavigation */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = CoreNavigation;
+		};
+		5F0000000000000000238411 /* Transitions */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = Transitions;
+		};
+		5F0000000000000000238413 /* Instrumentation */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = Instrumentation;
+		};
+		5F0000000000000000238415 /* DebugDashboard */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = DebugDashboard;
 		};
 		5F00000000000000000000C2 /* CoreNetworking */ = {
 			isa = XCSwiftPackageProductDependency;

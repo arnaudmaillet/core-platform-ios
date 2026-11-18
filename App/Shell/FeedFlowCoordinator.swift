@@ -1,5 +1,6 @@
 import CoreNavigation
 import FeedInterface
+import Transitions
 import UIKit
 
 /// Owns the timeline feed as a shell-level flow — not a tab root. The Feed

@@ -12,7 +12,7 @@ The code-level list of every interactive element is in [`RESPONSIVENESS_INVENTOR
 
 ## 1. The instruments
 
-- **`-interaction-latency`** (`CoreNavigation/InteractionLatency.swift`, DEBUG only). It measures input → frame for every input.
+- **`-interaction-latency`** (`CoreNavigation/Sources/Instrumentation/InteractionLatency.swift`, DEBUG only). It measures input → frame for every input.
   - **The input:** `UIApplication.sendEvent`. The last finger up is a tap, or a release past 10 pt of travel. A long-press recognizer's `.began` after 300 ms of real hold is a long press.
   - **The response:** the strongest within 1.2 s.
     - **Screen:** `viewWillAppear` / `viewWillDisappear` (push, pop, present, dismiss, tab), or a menu or popover view entering a window.

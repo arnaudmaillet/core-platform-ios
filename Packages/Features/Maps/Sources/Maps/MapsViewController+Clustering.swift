@@ -9,6 +9,7 @@ import MapsInterface
 import MediaCore
 import MediaPlayback
 import PostGrid
+import Transitions
 import UIKit
 
 // Querying and clustering (#2388, out of the map's file)

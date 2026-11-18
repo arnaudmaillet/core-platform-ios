@@ -1,15 +1,11 @@
 // ⚠️ THE WHOLE FILE: DEBUG only — the debug dashboard (#2134).
 #if DEBUG
 import DesignSystem
+import Instrumentation
 import PencilKit
 import UIKit
 
 // MARK: - The app's windows
-
-/// The dashboard's own windows — its sheet, badges and overlays — which the
-/// tools never inspect, outline, slow down or screenshot.
-@MainActor
-protocol DebugOverlayWindow: UIWindow {}
 
 @MainActor
 enum DebugWindows {

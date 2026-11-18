@@ -1,6 +1,7 @@
 import Testing
 import UIKit
 @testable import CoreNavigation
+@testable import Transitions
 
 /// ⚠️ ONE POPPER PER SWIPE (#1144): every custom back recognizer on a stack
 /// has UIKit's two pops — the edge one and iOS 26's full-content one —

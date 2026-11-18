@@ -1,6 +1,7 @@
 import Testing
 import UIKit
 @testable import CoreNavigation
+@testable import Transitions
 
 /// ⚠️ A REVEAL LEG TAKES THE SCREEN'S TOUCHES FOR AS LONG AS IT RUNS (#786).
 ///

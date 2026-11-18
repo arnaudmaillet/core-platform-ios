@@ -1,6 +1,7 @@
 import Testing
 import UIKit
 @testable import CoreNavigation
+@testable import Transitions
 
 /// The still picture flown at its native aspect (#539): a marker's cover and
 /// baked preview, posed by transform like the live surface instead of

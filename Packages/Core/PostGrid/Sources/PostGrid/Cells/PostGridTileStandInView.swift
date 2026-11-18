@@ -1,6 +1,7 @@
 import CoreModels
 import CoreNavigation
 import MediaCore
+import Transitions
 import UIKit
 
 /// `RevealDismissCardView`'s GRID twin: one free-standing brick on its own

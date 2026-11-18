@@ -5,6 +5,7 @@ import DesignSystem
 import LaunchArguments
 import MediaCore
 import MediaUI
+import Transitions
 import UIKit
 
 /// The Search tab.

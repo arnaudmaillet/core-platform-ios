@@ -250,7 +250,7 @@ public extension UINavigationController {
     /// `screen` (a pushed profile sets it), has no dock to give back.
     func showsAppTabBar(for screen: UIViewController?) -> Bool {
         guard let screen else { return false }
-        if (screen as? any ZoomTransitionDestination)?.concealsAppTabBar == true { return false }
+        if (screen as? any FlightDestination)?.concealsAppTabBar == true { return false }
         return !flagHidesAppTabBar(at: screen)
     }
 
@@ -321,7 +321,7 @@ public extension UIViewController {
         guard let from = transitionCoordinator?.viewController(forKey: .from),
               from !== self, from !== navigationController
         else { return false }
-        return (from as? any ZoomTransitionDestination)?.concealsAppTabBar == true
+        return (from as? any FlightDestination)?.concealsAppTabBar == true
     }
 
     /// Runs `reveal` at the moment `TabBarRevealPolicy` allows for this

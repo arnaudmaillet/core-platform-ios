@@ -5,6 +5,8 @@ import CoreModels
 import DebugTools
 import FeedInterface
 import CoreNavigation
+import Transitions
+import Instrumentation
 import CoreRealtime
 import CoreStorage
 import DesignSystem

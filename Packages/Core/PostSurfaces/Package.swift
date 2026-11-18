@@ -31,7 +31,7 @@ let package = Package(
         .target(
             name: "PostSurfaces",
             dependencies: [
-                "LaunchArguments", "CoreModels", "PostGrid", "DesignSystem", "CoreNavigation",
+                "LaunchArguments", "CoreModels", "PostGrid", "DesignSystem", "CoreNavigation", .product(name: "Instrumentation", package: "CoreNavigation"), .product(name: "Transitions", package: "CoreNavigation"),
                 "MediaCore", .product(name: "MediaUI", package: "MediaCore"), "MediaPlayback", "CoreStorage", "EntityStore", "EmoteKit", "ThreadKit",
                 .product(name: "VoiceKitUI", package: "VoiceKit")
             ]
