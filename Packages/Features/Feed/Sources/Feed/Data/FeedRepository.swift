@@ -143,7 +143,6 @@ public actor FeedRepository: FeedProviding {
     private let timelineClient: any Timeline_V1_TimelineServiceClientInterface
     private let postClient: any Post_V1_PostServiceClientInterface
     private let profileClient: any Profile_V1_ProfileServiceClientInterface
-    private let counterClient: any Counter_V1_CounterServiceClientInterface
     private let engagementClient: any Engagement_V1_EngagementServiceClientInterface
     /// Where a like is committed (`wallet.Stake`); nil outside the app, where
     /// a like throws.
@@ -178,7 +177,6 @@ public actor FeedRepository: FeedProviding {
         timelineClient: any Timeline_V1_TimelineServiceClientInterface,
         postClient: any Post_V1_PostServiceClientInterface,
         profileClient: any Profile_V1_ProfileServiceClientInterface,
-        counterClient: any Counter_V1_CounterServiceClientInterface,
         engagementClient: any Engagement_V1_EngagementServiceClientInterface,
         likeStaking: (any LikeStaking)? = nil,
         authSession: any AuthSessionProviding,
@@ -189,7 +187,6 @@ public actor FeedRepository: FeedProviding {
         self.timelineClient = timelineClient
         self.postClient = postClient
         self.profileClient = profileClient
-        self.counterClient = counterClient
         self.engagementClient = engagementClient
         self.likeStaking = likeStaking
         self.authSession = authSession

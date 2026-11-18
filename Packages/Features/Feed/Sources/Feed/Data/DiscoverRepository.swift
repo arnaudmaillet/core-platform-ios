@@ -77,7 +77,7 @@ public actor DiscoverRepository: DiscoverProviding {
     /// Reads the numbers the timeline does not carry — see `counters(for:)`.
     /// Optional so a composition root without one still gets a working grid,
     /// with its counters hidden, which is what every card did before this.
-    private let counterClient: (any Counter_V1_CounterServiceClientInterface)?
+    private let postCounters: (any PostCounterReading)?
     /// Discover's own corpus (`DiscoveryFeedRepository`). Nil: Discover is
     /// `feed`.
     private let discovery: (any FeedProviding)?
@@ -87,12 +87,12 @@ public actor DiscoverRepository: DiscoverProviding {
 
     public init(
         feed: any FeedProviding,
-        counterClient: (any Counter_V1_CounterServiceClientInterface)? = nil,
+        postCounters: (any PostCounterReading)? = nil,
         discovery: (any FeedProviding)? = nil,
         localCache: FeedLocalCache? = nil
     ) {
         self.feed = feed
-        self.counterClient = counterClient
+        self.postCounters = postCounters
         self.discovery = discovery
         self.localCache = localCache
     }
@@ -205,7 +205,7 @@ public actor DiscoverRepository: DiscoverProviding {
     /// The timeline read hydrates LIKES only — a `FeedEntry` carries a like
     /// count and nothing else — so a card had no reach to show, and once its
     /// counter chip became views alone it showed no chip at all. One batched
-    /// read per page, through `PostCounterReader`, which the profile gallery
+    /// read per page, through `PostCounterReading`, which the profile gallery
     /// uses for the same three numbers.
     ///
     /// Best-effort by construction: an outage answers no snapshots, the counts
@@ -216,10 +216,8 @@ public actor DiscoverRepository: DiscoverProviding {
     /// opens end up disagreeing; the counter is the one the rest of the app
     /// reads.
     private func counters(for page: FeedPage) async -> [PostID: PostCounters] {
-        guard let counterClient, !page.entries.isEmpty else { return [:] }
-        let byPostID = await PostCounterReader.counters(
-            forPostIDs: page.entries.map(\.post.id.rawValue), using: counterClient
-        )
+        guard let postCounters, !page.entries.isEmpty else { return [:] }
+        let byPostID = await postCounters.counters(forPostIDs: page.entries.map(\.post.id.rawValue))
         return Dictionary(byPostID.map { (PostID($0.key), $0.value) }, uniquingKeysWith: { first, _ in first })
     }
 

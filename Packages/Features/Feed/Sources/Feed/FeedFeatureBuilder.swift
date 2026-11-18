@@ -131,7 +131,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         /// Reads the numbers the timeline does not carry, so a card can show
         /// reach. Optional: without it the cards simply hide their counter,
         /// which is what they did before.
-        counterClient: (any Counter_V1_CounterServiceClientInterface)? = nil,
+        postCounters: (any PostCounterReading)? = nil,
         postDrafts: PostDraftStore? = nil,
         soundProvider: (any PostSoundProviding)? = nil,
         useSound: (@MainActor (PostSound) -> Void)? = nil,
@@ -157,7 +157,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         self.postDrafts = postDrafts
         self.soundProvider = soundProvider
         self.useSound = useSound
-        self.counterClient = counterClient
+        self.postCounters = postCounters
         self.reporting = reporting
         self.socialGraph = socialGraph
         self.followRelations = followRelations
@@ -376,7 +376,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     }
     #endif
 
-    private let counterClient: (any Counter_V1_CounterServiceClientInterface)?
+    private let postCounters: (any PostCounterReading)?
     private let discovery: (any FeedProviding)?
     private let shareTargeting: (any ShareTargeting)?
     private let localCache: FeedLocalCache?
@@ -656,7 +656,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
 
     public func makePostSetSurface(style: PostSetSurfaceStyle) -> any PostSetSurface {
         let base = repository
-        let counterClient = counterClient
+        let postCounters = postCounters
         let entities = entities
         let surface = PostSetSurfaceViewController(
             style: style,
@@ -677,10 +677,8 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                 guard let hydrated = try? await DiscoverRepository(feed: provider).firstPage().posts
                 else { return [] }
                 let posts = hydrated.filter { !entities.isDeleted($0.id) }
-                guard let counterClient else { return posts }
-                let byPostID = await PostCounterReader.counters(
-                    forPostIDs: posts.map(\.id.rawValue), using: counterClient
-                )
+                guard let postCounters else { return posts }
+                let byPostID = await postCounters.counters(forPostIDs: posts.map(\.id.rawValue))
                 guard !byPostID.isEmpty else { return posts }
                 return posts.map { post in
                     guard let counts = byPostID[post.id.rawValue] else { return post }
@@ -731,9 +729,9 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
 
     /// A place's posts as its page draws them (#2381: the place page lives in
     /// Place; its posts are still hydrated by the feed, so every post the
-    /// feed above holds is a cache hit). See `placeGalleryPosts(_:base:counterClient:)`.
+    /// feed above holds is a cache hit). See `placeGalleryPosts(_:base:postCounters:)`.
     nonisolated public func placeGalleryPosts(_ ids: [PostID]) async throws -> [GalleryPost] {
-        try await Self.placeGalleryPosts(ids, base: repository, counterClient: counterClient)
+        try await Self.placeGalleryPosts(ids, base: repository, postCounters: postCounters)
     }
 
     /// A place's posts as its page draws them: the feed's hydration (so
@@ -744,15 +742,15 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     /// asked for is a control this page never draws. The COMMENT count stayed
     /// absent, which `PostMetricLabel.set(nil)` renders as a hidden chip — so
     /// one batched read of likes and comments, through the same
-    /// `PostCounterReader` For You and the profile gallery use. Fail-open: a
+    /// `PostCounterReading` the profile gallery uses. Fail-open: a
     /// missing read leaves every count as the timeline gave it.
     nonisolated static func placeGalleryPosts(
-        _ ids: [PostID], base: any FeedProviding, counterClient: (any Counter_V1_CounterServiceClientInterface)?
+        _ ids: [PostID], base: any FeedProviding, postCounters: (any PostCounterReading)?
     ) async throws -> [GalleryPost] {
         let provider = FixedPostsFeedProvider(base: base, ids: ids)
         var members = try await DiscoverRepository(feed: provider).firstPage().posts
-        if let counterClient {
-            let byPostID = await PostCounterReader.counters(forPostIDs: members.map(\.id.rawValue), using: counterClient)
+        if let postCounters {
+            let byPostID = await postCounters.counters(forPostIDs: members.map(\.id.rawValue))
             if !byPostID.isEmpty {
                 members = members.map { post in
                     guard let counts = byPostID[post.id.rawValue] else { return post }
