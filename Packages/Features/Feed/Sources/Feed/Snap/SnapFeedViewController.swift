@@ -583,7 +583,7 @@ final class SnapFeedViewController: UIViewController {
         socialGraph: (any SocialGraphWriting)? = nil,
         followRelations: (any SocialGraphReading)? = nil,
         followEvents: FollowGraphEvents? = nil,
-        entities: EntityStore = EntityStore(),
+        entities: any EntityReading & EntityWriting = EntityStore(),
         bookmarks: PostBookmarkStore = .shared,
         soundProvider: (any PostSoundProviding)? = nil,
         useSound: (@MainActor (PostSound) -> Void)? = nil,

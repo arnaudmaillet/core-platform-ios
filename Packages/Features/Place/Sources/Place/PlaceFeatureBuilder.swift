@@ -28,7 +28,7 @@ public final class PlaceFeatureBuilder: PlaceFeatureBuilding {
     private let wallet: (any WalletStaking)?
     private let makeWalletSheet: (@MainActor () -> UIViewController)?
     private let showsBalance: @MainActor () -> Bool
-    private let entities: EntityStore
+    private let entities: any EntityReading & EntityWriting
     private let router: (any Router)?
     private let authorMarks: PostAuthorMarks?
     private let postOpenWarm: PostOpenWarm?
@@ -50,7 +50,7 @@ public final class PlaceFeatureBuilder: PlaceFeatureBuilding {
         wallet: (any WalletStaking)?,
         makeWalletSheet: (@MainActor () -> UIViewController)?,
         showsBalance: @escaping @MainActor () -> Bool,
-        entities: EntityStore,
+        entities: any EntityReading & EntityWriting,
         router: (any Router)?,
         /// The cards' relation marks (#2300) and the tiles' comment warm-up
         /// (#2002): the feed's own, so a place's cards match every other.

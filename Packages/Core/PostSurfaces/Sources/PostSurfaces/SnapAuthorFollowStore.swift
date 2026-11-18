@@ -25,7 +25,7 @@ final public class SnapAuthorFollowStore {
     private let reader: (any SocialGraphReading)?
     /// Where the answers live: what the reader answered, per author, and
     /// every follow the graph accepted, from any screen.
-    private let entities: EntityStore
+    private let entities: any ProfileEntityReading & ProfileEntityWriting
     /// What this screen last reported per author through `onRelationChange`
     /// — so a store write that did not move an author's answer (their
     /// profile summary loaded by a list) re-draws nothing, and a viewer
@@ -58,7 +58,7 @@ final public class SnapAuthorFollowStore {
     }
 
     public init(
-        writer: (any SocialGraphWriting)?, reader: (any SocialGraphReading)?, entities: EntityStore = EntityStore(),
+        writer: (any SocialGraphWriting)?, reader: (any SocialGraphReading)?, entities: any ProfileEntityReading & ProfileEntityWriting = EntityStore(),
         viewer: @escaping @MainActor () -> ProfileID? = SnapAuthorFollowStore.activeProfile
     ) {
         self.writer = writer

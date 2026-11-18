@@ -79,7 +79,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     /// The app's one post and profile per id (#896): every snap feed reads
     /// the viewer's relation to an author from it, so a follow on one feed
     /// is the badge of all of them.
-    private let entities: EntityStore
+    private let entities: any EntityReading & EntityWriting
 
     /// The lists' author bands' relation mark and "+" (#2300): ONE binding
     /// for every surface this root builds — For You, the place page, a post
@@ -145,7 +145,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         localCache: FeedLocalCache? = nil,
         /// The app's entity store. Nil: this builder's screens share one of
         /// their own.
-        entities: EntityStore? = nil,
+        entities: (any EntityReading & EntityWriting)? = nil,
         /// The post share sheet's quick-send row (#1710) — the profile
         /// sheet's own source. Nil: the sheet has no row of people.
         shareTargeting: (any ShareTargeting)? = nil
@@ -278,7 +278,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     }
 
     /// `id` as `store` holds it: the post and its author, both needed.
-    static func entry(_ id: PostID, in store: EntityStore) -> FeedEntry? {
+    static func entry(_ id: PostID, in store: any EntityReading) -> FeedEntry? {
         guard let entity = store.post(id), let post = entity.post,
               let author = store.profile(post.authorID)?.summary
         else { return nil }
