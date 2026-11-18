@@ -1,7 +1,7 @@
 import CoreStorage
 import Foundation
-import Maps
-import Profile
+import ProfileInterface
+import WalletInterface
 
 /// The gem-shop items a profile wears (#944, #947) — the shell's answer to
 /// `ProfileItemAccess`.
@@ -14,13 +14,13 @@ import Profile
 ///   an item.
 /// - A guest owns nothing and buys nothing; neither does a teen (#401).
 @MainActor
-final class ProfileItemService: ProfileItemAccess, ProfileItemSelling {
+public final class ProfileItemService: ProfileItemAccess, ProfileItemSelling {
     private let accountID: String
     private let wallet: WalletStore
     private let store: ProfileItemStore
     private let isMember: @MainActor () -> Bool
 
-    init(
+    public init(
         accountID: String, wallet: WalletStore, store: ProfileItemStore,
         isMember: @escaping @MainActor () -> Bool = { true }
     ) {
@@ -30,23 +30,23 @@ final class ProfileItemService: ProfileItemAccess, ProfileItemSelling {
         self.isMember = isMember
     }
 
-    var gems: Int { wallet.snapshot().gems }
+    public var gems: Int { wallet.snapshot().gems }
 
     /// The Shop's Profile shelf: every item there is.
-    var items: [ProfileItem] { ProfileItem.allCases }
+    public var items: [ProfileItem] { ProfileItem.allCases }
 
-    func owns(_ item: ProfileItem) -> Bool {
+    public func owns(_ item: ProfileItem) -> Bool {
         guard isMember() else { return false }
         if wallet.isServerBacked { return wallet.ownedItems?.contains(item.catalogID) ?? false }
         return store.owns(item, accountID: accountID)
     }
 
     /// The catalogue's price, once read; the item's own until then.
-    func price(of item: ProfileItem) -> Int {
+    public func price(of item: ProfileItem) -> Int {
         wallet.catalogPrice(of: item.catalogID) ?? item.gemPrice
     }
 
-    func buy(_ item: ProfileItem) async -> ProfileItemPurchase {
+    public func buy(_ item: ProfileItem) async -> ProfileItemPurchase {
         guard isMember(), !TeenProtections.shared.restrictsPurchases else { return .unavailable }
         guard !owns(item) else { return .alreadyOwned }
         if wallet.isServerBacked {

@@ -13,6 +13,7 @@ import PlaceInterface
 import PostGrid
 import Transitions
 import UIKit
+import WalletInterface
 
 /// The Explore tab's surface: a full-bleed `MKMapView` that re-queries
 /// lightweight pins whenever the user settles a pan/zoom, and applies the

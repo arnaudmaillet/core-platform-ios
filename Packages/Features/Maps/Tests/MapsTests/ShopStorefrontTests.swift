@@ -2,6 +2,7 @@ import DesignSystem
 import MapsInterface
 import Testing
 import UIKit
+import WalletInterface
 @testable import Maps
 
 /// The Shop's storefront (#1075): shelves of categories — Boosts as portrait

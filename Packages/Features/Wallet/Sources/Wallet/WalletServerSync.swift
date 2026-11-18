@@ -7,18 +7,18 @@ import UIKit
 /// the claim's countdown runs out — the server is the clock, so it is asked
 /// rather than the device deciding the claim has opened.
 @MainActor
-final class WalletServerSync {
+public final class WalletServerSync {
     private let wallet: WalletStore
     private let scope: StorageScope
     private var observers: [NSObjectProtocol] = []
     private var wake: Timer?
 
-    init(wallet: WalletStore, scope: StorageScope = .shared) {
+    public init(wallet: WalletStore, scope: StorageScope = .shared) {
         self.wallet = wallet
         self.scope = scope
     }
 
-    func start() {
+    public func start() {
         let center = NotificationCenter.default
         observers = [
             // A new viewer — a sign-in among them, whose welcome gift the

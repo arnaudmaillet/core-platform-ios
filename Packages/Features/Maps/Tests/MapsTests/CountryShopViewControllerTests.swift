@@ -2,6 +2,7 @@ import DesignSystem
 import MapsInterface
 import Testing
 import UIKit
+import WalletInterface
 @testable import Maps
 
 /// The Shop: one list — the progress block, then Unlocked and Locked — under

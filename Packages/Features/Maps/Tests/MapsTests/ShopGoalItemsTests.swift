@@ -1,6 +1,7 @@
 import CoreStorage
 import DesignSystem
 import Testing
+import WalletInterface
 @testable import Maps
 
 /// The gem goal's candidates (#1480): the profile items, by their Shop

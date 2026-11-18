@@ -2,6 +2,7 @@ import CoreModels
 import CoreStorage
 import Foundation
 import PostGrid
+import ProfileInterface
 import ProfileSettings
 
 @MainActor

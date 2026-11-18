@@ -4,6 +4,7 @@ import CoreStorage
 import DesignSystem
 import MapsInterface
 import UIKit
+import Wallet
 
 /// Owns the Explore tab: the map surface vended by the Maps feature behind the
 /// `MapsFeatureBuilding` seam, on its own navigation stack (Step B pushes/

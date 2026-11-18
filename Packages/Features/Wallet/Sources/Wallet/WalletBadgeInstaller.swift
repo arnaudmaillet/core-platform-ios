@@ -34,7 +34,7 @@ import UIKit
 /// A PUSHED screen has no coordinator to hold one, so `attach(to:…)` hangs the
 /// installer on the screen itself and it lives exactly as long as the screen.
 @MainActor
-final class WalletBadgeInstaller: NSObject {
+public final class WalletBadgeInstaller: NSObject {
     /// Every host's badge carries the same identifier: iOS 26 treats two items
     /// with one identifier as ONE item across a transition, so a push from a
     /// root wearing the balance to a profile wearing it keeps it in place
@@ -65,7 +65,7 @@ final class WalletBadgeInstaller: NSObject {
     ///   width changes — re-assigning the same item hands the bar the same
     ///   wrapper at the same frozen size (measured in-sim: "120" still wrapped),
     ///   so a new item is the only thing a bar measures anew.
-    init(
+    public init(
         wallet: WalletStore,
         presenter: UIViewController?,
         makeSheet: @escaping () -> UIViewController,
@@ -108,7 +108,7 @@ final class WalletBadgeInstaller: NSObject {
     /// holds the screen only weakly, as its presenter and through `apply`, so
     /// popping the screen releases both. A screen that does not adopt
     /// `HeaderAccessoryHosting` is left alone.
-    static func attach(
+    public static func attach(
         to host: UIViewController,
         wallet: WalletStore,
         makeSheet: @escaping () -> UIViewController

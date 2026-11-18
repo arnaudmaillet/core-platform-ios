@@ -18,7 +18,7 @@ import OSLog
 ///
 /// Reads are synchronous (the screen's first frame); writes go to a serial
 /// queue, each as the viewer captured BEFORE its network call.
-nonisolated final class WalletHistoryLocalCache: Sendable {
+public nonisolated final class WalletHistoryLocalCache: Sendable {
     static let entityType = "wallet.transaction"
     static let format = 1
 
@@ -26,7 +26,7 @@ nonisolated final class WalletHistoryLocalCache: Sendable {
     private let queue = DispatchQueue(label: "cn.wynn.wallet-history-local-cache", qos: .utility)
     private let logger = Logger(subsystem: "cn.wynn.core-platform-ios", category: "wallet-history-cache")
 
-    init(store: LocalStore) {
+    public init(store: LocalStore) {
         self.store = store
     }
 

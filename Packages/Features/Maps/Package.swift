@@ -16,6 +16,8 @@ let package = Package(
         .package(path: "../../Kit/CoreContracts"),
         .package(path: "../../Kit/CoreModels"),
         .package(path: "../../Core/CoreNavigation"),
+        // The stake packs and profile items the Shop sells (#2385).
+        .package(path: "../../FeatureInterfaces/WalletInterface"),
         .package(path: "../../Core/CoreNetworking"),
         .package(path: "../../Core/CoreStorage"),
         .package(path: "../../Core/DesignSystem"),
@@ -39,7 +41,7 @@ let package = Package(
                 "PlaceInterface",
                 "CoreContracts",
                 "CoreModels",
-                "CoreNavigation", .product(name: "Instrumentation", package: "CoreNavigation"), .product(name: "Transitions", package: "CoreNavigation"),
+                "CoreNavigation", "WalletInterface", .product(name: "Instrumentation", package: "CoreNavigation"), .product(name: "Transitions", package: "CoreNavigation"),
                 // `NetworkFailure`: the repository error keeps why a call
                 // failed, so the screen can say "You're offline" (#794).
                 "CoreNetworking",
@@ -78,7 +80,7 @@ let package = Package(
                 "MapsInterface",
                 "PlaceInterface",
                 // `AppRoute` / `PlaceLink`: a place's share link opens it (#985).
-                "CoreNavigation",
+                "CoreNavigation", "WalletInterface",
                 "DesignSystem",
                 "CoreModels",
                 "CoreNetworking",

@@ -17,6 +17,7 @@ import MediaCore
 import UIKit
 import VoiceKit
 import VoiceKitUI
+import Wallet
 #if DEBUG
 import CoreNetworkingMocks
 #endif

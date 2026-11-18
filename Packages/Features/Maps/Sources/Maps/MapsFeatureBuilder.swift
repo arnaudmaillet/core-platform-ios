@@ -9,6 +9,7 @@ import MediaCore
 import MediaPlayback
 import PlaceInterface
 import UIKit
+import WalletInterface
 
 /// The Maps feature's entry point, resolved by the composition root and
 /// consumed through `MapsFeatureBuilding` by the app shell.

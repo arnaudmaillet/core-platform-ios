@@ -1,6 +1,7 @@
 import CoreStorage
 import DesignSystem
 import Foundation
+import WalletInterface
 
 /// The Shop items a gem goal weighs (#1480): what is bought once and kept —
 /// the profile items — in the Shop's order. Countries and boosts are not

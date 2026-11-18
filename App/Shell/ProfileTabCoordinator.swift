@@ -2,6 +2,7 @@ import CoreNavigation
 import ProfileInterface
 import DesignSystem
 import UIKit
+import Wallet
 
 /// Owns the Profile tab: the signed-in viewer's own profile as a root
 /// destination, on its own navigation stack.

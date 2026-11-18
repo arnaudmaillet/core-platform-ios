@@ -15,10 +15,10 @@ import UIKit
 /// ⚠️ SELECTOR-BASED (`WalletBadgeInstaller`'s rule): the registration goes
 /// with the notifier.
 @MainActor
-final class StakeRefundNotifier {
+public final class StakeRefundNotifier {
     private let window: UIWindow
 
-    init(wallet: WalletStore, window: UIWindow) {
+    public init(wallet: WalletStore, window: UIWindow) {
         self.window = window
         NotificationCenter.default.addObserver(
             self, selector: #selector(stakeRefunded(_:)),

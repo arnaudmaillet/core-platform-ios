@@ -3,6 +3,7 @@ import DesignSystem
 import MapsInterface
 import Testing
 import UIKit
+import WalletInterface
 @testable import Maps
 
 /// The Shop's Profile shelf (#944): the video banner at 500 gems, bought once
