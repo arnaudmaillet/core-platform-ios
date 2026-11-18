@@ -1,4 +1,3 @@
-import FeedInterface
 import Foundation
 import VoiceKit
 import VoiceKitUI
@@ -25,11 +24,11 @@ import VoiceKitUI
 /// camera and library are entries in its `attachments`; comments with
 /// photos later (#2310) declare the same entries, with no change to the
 /// composer. Voice comments (#2309) are `voice` at `.comment`.
-struct ComposerConfiguration {
+public struct ComposerConfiguration {
     /// What the empty field's hold records, and so the host's limit. `.none`:
     /// the field doesn't record, and nothing promises it (no "Hold for
     /// voice" placeholder, no VoiceOver action).
-    enum Voice: Equatable {
+    public enum Voice: Equatable {
         case none
         /// A voice message: five minutes, on the clock (#2102).
         case message
@@ -40,10 +39,10 @@ struct ComposerConfiguration {
         case post
 
         /// Whether the field's hold records.
-        var records: Bool { self != .none }
+        public var records: Bool { self != .none }
 
         /// The take's limit.
-        @MainActor var limit: TimeInterval {
+        @MainActor public var limit: TimeInterval {
             switch self {
             case .none, .message: VoiceRecorder.maximumDuration
             case .comment: Self.commentLimit
@@ -77,7 +76,7 @@ struct ComposerConfiguration {
     /// host opens EmoteKit's panel in the keyboard's place — the
     /// conversation's sticker strip left with #2305 — so this has one case;
     /// a host's own panel (stickers) would be one more.
-    enum Emote: Equatable {
+    public enum Emote: Equatable {
         case emotes
     }
 
@@ -93,15 +92,15 @@ struct ComposerConfiguration {
         case post
     }
 
-    var voice: Voice
+    public var voice: Voice
     /// The ORDERED list of what the reader can attach from the row: one
     /// glyph per entry in one glass capsule (#2344), between the field and
     /// the own bubble. The
     /// composer only calls an entry's `action`; what is picked travels as a
     /// value the host owns, and the host sends it — the composer never
     /// uploads.
-    var attachments: [ComposerAttachmentSource]
-    var emote: Emote
+    public var attachments: [ComposerAttachmentSource]
+    public var emote: Emote
     var column: Column
 
     init(voice: Voice = .none, attachments: [ComposerAttachmentSource] = [], emote: Emote = .emotes, column: Column) {
@@ -113,7 +112,7 @@ struct ComposerConfiguration {
 
     /// A conversation: its voice (a message, where its driver sends voice)
     /// and its attachments (`[camera, library]`, #2305), no column.
-    static func conversation(voice: Voice, attachments: [ComposerAttachmentSource]) -> Self {
+    public static func conversation(voice: Voice, attachments: [ComposerAttachmentSource]) -> Self {
         Self(voice: voice, attachments: attachments, column: .none)
     }
 
@@ -121,11 +120,11 @@ struct ComposerConfiguration {
     /// voice comment (#2309, a minute), no attachments (#2310 is on hold),
     /// the post's column. A host whose comments can't carry a voice turns
     /// `voice` off (`PostDetailViewController.commentsVoice`).
-    static var comments: Self { Self(voice: .comment, attachments: [], column: .post) }
+    public static var comments: Self { Self(voice: .comment, attachments: [], column: .post) }
 
     /// A post's comments in the comments sheet (#2087): the avatar, the
     /// field and the own bubble — no column — and the same voice comment.
-    static var commentsSheet: Self { Self(voice: .comment, attachments: [], column: .none) }
+    public static var commentsSheet: Self { Self(voice: .comment, attachments: [], column: .none) }
 
     /// Whether `other` lays the composer out the same: the same voice,
     /// emote and column, and the same attachment ENTRIES (ids, glyphs,

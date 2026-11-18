@@ -4,26 +4,26 @@ import MediaUI
 import UIKit
 
 /// What the sound bubble (and the composer's rail slot) draws for a post.
-struct SnapSoundFace: Equatable {
+public struct SnapSoundFace: Equatable {
     /// The cover's picture — the sound's artwork, else the post's own; nil
     /// draws the note (a named song with no artwork).
-    var coverURL: URL?
+    public var coverURL: URL?
     /// The post plays a sound. False — a media post with no audio — draws
     /// the bubble greyed.
-    var isAvailable: Bool
+    public var isAvailable: Bool
     /// Where a remote cover is read from on this turn (#894): the feed's
     /// pipeline, whose memory the attribution pill fills too. Nil reads files
     /// only. Not part of what the face IS: two faces that draw the same
     /// cover are equal whoever holds the pipeline.
-    var pipeline: ImagePipeline?
+    public var pipeline: ImagePipeline?
 
-    init(coverURL: URL?, isAvailable: Bool, pipeline: ImagePipeline? = nil) {
+    public init(coverURL: URL?, isAvailable: Bool, pipeline: ImagePipeline? = nil) {
         self.coverURL = coverURL
         self.isAvailable = isAvailable
         self.pipeline = pipeline
     }
 
-    static func == (lhs: SnapSoundFace, rhs: SnapSoundFace) -> Bool {
+    public static func == (lhs: SnapSoundFace, rhs: SnapSoundFace) -> Bool {
         lhs.coverURL == rhs.coverURL && lhs.isAvailable == rhs.isAvailable
     }
 
@@ -39,11 +39,11 @@ struct SnapSoundFace: Equatable {
     /// attribution has always read files directly (`SnapMediaAttributionView`).
     @MainActor var localCover: UIImage? {
         guard isAvailable else { return Self.noSoundImage }
-        guard let coverURL else { return SnapMediaAttributionView.noteImage }
+        guard let coverURL else { return Self.noteImage }
         guard coverURL.isFileURL else { return nil }
         // Read once, then kept in the pipeline's memory: the next face for the
         // same file does not touch the disk again.
-        if let kept = pipeline?.cachedImage(for: coverURL, size: SnapMediaAttributionView.coverBucket) { return kept }
+        if let kept = pipeline?.cachedImage(for: coverURL, size: Self.coverBucket) { return kept }
         guard let image = UIImage(contentsOfFile: coverURL.path) else { return nil }
         pipeline?.store(image, for: coverURL)
         return image
@@ -51,7 +51,7 @@ struct SnapSoundFace: Equatable {
 
     /// Draws this face's cover through `slot` (#1772): a local one handed in,
     /// a remote one loaded on the media's ladder.
-    @MainActor func draw(into slot: CoverSlot) {
+    @MainActor public func draw(into slot: CoverSlot) {
         if let local = localCover {
             slot.reset()
             slot.apply(local)
@@ -78,6 +78,28 @@ struct SnapSoundFace: Equatable {
         }
     }()
     static let noSoundSymbol = "music.note.slash"
+
+    /// The bucket a remote cover is decoded at, for the pill and the sound
+    /// bubble alike (#894): a small disc, so the pipeline's avatar size. Its
+    /// memory answers synchronously, so a swap made on this turn draws the new
+    /// post wearing its cover instead of popping to it once the blur has
+    /// landed. A post's own picture already decoded larger serves it too.
+    public static let coverBucket = ImageBucket.avatar
+
+    /// A white note on the cover's own dark ground.
+    public static let noteImage: UIImage = {
+        let side: CGFloat = 64
+        return UIGraphicsImageRenderer(size: CGSize(width: side, height: side)).image { context in
+            UIColor.darkGray.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: side, height: side))
+            let glyph = UIImage(systemName: "music.note")?
+                .withConfiguration(UIImage.SymbolConfiguration(pointSize: 26, weight: .semibold))
+                .withTintColor(.white, renderingMode: .alwaysOriginal)
+            if let glyph {
+                glyph.draw(at: CGPoint(x: (side - glyph.size.width) / 2, y: (side - glyph.size.height) / 2))
+            }
+        }
+    }()
 }
 
 /// The column's lower bubble (#671): the sound's record IN its glass
@@ -96,10 +118,10 @@ struct SnapSoundFace: Equatable {
 /// The button keeps the touches (tap, hold, VoiceOver) and draws nothing
 /// itself: the record view inside it is the glass, and the button's
 /// highlight presses it (`isHighlighted`).
-final class SnapSoundBubbleButton: UIButton {
+public final class SnapSoundBubbleButton: UIButton {
     /// A tap: open the sound sheet — or, while the way back shows, go back
     /// to the stream's start (the host reads `showsReturn`).
-    var onTap: (() -> Void)?
+    public var onTap: (() -> Void)?
 
     private let record = SoundRecordGlass()
     /// The glyph in the record's glass: the way back (#1929) or Share
@@ -110,15 +132,15 @@ final class SnapSoundBubbleButton: UIButton {
     /// The symbol the glyph wears, nil while the record shows.
     private var glyphSymbol: String?
     /// Whether the way back shows instead of the record.
-    private(set) var showsReturn = false
+    public private(set) var showsReturn = false
     /// Whether the bubble is the post's Share instead of its sound (#1999).
-    private(set) var sharesPost = false
+    public private(set) var sharesPost = false
     /// What the host last asked of the record, kept while the way back
     /// hides it: the record turns again when it comes back (#692).
     private var wantsSpinning = false
     /// Whether the bubble wears its own glass — off in the page's action
     /// column (#1872), which is one glass for all its bubbles.
-    var drawsGlass: Bool {
+    public var drawsGlass: Bool {
         get { record.drawsGlass }
         set { record.drawsGlass = newValue }
     }
@@ -127,12 +149,12 @@ final class SnapSoundBubbleButton: UIButton {
     /// The record's cover on the media slot (#1772): a bone on the dark
     /// ground while it loads, the slot's arrival.
     private lazy var coverSlot: CoverSlot = {
-        let slot = CoverSlot(view: record.cover, size: SnapMediaAttributionView.coverBucket)
+        let slot = CoverSlot(view: record.cover, size: SnapSoundFace.coverBucket)
         slot.bone?.fill = Surface.skeletonOnDark
         return slot
     }()
 
-    init() {
+    public init() {
         super.init(frame: .zero)
         var config = UIButton.Configuration.plain()
         config.contentInsets = .zero
@@ -156,7 +178,7 @@ final class SnapSoundBubbleButton: UIButton {
     /// The way back (#1929): the record cross-fades with `chevron.up`, the
     /// glass standing still — `chevron.down` when the stream's start is its
     /// end (`down`: Recent's newest, #2007). The record stops while hidden.
-    func setShowsReturn(_ shows: Bool, down: Bool = false, animated: Bool) {
+    public func setShowsReturn(_ shows: Bool, down: Bool = false, animated: Bool) {
         if down != returnPointsDown {
             returnPointsDown = down
             if shows == showsReturn { applyFace(animated: animated) }
@@ -167,7 +189,7 @@ final class SnapSoundBubbleButton: UIButton {
     }
 
     /// Whether the way back points down (#2007).
-    private(set) var returnPointsDown = false
+    public private(set) var returnPointsDown = false
 
     /// The glyph's symbol and its size: the composer slot's (`CommentsInputBar`),
     /// so the two chevrons read alike.
@@ -179,7 +201,7 @@ final class SnapSoundBubbleButton: UIButton {
     /// The bubble as the post's Share (#1999), or back to its sound: Share's
     /// glyph in the glass where the record was, the way back cross-fading
     /// with it as with the record.
-    func setSharesPost(_ shares: Bool) {
+    public func setSharesPost(_ shares: Bool) {
         guard shares != sharesPost else { return }
         sharesPost = shares
         accessibilityIdentifier = shares ? SnapFooterToolbar.ID.share : nil
@@ -224,16 +246,16 @@ final class SnapSoundBubbleButton: UIButton {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    override var isHighlighted: Bool {
+    public override var isHighlighted: Bool {
         didSet {
             guard isHighlighted != oldValue else { return }
             record.setPressed(isHighlighted)
         }
     }
 
-    override func layoutSubviews() {
+    public override func layoutSubviews() {
         super.layoutSubviews()
         // By bounds and centre, not frame: the press transforms the record.
         record.bounds = CGRect(origin: .zero, size: bounds.size)
@@ -246,7 +268,7 @@ final class SnapSoundBubbleButton: UIButton {
 
     /// Draws `face`; nil hides nothing by itself (the host decides visibility)
     /// but clears the cover.
-    func setFace(_ face: SnapSoundFace?, pipeline: ImagePipeline?) {
+    public func setFace(_ face: SnapSoundFace?, pipeline: ImagePipeline?) {
         guard face != self.face else { return }
         let coverChanged = face?.coverURL != self.face?.coverURL || self.face == nil
             || face?.isAvailable != self.face?.isAvailable
@@ -265,7 +287,7 @@ final class SnapSoundBubbleButton: UIButton {
     /// (#1871). A "No audio" face never turns, whatever the page's clip does:
     /// a carousel's clips are muted (#1849), and a record that turns says a
     /// sound is playing. The rail's rule (`CommentsInputBar.setRailSpinning`).
-    func setSpinning(_ spinning: Bool) {
+    public func setSpinning(_ spinning: Bool) {
         wantsSpinning = spinning
         applySpinning()
     }
@@ -276,16 +298,16 @@ final class SnapSoundBubbleButton: UIButton {
     }
 
     /// The record's cover as drawn now — the hold's disc carries it (#1929).
-    var coverImage: UIImage? { coverView.image }
+    public var coverImage: UIImage? { coverView.image }
 
     #if DEBUG
     /// Whether the record is turning now.
-    var debugIsSpinning: Bool { record.isSpinning }
+    public var debugIsSpinning: Bool { record.isSpinning }
     #endif
 
     #if DEBUG
     var debugRecord: SoundRecordGlass { record }
-    var debugCoverImage: UIImage? { coverView.image }
+    public var debugCoverImage: UIImage? { coverView.image }
     var debugReturnGlyphAlpha: CGFloat { showsReturn ? glyph.alpha : 0 }
     var debugShareGlyphAlpha: CGFloat { sharesPost && !showsReturn ? glyph.alpha : 0 }
     /// The glyph's symbol now. Tests.

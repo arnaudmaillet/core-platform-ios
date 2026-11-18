@@ -10,17 +10,17 @@ import UIKit
 /// starved CI runner every test lasts minutes, so a fake keyboard posted
 /// globally used to lift the composers of whatever else was on screen, for
 /// the rest of their lives.
-enum KeyboardNotificationScope {
+public enum KeyboardNotificationScope {
     /// The window `note` is aimed at, or nil for a system notification.
     /// An identifier, not the window: it crosses into the main actor.
-    nonisolated static func window(of note: Notification) -> ObjectIdentifier? {
+    public nonisolated static func window(of note: Notification) -> ObjectIdentifier? {
         (note.object as? UIWindow).map(ObjectIdentifier.init)
     }
 }
 
 extension UIView {
     /// Whether a keyboard notification aimed at `scope` concerns this view.
-    func hearsKeyboard(aimedAt scope: ObjectIdentifier?) -> Bool {
+    public func hearsKeyboard(aimedAt scope: ObjectIdentifier?) -> Bool {
         guard let scope else { return true }
         return window.map(ObjectIdentifier.init) == scope
     }

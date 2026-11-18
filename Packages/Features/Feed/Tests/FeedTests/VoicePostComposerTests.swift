@@ -6,6 +6,7 @@ import UIKit
 import VoiceKit
 import VoiceKitUI
 @testable import Feed
+@testable import ThreadKit
 
 /// The text composer records a voice post (#2209): the thread's composer
 /// with a minute's limit, and a draft that publishes the take.

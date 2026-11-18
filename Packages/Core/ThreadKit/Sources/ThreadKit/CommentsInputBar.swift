@@ -55,18 +55,18 @@ import LaunchArguments
 /// changes it. The OWN BUBBLE is the emote button over an empty field and
 /// the SEND over a draft (a symbol replace), on every host (#2308: the
 /// comments' inline waveform and send are gone).
-final class CommentsInputBar: UIView {
+public final class CommentsInputBar: UIView {
     /// Fired with trimmed, non-empty text; the field clears itself first.
-    var onSend: ((String) -> Void)?
+    public var onSend: ((String) -> Void)?
     /// Fired by the boost (star) button with what to spend — the tap's
     /// default amount, or a pick from the long-press menu (the default, or
     /// one ×100 shot). The spend itself is the host's affair (it owns the post
     /// identity and the wallet); the refusal comes back through
     /// `playBoostDenied`.
-    var onBoost: ((WalletStakeSpend) -> Void)?
+    public var onBoost: ((WalletStakeSpend) -> Void)?
     /// Fired by the boost menu's Undo entry — the host refunds the session
     /// spend (it owns the tally and the wallet; the bar only shows the door).
-    var onBoostUndo: (() -> Void)?
+    public var onBoostUndo: (() -> Void)?
 
     // MARK: The contract (#2308)
 
@@ -74,7 +74,7 @@ final class CommentsInputBar: UIView {
     /// and its column — and nothing else: the row, the own bubble, tap to
     /// type, hold to talk and the attachments' rule are the composer's, the
     /// same for every host. A post's comments by default.
-    var configuration: ComposerConfiguration = .comments {
+    public var configuration: ComposerConfiguration = .comments {
         didSet { applyConfiguration(from: oldValue) }
     }
 
@@ -886,7 +886,7 @@ final class CommentsInputBar: UIView {
     private var voiceOverlayCoversButton = false
     /// A take shows in the field's place, or the field is back: hosts clear
     /// what floats over the composer's end (the lock rises there).
-    var onVoiceOverlayChange: ((Bool) -> Void)?
+    public var onVoiceOverlayChange: ((Bool) -> Void)?
 
     /// The bin in the avatar's place while a voice take can be thrown away
     /// (#2102): `onDelete` nil gives the face back. The two cross-fade.
@@ -924,7 +924,7 @@ final class CommentsInputBar: UIView {
         }
     }
     /// One phase of an interactive vertical page-swipe born on the bar.
-    enum PageSwipePhase { case began, changed, ended }
+    public enum PageSwipePhase { case began, changed, ended }
     /// A vertical drag anywhere on the bar (field, buttons, gaps) drives the
     /// feed pager INTERACTIVELY — the bar forwards the raw translation and
     /// velocity, and the host offsets the parent scroll view in real time
@@ -936,16 +936,16 @@ final class CommentsInputBar: UIView {
     /// `velocity` are the pan's vertical components; up (negative) pages to
     /// the next post. Hosts that leave it nil (the pushed comments screen,
     /// the conversation) have no page-swipe.
-    var onPageSwipe: ((PageSwipePhase, _ translation: CGFloat, _ velocity: CGFloat) -> Void)?
+    public var onPageSwipe: ((PageSwipePhase, _ translation: CGFloat, _ velocity: CGFloat) -> Void)?
 
     /// Disables sending while a comment is in flight (spinner in the field's
     /// send arrow).
-    var isSending = false {
+    public var isSending = false {
         didSet { updateFieldAction() }
     }
 
     /// What the rail slot wears — see `railFace`.
-    enum RailFace: Equatable {
+    public enum RailFace: Equatable {
         /// No bubble in the slot: a draft post, which has nothing to repost
         /// yet. The slot keeps its station (the stake's stands on it).
         case empty
@@ -976,7 +976,7 @@ final class CommentsInputBar: UIView {
     /// action and only the action — a draft never turns it into send (asked
     /// 2026-10-02: the send arrow lives in the field, and the column's bubbles
     /// never change meaning under the thumb).
-    var railFace: RailFace = .empty {
+    public var railFace: RailFace = .empty {
         didSet {
             // No column (`ComposerConfiguration.Column.none`): no slot,
             // whatever a host's page state asks.
@@ -997,10 +997,10 @@ final class CommentsInputBar: UIView {
 
     /// The rail face was tapped (repost, pin, the sound's mute), whatever the
     /// field holds.
-    var onRailAction: (() -> Void)?
+    public var onRailAction: (() -> Void)?
     /// The SOUND face was held: the host toggles the sound (#683). Other
     /// faces, and a post with no sound, ignore a hold.
-    var onRailLongPress: (() -> Void)?
+    public var onRailLongPress: (() -> Void)?
 
     @objc private func railHeld(_ recogniser: UILongPressGestureRecognizer) {
         guard recogniser.state == .began else { return }
@@ -1014,10 +1014,10 @@ final class CommentsInputBar: UIView {
 
     /// The slot's button, for a host that hangs its own hold on it (#1929,
     /// `HoldToArmPresenter`).
-    var railHoldTarget: UIView { railButton }
+    public var railHoldTarget: UIView { railButton }
     /// The sound face's cover as drawn now — the way back's hold carries it
     /// on its disc (#1929).
-    var railCoverImage: UIImage? { railCoverView.image }
+    public var railCoverImage: UIImage? { railCoverView.image }
 
     /// A recognised hold on the slot, for tests (`railHeld`'s `.began`).
     func debugHoldRail() { holdRail() }
@@ -1029,7 +1029,7 @@ final class CommentsInputBar: UIView {
     /// keep their stations — the resting height, the field's trailing inset
     /// and the keyboard's rise read the same frames — but draw nothing and
     /// take no touch.
-    var hostsActionColumn = true {
+    public var hostsActionColumn = true {
         didSet {
             guard hostsActionColumn != oldValue else { return }
             railButton.isUserInteractionEnabled = hostsActionColumn
@@ -1052,7 +1052,7 @@ final class CommentsInputBar: UIView {
 
     /// Whether the column carries the stake bubble. A conversation's does not:
     /// there is nothing there to like. The slot stays where it was.
-    var showsStake = true {
+    public var showsStake = true {
         didSet {
             if configuration.column == .none, showsStake { showsStake = false }
             guard showsStake != oldValue else { return }
@@ -1075,7 +1075,7 @@ final class CommentsInputBar: UIView {
     /// without the stake) — the stake the like pill with the like face, a
     /// bubble without — and the field grows beside the stake rather than
     /// under it.
-    static func restingHeight(
+    public static func restingHeight(
         for category: UIContentSizeCategory, showsStake: Bool = true, likeFace: Bool = true
     ) -> CGFloat {
         let bubble = SnapActionColumn.bubbleSize
@@ -1086,7 +1086,7 @@ final class CommentsInputBar: UIView {
     /// The INPUT ROW's height at rest in `category`: one empty line of the
     /// field, never less than its floor. What a host clears above a keyboard,
     /// where the row rides alone — the column stays at rest, under it.
-    static func restingInputRowHeight(for category: UIContentSizeCategory) -> CGFloat {
+    public static func restingInputRowHeight(for category: UIContentSizeCategory) -> CGFloat {
         if let cached = restingFieldHeights[category] { return cached }
         let probe = UITextView()
         probe.font = .preferredFont(
@@ -1238,7 +1238,7 @@ final class CommentsInputBar: UIView {
     private var railCoverView: UIImageView { railRecord.cover }
     /// The rail's sound cover on the media slot (#1772), the bubble's.
     private lazy var railCoverSlot: CoverSlot = {
-        let slot = CoverSlot(view: railRecord.cover, size: SnapMediaAttributionView.coverBucket)
+        let slot = CoverSlot(view: railRecord.cover, size: SnapSoundFace.coverBucket)
         slot.bone?.fill = Surface.skeletonOnDark
         return slot
     }()
@@ -1254,7 +1254,7 @@ final class CommentsInputBar: UIView {
     /// the global signal is unambiguous). It gates the page-swipe drive, the
     /// hosts' pull-to-close and the idle-dismiss seam — never a face. Internal
     /// setter for tests: all of them are unit-tested without a real keyboard.
-    private(set) var isKeyboardOpen = false
+    public private(set) var isKeyboardOpen = false
     /// Removes the keyboard observers on release — a nonisolated deinit
     /// cannot touch main-actor state, so the tokens live in a bag whose
     /// own deinit does the unregistering (the VC-side pattern).
@@ -1322,7 +1322,7 @@ final class CommentsInputBar: UIView {
             .withTintColor(sendTint, renderingMode: .alwaysOriginal)
     }
 
-    override init(frame: CGRect) {
+    public override init(frame: CGRect) {
         super.init(frame: frame)
 
         textView.font = .appFont(forTextStyle: .body)
@@ -1669,7 +1669,7 @@ final class CommentsInputBar: UIView {
 
     /// Vertical-intent gate for the swipe-exit pan only; every other
     /// recognizer keeps UIKit's default answer.
-    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+    public override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         // The field's voice hold (#2183): over an empty field at rest, nothing
         // on its way. Focused, the field writes (2026-11-08).
         if gestureRecognizer === fieldVoiceHold {
@@ -1695,7 +1695,7 @@ final class CommentsInputBar: UIView {
     /// stands above the bar's own bounds, and its touches are still the bar's.
     ///
     /// So are the emote and completion strips riding over it (#960).
-    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+    public override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
         if emotes.suggestionsContain(point, in: self) { return true }
         // No input row (#2216): its band is the stream's, not the bar's.
         if takesComments, point.y >= field.frame.minY, point.y <= field.frame.maxY,
@@ -1715,7 +1715,7 @@ final class CommentsInputBar: UIView {
     /// frames (`Metrics.minimumHitSide`): the 38pt line cannot hold one, and
     /// the emote toggle and the send arrow are the field's most hit spots.
     /// Where the two targets overlap, the nearer button's centre wins.
-    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+    public override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
         if let button = fieldButton(near: point) { return button }
         return super.hitTest(point, with: event)
     }
@@ -1767,7 +1767,7 @@ final class CommentsInputBar: UIView {
     /// column on it.
     ///
     /// The guide's owner must be an ancestor of the bar.
-    func riseWithKeyboard(of guide: UILayoutGuide) {
+    public func riseWithKeyboard(of guide: UILayoutGuide) {
         keyboardCeiling?.isActive = false
         let ceiling = field.bottomAnchor.constraint(lessThanOrEqualTo: guide.topAnchor, constant: -Spacing.sm)
         keyboardCeiling = ceiling
@@ -1784,7 +1784,7 @@ final class CommentsInputBar: UIView {
     /// will-change-frame notifications; nil while it is down.
     private var keyboardTopInWindow: CGFloat?
 
-    func setOverlayOffset(_ offset: CGFloat) {
+    public func setOverlayOffset(_ offset: CGFloat) {
         overlayOffset = offset
         transform = offset == 0 ? .identity : CGAffineTransform(translationX: 0, y: offset)
         refreshKeyboardCeiling()
@@ -1876,7 +1876,7 @@ final class CommentsInputBar: UIView {
     /// pinned at the screen's edge instead of travelling with the page. The
     /// host grants it to the page a viewer can type on (see
     /// `PostDetailViewController.setComposerTracksKeyboard`).
-    var tracksKeyboard = true {
+    public var tracksKeyboard = true {
         didSet {
             guard tracksKeyboard != oldValue else { return }
             keyboardCeiling?.isActive = tracksKeyboard
@@ -1893,7 +1893,7 @@ final class CommentsInputBar: UIView {
     /// row above the bar. For a host clearing its stream above the composer.
     /// Lays the bar out first: the field is the bar's subview, laid out after
     /// a host's `viewDidLayoutSubviews` asks.
-    var occupiedMinY: CGFloat {
+    public var occupiedMinY: CGFloat {
         layoutIfNeeded()
         return frame.minY + min(0, field.frame.minY)
     }
@@ -1938,13 +1938,13 @@ final class CommentsInputBar: UIView {
     /// and with the keyboard. For a host whose chrome belongs to the input
     /// row rather than to the whole bar (the footer band, whose ramp the
     /// stake bubble floats in, and which rides the keyboard with the row).
-    var inputRowTopAnchor: NSLayoutYAxisAnchor { field.topAnchor }
+    public var inputRowTopAnchor: NSLayoutYAxisAnchor { field.topAnchor }
 
     /// The stake station's top — the heart, or the Text Post page's globe,
     /// floating over the input row's trailing end while the keyboard is
     /// down. For a host that stacks something above the row and must clear
     /// it too (a showcase's card, #2216). Valid while the station shows.
-    var stakeStationTopAnchor: NSLayoutYAxisAnchor { boostButton.topAnchor }
+    public var stakeStationTopAnchor: NSLayoutYAxisAnchor { boostButton.topAnchor }
 
     /// The view whose top is `inputRowTopAnchor`: what a toast stands on over
     /// the composer (`Feedback`'s `above:`, #729).
@@ -1953,10 +1953,10 @@ final class CommentsInputBar: UIView {
     /// Whether the field holds the keyboard. A row tap on the stream then
     /// retires it instead of doing the row's own work — see the hosts'
     /// reply taps.
-    var isEditingDraft: Bool { textView.isFirstResponder }
+    public var isEditingDraft: Bool { textView.isFirstResponder }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     /// The nudge's damped, saturating displacement: near-1:1 for the first
     /// few points, asymptotic to ±40 — the bar feels physically attached
@@ -1996,7 +1996,7 @@ final class CommentsInputBar: UIView {
     }
 
     #if DEBUG
-    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+    public override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         if LaunchArgument.gestureLog.isPassed(), let touch = touches.first {
             print("GESTURELOG: bar touchesBegan at \(touch.location(in: self))")
         }
@@ -2004,7 +2004,7 @@ final class CommentsInputBar: UIView {
     }
     #endif
 
-    override func didMoveToWindow() {
+    public override func didMoveToWindow() {
         super.didMoveToWindow()
         guard window != nil else { return }
         applyPlaceholder()
@@ -2031,7 +2031,7 @@ final class CommentsInputBar: UIView {
         }
     }
 
-    override func layoutSubviews() {
+    public override func layoutSubviews() {
         // ⚠️ THE FIRST LAYOUT IS NEVER ANIMATED (the owner, 2026-11-08: the
         // emote button came in from the top-left corner). A conversation's
         // bar is laid out for the first time inside the push's animation, or
@@ -2073,7 +2073,7 @@ final class CommentsInputBar: UIView {
     /// machine is exercised without a real keyboard) and any future draft
     /// restoration; routes through the delegate path so the toggle and
     /// the field height stay honest.
-    var draftText: String {
+    public var draftText: String {
         get { textView.plainText }
         set {
             textView.plainText = newValue
@@ -2083,13 +2083,13 @@ final class CommentsInputBar: UIView {
 
     /// The prompt when nobody is being replied to, overriding the comment
     /// wording ("Comment as …") — a conversation's field says "Message…".
-    var defaultPlaceholder: String? {
+    public var defaultPlaceholder: String? {
         didSet { applyPlaceholder() }
     }
 
     /// The send arrow's spoken name. Nil is "Send comment"; the Text Post
     /// page's first send publishes the post, and says so.
-    var sendAccessibilityLabel: String? {
+    public var sendAccessibilityLabel: String? {
         didSet { updateFieldAction() }
     }
 
@@ -2097,7 +2097,7 @@ final class CommentsInputBar: UIView {
     /// that does not exist yet has a different question for that station —
     /// who will see it. Non-nil swaps the heart for a globe that opens this
     /// menu; nil puts the heart back.
-    var visibilityMenu: UIMenu? {
+    public var visibilityMenu: UIMenu? {
         didSet {
             visibilityButton.menu = visibilityMenu
             applyStakeStation()
@@ -2106,12 +2106,12 @@ final class CommentsInputBar: UIView {
 
     /// Every change to the draft, typed or set — for a host that keeps it (the
     /// Text Post page's drafts, and its guard against a swipe throwing it away).
-    var onTextChange: ((String) -> Void)?
+    public var onTextChange: ((String) -> Void)?
 
     #if DEBUG
     /// Types `text` and sends it, exactly as a tap on send would — for the
     /// simulator hooks, which cannot type into a field.
-    func debugSend(_ text: String) {
+    public func debugSend(_ text: String) {
         draftText = text
         sendTapped()
     }
@@ -2162,13 +2162,13 @@ final class CommentsInputBar: UIView {
 
     /// Fired when the keyboard retires over an EMPTY field — the reply
     /// state's natural exit (a draft in progress keeps its target).
-    var onIdleDismiss: (() -> Void)?
+    public var onIdleDismiss: (() -> Void)?
 
     /// Renders the viewer into the leading avatar: the monogram lands on
     /// this frame, the picture arrives behind it whenever the fetch
     /// resolves. A nil identity (nobody signed in, no profile) leaves the
     /// neutral placeholder disc — never someone else's face.
-    func setViewerIdentity(_ identity: ViewerIdentity?, imagePipeline: ImagePipeline?) {
+    public func setViewerIdentity(_ identity: ViewerIdentity?, imagePipeline: ImagePipeline?) {
         viewerIdentity = identity
         viewerImagePipeline = imagePipeline
         avatarView.setMonogram(Self.monogram(identity?.name))
@@ -2185,7 +2185,7 @@ final class CommentsInputBar: UIView {
     /// handed the face to anchor to. Nil disables it — an account with
     /// nothing to switch to must not offer one, and a host that wires no
     /// switcher at all (the pushed comments screen) gets a plain, inert face.
-    func setProfileSwitch(_ open: ((UIView) -> Void)?) {
+    public func setProfileSwitch(_ open: ((UIView) -> Void)?) {
         onProfileSwitch = open
         avatarButton.isEnabled = open != nil
     }
@@ -2194,14 +2194,14 @@ final class CommentsInputBar: UIView {
     /// The composer's initials, by the app's one rule (#811): first letters
     /// of the first two words. The placeholder for an unknown viewer is the
     /// same "?" a nameless comment author gets.
-    static func monogram(_ name: String?) -> String {
+    public static func monogram(_ name: String?) -> String {
         MonogramAvatarView.monogram(name: name ?? "", handle: "")
     }
 
     /// The reply state's face: a non-nil name switches the placeholder to
     /// "Reply to NAME…"; nil restores the default prompt. Pure placeholder
     /// — the reply payload (the thread parent's id) is the HOST's state.
-    func setReplyPlaceholder(name: String?) {
+    public func setReplyPlaceholder(name: String?) {
         replyName = name
         applyPlaceholder()
         // A comment's reply may be a voice (`recordsReplyWhileWriting`).
@@ -2307,7 +2307,7 @@ final class CommentsInputBar: UIView {
     /// input row, only the column: its like and its Share. The row is hidden,
     /// not removed: the column keeps its station, the bar its height, and
     /// every host's clearance with it.
-    var takesComments = true {
+    public var takesComments = true {
         didSet {
             guard takesComments != oldValue else { return }
             if !takesComments { textView.resignFirstResponder() }
@@ -2331,7 +2331,7 @@ final class CommentsInputBar: UIView {
     }
 
     /// Raises the keyboard into the composer — the row-tap reply trigger.
-    func focusComposer() {
+    public func focusComposer() {
         guard takesComments else { return }
         textView.becomeFirstResponder()
     }
@@ -2344,7 +2344,7 @@ final class CommentsInputBar: UIView {
     /// Whether the avatar leads the field. Off, it fades out and the field
     /// takes its room — the detached composer over the keys (#2087, the
     /// owner 2026-11-04). Inside an animation block, it follows it.
-    var showsAvatar = true {
+    public var showsAvatar = true {
         didSet {
             guard showsAvatar != oldValue else { return }
             fieldAfterAvatar.isActive = showsAvatar
@@ -2357,10 +2357,10 @@ final class CommentsInputBar: UIView {
     /// Asked as the field is about to edit, for a member: false keeps the
     /// keyboard away — a host that edits in another bar instead (#2087's
     /// detached composer, `SnapCommentsDetachedComposer`).
-    var shouldBeginEditing: (() -> Bool)?
+    public var shouldBeginEditing: (() -> Bool)?
 
     /// Sends the draft, as a tap on send does.
-    func send() {
+    public func send() {
         sendTapped()
     }
 
@@ -2369,7 +2369,7 @@ final class CommentsInputBar: UIView {
     /// (`SnapCommentsDetachedComposer`). Its voice excepted: the stand-in
     /// edits text over the keys, where the field never records, and the
     /// recorder is `other`'s.
-    func mirrorLook(of other: CommentsInputBar) {
+    public func mirrorLook(of other: CommentsInputBar) {
         var look = other.configuration
         look.voice = .none
         configuration = look
@@ -2557,7 +2557,7 @@ final class CommentsInputBar: UIView {
     /// and comments layouts stays a crossfade between two identical bubbles.
     /// The snap feed's comments panel turns it on; elsewhere the bubble keeps
     /// its receipt face (the spend as a number).
-    var usesLikeFace = false {
+    public var usesLikeFace = false {
         didSet {
             guard usesLikeFace != oldValue else { return }
             stakeHeight?.constant = Self.stakeSide(likeFace: usesLikeFace)
@@ -2570,7 +2570,7 @@ final class CommentsInputBar: UIView {
     /// (`WalletStakeLikes`, #896) — the bar draws it as given, as the rail's
     /// chrome does. Nil when the author hides it (#397). Read only by the
     /// like face.
-    func setLikeCount(_ count: Int64?) {
+    public func setLikeCount(_ count: Int64?) {
         guard count != boostPostLikeCount else { return }
         boostPostLikeCount = count
         applyBoostFace()
@@ -2594,7 +2594,7 @@ final class CommentsInputBar: UIView {
 
     #if DEBUG
     /// The count under the like face's heart — nil while it is not showing.
-    var debugLikeBadgeText: String? {
+    public var debugLikeBadgeText: String? {
         usesLikeFace && !boostButton.isHidden ? boostButton.configuration?.title : nil
     }
     #endif
@@ -2605,7 +2605,7 @@ final class CommentsInputBar: UIView {
     /// its glyph face (0, an invitation) and the number itself (a receipt),
     /// the rail's former contract. Owned by the host, which owns the post
     /// identity and the wallet.
-    func setBoostTotal(_ total: Int, animated: Bool = false) {
+    public func setBoostTotal(_ total: Int, animated: Bool = false) {
         guard total != boostSpentTotal else { return }
         boostSpentTotal = total
         applyBoostFace()
@@ -2630,7 +2630,7 @@ final class CommentsInputBar: UIView {
                 )
             }
             boostButton.accessibilityLabel = "Like"
-            boostButton.accessibilityValue = SnapRailBoostButton.accessibilityValue(
+            boostButton.accessibilityValue = SnapActionColumn.likeAccessibilityValue(
                 likeCount: boostPostLikeCount,
                 staked: total
             )
@@ -2674,7 +2674,7 @@ final class CommentsInputBar: UIView {
     /// offer — tap unaffordable AND nothing to undo — because a disabled
     /// `UIButton` delivers no long-press either, and the menu is the
     /// undo's only door.
-    func setBoostContext(balance: Int, undoableAmount: Int, stakeShots: Int = 0) {
+    public func setBoostContext(balance: Int, undoableAmount: Int, stakeShots: Int = 0) {
         boostBalance = balance
         boostUndoableAmount = undoableAmount
         boostStakeShots = stakeShots
@@ -2718,7 +2718,7 @@ final class CommentsInputBar: UIView {
 
     /// The refund's receipt: the confirmation float mirrored — a cool "−N"
     /// sinking off the button. White, not gold: an undo is not a payout.
-    func playBoostRefund(amount: Int) {
+    public func playBoostRefund(amount: Int) {
         guard boostButton.bounds.width > 0 else { return }
         let label = UILabel()
         label.text = "−\(amount)"
@@ -2756,7 +2756,7 @@ final class CommentsInputBar: UIView {
     /// anchor's theatre (`SnapChromeView.playBoostConfirmation`), replayed on
     /// this surface so one spend looks the same wherever it was made. The bar
     /// doesn't clip, so the label may rise past its top edge by design.
-    func playBoostConfirmation(amount: Int) {
+    public func playBoostConfirmation(amount: Int) {
         guard boostButton.bounds.width > 0 else { return }
         let label = UILabel()
         label.text = "+\(amount)"
@@ -2800,7 +2800,7 @@ final class CommentsInputBar: UIView {
     /// The refusal: a head-shake on the boost button — the wallet couldn't
     /// cover the spend, nothing changed, and no label flies (a "-0" would
     /// read as a payout). The host pairs it with the error haptic.
-    func playBoostDenied() {
+    public func playBoostDenied() {
         let shake = CAKeyframeAnimation(keyPath: "transform.translation.x")
         shake.values = [0, -7, 6, -4, 3, -1, 0]
         shake.duration = 0.4
@@ -3053,7 +3053,7 @@ final class CommentsInputBar: UIView {
     /// Turns the sound face's cover like a record while the post plays aloud
     /// (#692) — the page's sound bubble's rule: play, pause and mute, and
     /// Reduce Motion, never the idle calm. Other faces never turn.
-    func setRailSpinning(_ spinning: Bool) {
+    public func setRailSpinning(_ spinning: Bool) {
         guard hostsActionColumn, case .sound(let face) = railFace, face.isAvailable else {
             railCoverView.layer.setRecordSpinning(false)
             return
@@ -3078,7 +3078,7 @@ final class CommentsInputBar: UIView {
     }
 
     /// The share face's glyph: the toolbar's Share (`SnapFooterToolbar`).
-    static let shareRailSymbol = "arrowshape.turn.up.right"
+    public static let shareRailSymbol = "arrowshape.turn.up.right"
 
     /// What `debugRailSymbol` reads while the slot wears the sound's cover.
     static let soundRailSymbol = "sound.cover"
@@ -3190,7 +3190,7 @@ extension CommentsInputBar: UITextViewDelegate {
     /// keyboard, and takes focus after they sign up — the comment they were
     /// about to write. Every entry into editing passes here (a tap, a reply
     /// row, the emote panel), so this one check covers them all.
-    func textViewShouldBeginEditing(_ textView: UITextView) -> Bool {
+    public func textViewShouldBeginEditing(_ textView: UITextView) -> Bool {
         guard let gate = MemberGates.gate(from: self), !gate.isMember else {
             return shouldBeginEditing?() ?? true
         }
@@ -3203,21 +3203,21 @@ extension CommentsInputBar: UITextViewDelegate {
 
     /// Focused, a conversation's field writes: its placeholder and its
     /// voice action follow (2026-11-08).
-    func textViewDidBeginEditing(_ textView: UITextView) {
+    public func textViewDidBeginEditing(_ textView: UITextView) {
         applyPlaceholder()
         updateFieldAction()
     }
 
     /// The emote panel goes with the keyboard: the bubble's glyph follows,
     /// once the panel has left (after this turn). The field speaks again.
-    func textViewDidEndEditing(_ textView: UITextView) {
+    public func textViewDidEndEditing(_ textView: UITextView) {
         applyPlaceholder()
         // An empty field let go: the attachments come back now (#2305).
         updateAttachments()
         DispatchQueue.main.async { [weak self] in self?.updateFieldAction() }
     }
 
-    func textViewDidChange(_ textView: UITextView) {
+    public func textViewDidChange(_ textView: UITextView) {
         placeholderLabel.isHidden = textView.hasText
         updateFieldAction()
         updateFieldHeight(animated: true)

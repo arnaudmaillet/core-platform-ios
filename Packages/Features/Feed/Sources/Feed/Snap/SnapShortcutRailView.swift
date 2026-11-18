@@ -2,6 +2,7 @@ import CoreModels
 import CoreStorage
 import DesignSystem
 import EmoteKit
+import ThreadKit
 import UIKit
 
 /// The vertical shortcut wheel: a right-edge rail of quick-react shortcuts,
@@ -891,15 +892,10 @@ final class SnapRailBoostButton: StakeMenuButton {
         accessibilityValue = Self.accessibilityValue(likeCount: likeCount, staked: spentTotal)
     }
 
-    /// "1.2K likes, you staked 3 points" — the post's count when it is shown,
-    /// the viewer's stake when there is any. Nil when there is neither.
+    /// The like's VoiceOver value: `SnapActionColumn.likeAccessibilityValue`
+    /// (#2380), shared with the composer's stake pill and the toolbar.
     static func accessibilityValue(likeCount: Int64?, staked: Int) -> String? {
-        var parts: [String] = []
-        if let likeCount {
-            parts.append(likeCount == 1 ? "1 like" : "\(likeCount.formattedCompact()) likes")
-        }
-        if staked > 0 { parts.append("you staked \(StakeMenu.likes(staked))") }
-        return parts.isEmpty ? nil : parts.joined(separator: ", ")
+        SnapActionColumn.likeAccessibilityValue(likeCount: likeCount, staked: staked)
     }
 
     private static func makeConfiguration(glass: Bool, spentTotal: Int, likeCount: Int64?) -> UIButton.Configuration {

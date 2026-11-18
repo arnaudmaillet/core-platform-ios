@@ -10,7 +10,7 @@ import UIKit
 /// The first comments space of a media post — the in-page engagement over a
 /// black wash, with its pull-down dismissal — is gone (#2087): a media post's
 /// comments are the sheet.
-enum SnapCommentsLayout {
+public enum SnapCommentsLayout {
     /// The gap between the screen chrome and the first row of the stream.
     ///
     /// It was two constants summing to 20pt, and both were named for a "strip"
@@ -27,7 +27,7 @@ enum SnapCommentsLayout {
     /// below this number holds the first row off the blur band any more, so the
     /// caption arrived tight against the chrome. Reported as wanting air above
     /// it, which is exactly what was subtracted.
-    static let streamTopBreath: CGFloat = Spacing.lg
+    public static let streamTopBreath: CGFloat = Spacing.lg
 
     /// The stream's entrance scale: the whole comments layer EXPANDS into
     /// place as it fades in, rather than simply appearing there. This
@@ -41,7 +41,7 @@ enum SnapCommentsLayout {
     /// became a scrolling row: the motion belongs to the surface that
     /// appears, and that is now the list itself. Deliberately small —
     /// the one piece of motion the engagement still owns.
-    static let streamEntranceScale: CGFloat = 0.94
+    public static let streamEntranceScale: CGFloat = 0.94
 
     /// The skeleton density estimate: a DELIBERATE low-ball of the real
     /// skeleton row's height (~48pt with list insets), because the count
@@ -53,7 +53,7 @@ enum SnapCommentsLayout {
     /// cover the whole viewport on ANY form factor — SE, Pro Max, iPad —
     /// with zero hardcoded gaps. The fallback covers the pre-layout call
     /// (bounds not yet set): generous enough for every iPhone.
-    static func skeletonPlaceholderCount(viewportHeight: CGFloat) -> Int {
+    public static func skeletonPlaceholderCount(viewportHeight: CGFloat) -> Int {
         guard viewportHeight > 0 else { return 24 }
         return Int(ceil(viewportHeight / skeletonRowEstimate))
     }
@@ -63,7 +63,7 @@ enum SnapCommentsLayout {
     /// (the opener's metrics), never more bones than comments — and none for
     /// zero, whose empty page fades in when the fetch answers instead of a
     /// skeleton that turns into it. Nil: unknown, the viewport's count.
-    static func skeletonPlaceholderCount(viewportHeight: CGFloat, knownComments: Int64?) -> Int {
+    public static func skeletonPlaceholderCount(viewportHeight: CGFloat, knownComments: Int64?) -> Int {
         let viewport = skeletonPlaceholderCount(viewportHeight: viewportHeight)
         guard let knownComments else { return viewport }
         return min(viewport, Int(max(0, knownComments)))
@@ -103,8 +103,8 @@ enum SnapCommentsLayout {
     /// A stream that its caption row fills leaves no room, or less than none,
     /// and gets the block: a 260pt row under a long caption is a page that
     /// scrolls for nothing.
-    static let emptyPageFallbackHeight: CGFloat = 260
-    static func emptyPageHeight(availableHeight: CGFloat?, blockHeight: CGFloat) -> CGFloat {
+    public static let emptyPageFallbackHeight: CGFloat = 260
+    public static func emptyPageHeight(availableHeight: CGFloat?, blockHeight: CGFloat) -> CGFloat {
         guard let availableHeight else { return max(emptyPageFallbackHeight, blockHeight) }
         return max(blockHeight, availableHeight)
     }
@@ -118,7 +118,7 @@ enum SnapCommentsLayout {
     /// used to be `topInset + padding + cardHeight + padding`, and the card
     /// height was a measured function of the caption — a whole apparatus
     /// whose only purpose was holding a fixed rectangle open.)
-    static func commentsTopInset(topInset: CGFloat) -> CGFloat {
+    public static func commentsTopInset(topInset: CGFloat) -> CGFloat {
         topInset + streamTopBreath
     }
 
@@ -128,7 +128,7 @@ enum SnapCommentsLayout {
     /// `SnapGlassCardView`),
     /// which is what gives it the continuous curve — a layer radius would
     /// clip the material instead of shaping it.
-    static let stripCardCornerRadius: CGFloat = 18
+    public static let stripCardCornerRadius: CGFloat = 18
 
     // MARK: The chrome's frost bands
     //
@@ -142,7 +142,7 @@ enum SnapCommentsLayout {
     /// adapts to light and dark on its own. Density was tried and rejected
     /// anyway: what keeps the composer legible is `footerFrostLead` — the
     /// runway its ramp finishes over — not a thicker material.
-    static let frostStyle: UIBlurEffect.Style = .regular
+    public static let frostStyle: UIBlurEffect.Style = .regular
 
     /// The frost veil's opacity at the band's SOLID end, on pages where the
     /// blur alone cannot be seen.
@@ -152,19 +152,19 @@ enum SnapCommentsLayout {
     /// takes this to nothing by the band's inner edge, so a comment
     /// scrolling up recedes gradually rather than meeting a lid. Left short
     /// of 1 so the blur still contributes at the edge.
-    static let frostVeilOpacity: CGFloat = 0.85
+    public static let frostVeilOpacity: CGFloat = 0.85
 
     /// The veil's opacity for a given page format — zero over media, where
     /// the blur has a photo to refract and a veil would only mute it.
-    static func frostVeilOpacity(hasMedia: Bool) -> CGFloat {
+    public static func frostVeilOpacity(hasMedia: Bool) -> CGFloat {
         hasMedia ? 0 : frostVeilOpacity
     }
 
     /// The HEADER band's ramp: opaque at the screen's top edge, fully clear
     /// at the container's bottom — one gradient across the whole container,
     /// two stops so there is no knee partway down.
-    static var headerFrostMaskColors: [UIColor] { [.black, .clear] }
-    static var headerFrostMaskLocations: [NSNumber] { [0, 1] }
+    public static var headerFrostMaskColors: [UIColor] { [.black, .clear] }
+    public static var headerFrostMaskLocations: [NSNumber] { [0, 1] }
 
     /// The FOOTER band's ramp — THE HEADER'S, MIRRORED. Clear at the band's
     /// top, full material at the screen's bottom edge, one gradient across
@@ -181,8 +181,8 @@ enum SnapCommentsLayout {
     ///
     /// The composer now sits where the nav bar sits in the header's ramp:
     /// past the middle, on strong material, but not on a plateau.
-    static var footerFrostMaskColors: [UIColor] { [.clear, .black] }
-    static var footerFrostMaskLocations: [NSNumber] { [0, 1] }
+    public static var footerFrostMaskColors: [UIColor] { [.clear, .black] }
+    public static var footerFrostMaskLocations: [NSNumber] { [0, 1] }
 
     /// How far ABOVE the composer the footer band starts.
     ///
@@ -190,73 +190,9 @@ enum SnapCommentsLayout {
     /// finished early and held. With a single gradient it is simply how much
     /// of the page the fade is spread across — and spreading it further is
     /// what makes it gentle, so the number stays.
-    static let footerFrostLead: CGFloat = 96
+    public static let footerFrostLead: CGFloat = 96
 
 }
-
-/// The engaged screen's READABILITY LAYER: the one surface between the
-/// post's full-bleed media and the comment stream reading over it.
-///
-/// It is a black view whose alpha animates, and deliberately nothing more.
-/// No blur, no material, no gradient — two rounds of dark material were
-/// tried and both cost the photo (the archaeology is on
-/// `SnapCommentsLayout.backdropDimOpacity`). A wash scales luminance and
-/// leaves hue, detail, and motion untouched, so the post stays legible AS
-/// the post; a dark material desaturates and tints toward its own grey,
-/// which over a full-screen image reads as fog.
-///
-/// Being plain also makes it the cheapest possible answer. It covers the
-/// whole cell over a surface that may be a playing `AVPlayerLayer`, where a
-/// full-screen blur is a per-frame render-server cost; an opaque-blend pass
-/// is nearly free. It needs no window guard for the same reason — there is
-/// no `UIBlurEffect` here to contact the render server, so unlike every
-/// other effect surface in this feature it behaves identically on a
-/// headless CI host and on a device.
-///
-/// Alpha is the animatable channel (and the only one it has), so the whole
-/// treatment rides the engagement's single spring block for free.
-///
-/// HIT-INERT: the media behind it keeps whatever hit-testing it had, and
-/// the stream in front keeps every touch. This layer owns none.
-/// THE PAGE'S THEME, and the only place it is decided.
-///
-/// A snap page is one visual object made of surfaces that live in three
-/// different view trees — the cell (its frost band and the hosted comment
-/// panel), the navigation bar, and the toolbar. Nothing inherits across
-/// those boundaries, so before this existed each tree answered "am I light
-/// or dark?" on its own and they disagreed: in light mode a media page drew
-/// white-on-light nav platters above a dark caption bubble and a dark
-/// composer.
-///
-/// Two rules, and they follow from what is BEHIND the chrome:
-///
-///   • MEDIA — pinned dark. The chrome floats over an arbitrary photo or
-///     video, so its contrast can only come from the material it is made
-///     of; the device's appearance has no opinion worth taking here.
-///   • TEXT — inherited. The page's own ground follows the system (see
-///     `SnapFeedCell.configure`), so the chrome over it must too, or light
-///     mode puts white glass and white text on a white page.
-enum SnapChromeTheme {
-    static func style(hasMedia: Bool) -> UIUserInterfaceStyle {
-        hasMedia ? .dark : .unspecified
-    }
-
-    /// The same rule for something INSIDE a screen that may itself be pinned.
-    ///
-    /// ⚠️ `.unspecified` MEANS "ASK MY PARENT", and a page's parent is a screen
-    /// that pins itself dark while a photograph is settled. So a text page
-    /// scrolling in under a media page inherited DARK, then turned light at the
-    /// settle when the screen's own pin was released — a whole page changing
-    /// theme under the viewer, visible on any recording of the scroll.
-    ///
-    /// A text page follows the DEVICE, which is what it looks like it should
-    /// do, and saying so explicitly is the only way to mean it from inside a
-    /// subtree someone else has pinned.
-    static func style(hasMedia: Bool, device: UIUserInterfaceStyle) -> UIUserInterfaceStyle {
-        hasMedia ? .dark : device
-    }
-}
-
 
 /// A blur band that DISSOLVES along its length instead of ending on a hard
 /// geometric edge: a `UIVisualEffectView` alpha-masked by a vertical
@@ -274,7 +210,7 @@ enum SnapChromeTheme {
 /// is re-bound to the bounds every layout pass — the footer band resizes
 /// when the keyboard lifts the composer, and a stale mask frame shears the
 /// ramp.
-final class ProgressiveFrostView: UIVisualEffectView {
+public final class ProgressiveFrostView: UIVisualEffectView {
     private let fadeMask: GradientView
     /// A veil of the PAGE's own colour, under the same ramp as the blur.
     ///
@@ -311,7 +247,7 @@ final class ProgressiveFrostView: UIVisualEffectView {
 
     /// `maskColors`/`maskLocations` describe the mask's OPACITY ramp
     /// top→bottom: opaque = full material, clear = none.
-    init(maskColors: [UIColor], maskLocations: [NSNumber], topRampLength: CGFloat? = nil, bottomHoldLength: CGFloat? = nil) {
+    public init(maskColors: [UIColor], maskLocations: [NSNumber], topRampLength: CGFloat? = nil, bottomHoldLength: CGFloat? = nil) {
         fadeMask = GradientView(colors: maskColors, locations: maskLocations)
         self.maskColors = maskColors
         self.topRampLength = topRampLength
@@ -337,18 +273,18 @@ final class ProgressiveFrostView: UIVisualEffectView {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     /// Raises (or clears) the veil. Media pages leave it at zero — a blur
     /// over a photo is already doing the work, and a veil there would only
     /// mute the media the layout exists to show.
-    func setVeilOpacity(_ opacity: CGFloat) {
+    public func setVeilOpacity(_ opacity: CGFloat) {
         veil.alpha = min(max(0, opacity), 1)
     }
 
     /// Fades the whole band (#1527) by its mask, hidden at zero so a band at
     /// rest costs nothing.
-    func setRampStrength(_ strength: CGFloat) {
+    public func setRampStrength(_ strength: CGFloat) {
         let clamped = min(max(0, strength), 1)
         guard clamped != rampStrength || isHidden != (clamped == 0) else { return }
         rampStrength = clamped
@@ -357,7 +293,7 @@ final class ProgressiveFrostView: UIVisualEffectView {
         fadeMask.setColors(maskColors.map { $0.withAlphaComponent($0.cgColor.alpha * clamped) })
     }
 
-    override func layoutSubviews() {
+    public override func layoutSubviews() {
         super.layoutSubviews()
         fadeMask.frame = bounds
         if let bottomHoldLength, bounds.height > 0 {

@@ -6,6 +6,7 @@ import Testing
 import UIKit
 @testable import Feed
 @testable import PostSurfaces
+@testable import ThreadKit
 
 /// THE BAR PILLS HAVE FIXED WIDTHS, READ OFF THE BARS.
 ///

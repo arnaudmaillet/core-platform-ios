@@ -3,6 +3,7 @@ import DesignSystem
 import Testing
 import UIKit
 @testable import Feed
+@testable import ThreadKit
 
 /// Away from the comments' start, the sound offers the way back (#1929): the
 /// record cross-fades with `chevron.up`, a tap goes back to the top, and a

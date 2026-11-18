@@ -24,24 +24,24 @@ import UIKit
 /// ⚠️ The glass materializes on first window attach, like the app's other
 /// glass buttons (`SnapRailBoostButton`); and it never gets a
 /// `backgroundColor` — glass paints it (`glass-paints-background-color`).
-final class SoundRecordGlass: UIView {
+public final class SoundRecordGlass: UIView {
     /// The record: the cover's picture.
-    let cover = UIImageView()
+    public let cover = UIImageView()
     private let glass = UIVisualEffectView(effect: nil)
     /// Holds the record inside the glass, so the record can fade while the
     /// glass stands (#1929). The cover's own alpha is its loading ladder's.
     private let coverHolder = UIView()
     /// The glass's thickness around the record, at least.
-    static let rim: CGFloat = 3
+    public static let rim: CGFloat = 3
     /// The record's side: a bubble's face size (`AvatarImageView
     /// .bubbleDiameter`), centred in the glass, so the cover reads at the
     /// composer avatar's and the author pill's size. nil: the glass less its
     /// rim — the sound sheet's large record.
-    var coverSide: CGFloat? = AvatarImageView.bubbleDiameter {
+    public var coverSide: CGFloat? = AvatarImageView.bubbleDiameter {
         didSet { setNeedsLayout() }
     }
 
-    override init(frame: CGRect) {
+    public override init(frame: CGRect) {
         super.init(frame: frame)
         isUserInteractionEnabled = false
         glass.cornerConfiguration = .capsule()
@@ -56,19 +56,19 @@ final class SoundRecordGlass: UIView {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     /// Whether the record wears its own glass. Off in the page's action
     /// column (#1872), whose bubble is the column's one glass.
-    var drawsGlass = true
+    public var drawsGlass = true
 
-    override func didMoveToWindow() {
+    public override func didMoveToWindow() {
         super.didMoveToWindow()
         guard drawsGlass, window != nil, glass.effect == nil else { return }
         glass.effect = UIGlassEffect(style: .regular)
     }
 
-    override func layoutSubviews() {
+    public override func layoutSubviews() {
         super.layoutSubviews()
         glass.frame = bounds
         coverHolder.frame = bounds
@@ -96,11 +96,11 @@ final class SoundRecordGlass: UIView {
     }
 
     /// Turns the record while the post plays audibly; Reduce Motion stills it.
-    func setSpinning(_ spinning: Bool) {
+    public func setSpinning(_ spinning: Bool) {
         cover.layer.setRecordSpinning(spinning, reducesMotion: MotionPreference.reducesMotion)
     }
 
-    var isSpinning: Bool {
+    public var isSpinning: Bool {
         cover.layer.animation(forKey: CALayer.recordSpinKey) != nil && cover.layer.speed != 0
     }
 }

@@ -8,6 +8,7 @@ import Testing
 import UIKit
 @testable import Feed
 @testable import PostSurfaces
+@testable import ThreadKit
 
 /// The shortcut wheel's geometry contract: a full-height rail whose resting
 /// window shows exactly three bubbles docked at the bottom, with the rest

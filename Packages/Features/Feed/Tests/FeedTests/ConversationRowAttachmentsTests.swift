@@ -6,6 +6,7 @@ import Testing
 import UIKit
 import VoiceKit
 @testable import Feed
+@testable import ThreadKit
 
 /// #2305: on a conversation's screen the camera and the library stand in the
 /// composer's row, between the field and the own bubble; the pin and the

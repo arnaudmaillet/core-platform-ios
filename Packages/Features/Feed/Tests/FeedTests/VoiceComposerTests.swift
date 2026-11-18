@@ -4,6 +4,7 @@ import Testing
 import UIKit
 import VoiceKit
 @testable import Feed
+@testable import ThreadKit
 
 /// Recording from the composer (#2102), over #2101's recorder with a fake
 /// device: no microphone.

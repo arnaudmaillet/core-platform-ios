@@ -1,7 +1,7 @@
 import DesignSystem
 import Testing
 import UIKit
-@testable import Feed
+@testable import ThreadKit
 
 /// The sound's record IN its glass (#1150): the cover is the glass's
 /// content, the muted badge sits inside the rim, and a press moves both.

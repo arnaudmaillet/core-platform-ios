@@ -6,6 +6,7 @@ import LaunchArguments
 import MediaCore
 import PostGrid
 import PostSurfaces
+import ThreadKit
 import UIKit
 
 /// The snap *page's* UI chrome — the caption over the bottom scrim.
@@ -1600,15 +1601,9 @@ final class SnapChromeView: UIView {
         return paragraph
     }
 
-    /// The caption's locked box height — exactly TWO primary (body) lines,
-    /// matching the composed caption's geometry lock. Reserved by
-    /// `captionFloorGuide` on every format so the engagement corner (ticker /
-    /// rail / "+") is anchored to a single font-derived constant, agnostic of
-    /// whether the caption is a real two-line media caption or a collapsed
-    /// text-only placeholder.
-    static var captionFloorHeight: CGFloat {
-        2 * UIFont.appFont(forTextStyle: .body).lineHeight
-    }
+    /// The caption's locked box height: `SnapActionColumn.captionFloorHeight`
+    /// (#2380), which the column stands on.
+    static var captionFloorHeight: CGFloat { SnapActionColumn.captionFloorHeight }
 
     /// How many lines `string` occupies at `width` — the two-line contract's
     /// yardstick. A pure measurement (no label state), so `composedCaption`
@@ -2540,41 +2535,6 @@ final class SnapChromeView: UIView {
         shake.duration = 0.4
         shake.timingFunction = CAMediaTimingFunction(name: .easeOut)
         boostButton.layer.add(shake, forKey: "boost.denied")
-    }
-}
-
-/// A view backed by a `CAGradientLayer`, sized automatically with its bounds.
-final class GradientView: UIView {
-    override class var layerClass: AnyClass { CAGradientLayer.self }
-    private var gradientLayer: CAGradientLayer { layer as! CAGradientLayer }
-
-    init(colors: [UIColor],
-         locations: [NSNumber]? = nil,
-         startPoint: CGPoint = CGPoint(x: 0.5, y: 0),
-         endPoint: CGPoint = CGPoint(x: 0.5, y: 1)) {
-        super.init(frame: .zero)
-        isUserInteractionEnabled = false
-        gradientLayer.colors = colors.map(\.cgColor)
-        gradientLayer.locations = locations
-        gradientLayer.startPoint = startPoint
-        gradientLayer.endPoint = endPoint
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    /// Re-tunes the gradient's stop positions (the frost masks compute
-    /// theirs from the engaged geometry at install time).
-    func setLocations(_ locations: [NSNumber]) {
-        gradientLayer.locations = locations
-    }
-
-    /// Re-tunes the gradient's colours, unanimated.
-    func setColors(_ colors: [UIColor]) {
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        gradientLayer.colors = colors.map(\.cgColor)
-        CATransaction.commit()
     }
 }
 

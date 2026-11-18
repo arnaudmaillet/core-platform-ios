@@ -3,6 +3,7 @@ import Symbols
 import Testing
 import UIKit
 @testable import Feed
+@testable import ThreadKit
 
 /// The composer's FIELD, asked 2026-10-02: the send arrow one blue on every
 /// host, the trailing glyphs never shaved by their containers at any text

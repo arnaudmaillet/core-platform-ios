@@ -1,6 +1,7 @@
 import CoreModels
 import CoreNavigation
 import DesignSystem
+import ThreadKit
 import UIKit
 
 /// A media post's comments as a NATIVE SHEET (#2087) —

@@ -6,6 +6,7 @@ import Testing
 import UIKit
 @testable import Feed
 @testable import PostSurfaces
+@testable import ThreadKit
 
 /// **THE POST SCREEN'S PAGE STRIP: one segment per picture, across the whole
 /// width of the column.**

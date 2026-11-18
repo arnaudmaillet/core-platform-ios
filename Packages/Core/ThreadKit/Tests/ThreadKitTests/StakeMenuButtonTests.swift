@@ -2,7 +2,7 @@ import CoreModels
 import CoreNavigation
 import Testing
 import UIKit
-@testable import Feed
+@testable import ThreadKit
 
 /// The rail's and the comments bar's like raise the stake menu for a member
 /// only (#1146).

@@ -35,19 +35,24 @@ import UIKit
 /// - a paused property animator renders a ghost: the springs are stepped
 ///   here, frame by frame, never scrubbed.
 @MainActor
-final class SnapGlassColumn: UIView {
+public final class SnapGlassColumn: UIView {
     /// One item's frame, in this view's bounds.
-    struct Slot: Equatable {
-        let id: String
-        let frame: CGRect
+    public struct Slot: Equatable {
+        public let id: String
+        public let frame: CGRect
+
+        public init(id: String, frame: CGRect) {
+            self.id = id
+            self.frame = frame
+        }
     }
 
     /// The shapes to stand, each a run of slots that one bubble covers.
-    var layout: () -> [[Slot]] = { [] }
+    public var layout: () -> [[Slot]] = { [] }
 
     /// The item whose bubble survives every change and which the others fold
     /// into and are born from — the sound (the owner, 2026-10-29).
-    var anchorID: String?
+    public var anchorID: String?
     /// The reveal from the anchor in two steps, like the native toolbar: one
     /// capsule over every item first, then the split after this delay.
     var anchoredRevealDelay: Double = 0.12
@@ -59,9 +64,9 @@ final class SnapGlassColumn: UIView {
     /// Which way the bubbles stand: the action column's, top to bottom, or
     /// the composer's row (#2344), leading to trailing. It decides only a
     /// bubble's thickness — the frames are the caller's either way.
-    var axis: NSLayoutConstraint.Axis = .vertical
+    public var axis: NSLayoutConstraint.Axis = .vertical
     /// Between two separate shapes: the union's smoothing.
-    var gap: CGFloat = 12 {
+    public var gap: CGFloat = 12 {
         didSet { applySpacing() }
     }
 
@@ -88,7 +93,7 @@ final class SnapGlassColumn: UIView {
     private var holdUntil: CFTimeInterval = 0
     private var pendingSplit: DispatchWorkItem?
 
-    override init(frame: CGRect) {
+    public override init(frame: CGRect) {
         super.init(frame: frame)
         container.frame = bounds
         container.autoresizingMask = [.flexibleWidth, .flexibleHeight]
@@ -100,10 +105,10 @@ final class SnapGlassColumn: UIView {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     /// `content` stands for `id`: the column hosts it in its bubble.
-    func register(_ content: UIView, for id: String) {
+    public func register(_ content: UIView, for id: String) {
         contents[id] = content
     }
 
@@ -117,7 +122,7 @@ final class SnapGlassColumn: UIView {
 
     /// Only the bubbles and the accessories take a touch: between them, the
     /// page under the column gets it.
-    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+    public override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
         guard let hit = super.hitTest(point, with: event) else { return nil }
         if accessories.allObjects.contains(where: { hit.isDescendant(of: $0) }) { return hit }
         return blobs.contains(where: { !$0.dying && hit.isDescendant(of: $0.view) }) ? hit : nil
@@ -130,7 +135,7 @@ final class SnapGlassColumn: UIView {
     /// Glass the caller lays in the SAME container as the bubbles, under the
     /// items: it fuses with them (the smooth union, bridges included). The
     /// caller frames it in this view's bounds and takes it away.
-    func insertAccessory(_ view: UIView) {
+    public func insertAccessory(_ view: UIView) {
         accessories.add(view)
         container.contentView.insertSubview(view, belowSubview: pictureLayer)
     }
@@ -140,7 +145,7 @@ final class SnapGlassColumn: UIView {
     /// inside the accessory: the smooth union swells by about spacing / 4
     /// wherever two contours coincide, so a doubled bubble would step the
     /// accessory's outline (the lab's finding 5). The item does not move.
-    func setCover(_ id: String?, amount: CGFloat) {
+    public func setCover(_ id: String?, amount: CGFloat) {
         let clamped = id == nil ? 0 : max(0, min(1, amount))
         guard id != coverID || clamped != coverAmount else { return }
         coverID = id
@@ -160,7 +165,7 @@ final class SnapGlassColumn: UIView {
 
     // MARK: - Layout
 
-    override func layoutSubviews() {
+    public override func layoutSubviews() {
         super.layoutSubviews()
         container.frame = bounds
         pictureLayer.frame = bounds
@@ -171,7 +176,7 @@ final class SnapGlassColumn: UIView {
         if wanted != shapes || blobs.count != wanted.count { relayout(wanted) }
     }
 
-    override func didMoveToWindow() {
+    public override func didMoveToWindow() {
         super.didMoveToWindow()
         guard window != nil else { return }
         // #46: the glass is made on window attach, never off a window.
@@ -183,7 +188,7 @@ final class SnapGlassColumn: UIView {
 
     /// Stands the column on `layout()` now — animated through the morph, or
     /// snapped.
-    func refresh(animated: Bool) {
+    public func refresh(animated: Bool) {
         let wanted = layout()
         guard animated, window != nil, !shapes.isEmpty, wanted != shapes else {
             return relayout(wanted)

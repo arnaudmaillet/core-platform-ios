@@ -13,7 +13,7 @@ extension CALayer {
     /// (`IdleCalm`) (#580): an endless turn keeps the screen redrawing every
     /// frame for as long as the sound plays. The sound itself goes on.
     @MainActor
-    func setRecordSpinning(_ spinning: Bool, reducesMotion: Bool = MotionPreference.stillsDecoration) {
+    public func setRecordSpinning(_ spinning: Bool, reducesMotion: Bool = MotionPreference.stillsDecoration) {
         let spinning = spinning && !reducesMotion
         if spinning {
             if animation(forKey: Self.recordSpinKey) == nil {

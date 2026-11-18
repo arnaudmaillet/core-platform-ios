@@ -67,3 +67,18 @@ public enum ConversationThreadDelivery: Equatable, Sendable {
     case sending
     case failed
 }
+
+/// A finished take to send as a voice message (#2102): the recorder's draft
+/// (#2101), carried to the driver, which sends it as #2103 does.
+public struct ConversationThreadVoiceTake: Equatable, Sendable {
+    public let fileURL: URL
+    public let duration: TimeInterval
+    /// 100 levels, 0–31.
+    public let waveform: [UInt8]
+
+    public init(fileURL: URL, duration: TimeInterval, waveform: [UInt8]) {
+        self.fileURL = fileURL
+        self.duration = duration
+        self.waveform = waveform
+    }
+}

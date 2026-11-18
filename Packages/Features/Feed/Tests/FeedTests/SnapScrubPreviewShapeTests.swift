@@ -4,6 +4,7 @@ import MediaCore
 import Testing
 import UIKit
 @testable import Feed
+@testable import ThreadKit
 
 /// #1724: the scrub card in the clip's own shape, and the flight replica's
 /// caption at the landing page's seat.

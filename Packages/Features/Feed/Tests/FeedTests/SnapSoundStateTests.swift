@@ -5,6 +5,7 @@ import PostGrid
 import Testing
 @testable import Feed
 @testable import PostSurfaces
+@testable import ThreadKit
 
 /// THE PAGE'S SOUND, WITHOUT THE SCREEN.
 ///

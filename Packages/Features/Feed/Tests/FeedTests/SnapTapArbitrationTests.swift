@@ -1,6 +1,7 @@
 import Testing
 import UIKit
 @testable import Feed
+@testable import ThreadKit
 
 /// The background tap (play/pause) must not fire when the touch lands on an
 /// interactive control or a declared interactive root, but must fire for taps

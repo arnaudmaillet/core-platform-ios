@@ -7,6 +7,7 @@ import Testing
 import UIKit
 @testable import Feed
 @testable import PostSurfaces
+@testable import ThreadKit
 
 /// Synthesizes like `PlaceholderImageFetcher`, counts fetches per URL, and
 /// lets a test await one beginning: the view's own load then decodes on the

@@ -3,6 +3,7 @@ import CoreModels
 import DesignSystem
 import MediaUI
 import PostSurfaces
+import ThreadKit
 import UIKit
 
 /// The media attribution (mini circular cover + author name + audio line)
@@ -395,26 +396,11 @@ final class SnapMediaAttributionView: UIView {
     var debugCoverImage: UIImage? { coverView.image }
     #endif
 
-    /// The bucket a remote cover is decoded at, for the pill and the sound
-    /// bubble alike (#894): a small disc, so the pipeline's avatar size. Its
-    /// memory answers synchronously, so a swap made on this turn draws the new
-    /// post wearing its cover instead of popping to it once the blur has
-    /// landed. A post's own picture already decoded larger serves it too.
-    static let coverBucket = ImageBucket.avatar
+    /// The bucket a remote cover is decoded at: `SnapSoundFace.coverBucket`,
+    /// shared with the sound bubble (#894, #2380).
+    static let coverBucket = SnapSoundFace.coverBucket
 
-    /// A white note on the cover's own dark ground.
-    static let noteImage: UIImage = {
-        let side: CGFloat = 64
-        return UIGraphicsImageRenderer(size: CGSize(width: side, height: side)).image { context in
-            UIColor.darkGray.setFill()
-            context.fill(CGRect(x: 0, y: 0, width: side, height: side))
-            let glyph = UIImage(systemName: "music.note")?
-                .withConfiguration(UIImage.SymbolConfiguration(pointSize: 26, weight: .semibold))
-                .withTintColor(.white, renderingMode: .alwaysOriginal)
-            if let glyph {
-                glyph.draw(at: CGPoint(x: (side - glyph.size.width) / 2, y: (side - glyph.size.height) / 2))
-            }
-        }
-    }()
+    /// A white note on the cover's own dark ground: `SnapSoundFace.noteImage`.
+    static var noteImage: UIImage { SnapSoundFace.noteImage }
 
 }
