@@ -2,7 +2,6 @@ import CacheKit
 import CoreModels
 import Foundation
 import LocalStore
-import OSLog
 
 /// A profile's Followers, Following and Friends lists on the device (#1776),
 /// in the LocalStore: a list opens on its last first page at the next visit
@@ -21,25 +20,18 @@ package final class ProfileRelationshipsLocalCache: Sendable {
     package static let entityType = "profile.relation"
     package static let format = 1
 
-    private let store: LocalStore
-    private let queue = DispatchQueue(label: "cn.wynn.relationships-local-cache", qos: .utility)
-    private let logger = Logger(subsystem: "cn.wynn.core-platform-ios", category: "relationships-cache")
+    private let list: LocalRecordList<Record>
 
     package init(store: LocalStore) {
-        self.store = store
+        list = LocalRecordList(store: store, entityType: Self.entityType, format: Self.format, name: "relationships")
     }
 
     /// Who a page is being fetched for, captured before the fetch.
-    package var viewer: LocalStoreViewer? { store.currentViewer }
+    package var viewer: LocalStoreViewer? { list.viewer }
 
     package func firstPage(of subject: ProfileID, _ direction: RelationshipDirection) -> RelationshipPage? {
-        guard let list = store.list(Self.listKey(subject, direction), maxPages: 1) else { return nil }
-        let relations = list.entries.compactMap { entity -> ProfileRelation? in
-            guard entity.key.type == Self.entityType, entity.format == Self.format,
-                  let record = try? JSONDecoder().decode(Record.self, from: entity.payload) else { return nil }
-            return record.relation
-        }
-        return RelationshipPage(relations: relations, nextPageToken: list.nextCursor ?? "")
+        guard let stored = list.read(Self.listKey(subject, direction), maxPages: 1) else { return nil }
+        return RelationshipPage(relations: stored.records.compactMap(\.relation), nextPageToken: stored.nextCursor ?? "")
     }
 
     /// Replaces the stored first page. The viewer's own lists are kept
@@ -48,31 +40,11 @@ package final class ProfileRelationshipsLocalCache: Sendable {
         _ page: RelationshipPage, of subject: ProfileID, _ direction: RelationshipDirection,
         isSelf: Bool, as viewer: LocalStoreViewer?
     ) {
-        let store = store
-        let logger = logger
-        queue.async {
-            let encoder = JSONEncoder()
-            let writes = page.relations.compactMap { relation -> LocalEntityWrite? in
-                guard let payload = try? encoder.encode(Record(relation)) else { return nil }
-                return LocalEntityWrite(
-                    key: LocalEntityKey(type: Self.entityType, id: relation.id.rawValue),
-                    payload: payload, format: Self.format, lifetime: LocalStorePolicy.profileLifetime
-                )
-            }
-            let listPage = LocalListPage(
-                items: writes.map(\.key), entities: writes,
-                nextCursor: page.nextPageToken.isEmpty ? nil : page.nextPageToken,
-                tier: isSelf ? .retained : .recent
-            )
-            do {
-                try store.replaceList(
-                    Self.listKey(subject, direction), with: listPage, as: viewer,
-                    lifetime: LocalStorePolicy.profileLifetime
-                )
-            } catch {
-                logger.error("relationships cache write failed: \(String(describing: error), privacy: .public)")
-            }
-        }
+        list.write(
+            page.relations.map { (id: $0.id.rawValue, record: Record($0)) }, to: Self.listKey(subject, direction),
+            nextCursor: page.nextPageToken.isEmpty ? nil : page.nextPageToken, as: viewer,
+            lifetime: LocalStorePolicy.profileLifetime, tier: isSelf ? .retained : .recent
+        )
     }
 
     package static func listKey(_ subject: ProfileID, _ direction: RelationshipDirection) -> String {
@@ -86,8 +58,7 @@ package final class ProfileRelationshipsLocalCache: Sendable {
 
     /// Waits for every write queued so far. Tests only.
     package func waitForPendingWrites() {
-        queue.sync {}
-        store.waitForPendingWrites()
+        list.waitForPendingWrites()
     }
 
     /// One row as stored.

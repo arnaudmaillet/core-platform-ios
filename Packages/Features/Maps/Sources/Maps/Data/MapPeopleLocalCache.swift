@@ -3,7 +3,6 @@ import CoreModels
 import Foundation
 import LocalStore
 import MapsInterface
-import OSLog
 
 /// The map's people on the device (#1776), in the LocalStore: the dock's
 /// pills and the Friends / Following sub-filter rows open on their last
@@ -47,54 +46,32 @@ final class MapPeopleLocalCache: Sendable {
         }
     }
 
-    private let store: LocalStore
-    private let queue = DispatchQueue(label: "cn.wynn.map-people-local-cache", qos: .utility)
-    private let logger = Logger(subsystem: "cn.wynn.core-platform-ios", category: "map-people-cache")
+    private let list: LocalRecordList<Record>
 
     init(store: LocalStore) {
-        self.store = store
+        list = LocalRecordList(store: store, entityType: Self.entityType, format: Self.format, name: "map-people")
     }
 
     /// Who a list is being fetched for, captured before the fetch.
-    var viewer: LocalStoreViewer? { store.currentViewer }
+    var viewer: LocalStoreViewer? { list.viewer }
 
     /// The slot's people as last read, in order; nil when none are stored.
     func people(_ slot: Slot) -> [MapFavorite]? {
-        guard let list = store.list(Self.listKey(slot)) else { return nil }
-        return list.entries.compactMap { entity -> MapFavorite? in
-            guard entity.key.type == Self.entityType, entity.format == Self.format,
-                  let record = try? JSONDecoder().decode(Record.self, from: entity.payload) else { return nil }
-            return record.favorite
-        }
+        list.read(Self.listKey(slot))?.records.compactMap(\.favorite)
     }
 
     func store(_ people: [MapFavorite], in slot: Slot, as viewer: LocalStoreViewer?) {
-        let store = store
-        let logger = logger
-        queue.async {
-            let encoder = JSONEncoder()
-            let writes = people.prefix(Self.maxStoredPeople).compactMap { person -> LocalEntityWrite? in
-                guard let payload = try? encoder.encode(Record(person)) else { return nil }
-                return LocalEntityWrite(
-                    key: LocalEntityKey(type: Self.entityType, id: person.profileID.rawValue),
-                    payload: payload, format: Self.format, lifetime: LocalStorePolicy.profileLifetime
-                )
-            }
-            let page = LocalListPage(items: writes.map(\.key), entities: writes, nextCursor: nil, tier: .retained)
-            do {
-                try store.replaceList(Self.listKey(slot), with: page, as: viewer, lifetime: LocalStorePolicy.profileLifetime)
-            } catch {
-                logger.error("map people cache write failed: \(String(describing: error), privacy: .public)")
-            }
-        }
+        list.write(
+            people.prefix(Self.maxStoredPeople).map { (id: $0.profileID.rawValue, record: Record($0)) },
+            to: Self.listKey(slot), as: viewer, lifetime: LocalStorePolicy.profileLifetime
+        )
     }
 
     static func listKey(_ slot: Slot) -> String { "map.people.\(slot.rawValue)" }
 
     /// Waits for every write queued so far. Tests only.
     func waitForPendingWrites() {
-        queue.sync {}
-        store.waitForPendingWrites()
+        list.waitForPendingWrites()
     }
 
     struct Record: Codable, Equatable {
