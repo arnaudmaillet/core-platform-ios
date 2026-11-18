@@ -1,6 +1,7 @@
 import Testing
 import UIKit
 @testable import CoreNavigation
+@testable import Transitions
 
 /// ⚠️ THE SLIDE POP HANDS THE FEED'S LAYER BACK AS IT FOUND IT (#787).
 ///

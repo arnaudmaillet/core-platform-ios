@@ -10,6 +10,7 @@ import MediaCore
 import MediaPlayback
 import PlaceInterface
 import PostGrid
+import Transitions
 import UIKit
 
 // The map's delegate: markers, selection, regions, touch-down warm, idle

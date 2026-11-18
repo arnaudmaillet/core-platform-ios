@@ -11,6 +11,7 @@ import MediaPlayback
 import MediaUI
 import PlaceInterface
 import PostGrid
+import Transitions
 import UIKit
 
 /// The Explore tab's surface: a full-bleed `MKMapView` that re-queries

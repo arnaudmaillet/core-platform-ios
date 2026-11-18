@@ -22,7 +22,7 @@ let package = Package(
         .target(
             name: "FeedInterface",
             dependencies: [
-                "ThreadKit", "CoreModels", "PostGrid", "CoreNavigation", "DesignSystem", "MediaCore", .product(name: "MediaUI", package: "MediaCore")]
+                "ThreadKit", "CoreModels", "PostGrid", "CoreNavigation", .product(name: "Transitions", package: "CoreNavigation"), "DesignSystem", "MediaCore", .product(name: "MediaUI", package: "MediaCore")]
         )
     ]
 )

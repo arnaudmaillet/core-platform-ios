@@ -9,6 +9,7 @@ import MediaPlayback
 import PlaceInterface
 import PostGrid
 import PostSurfaces
+import Transitions
 import UIKit
 
 /// The Place feature's entry point (#2381), resolved by the composition root

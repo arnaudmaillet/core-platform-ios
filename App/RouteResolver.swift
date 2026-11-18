@@ -1,6 +1,7 @@
 import ChatInterface
 import CoreModels
 import CoreNavigation
+import Transitions
 import DesignSystem
 import FeedInterface
 import OSLog

@@ -3,6 +3,7 @@ import CoreNavigation
 import MediaPlayback
 import PostGrid
 import Testing
+import Transitions
 import UIKit
 @testable import Feed
 @testable import PostSurfaces

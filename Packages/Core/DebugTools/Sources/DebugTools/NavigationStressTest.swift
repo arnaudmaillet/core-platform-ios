@@ -1,7 +1,9 @@
 #if DEBUG
 import CoreModels
 import CoreNavigation
+import DebugDashboard
 import DesignSystem
+import Transitions
 import UIKit
 
 /// Drives deep, cyclical navigation and audits what it leaves behind.

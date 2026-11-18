@@ -2,6 +2,7 @@ import CoreModels
 import CoreNavigation
 import MediaCore
 import Testing
+import Transitions
 import UIKit
 @testable import Feed
 @testable import PostSurfaces

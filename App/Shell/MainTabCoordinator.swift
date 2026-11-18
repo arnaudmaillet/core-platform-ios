@@ -1,6 +1,7 @@
 import ChatInterface
 import CoreModels
 import CoreNavigation
+import Transitions
 import FeedInterface
 import LaunchArguments
 import MediaCore

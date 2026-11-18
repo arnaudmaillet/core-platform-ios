@@ -7,6 +7,7 @@ import MediaCore
 import MediaUI
 import PostGrid
 import Testing
+import Transitions
 import UIKit
 @testable import Feed
 @testable import PostSurfaces

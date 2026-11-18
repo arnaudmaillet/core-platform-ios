@@ -1,6 +1,7 @@
 import Testing
 import UIKit
 @testable import CoreNavigation
+@testable import Transitions
 
 /// One grab-to-dismiss contract on every screen (#1316): the platform's
 /// threshold, one owner for the full-surface gesture, a spring at release.

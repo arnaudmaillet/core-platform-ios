@@ -35,7 +35,7 @@ let package = Package(
             name: "PostGrid",
             dependencies: [
                 "LaunchArguments",
-                "CoreModels", "MediaCore", .product(name: "MediaUI", package: "MediaCore"), "MediaPlayback", "DesignSystem", "CoreNavigation",
+                "CoreModels", "MediaCore", .product(name: "MediaUI", package: "MediaCore"), "MediaPlayback", "DesignSystem", "CoreNavigation", .product(name: "Transitions", package: "CoreNavigation"),
                 "CoreStorage", "EntityStore", "EmoteKit",
                 .product(name: "VoiceKitUI", package: "VoiceKit")
             ]

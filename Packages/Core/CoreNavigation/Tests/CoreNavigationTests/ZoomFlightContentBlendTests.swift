@@ -1,6 +1,7 @@
 import Testing
 import UIKit
 @testable import CoreNavigation
+@testable import Transitions
 
 /// The flight's PICTURE channel: the card blends between its own resting
 /// content and the picture of the page at the other end.

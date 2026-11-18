@@ -1,5 +1,6 @@
 import CoreGraphics
 @testable import CoreNavigation
+@testable import Transitions
 import Testing
 
 /// The mid-air catch is a state machine plus two channels, and both halves

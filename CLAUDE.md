@@ -73,9 +73,10 @@ from fighting over `develop` and over CI.
   red `develop` run blocks the queue**: the session whose change broke it pushes
   a fix first, ahead of everything else.
 - Where each job runs:
-  - `build app` (Debug + Release) and `compile tests (Xcode 26)` on GitHub's
-    `macos-latest`, **Xcode 26**: the guard against Swift only Xcode 27
-    accepts, for the app and for the Mac lanes' tests.
+  - `build app` (Debug + Release) always runs on GitHub's `macos-latest`,
+    **Xcode 26**: the guard against Swift only Xcode 27 accepts.
+    `compile tests (Xcode 26)` does the same for the Mac lanes' tests, so it
+    runs only while lanes run on the Mac: `MACOS_RUNNER=github` skips it.
   - **The test lanes, by repository variable:**
     - `MACOS_RUNNER=github` (set since 2026-11-18, the owner: one session
       works on the repository during audit #2366): **every lane runs on

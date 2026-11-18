@@ -1,6 +1,7 @@
 import Testing
 import UIKit
 @testable import CoreNavigation
+@testable import Transitions
 
 /// #539: the destination's chrome replica rides inside the card's CLIPPING
 /// container, so its legibility scrim can never draw past the window's

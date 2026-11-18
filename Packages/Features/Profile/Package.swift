@@ -60,7 +60,7 @@ let package = Package(
                 "LaunchArguments",
                 "MediaCore",
                 .product(name: "MediaUI", package: "MediaCore"),
-                "CoreNavigation",
+                "CoreNavigation", .product(name: "DebugDashboard", package: "CoreNavigation"),
                 "CoreStorage",
                 // The LocalStore's registration (#893), and Settings → Storage
                 // measuring and clearing the coordinated caches (images, #894)
@@ -106,7 +106,7 @@ let package = Package(
                 "LaunchArguments",
                 "MediaCore",
                 .product(name: "MediaUI", package: "MediaCore"),
-                "CoreNavigation",
+                "CoreNavigation", .product(name: "DebugDashboard", package: "CoreNavigation"),
                 "CoreStorage",
                 // The LocalStore's registration (#893), and Settings → Storage
                 // measuring and clearing the coordinated caches (images, #894)

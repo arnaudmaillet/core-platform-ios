@@ -1,4 +1,5 @@
 import CoreNavigation
+import Transitions
 import CoreModels
 import UIKit
 

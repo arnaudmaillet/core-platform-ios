@@ -59,7 +59,7 @@ let package = Package(
                 // The voice component, shared with every surface that draws
                 // a voice post (#2205).
                 .product(name: "VoiceKitUI", package: "VoiceKit"),
-                "CoreNavigation",
+                "CoreNavigation", .product(name: "Transitions", package: "CoreNavigation"),
                 "CoreRealtime",
                 "CoreStorage",
                 "CacheKit",
@@ -90,7 +90,7 @@ let package = Package(
                 "DesignSystem",
                 .product(name: "VoiceKitUI", package: "VoiceKit"),
                 "EmoteKit",
-                "CoreNavigation",
+                "CoreNavigation", .product(name: "Transitions", package: "CoreNavigation"),
                 "CoreNetworking",
                 "CoreStorage",
                 "CacheKit",

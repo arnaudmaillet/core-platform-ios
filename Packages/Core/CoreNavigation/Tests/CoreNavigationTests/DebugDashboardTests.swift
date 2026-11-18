@@ -2,6 +2,7 @@ import Foundation
 import Testing
 import UIKit
 @testable import CoreNavigation
+@testable import DebugDashboard
 
 /// The debug dashboard's rules (#2131): turn on only what the moment needs,
 /// mask what leaves the screen, stay DEBUG only, and never be measured as the
@@ -61,12 +62,12 @@ struct DebugDashboardTests {
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let files = [
-            "Packages/Core/CoreNavigation/Sources/CoreNavigation/DebugDashboard/DebugDashboard.swift",
-            "Packages/Core/CoreNavigation/Sources/CoreNavigation/DebugDashboard/DebugTools.swift",
-            "Packages/Core/CoreNavigation/Sources/CoreNavigation/DebugDashboard/DebugSections.swift",
-            "Packages/Core/CoreNavigation/Sources/CoreNavigation/DebugDashboard/ConsoleCapture.swift",
-            "Packages/Core/CoreNavigation/Sources/CoreNavigation/DebugDashboard/FrameRateOverlay.swift",
-            "Packages/Core/CoreNavigation/Sources/CoreNavigation/DebugDashboard/DebugInterfaceTools.swift",
+            "Packages/Core/CoreNavigation/Sources/DebugDashboard/DebugDashboard.swift",
+            "Packages/Core/CoreNavigation/Sources/DebugDashboard/DebugTools.swift",
+            "Packages/Core/CoreNavigation/Sources/DebugDashboard/DebugSections.swift",
+            "Packages/Core/CoreNavigation/Sources/DebugDashboard/ConsoleCapture.swift",
+            "Packages/Core/CoreNavigation/Sources/DebugDashboard/FrameRateOverlay.swift",
+            "Packages/Core/CoreNavigation/Sources/DebugDashboard/DebugInterfaceTools.swift",
             "Packages/Core/CoreNetworking/Sources/CoreNetworking/NetworkLog.swift",
             "Packages/Core/DebugTools/Sources/DebugTools/DebugDashboardTools.swift",
             "App/Shell/DebugDashboardWiring.swift",

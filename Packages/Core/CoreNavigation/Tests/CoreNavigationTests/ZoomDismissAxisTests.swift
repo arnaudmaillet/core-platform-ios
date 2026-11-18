@@ -1,6 +1,7 @@
 import Testing
 import CoreGraphics
 @testable import CoreNavigation
+@testable import Transitions
 
 /// The axis split for the grab-to-dismiss: which axis (if any) a hand
 /// movement arms, and how the axis decomposes the drag's geometry. Pure

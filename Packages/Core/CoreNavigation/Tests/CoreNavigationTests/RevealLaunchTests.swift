@@ -1,6 +1,7 @@
 import Testing
 import UIKit
 @testable import CoreNavigation
+@testable import Transitions
 
 /// ⚠️ A WINDOW OPENS OUT OF THE LIFT THE VIEWER TAPPED (#1543): a long press's
 /// preview of a text card or a friend's face, which is not its source's shape.

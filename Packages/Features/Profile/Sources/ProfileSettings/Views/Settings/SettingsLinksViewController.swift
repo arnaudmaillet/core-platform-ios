@@ -1,5 +1,6 @@
 #if DEBUG
 import CoreNavigation
+import DebugDashboard
 #endif
 import DesignSystem
 import SafariServices

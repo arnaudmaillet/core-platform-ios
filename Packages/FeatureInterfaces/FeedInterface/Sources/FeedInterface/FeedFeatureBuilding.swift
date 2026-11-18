@@ -1,6 +1,7 @@
 import CoreModels
 import CoreNavigation
 import PostGrid
+import Transitions
 import UIKit
 
 /// Entry point contract for the Feed feature. Other modules (the app shell,

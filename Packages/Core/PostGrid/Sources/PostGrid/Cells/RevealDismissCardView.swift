@@ -2,6 +2,7 @@ import CoreModels
 import LaunchArguments
 import MediaCore
 import CoreNavigation
+import Transitions
 import MediaUI
 import PostGrid
 import UIKit

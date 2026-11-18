@@ -1,6 +1,7 @@
 import Testing
 import UIKit
 @testable import CoreNavigation
+@testable import Transitions
 
 /// What outlives a hero flight, and what ends it (`dev/HERO_PUSH_AUDIT_PLAN.md`,
 /// Phase 2): recognizers on a reused view, landing covers and holds, the

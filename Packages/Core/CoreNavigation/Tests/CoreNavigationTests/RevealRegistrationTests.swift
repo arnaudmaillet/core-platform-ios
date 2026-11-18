@@ -1,6 +1,7 @@
 import Testing
 import UIKit
 @testable import CoreNavigation
+@testable import Transitions
 
 /// The reveal's window can be GRABBED, which means its position stops being a
 /// function of progress and becomes a function of the hand. These pin the law

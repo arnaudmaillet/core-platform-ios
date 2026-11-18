@@ -3,6 +3,7 @@ import AVFoundation
 import CacheKit
 import CoreLocation
 import CoreNavigation
+import DebugDashboard
 import CoreNetworking
 import DesignSystem
 import LocalStore

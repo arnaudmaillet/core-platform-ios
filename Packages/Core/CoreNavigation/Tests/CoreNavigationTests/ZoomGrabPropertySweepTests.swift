@@ -1,6 +1,7 @@
 import CoreGraphics
 import Testing
 @testable import CoreNavigation
+@testable import Transitions
 
 /// Property sweeps over the catch-and-release contracts — seeded, so a red
 /// run names the exact inputs that produced it.

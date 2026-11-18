@@ -1,6 +1,7 @@
 import Testing
 import UIKit
 @testable import CoreNavigation
+@testable import Transitions
 
 /// How a transition card carries the picture it is LEAVING — the shared rule
 /// two cards read, so the marker's and the tile's cannot drift apart.

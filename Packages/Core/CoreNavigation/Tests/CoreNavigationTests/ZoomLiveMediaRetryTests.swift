@@ -1,4 +1,5 @@
 @testable import CoreNavigation
+@testable import Transitions
 import Testing
 import UIKit
 

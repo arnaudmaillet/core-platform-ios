@@ -1,6 +1,7 @@
 #if DEBUG
 import CoreNavigation
 import CoreNetworkingMocks
+import DebugDashboard
 import DesignSystem
 import UIKit
 

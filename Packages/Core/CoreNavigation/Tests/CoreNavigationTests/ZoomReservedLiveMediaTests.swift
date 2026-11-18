@@ -1,6 +1,7 @@
 import Testing
 import UIKit
 @testable import CoreNavigation
+@testable import Transitions
 
 /// ⚠️ THE ARRIVING PICTURE RIDES THE CARD FROM TAKE-OFF (#2033): on a present
 /// that flies no player (a map marker, a friend's face), the surface the

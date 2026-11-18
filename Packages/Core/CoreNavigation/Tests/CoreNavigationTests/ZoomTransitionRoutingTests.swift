@@ -1,6 +1,8 @@
 import Testing
 import UIKit
 @testable import CoreNavigation
+@testable import Instrumentation
+@testable import Transitions
 
 /// `ZoomTransitionController`'s delegate answers — which transitions it
 /// customises, which it leaves native, and what it retains while one runs.

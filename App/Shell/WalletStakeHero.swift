@@ -3,6 +3,7 @@ import CoreNavigation
 import DesignSystem
 import FeedInterface
 import PostGrid
+import Transitions
 import UIKit
 
 /// How a stake row opens its post (#1476, #1477) — the Wallet sheet's preview and the

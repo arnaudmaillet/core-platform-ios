@@ -1,6 +1,7 @@
 import QuartzCore
 import Testing
 @testable import CoreNavigation
+@testable import Transitions
 
 /// A grab's frame pacing (#1915): the summary the `-grab-frames` log prints.
 struct GrabFramePacingTests {

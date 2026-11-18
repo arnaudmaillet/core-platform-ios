@@ -1,6 +1,7 @@
 import Testing
 import UIKit
 @testable import CoreNavigation
+@testable import Transitions
 
 /// The clip time a source's picture shows, handed to the page about to start
 /// that clip (#625).

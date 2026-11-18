@@ -2,6 +2,7 @@ import QuartzCore
 import Testing
 import UIKit
 @testable import CoreNavigation
+@testable import Instrumentation
 
 /// `-interaction-latency` (#2116): the clock runs from the input's own
 /// timestamp to the frame that shows the strongest response, and names the

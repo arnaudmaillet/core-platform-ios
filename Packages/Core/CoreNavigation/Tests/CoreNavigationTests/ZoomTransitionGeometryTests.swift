@@ -1,5 +1,6 @@
 import CoreGraphics
 @testable import CoreNavigation
+@testable import Transitions
 import Testing
 
 struct ZoomTransitionGeometryTests {

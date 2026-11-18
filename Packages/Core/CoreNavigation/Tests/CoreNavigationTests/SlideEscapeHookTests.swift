@@ -1,6 +1,7 @@
 import Testing
 import UIKit
 @testable import CoreNavigation
+@testable import Transitions
 
 /// `InteractiveSlideDismissal.onWillBeginPop` — the restaging window the
 /// gallery-opened post's horizontal escape stands on: at swipe-begin the hook

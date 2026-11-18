@@ -1,6 +1,7 @@
 import Testing
 import UIKit
 @testable import CoreNavigation
+@testable import Transitions
 
 /// A re-grab reads a caught pose back into the drag's terms (#2362): the
 /// position exactly, the shrink exactly at the catch and back on the curve at

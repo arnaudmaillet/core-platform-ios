@@ -1,6 +1,7 @@
 import CoreContracts
 import CoreModels
 import CoreNavigation
+import Transitions
 import Foundation
 import MediaCore
 import MediaPlayback

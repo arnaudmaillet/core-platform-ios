@@ -4,6 +4,7 @@ import EmoteKit
 import LaunchArguments
 import MediaPlayback
 import PostGrid
+import Transitions
 import UIKit
 
 /// The grid side of the hero transition: the tapped tile. Mirror of

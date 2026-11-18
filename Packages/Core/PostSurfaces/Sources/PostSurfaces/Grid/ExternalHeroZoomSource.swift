@@ -3,6 +3,7 @@ import CoreNavigation
 import EmoteKit
 import LaunchArguments
 import PostGrid
+import Transitions
 import UIKit
 
 /// The hero source for a surface OUTSIDE this feature — a profile gallery, or

@@ -16,6 +16,6 @@ let package = Package(
         .package(path: "../../Core/CoreNavigation")
     ],
     targets: [
-        .target(name: "PlaceInterface", dependencies: ["CoreModels", "CoreNavigation"])
+        .target(name: "PlaceInterface", dependencies: ["CoreModels", "CoreNavigation", .product(name: "Transitions", package: "CoreNavigation")])
     ]
 )

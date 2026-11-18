@@ -1,5 +1,6 @@
 import CoreNavigation
 import DesignSystem
+import Transitions
 import UIKit
 
 /// Keeps the native edge-swipe-to-pop alive on a stack whose delegate slot is

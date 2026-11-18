@@ -38,7 +38,7 @@ let package = Package(
         .target(
             name: "DebugTools",
             dependencies: [
-                "CoreModels", "LaunchArguments", "DesignSystem", "CoreNavigation", "MediaPlayback", "PostGrid",
+                "CoreModels", "LaunchArguments", "DesignSystem", "CoreNavigation", .product(name: "DebugDashboard", package: "CoreNavigation"), .product(name: "Instrumentation", package: "CoreNavigation"), .product(name: "Transitions", package: "CoreNavigation"), "MediaPlayback", "PostGrid",
                 .product(name: "CoreNetworkingMocks", package: "CoreNetworking"),
                 "CacheKit", "LocalStore",
                 .product(name: "VoiceKitUI", package: "VoiceKit")

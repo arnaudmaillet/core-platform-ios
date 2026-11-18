@@ -1,5 +1,6 @@
 import Testing
 @testable import CoreNavigation
+@testable import Transitions
 
 /// The released grab's settlement, pinned as a decision table.
 ///

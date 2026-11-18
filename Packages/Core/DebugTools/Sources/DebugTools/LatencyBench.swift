@@ -1,5 +1,7 @@
 #if DEBUG
 import CoreNavigation
+import DebugDashboard
+import Instrumentation
 import LaunchArguments
 import UIKit
 
