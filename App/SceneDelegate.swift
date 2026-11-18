@@ -1,10 +1,10 @@
 #if DEBUG
 import CoreNavigation
 import DebugDashboard
+import DebugTools
 import CoreNetworkingMocks
 #endif
 import AppPreferences
-import DebugTools
 import DesignSystem
 import LaunchArguments
 import MediaCore

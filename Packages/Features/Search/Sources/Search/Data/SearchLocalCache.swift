@@ -27,8 +27,12 @@ final class SearchLocalCache: Sendable {
     private let queue = DispatchQueue(label: "cn.wynn.search-local-cache", qos: .utility)
     private let logger = Logger(subsystem: "cn.wynn.core-platform-ios", category: "search-cache")
 
+    /// The trending creators' list (#2390, `LocalRecordList`).
+    private let trendingList: LocalRecordList<Record>
+
     init(store: LocalStore) {
         self.store = store
+        trendingList = LocalRecordList(store: store, entityType: Self.entityType, format: Self.format, name: "search")
     }
 
     /// Who the trending list is being fetched for, captured before the fetch.
@@ -41,35 +45,16 @@ final class SearchLocalCache: Sendable {
     }
 
     func trending() -> Trending? {
-        guard let list = store.list(Self.listKey) else { return nil }
-        let creators = list.entries.compactMap { entity -> ExploreCreator? in
-            guard entity.format == Self.format,
-                  let record = try? JSONDecoder().decode(Record.self, from: entity.payload) else { return nil }
-            return record.creator
-        }
-        return Trending(creators: creators, fetchedAt: list.fetchedAt)
+        guard let stored = trendingList.read(Self.listKey) else { return nil }
+        return Trending(creators: stored.records.compactMap(\.creator), fetchedAt: stored.fetchedAt)
     }
 
     /// Replaces the stored list: the screen's `retained` page.
     func storeTrending(_ creators: [ExploreCreator], as viewer: LocalStoreViewer?) {
-        let store = store
-        let logger = logger
-        queue.async {
-            let encoder = JSONEncoder()
-            let writes = creators.compactMap { creator -> LocalEntityWrite? in
-                guard let payload = try? encoder.encode(Record(creator)) else { return nil }
-                return LocalEntityWrite(
-                    key: LocalEntityKey(type: Self.entityType, id: creator.id.rawValue),
-                    payload: payload, format: Self.format, lifetime: LocalStorePolicy.profileLifetime
-                )
-            }
-            let page = LocalListPage(items: writes.map(\.key), entities: writes, nextCursor: nil, tier: .retained)
-            do {
-                try store.replaceList(Self.listKey, with: page, as: viewer)
-            } catch {
-                logger.error("search cache write failed: \(String(describing: error), privacy: .public)")
-            }
-        }
+        trendingList.write(
+            creators.map { (id: $0.id.rawValue, record: Record($0)) }, to: Self.listKey, as: viewer,
+            lifetime: LocalStorePolicy.profileLifetime, listLifetime: LocalStorePolicy.listLifetime
+        )
     }
 
     // MARK: - Hashtags (#1776)
@@ -135,6 +120,7 @@ final class SearchLocalCache: Sendable {
 
     /// Waits for every write queued so far. Tests only.
     func waitForPendingWrites() {
+        trendingList.waitForPendingWrites()
         queue.sync {}
         store.waitForPendingWrites()
     }

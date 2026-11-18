@@ -18,6 +18,18 @@ final class GuestModeUITests: XCTestCase {
     /// .isRelationshipsPrivate`: index % 9 < 4).
     private static let publicPost = "post-0005"
 
+    /// How long one step of a flow may take to show: a sheet, a field, the
+    /// next screen. A wait returns as soon as the element is there, so this
+    /// only bounds a failure. GitHub's macOS runners (three cores, iOS 26)
+    /// take several times longer than a local Mac: the 5–10 s waits these
+    /// steps had failed there while the whole class passed locally (#2389).
+    ///
+    /// For the same reason the `-guest-sign-in-after` and
+    /// `-guest-sign-out-after` delays below, which count from the launch,
+    /// leave the guest half of a test room to finish before the account
+    /// changes under it.
+    private static let step: TimeInterval = 20
+
     private func launch(_ arguments: [String]) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-guest", "-welcome-gift-reset"] + arguments
@@ -39,20 +51,20 @@ final class GuestModeUITests: XCTestCase {
     /// root, with the bar still under it. Signing in turns the bar back into
     /// the member's, without a tap.
     func testTheGuestBarHoldsOnlyWhatAGuestCanUseUntilTheySignIn() {
-        let app = launch(["-guest-sign-in-after", "12"])
+        let app = launch(["-guest-sign-in-after", "45"])
         let bar = app.tabBars.firstMatch
         XCTAssertTrue(bar.waitForExistence(timeout: 25), "no tab bar")
         let settings = bar.buttons["Settings"]
-        XCTAssertTrue(settings.waitForExistence(timeout: 5), "the guest bar has no Settings")
+        XCTAssertTrue(settings.waitForExistence(timeout: Self.step), "the guest bar has no Settings")
         XCTAssertTrue(bar.buttons["Sign in"].exists, "the guest bar has no Sign in bubble")
         XCTAssertFalse(bar.buttons["Messages"].exists, "Messages is in the guest bar")
 
         settings.tap()
-        XCTAssertTrue(app.staticTexts["Playback and Sound"].waitForExistence(timeout: 8),
+        XCTAssertTrue(app.staticTexts["Playback and Sound"].waitForExistence(timeout: Self.step),
                       "Settings is not the tab's root")
         XCTAssertTrue(bar.isHittable, "the bar left with the Settings root")
 
-        XCTAssertTrue(bar.buttons["Messages"].waitForExistence(timeout: 25), "signing in did not bring Messages back")
+        XCTAssertTrue(bar.buttons["Messages"].waitForExistence(timeout: 90), "signing in did not bring Messages back")
         XCTAssertTrue(bar.buttons["Profile"].exists, "the member bar has no Profile")
         XCTAssertTrue(bar.buttons["Create"].exists,
                       "the member bar has no \"+\": \(bar.buttons.allElementsBoundByIndex.map { $0.label })")
@@ -64,7 +76,7 @@ final class GuestModeUITests: XCTestCase {
     /// without a relaunch: the bell alone on Explore (the map wears no
     /// balance, #2336), the balance on the own profile.
     func testAGuestSeesNoBellBalanceOrShopUntilTheySignIn() {
-        let app = launch(["-guest-sign-in-after", "40"])
+        let app = launch(["-guest-sign-in-after", "60"])
         let bar = app.tabBars.firstMatch
         XCTAssertTrue(bar.waitForExistence(timeout: 25), "no tab bar")
         // The app opens on the map (#2453).
@@ -74,9 +86,9 @@ final class GuestModeUITests: XCTestCase {
 
         // Signed in (`-guest-sign-in-after`): Explore re-dressed in place,
         // and the own profile in the bar with its balance.
-        XCTAssertTrue(bar.buttons["Profile"].waitForExistence(timeout: 60), "signing in did not bring Profile back")
+        XCTAssertTrue(bar.buttons["Profile"].waitForExistence(timeout: 90), "signing in did not bring Profile back")
         bar.buttons["Explore"].firstMatch.tap()
-        XCTAssertTrue(app.navigationBars.buttons["Notifications"].waitForExistence(timeout: 10),
+        XCTAssertTrue(app.navigationBars.buttons["Notifications"].waitForExistence(timeout: Self.step),
                       "signing in did not bring Explore's bell back")
         XCTAssertFalse(balance(in: app).exists, "the member's map wears the balance (#2336)")
         bar.buttons["Profile"].firstMatch.tap()
@@ -87,15 +99,15 @@ final class GuestModeUITests: XCTestCase {
     /// place (#1146). The member's Explore wears the bell and no
     /// balance (#2336), so the bell is what comes and goes there.
     func testSigningOutTakesTheMemberItemsAway() {
-        let app = launch(["-guest-sign-in-after", "10", "-guest-sign-out-after", "20"])
+        let app = launch(["-guest-sign-in-after", "30", "-guest-sign-out-after", "60"])
         let bar = app.tabBars.firstMatch
         XCTAssertTrue(bar.waitForExistence(timeout: 25), "no tab bar")
         // The app opens on the map (#2453).
         XCTAssertTrue(app.navigationBars.buttons["Search"].waitForExistence(timeout: 15), "Explore's header has no search")
         let bell = app.navigationBars.buttons["Notifications"]
-        XCTAssertTrue(bell.waitForExistence(timeout: 40), "the member's Explore never showed the bell")
+        XCTAssertTrue(bell.waitForExistence(timeout: 60), "the member's Explore never showed the bell")
         XCTAssertFalse(balance(in: app).exists, "the member's map wears the balance (#2336)")
-        XCTAssertTrue(bell.waitForNonExistence(timeout: 60), "signing out left Explore's bell")
+        XCTAssertTrue(bell.waitForNonExistence(timeout: 90), "signing out left Explore's bell")
         assertNoMemberItems(in: app, on: "Explore after signing out")
     }
 
@@ -130,7 +142,7 @@ final class GuestModeUITests: XCTestCase {
         signIn.tap()
         let email = app.descendants(matching: .any)
             .matching(NSPredicate(format: "label CONTAINS[c] 'with email'")).firstMatch
-        XCTAssertTrue(email.waitForExistence(timeout: 8), "the bubble did not open the login sheet")
+        XCTAssertTrue(email.waitForExistence(timeout: Self.step), "the bubble did not open the login sheet")
         XCTAssertFalse(app.buttons["Text Post"].exists, "the create menu opened for a guest")
     }
 
@@ -143,20 +155,20 @@ final class GuestModeUITests: XCTestCase {
         let grabber = prompt.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: -0.2))
         grabber.press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.98)))
 
-        XCTAssertTrue(prompt.waitForNonExistence(timeout: 8), "the sign-up sheet did not close")
-        XCTAssertTrue(follow.waitForExistence(timeout: 5), "closing the sheet moved the guest off the profile")
+        XCTAssertTrue(prompt.waitForNonExistence(timeout: Self.step), "the sign-up sheet did not close")
+        XCTAssertTrue(follow.waitForExistence(timeout: Self.step), "closing the sheet moved the guest off the profile")
     }
 
     /// × closes the sheet at once (#1969), the same exit as the swipe.
     func testTheCloseItemClosesTheSignUpSheet() {
         let (_, follow, prompt) = askToFollowAsGuest()
         let close = prompt.buttons["auth.methods.close"]
-        XCTAssertTrue(close.waitForExistence(timeout: 5), "the sheet's bar has no close item")
+        XCTAssertTrue(close.waitForExistence(timeout: Self.step), "the sheet's bar has no close item")
         XCTAssertTrue(prompt.buttons["auth.methods.help"].exists, "the sheet's bar has no help item")
         close.tap()
 
-        XCTAssertTrue(prompt.waitForNonExistence(timeout: 8), "× did not close the sign-up sheet")
-        XCTAssertTrue(follow.waitForExistence(timeout: 5), "closing the sheet moved the guest off the profile")
+        XCTAssertTrue(prompt.waitForNonExistence(timeout: Self.step), "× did not close the sign-up sheet")
+        XCTAssertTrue(follow.waitForExistence(timeout: Self.step), "closing the sheet moved the guest off the profile")
     }
 
     /// A guest taps Follow on a profile: its Follow button and the sheet's bar.
@@ -171,7 +183,7 @@ final class GuestModeUITests: XCTestCase {
         follow.tap()
 
         let prompt = signInSheet(in: app)
-        XCTAssertTrue(prompt.waitForExistence(timeout: 8), "Follow did not ask the guest to sign up")
+        XCTAssertTrue(prompt.waitForExistence(timeout: Self.step), "Follow did not ask the guest to sign up")
         return (app, follow, prompt)
     }
 
@@ -198,24 +210,24 @@ final class GuestModeUITests: XCTestCase {
 
         continueWithEmail("new.guest@example.com", code: "123456", in: app)
         let birthday = app.buttons["Continue"]
-        XCTAssertTrue(app.staticTexts["When\u{2019}s Your Birthday?"].waitForExistence(timeout: 10), "no birthday step")
+        XCTAssertTrue(app.staticTexts["When\u{2019}s Your Birthday?"].waitForExistence(timeout: Self.step), "no birthday step")
         birthday.tap()
         let agree = app.buttons["Agree and Continue"]
-        XCTAssertTrue(agree.waitForExistence(timeout: 8), "no consent step")
+        XCTAssertTrue(agree.waitForExistence(timeout: Self.step), "no consent step")
         agree.tap()
         let handle = app.textFields["signup.handle"]
-        XCTAssertTrue(handle.waitForExistence(timeout: 10), "no username step")
+        XCTAssertTrue(handle.waitForExistence(timeout: Self.step), "no username step")
         handle.typeText("new.guest")
-        XCTAssertTrue(staticText(beginningWith: "@new.guest is available", in: app).waitForExistence(timeout: 8),
+        XCTAssertTrue(staticText(beginningWith: "@new.guest is available", in: app).waitForExistence(timeout: Self.step),
                       "the username was never checked")
         app.buttons["Create Account"].tap()
 
         XCTAssertTrue(prompt.waitForNonExistence(timeout: 15), "signing up did not close the sheet")
         // A new member is offered a passkey once the sheet has gone (#840).
         let offer = app.alerts["Sign In Faster With a Passkey"]
-        XCTAssertTrue(offer.waitForExistence(timeout: 10), "the sign-up did not offer a passkey")
+        XCTAssertTrue(offer.waitForExistence(timeout: Self.step), "the sign-up did not offer a passkey")
         offer.buttons["Not Now"].tap()
-        XCTAssertTrue(offer.waitForNonExistence(timeout: 5), "Not Now did not put the offer away")
+        XCTAssertTrue(offer.waitForNonExistence(timeout: Self.step), "Not Now did not put the offer away")
         assertLikeLanded(like, before: before, in: app)
     }
 
@@ -231,7 +243,7 @@ final class GuestModeUITests: XCTestCase {
         XCTAssertTrue(
             app.descendants(matching: .any)
                 .matching(NSPredicate(format: "placeholderValue == 'Sign up to comment' OR label == 'Sign up to comment'"))
-                .firstMatch.waitForExistence(timeout: 5),
+                .firstMatch.waitForExistence(timeout: Self.step),
             "the comment field does not invite the guest to sign up"
         )
         let before = like.value as? String
@@ -239,7 +251,7 @@ final class GuestModeUITests: XCTestCase {
         // The sheet's one title (#1969): never the welcome gift, nor an
         // amount of likes (#1146, the owner 2026-10-14).
         let prompt = signInSheet(in: app)
-        XCTAssertTrue(prompt.waitForExistence(timeout: 8), "like did not ask the guest to sign up")
+        XCTAssertTrue(prompt.waitForExistence(timeout: Self.step), "like did not ask the guest to sign up")
         return (like, before, prompt)
     }
 
@@ -249,14 +261,14 @@ final class GuestModeUITests: XCTestCase {
     private func continueWithEmail(_ address: String, code: String, in app: XCUIApplication) {
         let email = app.descendants(matching: .any)
             .matching(NSPredicate(format: "label CONTAINS[c] 'with email'")).firstMatch
-        XCTAssertTrue(email.waitForExistence(timeout: 5), "the sheet offers no email sign-in")
+        XCTAssertTrue(email.waitForExistence(timeout: Self.step), "the sheet offers no email sign-in")
         email.tap()
         let field = app.textFields["signup.email"]
-        XCTAssertTrue(field.waitForExistence(timeout: 8), "the email step never appeared")
+        XCTAssertTrue(field.waitForExistence(timeout: Self.step), "the email step never appeared")
         // Return is the step's Go: it sends the code.
         field.typeText("\(address)\n")
         let codeField = app.textFields["signup.code"]
-        XCTAssertTrue(codeField.waitForExistence(timeout: 10), "the code step never appeared")
+        XCTAssertTrue(codeField.waitForExistence(timeout: Self.step), "the code step never appeared")
         codeField.typeText(code)
     }
 
@@ -264,7 +276,7 @@ final class GuestModeUITests: XCTestCase {
     /// still on it, pushed where they were: its rail and its back button.
     private func assertLikeLanded(_ like: XCUIElement, before: String?, in app: XCUIApplication) {
         let landed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value != %@", before ?? ""), object: like)
-        XCTAssertEqual(XCTWaiter.wait(for: [landed], timeout: 10), .completed, "the like did not land")
+        XCTAssertEqual(XCTWaiter.wait(for: [landed](timeout: Self.step), .completed, "the like did not land")
         XCTAssertTrue(like.exists, "signing in moved the viewer off the post")
         XCTAssertTrue(app.navigationBars.buttons["Back"].firstMatch.exists, "signing in reset the post's stack")
     }

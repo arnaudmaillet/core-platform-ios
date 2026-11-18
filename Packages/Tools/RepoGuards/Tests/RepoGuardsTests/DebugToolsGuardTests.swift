@@ -27,6 +27,49 @@ struct DebugToolsGuardTests {
         }
     }
 
+    /// The app reaches DebugTools only from DEBUG code (#2386, the owner's
+    /// choice of 2026-11-18): the product stays linked, compiled empty in
+    /// Release, and no Release source may name it. An `import DebugTools`
+    /// outside `#if DEBUG` is where a debug tool would slip into the shipped
+    /// app first.
+    static func importsOutsideDebug(_ text: String) -> [Int] {
+        var conditions: [Bool] = []
+        var found: [Int] = []
+        for (index, raw) in text.split(separator: "\n", omittingEmptySubsequences: false).enumerated() {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            if line.hasPrefix("#if ") {
+                conditions.append(line == "#if DEBUG")
+            } else if line.hasPrefix("#else") || line.hasPrefix("#elseif") {
+                if !conditions.isEmpty { conditions[conditions.count - 1] = false }
+            } else if line == "#endif" {
+                _ = conditions.popLast()
+            } else if line == "import DebugTools", !conditions.contains(true) {
+                found.append(index + 1)
+            }
+        }
+        return found
+    }
+
+    @Test func theAppImportsDebugToolsOnlyInDebug() throws {
+        let app = RepoRoot.url.appendingPathComponent("App")
+        let files = try #require(FileManager.default.enumerator(atPath: app.path))
+            .compactMap { $0 as? String }
+            .filter { $0.hasSuffix(".swift") }
+        #expect(!files.isEmpty, "no sources under App")
+        for file in files {
+            let text = try String(contentsOf: app.appendingPathComponent(file), encoding: .utf8)
+            let lines = Self.importsOutsideDebug(text)
+            #expect(lines.isEmpty, "App/\(file):\(lines) imports DebugTools outside #if DEBUG")
+        }
+    }
+
+    @Test func theImportPatternSeesAReleaseImport() {
+        #expect(Self.importsOutsideDebug("#if DEBUG\nimport DebugTools\n#endif\n").isEmpty)
+        #expect(Self.importsOutsideDebug("import UIKit\nimport DebugTools\n") == [2])
+        #expect(Self.importsOutsideDebug("#if DEBUG\nimport A\n#else\nimport DebugTools\n#endif\n") == [4])
+        #expect(Self.importsOutsideDebug("#if canImport(X)\nimport DebugTools\n#endif\n") == [2])
+    }
+
     @Test func thePatternSeesAnUnguardedFile() {
         #expect(Self.isDebugOnly("import UIKit\n\n#if DEBUG\nfinal class A {}\n#endif\n"))
         #expect(!Self.isDebugOnly("import UIKit\nfinal class A {}\n"))
