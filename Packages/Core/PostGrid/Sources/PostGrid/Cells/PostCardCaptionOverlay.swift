@@ -2,6 +2,7 @@ import CoreModels
 import DesignSystem
 import EmoteKit
 import MediaCore
+import MediaUI
 import UIKit
 
 /// The foot of a compact card: who posted, and the first lines of what they

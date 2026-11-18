@@ -1,0 +1,8 @@
+import LaunchArguments
+
+/// The launch arguments MediaUI reads (#2374): declared here, read
+/// through `isPassed` or `value`, never as raw strings.
+extension LaunchArgument {
+    static let avatarPlayLog = LaunchArgument("-avatar-play-log")
+    static let avatarRounds = LaunchArgument("-avatar-rounds")
+}

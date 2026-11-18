@@ -1,6 +1,7 @@
 import CoreModels
 import DesignSystem
 import MediaCore
+import MediaUI
 import UIKit
 
 /// The inbox's search results: one sectioned list covering every category at

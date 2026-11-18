@@ -1,4 +1,5 @@
 import MediaCore
+import MediaUI
 import UIKit
 
 /// One emote in the panel, the strip, the suggestion row or the feed's

@@ -1,6 +1,7 @@
 import CoreNetworking
 import DesignSystem
 import MediaCore
+import MediaUI
 import UIKit
 
 /// State for Settings → Safety → Restricted Accounts (#416).

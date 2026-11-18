@@ -3,6 +3,7 @@ import DesignSystem
 import EntityStore
 import Foundation
 import MediaCore
+import MediaUI
 import TestSupport
 import Testing
 import UIKit

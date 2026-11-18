@@ -1,5 +1,6 @@
 import DesignSystem
 import MediaCore
+import MediaUI
 import UIKit
 
 /// A `UILabel` whose emotes animate — the one building block a text surface

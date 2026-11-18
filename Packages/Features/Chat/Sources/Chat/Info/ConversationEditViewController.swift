@@ -1,5 +1,6 @@
 import DesignSystem
 import MediaCore
+import MediaUI
 import UIKit
 
 /// A group's or a channel's editing sheet (#2237), from the header's Edit:

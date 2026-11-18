@@ -1,5 +1,6 @@
 import EmoteKit
 import MediaCore
+import MediaUI
 import Testing
 import UIKit
 @testable import Feed

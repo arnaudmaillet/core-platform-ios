@@ -2,6 +2,7 @@ import CoreModels
 import DesignSystem
 import Foundation
 import MediaCore
+import MediaUI
 import UIKit
 
 /// A suggested account: avatar, identity, the reason it's being suggested, and

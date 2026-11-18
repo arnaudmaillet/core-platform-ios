@@ -8,6 +8,7 @@ import EmoteKit
 import EntityStore
 import FeedInterface
 import MediaPlayback
+import MediaUI
 import PostGrid
 import PostSurfaces
 import ShareSheet

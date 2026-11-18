@@ -21,7 +21,7 @@ let package = Package(
     targets: [
         .target(
             name: "ShareSheet",
-            dependencies: ["LaunchArguments", "CoreModels", "CoreNavigation", "DesignSystem", "MediaCore"]
+            dependencies: ["LaunchArguments", "CoreModels", "CoreNavigation", "DesignSystem", "MediaCore", .product(name: "MediaUI", package: "MediaCore")]
         ),
         .testTarget(name: "ShareSheetTests", dependencies: ["ShareSheet"])
     ]

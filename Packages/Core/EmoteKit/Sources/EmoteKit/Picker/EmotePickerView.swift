@@ -1,5 +1,6 @@
 import DesignSystem
 import MediaCore
+import MediaUI
 import UIKit
 
 /// The emote panel that takes the keyboard's place: every emote in sections,

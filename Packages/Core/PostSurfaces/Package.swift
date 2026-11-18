@@ -32,7 +32,7 @@ let package = Package(
             name: "PostSurfaces",
             dependencies: [
                 "LaunchArguments", "CoreModels", "PostGrid", "DesignSystem", "CoreNavigation",
-                "MediaCore", "MediaPlayback", "CoreStorage", "EntityStore", "EmoteKit", "ThreadKit",
+                "MediaCore", .product(name: "MediaUI", package: "MediaCore"), "MediaPlayback", "CoreStorage", "EntityStore", "EmoteKit", "ThreadKit",
                 .product(name: "VoiceKitUI", package: "VoiceKit")
             ]
         )

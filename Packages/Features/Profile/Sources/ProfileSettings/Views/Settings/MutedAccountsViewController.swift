@@ -1,6 +1,7 @@
 import CoreNetworking
 import DesignSystem
 import MediaCore
+import MediaUI
 import UIKit
 
 /// Settings → Safety and Interactions → Muted Accounts (#403): who the active

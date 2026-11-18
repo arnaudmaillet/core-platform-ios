@@ -1,5 +1,6 @@
 import DesignSystem
 import MediaCore
+import MediaUI
 import UIKit
 
 /// One tab's list, a page of the pager. Each tab its own controller, as the

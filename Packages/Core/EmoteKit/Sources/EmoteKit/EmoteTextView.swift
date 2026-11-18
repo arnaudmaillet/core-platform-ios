@@ -1,6 +1,7 @@
 import CacheKit
 import DesignSystem
 import MediaCore
+import MediaUI
 import UIKit
 
 /// The composer's counterpart of `EmoteLabel` (#699): an editable text view

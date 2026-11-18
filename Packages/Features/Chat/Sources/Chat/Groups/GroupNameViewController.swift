@@ -2,6 +2,7 @@ import CoreNavigation
 import CoreModels
 import DesignSystem
 import MediaCore
+import MediaUI
 import UIKit
 
 /// The new group's name step (#2214): where its photo will go, its name

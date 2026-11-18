@@ -2,6 +2,7 @@ import CoreModels
 import DesignSystem
 import EmoteKit
 import MediaCore
+import MediaUI
 import UIKit
 
 /// A pending message request, laid out as a standard two-line messaging row

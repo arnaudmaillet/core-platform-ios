@@ -1,6 +1,7 @@
 import DesignSystem
 import MediaCore
 import MediaPlayback
+import MediaUI
 import UIKit
 
 /// THE MEDIA SURFACE (#1088, step 4 of #1085): a cover, and a live video

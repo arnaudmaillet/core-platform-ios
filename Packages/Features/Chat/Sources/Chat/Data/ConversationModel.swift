@@ -2,6 +2,7 @@ import CoreModels
 import CoreNetworking
 import Foundation
 import MediaCore
+import MediaUI
 
 /// Who may find and join a group or a channel (#2213): its members only, anyone,
 /// or shown on its showcases while joining waits for an admin.

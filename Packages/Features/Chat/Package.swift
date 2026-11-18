@@ -61,6 +61,7 @@ let package = Package(
                 "EmoteKit",
                 "FeedInterface",
                 "MediaCore",
+                .product(name: "MediaUI", package: "MediaCore"),
                 "EntityStore",
                 "VoiceKit",
                 "HeroPage",
@@ -80,6 +81,7 @@ let package = Package(
                 "EntityStore",
                 // `ChatMediaTests` builds an uploader and a transport (#681).
                 "MediaCore",
+                .product(name: "MediaUI", package: "MediaCore"),
                 // `ChatLocalCacheTests` opens a store in a temporary folder.
                 "CacheKit",
                 "LocalStore",

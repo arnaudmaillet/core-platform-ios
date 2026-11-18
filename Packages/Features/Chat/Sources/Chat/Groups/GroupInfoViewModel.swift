@@ -5,6 +5,7 @@ import DesignSystem
 import Foundation
 import HeroPage
 import MediaCore
+import MediaUI
 
 /// A group's info screen (#2214, #2237): its identity, its counters, what
 /// the viewer may do — which their role decides, here, in one place

@@ -2,6 +2,7 @@ import CoreModels
 import MediaCore
 import DesignSystem
 import EmoteKit
+import MediaUI
 import PostGrid
 import UIKit
 import VoiceKitUI

@@ -34,6 +34,7 @@ let package = Package(
                 "CoreNetworking",
                 "DesignSystem",
                 "MediaCore",
+                .product(name: "MediaUI", package: "MediaCore"),
                 "CacheKit",
                 "LocalStore"
             ]

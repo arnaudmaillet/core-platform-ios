@@ -2,6 +2,7 @@ import CoreModels
 import DesignSystem
 import EmoteKit
 import MediaCore
+import MediaUI
 import UIKit
 
 /// One conversation, as a row — the whole visual definition, in one place.

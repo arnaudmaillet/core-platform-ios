@@ -29,6 +29,7 @@ let package = Package(
             name: "EmoteKit",
             dependencies: [
                 "MediaCore",
+                .product(name: "MediaUI", package: "MediaCore"),
                 "StickerKit",
                 "DesignSystem",
                 "CacheKit",
@@ -50,6 +51,7 @@ let package = Package(
                 "EmoteKit",
                 "DesignSystem",
                 "MediaCore",
+                .product(name: "MediaUI", package: "MediaCore"),
                 "CacheKit",
                 .product(name: "Lottie", package: "lottie-ios")
             ]

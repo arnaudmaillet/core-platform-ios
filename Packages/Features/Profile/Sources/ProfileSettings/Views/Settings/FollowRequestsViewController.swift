@@ -2,6 +2,7 @@ import CoreModels
 import CoreNetworking
 import DesignSystem
 import MediaCore
+import MediaUI
 import UIKit
 
 /// Settings → Privacy → Follow Requests (#396): who asked to follow the

@@ -1,5 +1,6 @@
 import DesignSystem
 import MediaCore
+import MediaUI
 import UIKit
 
 /// The share sheet's quick-send row: a horizontally scrolling strip of people

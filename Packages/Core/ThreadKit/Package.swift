@@ -27,7 +27,7 @@ let package = Package(
         .target(
             name: "ThreadKit",
             dependencies: [
-                "CoreModels", "DesignSystem", "MediaCore", "EmoteKit", "PostGrid",
+                "CoreModels", "DesignSystem", "MediaCore", .product(name: "MediaUI", package: "MediaCore"), "EmoteKit", "PostGrid",
                 .product(name: "VoiceKitUI", package: "VoiceKit")
             ]
         )

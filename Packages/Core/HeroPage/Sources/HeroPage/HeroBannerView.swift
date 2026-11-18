@@ -1,6 +1,7 @@
 import DesignSystem
 import MediaCore
 import MediaPlayback
+import MediaUI
 import UIKit
 
 /// The immersive media backdrop behind the profile identity block. It runs

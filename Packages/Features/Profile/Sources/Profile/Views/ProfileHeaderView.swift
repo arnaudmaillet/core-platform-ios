@@ -1,6 +1,7 @@
 import DesignSystem
 import HeroPage
 import MediaCore
+import MediaUI
 import ProfileSettings
 import UIKit
 

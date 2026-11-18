@@ -1,5 +1,6 @@
 import DesignSystem
 import MediaCore
+import MediaUI
 import UIKit
 
 /// The carousel's pages as a filmstrip IN PLACE of the segment strip while a

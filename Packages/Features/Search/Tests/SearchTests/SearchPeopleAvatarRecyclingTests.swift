@@ -1,5 +1,6 @@
 import DesignSystem
 import Foundation
+import MediaUI
 import Synchronization
 import MediaCore
 import Testing

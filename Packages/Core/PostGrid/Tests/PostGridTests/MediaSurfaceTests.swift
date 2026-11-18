@@ -1,5 +1,6 @@
 import MediaCore
 import MediaPlayback
+import MediaUI
 import Testing
 import UIKit
 @testable import PostGrid

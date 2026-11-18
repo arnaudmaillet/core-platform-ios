@@ -18,6 +18,7 @@
 		5F00000000000000000000B9 /* Auth in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000C9 /* Auth */; };
 		5F00000000000000000000BA /* CoreNetworkingMocks in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000CA /* CoreNetworkingMocks */; };
 		5F00000000000000000000BB /* MediaCore in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000CB /* MediaCore */; };
+		5F0000000000000000238402 /* MediaUI in Frameworks */ = {isa = PBXBuildFile; productRef = 5F0000000000000000238403 /* MediaUI */; };
 		5F00000000000000000000BC /* Feed in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000CC /* Feed */; };
 		5F00000000000000000000BD /* CoreRealtime in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000CD /* CoreRealtime */; };
 		5F00000000000000000000BE /* CoreRealtimeMocks in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000CE /* CoreRealtimeMocks */; };
@@ -103,6 +104,7 @@
 				5F00000000000000000000B9 /* Auth in Frameworks */,
 				5F00000000000000000000BA /* CoreNetworkingMocks in Frameworks */,
 				5F00000000000000000000BB /* MediaCore in Frameworks */,
+				5F0000000000000000238402 /* MediaUI in Frameworks */,
 				5F00000000000000000010B2 /* MediaPlayback in Frameworks */,
 				5F00000000000000000000BC /* Feed in Frameworks */,
 				5F00000000000000000000BD /* CoreRealtime in Frameworks */,
@@ -191,6 +193,7 @@
 				5F00000000000000000000C9 /* Auth */,
 				5F00000000000000000000CA /* CoreNetworkingMocks */,
 				5F00000000000000000000CB /* MediaCore */,
+				5F0000000000000000238403 /* MediaUI */,
 				5F00000000000000000010B1 /* MediaPlayback */,
 				5F00000000000000000000CC /* Feed */,
 				5F00000000000000000000CD /* CoreRealtime */,
@@ -806,6 +809,10 @@
 		5F00000000000000000000CB /* MediaCore */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = MediaCore;
+		};
+		5F0000000000000000238403 /* MediaUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MediaUI;
 		};
 		5F00000000000000000000CC /* Feed */ = {
 			isa = XCSwiftPackageProductDependency;

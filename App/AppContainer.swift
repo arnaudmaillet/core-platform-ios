@@ -10,6 +10,7 @@ import CoreLocation
 import CoreContracts
 import CoreNavigation
 import MediaCore
+import MediaUI
 import CoreModels
 import MediaPlayback
 import CoreNetworking

@@ -4,6 +4,7 @@ import CoreStorage
 import DesignSystem
 import LaunchArguments
 import MediaCore
+import MediaUI
 import UIKit
 
 /// A settings page that can open another section (Family and Teens points at

@@ -2,6 +2,7 @@ import AVKit
 import DesignSystem
 import FeedInterface
 import MediaCore
+import MediaUI
 import ThreadKit
 import UIKit
 

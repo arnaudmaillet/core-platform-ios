@@ -1,5 +1,6 @@
 import Foundation
 import MediaCore
+import MediaUI
 import UIKit
 
 /// Emotes as the map's icon faces.

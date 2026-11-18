@@ -1,6 +1,7 @@
 import DesignSystem
 import CoreModels
 import MediaCore
+import MediaUI
 import UIKit
 import Testing
 @testable import PostGrid

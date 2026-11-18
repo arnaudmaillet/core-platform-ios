@@ -1,5 +1,6 @@
 import DesignSystem
 import MediaCore
+import MediaUI
 import UIKit
 
 /// The pull to the next / previous post's pill (#2298 § 2): a small Liquid

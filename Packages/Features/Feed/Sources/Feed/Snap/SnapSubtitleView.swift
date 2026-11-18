@@ -2,6 +2,7 @@ import CoreStorage
 import DesignSystem
 import EmoteKit
 import MediaCore
+import MediaUI
 import ThreadKit
 import UIKit
 

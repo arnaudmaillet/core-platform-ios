@@ -2,6 +2,7 @@ import DesignSystem
 import CoreStorage
 import EmoteKit
 import MediaCore
+import MediaUI
 import UIKit
 import LaunchArguments
 

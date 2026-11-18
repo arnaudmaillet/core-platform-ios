@@ -52,7 +52,7 @@ struct HandWrittenImageLoadGuardTests {
             while let url = enumerator?.nextObject() as? URL {
                 let path = url.path
                 guard url.pathExtension == "swift", !path.contains("/.build/"), !path.contains("/Tests/"),
-                      !path.contains("/MediaCore/Sources/MediaCore/Loading/"),
+                      !path.contains("/MediaCore/Sources/MediaUI/Loading/"),
                       url.lastPathComponent != "ImagePipeline.swift" else { continue }
                 let text = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
                 if Self.isHandWrittenLoad(text) { found.insert(url.lastPathComponent) }
