@@ -57,7 +57,7 @@ final class SnapBoostController {
     /// The viewer's point balance, spent by the rail's boost anchor. Nil
     /// (an unwired host) drops every spend silently; the mock store is
     /// always wired in the app itself.
-    let wallet: WalletStore?
+    let wallet: (any WalletStaking)?
 
     /// The active post's UNDOABLE spend: what this screen has boosted onto
     /// it while it stayed the active page. Paging away FINALIZES it — the
@@ -67,7 +67,7 @@ final class SnapBoostController {
     private(set) var sessionID: PostID?
     private(set) var sessionAmount = 0
 
-    init(wallet: WalletStore?) {
+    init(wallet: (any WalletStaking)?) {
         self.wallet = wallet
     }
 

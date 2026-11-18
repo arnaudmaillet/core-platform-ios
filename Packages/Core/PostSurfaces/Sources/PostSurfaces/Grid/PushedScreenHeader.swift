@@ -50,7 +50,7 @@ final public class PushedScreenHeader: NSObject {
     /// Search's, shared with For You's own search item.
     static let searchItemIdentifier = BarItems.SharedID.search
 
-    private let wallet: WalletStore?
+    private let wallet: (any WalletReading)?
     private let makeWalletSheet: (@MainActor () -> UIViewController)?
     private weak var router: (any Router)?
     private weak var host: UIViewController?
@@ -77,7 +77,7 @@ final public class PushedScreenHeader: NSObject {
     ///   - makeWalletSheet: the shell's claim sheet. Nil makes the badge a
     ///     read-out: a control with nothing behind it is not offered.
     public init(
-        wallet: WalletStore?,
+        wallet: (any WalletReading)?,
         makeWalletSheet: (@MainActor () -> UIViewController)?,
         router: (any Router)?
     ) {

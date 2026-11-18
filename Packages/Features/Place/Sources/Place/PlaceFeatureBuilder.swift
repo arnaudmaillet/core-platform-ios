@@ -25,7 +25,7 @@ public final class PlaceFeatureBuilder: PlaceFeatureBuilding {
     private let placePosts: (any PlacePostsListing)?
     private let imagePipeline: ImagePipeline
     private let videoPlayback: VideoPlaybackController?
-    private let wallet: WalletStore?
+    private let wallet: (any WalletStaking)?
     private let makeWalletSheet: (@MainActor () -> UIViewController)?
     private let showsBalance: @MainActor () -> Bool
     private let entities: EntityStore
@@ -34,7 +34,7 @@ public final class PlaceFeatureBuilder: PlaceFeatureBuilding {
     private let postOpenWarm: PostOpenWarm?
     /// The balance the pushed screens' header wears: only where likes move
     /// (#2336).
-    private var balanceWallet: WalletStore? { showsBalance() ? wallet : nil }
+    private var balanceWallet: (any WalletStaking)? { showsBalance() ? wallet : nil }
 
     public init(
         /// The reader the page opens posts in, and the posts the app holds.
@@ -47,7 +47,7 @@ public final class PlaceFeatureBuilder: PlaceFeatureBuilding {
         imagePipeline: ImagePipeline,
         videoPlayback: VideoPlaybackController?,
         /// The app's one wallet, the same the map's toolbar shows.
-        wallet: WalletStore?,
+        wallet: (any WalletStaking)?,
         makeWalletSheet: (@MainActor () -> UIViewController)?,
         showsBalance: @escaping @MainActor () -> Bool,
         entities: EntityStore,

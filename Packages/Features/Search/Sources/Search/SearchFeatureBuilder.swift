@@ -21,7 +21,7 @@ public struct SearchFeatureBuilder: SearchFeatureBuilding {
     private let postSurfaces: (any SearchPostSurfaceProviding)?
     /// The viewer's point balance, for the results screen's header. `nil` in a
     /// composition without a wallet — the badge simply does not appear.
-    private let wallet: WalletStore?
+    private let wallet: (any WalletReading)?
     /// The shell owns the Wallet sheet (`WalletSheetViewController` lives in
     /// App/Shell), so it arrives as a closure rather than a type.
     private let makeWalletSheet: (@MainActor () -> UIViewController)?
@@ -45,7 +45,7 @@ public struct SearchFeatureBuilder: SearchFeatureBuilding {
         imagePipeline: ImagePipeline,
         router: (any Router)? = nil,
         postSurfaces: (any SearchPostSurfaceProviding)? = nil,
-        wallet: WalletStore? = nil,
+        wallet: (any WalletReading)? = nil,
         makeWalletSheet: (@MainActor () -> UIViewController)? = nil,
         showsBalance: @escaping @MainActor () -> Bool = { true },
         localStore: LocalStore? = nil,

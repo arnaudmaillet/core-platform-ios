@@ -35,7 +35,7 @@ import CoreNavigation
 /// another surface's card or on the post page re-draws the row's glyph here.
 @MainActor
 public final class PostCardStaking {
-    private let wallet: WalletStore
+    private let wallet: any WalletStaking
     /// The posts' live counts, through the store's post seams (#2377).
     private let entities: (any PostEntityReading & PostEntityWriting)?
     /// Where a bound row's save glyph reads its answer back.
@@ -56,7 +56,7 @@ public final class PostCardStaking {
     private var observer: NSObjectProtocol?
 
     /// Each card keeps the count its post was configured with.
-    public convenience init(wallet: WalletStore) {
+    public convenience init(wallet: any WalletStaking) {
         self.init(wallet: wallet, entities: nil)
     }
 
@@ -65,7 +65,7 @@ public final class PostCardStaking {
     /// - Parameter saves: the pile whose answers a bound row's save glyph
     ///   draws again when the store says a save changed.
     public init(
-        wallet: WalletStore,
+        wallet: any WalletStaking,
         entities: (any PostEntityReading & PostEntityWriting)?,
         saves: PostBookmarkStore = .shared
     ) {

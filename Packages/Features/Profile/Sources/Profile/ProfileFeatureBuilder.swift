@@ -552,7 +552,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
 
     /// The wallet the gallery cards' like chips stake from — the app's one
     /// instance. Nil leaves the chips counters.
-    public var wallet: WalletStore?
+    public var wallet: (any WalletStaking)?
     /// Settings → Wallet and Purchases (#400): built by the composition
     /// root, which can read the server wallet. Nil leaves it coming soon.
     public var makeWalletSection: (@MainActor () -> UIViewController)?

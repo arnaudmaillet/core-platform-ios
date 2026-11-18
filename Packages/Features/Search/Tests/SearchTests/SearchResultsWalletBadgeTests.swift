@@ -20,7 +20,7 @@ struct SearchResultsWalletBadgeTests {
     }
 
     private func makeScreen(
-        wallet: WalletStore?,
+        wallet: (any WalletReading)?,
         sheet: (@MainActor () -> UIViewController)? = { UIViewController() }
     ) -> SearchResultsViewController {
         let screen = SearchResultsViewController(
@@ -34,8 +34,40 @@ struct SearchResultsWalletBadgeTests {
         return screen
     }
 
-    private func isolatedWallet() -> WalletStore {
-        WalletStore(defaults: UserDefaults(suiteName: UUID().uuidString)!)
+    /// The wallet as this screen sees it (#2377): a balance to show and a
+    /// change to hear. No store, no storage, no server.
+    private final class FakeWallet: WalletReading, @unchecked Sendable {
+        var reading = WalletSnapshot(balance: 250)
+        var balance: Int { reading.balance }
+        var stakeableBalance: Int { reading.balance }
+        var stakeShots: Int { reading.stakeShots }
+        func snapshot() -> WalletSnapshot { reading }
+        func boostTotal(forTarget targetID: String) -> Int { 0 }
+        func stakes() -> [WalletStake] { [] }
+
+        /// What the store does after every spend or claim.
+        func change(balance: Int) {
+            reading = WalletSnapshot(balance: balance)
+            NotificationCenter.default.post(name: WalletStore.didChangeNotification, object: self)
+        }
+    }
+
+    private func isolatedWallet() -> FakeWallet { FakeWallet() }
+
+    /// The badge reads the wallet it was handed and follows its changes: a
+    /// spend made anywhere (a boost in a feed pushed over this screen) is on
+    /// the badge when the viewer comes back.
+    @Test func theBadgeShowsTheBalanceAndFollowsItsChanges() async throws {
+        let wallet = FakeWallet()
+        let screen = makeScreen(wallet: wallet)
+        let badge = try #require(screen.navigationItem.rightBarButtonItems?.last?.customView as? WalletBadgeButton)
+        #expect(badge.renderedCount == 250.formattedCompact())
+
+        wallet.change(balance: 1_200)
+        // The observer runs on the main queue: wait for it in looks, never
+        // wall-clock time (#1115).
+        for _ in 0..<1_000 where badge.renderedCount != 1_200.formattedCompact() { await Task.yield() }
+        #expect(badge.renderedCount == 1_200.formattedCompact())
     }
 
     /// ⚠️ `[0]` IS THE SCREEN EDGE, so this order renders left-to-right as

@@ -30,6 +30,33 @@ public struct WalletSnapshot: Equatable, Sendable {
     /// The balance a claim never takes past — the server's (`Wallet.points_cap`,
     /// #1098); nil while the wallet is the local mock's.
     public var likesCap: Int? = nil
+
+    /// Public so a fake `WalletReading` outside this module can answer one
+    /// (#2377). The labels and their order are the memberwise init's, so the
+    /// store's own readings build it as before.
+    public init(
+        balance: Int,
+        claimAvailable: Bool = false,
+        nextClaimAt: Date? = nil,
+        claimAmount: Int = 0,
+        claimedToday: Int = 0,
+        dailyClaimCap: Int = 0,
+        streakDays: Int = 0,
+        gems: Int = 0,
+        stakeShots: Int = 0,
+        likesCap: Int? = nil
+    ) {
+        self.balance = balance
+        self.claimAvailable = claimAvailable
+        self.nextClaimAt = nextClaimAt
+        self.claimAmount = claimAmount
+        self.claimedToday = claimedToday
+        self.dailyClaimCap = dailyClaimCap
+        self.streakDays = streakDays
+        self.gems = gems
+        self.stakeShots = stakeShots
+        self.likesCap = likesCap
+    }
 }
 
 /// The viewer's wallet as the server holds it (wallet.v1 `GetWallet`, and the
