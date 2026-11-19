@@ -1766,18 +1766,12 @@ final class PostDetailViewController: UIViewController {
 
     /// The empty stream's words: an invitation to write while this is a
     /// DRAFT, an invitation to comment once it is a post.
-    struct EmptyPageCopy: Equatable {
-        let symbol: String
-        let title: String
-        let subtitle: String
-        /// The block's button — only the failed stream's Try Again (#798).
-        var actionTitle: String?
-    }
+    typealias EmptyPageCopy = CommentsEmptyPageCopy
 
     static let commentsEmptyPageCopy = EmptyPageCopy(
         // The comments glyph, app-wide — a DM thread's empty page keeps the
-        // two bubbles (`ConversationThreadViewController`): a conversation is
-        // not a post's comments.
+        // two bubbles (Chat's `ConversationThreadViewController`): a
+        // conversation is not a post's comments.
         symbol: PostActionSymbol.comments,
         title: SnapCommentEmptyStateView.promptText,
         subtitle: "Be the first to comment."

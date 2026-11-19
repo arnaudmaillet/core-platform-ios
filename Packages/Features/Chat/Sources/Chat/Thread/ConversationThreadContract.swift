@@ -1,22 +1,23 @@
-@_exported import ThreadKit
 import CoreModels
 import MediaCore
 import MediaUI
+import ThreadKit
 import UIKit
 
-// MARK: - The conversation, drawn by Feed and driven by Chat
+// MARK: - The conversation's seam: the screen and the data that drives it
 
 // The conversation screen, built from the text post's screen.
 //
-// Feed owns the DRAWING — the post's comment rows, its composer, its header
-// frost and footer — because every one of those pieces is Feed's, and a
-// conversation is meant to be the same screen. Chat owns the DATA — the
-// thread, sending, replies, the inbox bookkeeping — because none of that is
-// Feed's business. Features never import each other, so the two meet here, in
-// plain values and three small protocols.
+// The screen (`ConversationThreadViewController`) owns the DRAWING — the post's
+// comment rows, its composer, its header frost and footer, all ThreadKit's,
+// because a conversation is meant to be the same screen as a text post. The
+// driver (`ConversationThreadDriver`) owns the DATA — the thread, sending,
+// replies, the inbox bookkeeping. Both live in Chat (#2380); they still meet
+// here, in plain values and one protocol, so the screen never learns what a
+// `ChatMessage` is and its tests drive it with a fake.
 
 /// Whether the screen is the thread itself or the inbox's long-press peek.
-public enum ConversationThreadMode: Sendable {
+enum ConversationThreadMode: Sendable {
     case full
     /// No composer, no footer, no menu, no refresh — typing and acting are
     /// impossible in a peek.
@@ -30,35 +31,35 @@ public enum ConversationThreadMediaSource: Equatable, Sendable {
 }
 
 /// One message, as the screen needs it.
-public struct ConversationThreadMessage: Equatable, Sendable, Identifiable {
+struct ConversationThreadMessage: Equatable, Sendable, Identifiable {
     /// The message a reply answers, already resolved to what the row shows.
-    public struct Quote: Equatable, Sendable {
-        public let messageID: String
-        public let author: String
-        public let snippet: String
+    struct Quote: Equatable, Sendable {
+        let messageID: String
+        let author: String
+        let snippet: String
 
-        public init(messageID: String, author: String, snippet: String) {
+        init(messageID: String, author: String, snippet: String) {
             self.messageID = messageID
             self.author = author
             self.snippet = snippet
         }
     }
 
-    public let id: String
-    public let senderID: ProfileID
-    public let body: String
-    public let sentAt: Date
-    public let isMine: Bool
-    public let quote: Quote?
+    let id: String
+    let senderID: ProfileID
+    let body: String
+    let sentAt: Date
+    let isMine: Bool
+    let quote: Quote?
     /// A MEDIA message's photo or video; `body` is then its caption.
-    public let media: ConversationThreadMedia?
-    public let delivery: ConversationThreadDelivery
+    let media: ConversationThreadMedia?
+    let delivery: ConversationThreadDelivery
     /// A line about the conversation rather than a message in it (#2214):
     /// "You created the group". Drawn centred and quiet, with no author, no
     /// menu and no reply; `body` is its words.
-    public let isSystem: Bool
+    let isSystem: Bool
 
-    public init(
+    init(
         id: String, senderID: ProfileID, body: String, sentAt: Date, isMine: Bool, quote: Quote?,
         media: ConversationThreadMedia? = nil, delivery: ConversationThreadDelivery = .sent,
         isSystem: Bool = false
@@ -75,7 +76,7 @@ public struct ConversationThreadMessage: Equatable, Sendable, Identifiable {
     }
 }
 
-public enum ConversationThreadPhase: Equatable, Sendable {
+enum ConversationThreadPhase: Equatable, Sendable {
     case loading
     /// Oldest first — the thread reads downward to the newest.
     case content([ConversationThreadMessage])
@@ -83,15 +84,15 @@ public enum ConversationThreadPhase: Equatable, Sendable {
 }
 
 /// Someone on the thread, as far as the screen can tell.
-public struct ConversationThreadPerson: Equatable, Sendable {
+struct ConversationThreadPerson: Equatable, Sendable {
     /// Nil until known, and for a group with no single correspondent.
-    public let id: ProfileID?
-    public let name: String
-    public let avatarURL: URL?
+    let id: ProfileID?
+    let name: String
+    let avatarURL: URL?
     /// The raw @handle, without the "@" (#752). Nil until known.
-    public let handle: String?
+    let handle: String?
 
-    public init(id: ProfileID?, name: String, avatarURL: URL?, handle: String? = nil) {
+    init(id: ProfileID?, name: String, avatarURL: URL?, handle: String? = nil) {
         self.id = id
         self.name = name
         self.avatarURL = avatarURL
@@ -106,7 +107,7 @@ public struct ConversationThreadPerson: Equatable, Sendable {
 /// The bar shows only what takes the viewer IN; what takes them out — Leave,
 /// Unfollow, Cancel Request — is the ⋯ menu's, confirmed (#2236). The mute
 /// is the top bar's bell, for everyone.
-public enum ConversationThreadReaderStanding: Equatable, Sendable {
+enum ConversationThreadReaderStanding: Equatable, Sendable {
     /// Subscribed: no bar (#2236) — the ⋯ menu's Leave Channel.
     case subscribed
     /// Not in a public channel: Join, at once.
@@ -141,30 +142,30 @@ public enum ConversationThreadReaderStanding: Equatable, Sendable {
 /// stream under its name and photo — no sender per row, the viewer's own
 /// posts included — and a viewer who doesn't post (`readerStanding`) gets
 /// a bar instead of the composer.
-public struct ConversationThreadGroup: Equatable, Sendable {
+struct ConversationThreadGroup: Equatable, Sendable {
     /// Its name, or its members' for a nameless group.
-    public let name: String
-    public let photoURL: URL?
+    let name: String
+    let photoURL: URL?
     /// Under the name in the header: "12 members", "12.4K subscribers".
-    public let subtitle: String
+    let subtitle: String
     /// The members the screen knows, by id — a row whose sender isn't here
     /// (someone who left) is signed "Member".
-    public let members: [ProfileID: ConversationThreadPerson]
+    let members: [ProfileID: ConversationThreadPerson]
     /// A channel (#2215): every row is signed by the channel itself.
-    public let isChannel: Bool
+    let isChannel: Bool
     /// Nil while the viewer posts here (a group's members, a channel's owner
     /// and admins); otherwise where they stand, and the bar that shows in
     /// the composer's place (#2215).
-    public let readerStanding: ConversationThreadReaderStanding?
+    let readerStanding: ConversationThreadReaderStanding?
     /// The group's faces (#2233): up to four of its other members, owner
     /// first then by join date, and its size for the "+N" — filled by Chat
     /// from the same source as the inbox row, so the pill and the row show
     /// the same faces. Empty: the photo, or the initials.
-    public let faces: [GroupAvatarFace]
+    let faces: [GroupAvatarFace]
     /// Everyone in the group, the viewer included; 0 when not known.
-    public let memberCount: Int
+    let memberCount: Int
 
-    public init(
+    init(
         name: String, photoURL: URL?, subtitle: String, members: [ProfileID: ConversationThreadPerson],
         isChannel: Bool = false, readerStanding: ConversationThreadReaderStanding? = nil,
         faces: [GroupAvatarFace] = [], memberCount: Int = 0
@@ -182,21 +183,21 @@ public struct ConversationThreadGroup: Equatable, Sendable {
     /// What the header pill draws for a group (#2233): its photo, else its
     /// faces, else its initials — the inbox row's picture. Nil for a
     /// channel, which keeps its photo or initials on the person's face.
-    public var avatar: GroupAvatarContent? {
+    var avatar: GroupAvatarContent? {
         isChannel ? nil : GroupAvatarContent(name: name, photoURL: photoURL, faces: faces, memberCount: memberCount)
     }
 
     /// Whether the viewer gets the composer (#2215).
-    public var canPost: Bool { readerStanding == nil }
+    var canPost: Bool { readerStanding == nil }
 }
 
 /// The message being answered, previewed above the composer.
-public struct ConversationThreadReplyDraft: Equatable, Sendable {
-    public let messageID: String
-    public let author: String
-    public let snippet: String
+struct ConversationThreadReplyDraft: Equatable, Sendable {
+    let messageID: String
+    let author: String
+    let snippet: String
 
-    public init(messageID: String, author: String, snippet: String) {
+    init(messageID: String, author: String, snippet: String) {
         self.messageID = messageID
         self.author = author
         self.snippet = snippet
@@ -205,7 +206,7 @@ public struct ConversationThreadReplyDraft: Equatable, Sendable {
 
 /// The thread's data plane, as the screen drives it.
 @MainActor
-public protocol ConversationThreadDriving: AnyObject {
+protocol ConversationThreadDriving: AnyObject {
     var onPhaseChange: ((ConversationThreadPhase) -> Void)? { get set }
     /// The correspondent: the header pill and their rows.
     var onPeerChange: ((ConversationThreadPerson) -> Void)? { get set }
@@ -308,7 +309,7 @@ public protocol ConversationThreadDriving: AnyObject {
     func unfollow()
 }
 
-public extension ConversationThreadDriving {
+extension ConversationThreadDriving {
     /// Whether the composer records voice messages (#2102). False: the
     /// waveform keeps "not available".
     var sendsVoice: Bool { false }
@@ -358,14 +359,4 @@ public extension ConversationThreadDriving {
     /// Drivers with no public groups (#2217): nothing to follow.
     func follow() {}
     func unfollow() {}
-}
-
-@MainActor
-public protocol ConversationThreadScreenBuilding {
-    /// `driver` is retained by the returned screen for its lifetime.
-    func makeConversationThreadViewController(
-        driver: any ConversationThreadDriving,
-        mode: ConversationThreadMode,
-        prefill: String
-    ) -> UIViewController
 }

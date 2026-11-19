@@ -195,7 +195,7 @@ Reach with `-select-tab 2` or `-open-messages [all\|requests\|suggestions]`.
 - msg | SuggestionsViewController | Follow / dismiss / row / long press | tap | optimistic / push profile / menu | `:135-136`, `:275` → `SuggestionsViewModel.didSelect` `:274`, `:285-308` | `-open-messages suggestions`
 - msg | compose / new message | – | **no compose button exists in the inbox** (no `square.and.pencil` / compose item). New message is reached only via `.messageUser` (profile Message, map sub-filter "Send message"). | – | `-message-user <profileID>`, `-new-message-page-size`
 
-### Thread / composer (`F/Feed/Sources/Feed/Conversation/ConversationThreadViewController.swift`)
+### Thread / composer (`F/Chat/Sources/Chat/Thread/ConversationThreadViewController.swift`)
 - thread | ConversationThreadViewController | send | tap | optimistic pending bubble | `composeBar.onSend` `:731` → `ConversationViewModel.send` (emit, then Task) | `-open-conversation <id>`
 - thread | ConversationThreadViewController | camera / library | tap | present picker | `:810-818` → `ConversationThreadDriver.pickMedia` `:175-185`, sync | same
 - thread | ConversationThreadViewController | media bubble | tap | present ThreadMediaViewer (failed one: retry) | `tapMedia` `:822-836` | same

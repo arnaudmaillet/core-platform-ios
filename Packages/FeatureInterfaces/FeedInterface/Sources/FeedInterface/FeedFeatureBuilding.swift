@@ -9,16 +9,13 @@ import UIKit
 /// never on the Feed implementation — so editing Feed internals recompiles
 /// nothing but Feed itself.
 ///
-/// It refines `ConversationThreadScreenBuilding` so the shell hands the Chat
-/// builder this very value and the relationship is checked by the compiler:
-/// Feed draws every conversation, and a runtime cast that failed would leave
-/// the Chat builder with nothing to draw one with.
-///
-/// It refines `TextPostScreenBuilding` for the same reason: the "+" menu's Text
-/// Post is a text post's own page, so Feed draws it, and the shell hands this
-/// value to the Upload builder that owns the publishing.
+/// It refines `TextPostScreenBuilding` so the shell hands the Upload builder
+/// this very value and the relationship is checked by the compiler: the "+"
+/// menu's Text Post is a text post's own page, so Feed draws it, and Upload
+/// owns the publishing. (The conversation, drawn from the same pieces, is
+/// Chat's own screen since #2380.)
 @MainActor
-public protocol FeedFeatureBuilding: ConversationThreadScreenBuilding, TextPostScreenBuilding {
+public protocol FeedFeatureBuilding: TextPostScreenBuilding {
     func makeFeedViewController() -> UIViewController
     /// ONE POST SCREEN (#1577, the owner 2026-10-22): the vertical full-screen
     /// feed on `postID`, its comments up when `opensComments` — what the

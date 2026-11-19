@@ -1,7 +1,6 @@
 import CoreModels
 import CoreNavigation
 import DesignSystem
-import FeedInterface
 import Foundation
 import HeroPage
 import MediaCore

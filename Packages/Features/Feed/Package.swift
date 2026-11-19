@@ -16,7 +16,7 @@ let package = Package(
         .package(path: "../../Kit/CoreModels"),
         .package(path: "../../Core/MediaCore"),
         .package(path: "../../Core/MediaPlayback"),
-        // Voice messages in the conversation (#2104): the one voice player.
+        // The text post's voice caption (#2209): its draft (`VoiceDraft`).
         .package(path: "../../Core/VoiceKit"),
         .package(path: "../../Core/CoreNavigation"),
         .package(path: "../../Core/CoreNetworking"),

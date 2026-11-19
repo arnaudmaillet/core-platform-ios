@@ -3,7 +3,7 @@ import CoreModels
 import CoreStorage
 import CoreNavigation
 import DesignSystem
-import FeedInterface
+import EntityStore
 import LaunchArguments
 import LocalStore
 import MediaCore
@@ -32,11 +32,12 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
     /// into the same one. Without that, reading a thread has no way to reach
     /// the list it should disappear from.
     private let catalog: InboxCatalog
-    /// Who draws a conversation: Feed's text-post screen, driven from here. A
-    /// closure rather than the value because the Feed builder reaches the
-    /// router, and the router reaches this — the same lazy edge Maps takes to
-    /// the feed.
-    private let threadScreens: () -> any ConversationThreadScreenBuilding
+    /// The conversation's peer pill (#752): its relation glyph, "+" follows
+    /// through `socialGraph`; nil graphs draw none. `entities` is the app's
+    /// one copy of where the viewer stands with each person (#2049).
+    private let socialGraph: (any SocialGraphWriting)?
+    private let followRelations: (any SocialGraphReading)?
+    private let entities: (any ProfileEntityReading & ProfileEntityWriting)?
     /// The thread's camera and library (#681); nil sends text only.
     private let mediaPicker: ChatMediaPickerFactory?
     /// The inbox and the last conversations on the device (#897).
@@ -80,13 +81,17 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         showsGroups: Bool = DebugFlags.isOn("-group-chats"),
         showsChannels: Bool = DebugFlags.isOn("-channels"),
         postsPage: (() -> any PostGridPage)? = nil,
-        threadScreens: @escaping () -> any ConversationThreadScreenBuilding
+        socialGraph: (any SocialGraphWriting)? = nil,
+        followRelations: (any SocialGraphReading)? = nil,
+        entities: (any ProfileEntityReading & ProfileEntityWriting)? = nil
     ) {
         self.postsPage = postsPage
         groups = showsGroups ? repository as? any GroupChatServicing : nil
         channels = showsChannels ? repository as? any GroupChatServicing : nil
         sharesShowcases = showsChannels
-        self.threadScreens = threadScreens
+        self.socialGraph = socialGraph
+        self.followRelations = followRelations
+        self.entities = entities
         self.relations = relations
         self.mediaPicker = mediaPicker
         let directory = ConversationDirectory()
@@ -528,7 +533,8 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         return makeThreadScreen(viewModel, mode: .full, prefill: prefill)
     }
 
-    /// A conversation: Feed's text-post screen, driving this view model.
+    /// A conversation: the text post's screen, built from ThreadKit's pieces
+    /// (#2380), driving this view model.
     ///
     /// For a pushed thread it is called AFTER the inbox callbacks are wired on
     /// the view model, so mark-read, sends and draft resolution report back to
@@ -547,10 +553,15 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
             mediaPicker: mode == .full ? mediaPicker : nil,
             groupContext: groupThreadContext()
         )
-        return threadScreens().makeConversationThreadViewController(
+        return ConversationThreadViewController(
             driver: driver,
             mode: mode,
-            prefill: prefill
+            prefill: prefill,
+            // The app always hands one; a test without it draws placeholders.
+            imagePipeline: imagePipeline ?? ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            socialGraph: socialGraph,
+            followRelations: followRelations,
+            entities: entities
         )
     }
 

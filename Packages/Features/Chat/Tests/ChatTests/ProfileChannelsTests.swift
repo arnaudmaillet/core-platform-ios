@@ -4,7 +4,6 @@ import CoreModels
 import CoreNavigation
 import CoreNetworking
 import CoreNetworkingMocks
-import FeedInterface
 import Foundation
 import Testing
 import UIKit
@@ -28,12 +27,6 @@ struct ProfileChannelsTests {
             AsyncStream { $0.yield(.authenticated(AccountID(MockAuthService.accountID))); $0.finish() }
         }
         func logout() async {}
-    }
-
-    private final class NoScreens: ConversationThreadScreenBuilding {
-        func makeConversationThreadViewController(
-            driver: any ConversationThreadDriving, mode: ConversationThreadMode, prefill: String
-        ) -> UIViewController { UIViewController() }
     }
 
     private func make(channels: Bool = true) -> ChatRepository {
@@ -184,12 +177,11 @@ struct ProfileChannelsTests {
     @Test func withTheFlagOffNoProfileHasChannels() async throws {
         let read = try await make(channels: false).ownedChannels(of: ProfileID("prof-12"))
         #expect(read.isEmpty)
-        let screens = NoScreens()
         let off = ChatFeatureBuilder(
-            repository: make(channels: false), showsGroups: false, showsChannels: false, threadScreens: { screens }
+            repository: make(channels: false), showsGroups: false, showsChannels: false
         )
         #expect(off.makeProfileChannels() == nil)
-        let on = ChatFeatureBuilder(repository: make(), showsGroups: false, showsChannels: true, threadScreens: { screens })
+        let on = ChatFeatureBuilder(repository: make(), showsGroups: false, showsChannels: true)
         #expect(on.makeProfileChannels() != nil)
     }
 }

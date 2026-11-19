@@ -1,7 +1,7 @@
 import DesignSystem
 import Testing
 import UIKit
-@testable import Feed
+@testable import Chat
 
 /// The thread's bell and a group's or a channel's info screen share one
 /// menu (#2237, `MuteMenu`): a duration added once shows on every bell.

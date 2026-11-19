@@ -1,7 +1,8 @@
 import Foundation
 
-// Moved from FeedInterface's text post contract (#2380), which re-exports it:
-// the composer records it.
+// A plain value (#2380): the composer (ThreadKit) records it, Feed's text
+// post page carries it, FeedInterface's `TextPostPublishing` hands it to
+// Upload. Here rather than in ThreadKit so the interface needs no Core kit.
 
 /// A take the text composer records as a post's caption (#2209).
 public struct TextPostVoice: Sendable, Equatable {

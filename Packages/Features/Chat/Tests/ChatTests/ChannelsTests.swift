@@ -4,7 +4,6 @@ import CoreModels
 import CoreNavigation
 import CoreNetworking
 import CoreNetworkingMocks
-import FeedInterface
 import Foundation
 import TestSupport
 import Testing
@@ -704,12 +703,6 @@ struct ChannelsTests {
         func directConversation(with profileID: ProfileID) async throws -> ConversationID { ConversationID("dm") }
     }
 
-    private final class NoScreens: ConversationThreadScreenBuilding {
-        func makeConversationThreadViewController(
-            driver: any ConversationThreadDriving, mode: ConversationThreadMode, prefill: String
-        ) -> UIViewController { UIViewController() }
-    }
-
     private func categories(_ builder: ChatFeatureBuilder) throws -> [MessagesCategory] {
         let inbox = try #require(builder.makeInboxViewController(initialCategory: .all) as? MessagesInboxViewController)
         return inbox.debugCategories
@@ -719,12 +712,11 @@ struct ChannelsTests {
     /// are in Chats. A "channels" token — a debug hook, a stored tab — no
     /// longer parses, and the callers' fallback is Chats.
     @Test func messagesHasThreePagesAndNoChannelsCategory() throws {
-        let screens = NoScreens()
         let off = ChatFeatureBuilder(
-            repository: make(channels: false), showsGroups: false, showsChannels: false, threadScreens: { screens }
+            repository: make(channels: false), showsGroups: false, showsChannels: false
         )
         #expect(try categories(off) == [.all, .requests, .suggestions])
-        let on = ChatFeatureBuilder(repository: make(), showsGroups: true, showsChannels: true, threadScreens: { screens })
+        let on = ChatFeatureBuilder(repository: make(), showsGroups: true, showsChannels: true)
         #expect(try categories(on) == [.all, .requests, .suggestions])
         #expect(MessagesCategory.allCases == [.all, .requests, .suggestions])
         #expect(MessagesCategory(rawValue: "channels") == nil, "`-open-messages channels`")
@@ -735,14 +727,13 @@ struct ChannelsTests {
     /// The "+" menu's "New Channel" exists only with the channels: the
     /// builder makes the sheet, or nothing (the menu then has no entry).
     @Test func theCreationSheetExistsOnlyWithTheChannels() throws {
-        let screens = NoScreens()
-        let on = ChatFeatureBuilder(repository: make(), showsChannels: true, threadScreens: { screens })
+        let on = ChatFeatureBuilder(repository: make(), showsChannels: true)
         let sheet = try #require(on.makeChannelCreationViewController() as? UINavigationController)
         #expect(sheet.viewControllers.first is ChannelCreationViewController)
-        let off = ChatFeatureBuilder(repository: make(channels: false), showsChannels: false, threadScreens: { screens })
+        let off = ChatFeatureBuilder(repository: make(channels: false), showsChannels: false)
         #expect(off.makeChannelCreationViewController() == nil)
         // A repository with no channels makes none, whatever the flag.
-        let none = ChatFeatureBuilder(repository: Stub(), showsChannels: true, threadScreens: { screens })
+        let none = ChatFeatureBuilder(repository: Stub(), showsChannels: true)
         #expect(none.makeChannelCreationViewController() == nil)
     }
 

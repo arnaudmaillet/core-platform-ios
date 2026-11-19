@@ -1,9 +1,8 @@
 import CoreModels
-import FeedInterface
 import MediaCore
 import Testing
 import UIKit
-@testable import Feed
+@testable import Chat
 @testable import ThreadKit
 @testable import PostSurfaces
 

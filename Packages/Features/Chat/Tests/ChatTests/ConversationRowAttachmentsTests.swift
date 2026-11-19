@@ -1,11 +1,10 @@
 import CoreModels
 import DesignSystem
-import FeedInterface
 import MediaCore
 import Testing
 import UIKit
 import VoiceKit
-@testable import Feed
+@testable import Chat
 @testable import ThreadKit
 
 /// #2305: on a conversation's screen the camera and the library stand in the

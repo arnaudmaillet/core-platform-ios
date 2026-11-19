@@ -1,6 +1,6 @@
 import CryptoKit
 import Foundation
-import FeedInterface
+import ThreadKit
 import UIKit
 
 /// A photo, a video or a voice message carried by a chat message (#681,

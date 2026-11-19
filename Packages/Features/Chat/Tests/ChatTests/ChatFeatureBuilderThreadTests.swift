@@ -1,13 +1,11 @@
 import CoreModels
-import FeedInterface
 import Foundation
 import Testing
 import UIKit
 @testable import Chat
 
-/// A conversation is drawn by whoever `threadScreens` names — Feed's text-post
-/// screen in the app — for an existing thread, a draft and a shared link alike,
-/// with the emote strip in its footer.
+/// A conversation is the text post's screen, Chat's own since #2380 —
+/// for an existing thread, a draft and a shared link alike.
 @MainActor
 struct ChatFeatureBuilderThreadTests {
     private actor Stub: ChatProviding {
@@ -21,41 +19,21 @@ struct ChatFeatureBuilderThreadTests {
         func directConversation(with profileID: ProfileID) async throws -> ConversationID { ConversationID("dm") }
     }
 
-    private final class RecordingScreens: ConversationThreadScreenBuilding {
-        struct Call {
-            let mode: ConversationThreadMode
-            let prefill: String
-        }
-        private(set) var calls: [Call] = []
-        let screen = UIViewController()
-
-        func makeConversationThreadViewController(
-            driver: any ConversationThreadDriving,
-            mode: ConversationThreadMode,
-            prefill: String
-        ) -> UIViewController {
-            calls.append(Call(mode: mode, prefill: prefill))
-            return screen
-        }
-    }
-
     /// The thread's footer has no emote strip any more (#680): the peer pill
     /// leads it, and the composer's emote button is the way to emotes.
-    @Test func anExistingThreadIsTheFeedsScreen() {
-        let screens = RecordingScreens()
-        let builder = ChatFeatureBuilder(repository: Stub(), threadScreens: { screens })
+    @Test func anExistingThreadIsTheTextPostsScreen() throws {
+        let builder = ChatFeatureBuilder(repository: Stub())
         let built = builder.makeConversationViewController(for: ConversationID("c1"))
-        #expect(built === screens.screen)
-        #expect(screens.calls.count == 1)
-        #expect(screens.calls.first?.mode == .full)
+        let screen = try #require(built as? ConversationThreadViewController)
+        #expect(screen.mode == .full)
     }
 
-    @Test func aSharedLinkReachesTheFeedsScreenAsItsDraft() {
-        let screens = RecordingScreens()
-        let builder = ChatFeatureBuilder(repository: Stub(), threadScreens: { screens })
-        _ = builder.makeDraftConversationViewController(
+    @Test func aSharedLinkReachesTheScreenAsItsDraft() throws {
+        let builder = ChatFeatureBuilder(repository: Stub())
+        let built = builder.makeDraftConversationViewController(
             with: ProfileID("them"), displayName: "Ava", prefill: "https://example.test/p/1"
         )
-        #expect(screens.calls.first?.prefill == "https://example.test/p/1")
+        let screen = try #require(built as? ConversationThreadViewController)
+        #expect(screen.prefill == "https://example.test/p/1")
     }
 }

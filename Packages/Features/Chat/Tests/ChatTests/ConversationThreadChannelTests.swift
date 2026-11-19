@@ -1,9 +1,8 @@
 import CoreModels
-import FeedInterface
 import MediaCore
 import Testing
 import UIKit
-@testable import Feed
+@testable import Chat
 
 /// A channel's thread (#2215): every post signed by the channel — the
 /// viewer's own too — the header its name and subscriber count; its owner

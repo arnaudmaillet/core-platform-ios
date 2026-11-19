@@ -3,7 +3,6 @@ import CoreContracts
 import CoreModels
 import CoreNetworking
 import CoreNetworkingMocks
-import FeedInterface
 import Foundation
 import TestSupport
 import Testing

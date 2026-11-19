@@ -193,24 +193,6 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         GridVideoPlaybackCoordinator.allowsAutoplay = { MediaPlaybackPolicy.autoplays }
     }
 
-    /// A conversation, drawn by the text post's screen. Chat drives it; the
-    /// bars and the image pipeline are Feed's.
-    public func makeConversationThreadViewController(
-        driver: any ConversationThreadDriving,
-        mode: ConversationThreadMode,
-        prefill: String
-    ) -> UIViewController {
-        ConversationThreadViewController(
-            driver: driver,
-            mode: mode,
-            prefill: prefill,
-            imagePipeline: imagePipeline,
-            socialGraph: socialGraph,
-            followRelations: followRelations,
-            entities: entities
-        )
-    }
-
     /// The timeline is the full-screen snap feed — the app's sole Timeline.
     public func makeFeedViewController() -> UIViewController {
         makeSnapFeed(

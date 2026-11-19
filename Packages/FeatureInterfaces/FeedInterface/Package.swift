@@ -9,20 +9,20 @@ let package = Package(
     ],
     dependencies: [
         .package(path: "../../Kit/CoreModels"),
+        // The grid page's and the hero flight's seam types the builder names
+        // (`PostGridPage`, `SnapFeedHeroOrigin`, `TextRevealOrigin`,
+        // `GalleryPost`): the last edge to a Core package beyond navigation
+        // and the design system (#2380, stage 3).
         .package(path: "../../Core/PostGrid"),
-        // The conversation thread's group faces (`GroupAvatarFace`).
-        .package(path: "../../Core/MediaCore"),
         .package(path: "../../Core/CoreNavigation"),
         // `OverSheetFeedHost` closes its sheet once (`closePresentation`, #1144).
-        .package(path: "../../Core/DesignSystem"),
-        // The thread rows and the conversation's row values (#2380).
-        .package(path: "../../Core/ThreadKit")
+        .package(path: "../../Core/DesignSystem")
     ],
     targets: [
         .target(
             name: "FeedInterface",
             dependencies: [
-                "ThreadKit", "CoreModels", "PostGrid", "CoreNavigation", .product(name: "Transitions", package: "CoreNavigation"), "DesignSystem", "MediaCore", .product(name: "MediaUI", package: "MediaCore")]
+                "CoreModels", "PostGrid", "CoreNavigation", .product(name: "Transitions", package: "CoreNavigation"), "DesignSystem"]
         )
     ]
 )

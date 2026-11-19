@@ -1964,10 +1964,12 @@ final class AppContainer {
         // For You's own grid, as the profile's and the place's pages — the
         // text posts that showcase it, laid out as a profile's Posts.
         postsPage: { [unowned self] in self.feedFeature.makePostGridPage(style: .list, savesPosts: false) },
-        // A conversation is drawn by the feed's text-post screen. Lazy, like
-        // every feature here: the feed builder reaches the router, and the
-        // router reaches this.
-        threadScreens: { [unowned self] in self.feedFeature }
+        // The conversation's peer pill follows and marks through the SAME
+        // repositories and store the feed's author pill does (#752, #2049):
+        // the conversation is Chat's own screen since #2380.
+        socialGraph: profileRepository,
+        followRelations: profileRepository,
+        entities: entityStore
     )
 
     // MARK: - Routing

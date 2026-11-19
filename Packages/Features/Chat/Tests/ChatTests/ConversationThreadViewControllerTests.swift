@@ -1,11 +1,10 @@
 import CoreModels
 import CoreStorage
 import DesignSystem
-import FeedInterface
 import MediaCore
 import Testing
 import UIKit
-@testable import Feed
+@testable import Chat
 @testable import ThreadKit
 @testable import PostSurfaces
 
@@ -139,11 +138,11 @@ struct ConversationThreadViewControllerTests {
         // clearance and the toolbar gap with it — the same numbers on every
         // starved run (#2392). The composer rests on a keyboard parked below
         // the screen; the keyboard tests move one of their own
-        // (`SnapActionColumnLayoutTests.fakeKeyboard`).
+        // (`ComposerProbes.fakeKeyboard`).
         // A screen with no composer on show (a reader's channel, say) has
         // nothing to park.
         if screen.debugComposeBar.isDescendant(of: screen.view) {
-            _ = SnapActionColumnLayoutTests.fakeKeyboard(
+            _ = ComposerProbes.fakeKeyboard(
                 in: screen.view, for: screen.debugComposeBar,
                 top: max(screen.view.bounds.height, window.bounds.height) + 100
             )
@@ -581,8 +580,8 @@ struct ConversationThreadViewControllerTests {
         let (screen, _, _, window) = makeScreen(anchorsShortStream: true)
         window.layoutIfNeeded()
         let stream = try #require(Self.firstView(UICollectionView.self, in: screen.view))
-        let rest = try SnapActionColumnLayoutTests.composerColumn(in: screen.view, space: window)
-        let keyboard = SnapActionColumnLayoutTests.fakeKeyboard(
+        let rest = try ComposerProbes.composerColumn(in: screen.view, space: window)
+        let keyboard = ComposerProbes.fakeKeyboard(
             in: screen.view, for: rest.bar, top: screen.view.bounds.height + 100
         )
         screen.view.layoutIfNeeded()
@@ -654,9 +653,9 @@ struct ConversationThreadViewControllerTests {
     /// field rests on the toolbar, `glassGap` above its glass.
     @Test func theComposerHasNoStakeAndItsFieldRestsOnTheToolbar() throws {
         let (screen, _, _, window) = makeScreen()
-        let composer = try SnapActionColumnLayoutTests.composerColumn(in: screen.view, space: window)
+        let composer = try ComposerProbes.composerColumn(in: screen.view, space: window)
         #expect(composer.stake == nil, "a like bubble over a conversation's pin")
-        #expect(SnapActionColumnLayoutTests.button(composer.bar, "Boost post")?.isHidden == true)
+        #expect(ComposerProbes.button(composer.bar, "Boost post")?.isHidden == true)
         let footerLine = screen.view.convert(
             CGPoint(x: 0, y: screen.view.bounds.height - screen.view.safeAreaInsets.bottom), to: window
         ).y
@@ -668,7 +667,7 @@ struct ConversationThreadViewControllerTests {
 
     /// ⚠️ THE GAP ON SCREEN, against the real toolbar this screen shows: the
     /// field's bottom to the ⋯ bubble's glass top — read off the glass UIKit
-    /// drew (`SnapActionColumnLayoutTests.glassFrame`) — is `glassGap`, the
+    /// drew (`ComposerProbes.glassFrame`) — is `glassGap`, the
     /// gap UIKit leaves between neighbouring bubbles of that bar.
     @Test func theFieldStandsOneGlassGapAboveTheToolbar() async throws {
         let (screen, _, _, window) = makeScreen()
@@ -678,12 +677,12 @@ struct ConversationThreadViewControllerTests {
         for _ in 0..<30 where hosted == nil || hosted?.bounds.height == 0 {
             screen.navigationController?.view.setNeedsLayout()
             screen.navigationController?.view.layoutIfNeeded()
-            hosted = screen.toolbarItems?.last.flatMap(SnapActionColumnLayoutTests.hostedView(of:))
+            hosted = screen.toolbarItems?.last.flatMap(ComposerProbes.hostedView(of:))
             if hosted == nil { try await Task.sleep(for: .milliseconds(10)) }
         }
         let more = try #require(hosted, "the bar never hosted ⋯")
-        let composer = try SnapActionColumnLayoutTests.composerColumn(in: screen.view, space: window)
-        let glass = try #require(SnapActionColumnLayoutTests.glassFrame(of: more, in: window))
+        let composer = try ComposerProbes.composerColumn(in: screen.view, space: window)
+        let glass = try #require(ComposerProbes.glassFrame(of: more, in: window))
         let gap = glass.minY - composer.field.maxY
         // `glassGap`, and the breath every composer stands on (#1722).
         #expect(abs(gap - SnapActionColumn.glassGap - SnapActionColumn.bottomBreath) < 0.5,
@@ -696,7 +695,7 @@ struct ConversationThreadViewControllerTests {
     @Test func theOwnBubbleEndsTheInputRow() throws {
         let (screen, _, _, window) = makeScreen()
         screen.view.layoutIfNeeded()
-        let composer = try SnapActionColumnLayoutTests.composerColumn(in: screen.view, space: window)
+        let composer = try ComposerProbes.composerColumn(in: screen.view, space: window)
         let bubble = composer.bar.debugRowActionButton.convert(composer.bar.debugRowActionButton.bounds, to: window)
         #expect(composer.stake == nil)
         #expect(abs(bubble.maxY - composer.field.maxY) < 0.5, "\(bubble) vs field \(composer.field)")
@@ -710,21 +709,21 @@ struct ConversationThreadViewControllerTests {
     /// bar.
     @Test func theKeyboardLiftsTheInputRowAndItsBubble() throws {
         let (screen, _, _, window) = makeScreen()
-        let rest = try SnapActionColumnLayoutTests.composerColumn(in: screen.view, space: window)
+        let rest = try ComposerProbes.composerColumn(in: screen.view, space: window)
         let stream = try #require(Self.firstView(UICollectionView.self, in: screen.view))
         let restInset = stream.contentInset.bottom
-        let keyboard = SnapActionColumnLayoutTests.fakeKeyboard(
+        let keyboard = ComposerProbes.fakeKeyboard(
             in: screen.view, for: rest.bar, top: screen.view.bounds.height + 100
         )
         screen.view.layoutIfNeeded()
-        let settled = try SnapActionColumnLayoutTests.composerColumn(in: screen.view, space: window)
+        let settled = try ComposerProbes.composerColumn(in: screen.view, space: window)
         #expect(settled.field == rest.field, "no keyboard moved the field: \(settled.field) vs \(rest.field)")
 
         let keyboardTop = screen.view.bounds.height - 336
         keyboard.constant = keyboardTop
         screen.view.setNeedsLayout()
         screen.view.layoutIfNeeded()
-        let up = try SnapActionColumnLayoutTests.composerColumn(in: screen.view, space: window)
+        let up = try ComposerProbes.composerColumn(in: screen.view, space: window)
         let keyboardTopInWindow = screen.view.convert(CGPoint(x: 0, y: keyboardTop), to: window).y
         #expect(abs(up.field.maxY - (keyboardTopInWindow - Spacing.sm)) < 0.5)
         let bubble = up.bar.debugRowActionButton.convert(up.bar.debugRowActionButton.bounds, to: window)

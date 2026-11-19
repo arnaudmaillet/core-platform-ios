@@ -33,9 +33,9 @@ import UIKit
 @MainActor
 public struct UploadFeatureBuilder {
     private let composer: any PostComposing
-    /// A closure rather than a value, for the reason Chat's `threadScreens` is
-    /// one: the composition root builds the feed builder lazily, and the feed
-    /// builder reaches the router, which reaches back here.
+    /// A closure rather than a value: the composition root builds the feed
+    /// builder lazily, and the feed builder reaches the router, which reaches
+    /// back here.
     private let textPostScreens: () -> any TextPostScreenBuilding
 
     public init(
