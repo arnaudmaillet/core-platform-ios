@@ -91,7 +91,7 @@ struct ViewerScopedGuardTests {
     }
 
     @Test func everyViewerScopedCacheIsInTheContainersList() throws {
-        let container = try String(contentsOf: Self.root.appendingPathComponent("App/AppContainer.swift"), encoding: .utf8)
+        let container = try String(contentsOf: Self.root.appendingPathComponent("App/Composition/AppContainer.swift"), encoding: .utf8)
         let listed = try #require(Self.scopedList(in: container), "AppContainer's `scoped` list was not found")
         let found = Self.conformers(in: Self.sources())
         // The guard sees the conformers it was written against.
