@@ -216,18 +216,15 @@ final class SnapFeedViewController: UIViewController {
     /// The cell that showed the post on show as the items were swapped: it
     /// kept its comment surfaces running for it (#1798).
     private weak var reorderHeldCell: SnapFeedCell?
-    /// The clip time a presenting flight's picture showed, for the entry page
-    /// (#625) — see `zoomTransitionWillStartMedia(at:)`. A nil post is the
-    /// entry page of a feed that had no posts yet when the flight took off.
-    private var flightMediaStart: (postID: PostID?, seconds: TimeInterval)?
-    /// True between `zoomTransitionWillBegin` and `zoomTransitionDidEnd`. Cells
-    /// realized inside that window inherit the playback deferral, so a page
-    /// activating mid-flight cannot steal the render slot from the flying card.
-    private var isAwaitingZoomPresentation = false {
+    /// The flight flags, and what derives from them (`SnapFlightPhase`):
+    /// re-stated on every present, because this controller is reused.
+    private var flight = SnapFlightPhase() {
         didSet {
             // The flight is over, one way or another: a text page that stood
             // on its placeholder gets its real panel now (charter PR 5b).
-            if !isAwaitingZoomPresentation, oldValue { landDeferredRestingComments() }
+            if !flight.isAwaitingZoomPresentation, oldValue.isAwaitingZoomPresentation {
+                landDeferredRestingComments()
+            }
         }
     }
 
@@ -247,16 +244,9 @@ final class SnapFeedViewController: UIViewController {
     /// The page whose panel is waiting for the flight to land.
     private var deferredResting: (id: PostID, cell: SnapFeedCell, placeholder: RestingCommentsPlaceholderView)?
 
-    /// A text reveal is about to push this screen. The reveal is a navigation
-    /// push with its own animator, not a zoom presentation, so it never
-    /// reaches `zoomTransitionWillBegin` / `zoomTransitionDidEnd`: the
-    /// installer raises this before the push and `viewDidAppear` — the push's
-    /// landing — lowers it.
-    private(set) var isAwaitingRevealPresentation = false
-
-    /// Set by `zoomTransitionWillDepart`, read once by `zoomTransitionDidEnd`:
-    /// the ending flight takes this screen off screen.
-    private var isDepartingWithFlight = false
+    /// A text reveal is about to push this screen (`SnapFlightPhase`).
+    /// Internal for tests.
+    var isAwaitingRevealPresentation: Bool { flight.isAwaitingRevealPresentation }
 
     public func beginRevealPresentation() {
         // ⚠️ AN OPENING ONLY. The installer that calls this also builds every
@@ -267,58 +257,14 @@ final class SnapFeedViewController: UIViewController {
         // deferred the author pill and skipped the comments prewarm. An
         // opening is the one case where the screen is not yet in a window.
         guard viewIfLoaded?.window == nil else { return }
-        isAwaitingRevealPresentation = true
+        flight.isAwaitingRevealPresentation = true
     }
 
-    /// True while any flight — zoom or reveal — has this screen on its way.
-    private var isAwaitingAnyFlight: Bool {
-        isAwaitingZoomPresentation || isAwaitingRevealPresentation
+    /// Set by whoever pushes this screen, on both paths (`SnapFlightPhase`).
+    public var zoomOwnsInteractiveDismissal: Bool {
+        get { flight.zoomOwnsInteractiveDismissal }
+        set { flight.zoomOwnsInteractiveDismissal = newValue }
     }
-    /// Whether the card staging that presentation is flying THIS page's player
-    /// — the source's own answer, handed over by the transition controller.
-    ///
-    /// Defaults to the conservative reading and is RE-STATED on every present,
-    /// for the reason `zoomOwnsInteractiveDismissal` below is: this controller
-    /// is reused, so a leftover `false` from a map flight would silently unarm
-    /// the deferral for the next flight from a grid — where it is load-bearing.
-    private var flightCarriesActivePlayer = true
-    /// The two facts whose AND is the deferral. Read at all three stamping
-    /// sites, so a page realized mid-flight cannot disagree with the one the
-    /// flight staged over.
-    ///
-    /// ⚠️ A MAP FLIGHT DOES NOT DEFER, and the question "could the page start
-    /// sooner so the video is up earlier in the window" is CLOSED. Measured on
-    /// a present from a marker, `-zoom-live-log -media-log`, times relative to
-    /// the flight beginning:
-    ///
-    ///     +0 ms    willBegin flyingPlayer=N defers=N
-    ///     +68 ms   [page-play] start
-    ///     +230 ms  retry ADOPTED mid-flight — the first decoded frame
-    ///     +703 ms  landed
-    ///
-    /// A marker carries no player, so this reads false and the page starts as
-    /// early as there is a page to start. The 162 ms between the start and the
-    /// first frame is a remote asset decoding, not a policy, and the fade
-    /// begins in the same tick the frame exists.
-    ///
-    /// The only two ways to make that frame earlier are both refused: warming a
-    /// player for every visible marker would put an `AVPlayer` behind a 44pt
-    /// pin, spend pool loans the pool is already tight on and decode during
-    /// pan — the map's own invariant forbids the first and
-    /// `prewarmVisiblePosts` deliberately warms POSTS, not players; and a cheap
-    /// preview rendition is the standing contract ask
-    /// (`dev/issues/BACKEND_MEDIA_PREVIEW_RENDITIONS.md`). Until that ships the
-    /// card is not empty for those 162 ms: it flies the marker's sprite sheet,
-    /// animating, at the page's own framing.
-    private var defersPlaybackForStagingFlight: Bool {
-        isAwaitingZoomPresentation && flightCarriesActivePlayer
-    }
-    /// Set by whoever pushes this screen: true when a flight attached a grab to
-    /// it, false when it arrived by an ordinary push and the native edge swipe
-    /// should work. Written on BOTH paths rather than defaulted, because this
-    /// controller is REUSED and a stale answer from the previous presentation
-    /// is exactly the bug this would otherwise become.
-    public var zoomOwnsInteractiveDismissal = true
 
     /// The shell's bell — a tab-root feed's leading item while no back arrow
     /// or ✕ holds the edge (`HeaderAccessoryHosting`). The shell installs it
@@ -377,11 +323,6 @@ final class SnapFeedViewController: UIViewController {
     /// The app left with a clip readied: the screen waits, untouched, for the
     /// system to open the window — or gives up and pauses as usual.
     private var isAwaitingPictureInPicture = false
-    /// The inert page-chrome replica riding in the hero transition's flying
-    /// card. Held weakly for the duration of a flight so a post that hydrates
-    /// mid-flight (cold tap) can still fill in the replica's labels; the card
-    /// owns the view itself.
-    private weak var flightChrome: SnapChromeView?
     /// Unregisters its notification tokens when this VC (and thus the bag) is
     /// released — a nonisolated deinit can't touch the VC's main-actor state.
     private let appObservers = NotificationTokens()
@@ -447,7 +388,6 @@ final class SnapFeedViewController: UIViewController {
     /// The post that must open ALREADY SHOWING its comments — see
     /// `openComments(for:)`.
     private var pendingCommentsID: PostID?
-    private var isEngagedDismissalActive = false
     private var commentsEngagedID: PostID?
     /// A media post's comments, a native sheet, while one is up (#2087): the
     /// engagement above is a text page's and stays nil meanwhile.
@@ -987,7 +927,7 @@ final class SnapFeedViewController: UIViewController {
         // rises with the pop, and the clip resumes at half. Arriving on its
         // own (a push, a presentation, a flight), it owns the whole screen.
         if let coordinator = transitionCoordinator, !isMovingToParent, !isBeingPresented,
-           navigationController?.isBeingPresented != true, !isAwaitingAnyFlight,
+           navigationController?.isBeingPresented != true, !flight.isAwaitingAnyFlight,
            let cover = ViewportShare.cover(of: coordinator, .from) {
             viewportShare.track(coordinator, cover: cover, coversAtEnd: false)
         } else {
@@ -1095,11 +1035,11 @@ final class SnapFeedViewController: UIViewController {
         // the route, because on the hero path this fires WITH the transition
         // and would spend the engagement's layout inside the flight's last
         // frames — the one place this screen refuses to spend it.
-        if isAwaitingRevealPresentation {
+        if flight.isAwaitingRevealPresentation {
             // The reveal's landing: the deferred panel goes in BEFORE the
             // pending comments are applied, so a card opened on its comments
             // finds its panel exactly as it would have without the deferral.
-            isAwaitingRevealPresentation = false
+            flight.isAwaitingRevealPresentation = false
             landDeferredRestingComments()
             // The reveal held no chrome, so the band's train was laid during
             // the flight, unseen behind the replica: it enters now.
@@ -1111,7 +1051,7 @@ final class SnapFeedViewController: UIViewController {
         // An author that arrived under the push swaps in now (#1791); one a
         // flight is still holding waits for its landing.
         showPendingAuthor()
-        if !isAwaitingZoomPresentation { applyPendingComments(animated: true) }
+        if !flight.isAwaitingZoomPresentation { applyPendingComments(animated: true) }
         #if DEBUG
         runDebugAppearanceHooks()
         #endif
@@ -1478,7 +1418,7 @@ final class SnapFeedViewController: UIViewController {
         // screen's own pop or dismissal: the screen under it is no cover, and
         // a grab carries this very player to its tile.
         if !isMovingFromParent, !isBeingDismissed, navigationController?.isBeingDismissed != true,
-           !isAwaitingAnyFlight, let cover = ViewportShare.cover(of: coordinator, .to) {
+           !flight.isAwaitingAnyFlight, let cover = ViewportShare.cover(of: coordinator, .to) {
             viewportShare.track(coordinator, cover: cover, coversAtEnd: true)
         }
     }
@@ -1624,7 +1564,7 @@ final class SnapFeedViewController: UIViewController {
         // page going away), the two disagreed by that much at landing — the
         // caption and the rail stepped up ~10pt as the replica faded into
         // the page (filmed on a device, 25 September 2026).
-        flightChrome?.setFixedInsets(view.safeAreaInsets)
+        flight.flightChrome?.setFixedInsets(view.safeAreaInsets)
         // The COMMENT PANEL too, and this is the seam that makes staging work
         // without anyone doing inset arithmetic by hand.
         //
@@ -2305,7 +2245,7 @@ final class SnapFeedViewController: UIViewController {
     /// presentation's transition, whose own bar animation already owns the
     /// items (a morph started under it lands in the flight's first frames).
     private var canAnimateBarItems: Bool {
-        view.window != nil && transitionCoordinator == nil && !isAwaitingAnyFlight
+        view.window != nil && transitionCoordinator == nil && !flight.isAwaitingAnyFlight
     }
 
     /// Mints the author item for the pill shown now and swaps it into the
@@ -2346,7 +2286,7 @@ final class SnapFeedViewController: UIViewController {
     private var authorPillAwaitsLandingInstall = false
 
     private func installAuthorPillAfterLanding() {
-        guard authorPillAwaitsLandingInstall, !isAwaitingAnyFlight else { return }
+        guard authorPillAwaitsLandingInstall, !flight.isAwaitingAnyFlight else { return }
         #if DEBUG
         if LaunchArgument.pillNoLandingInstall.isPassed() { return }
         #endif
@@ -2383,7 +2323,7 @@ final class SnapFeedViewController: UIViewController {
         // (`pendingAuthor`) is drawn when its pill swaps in.
         guard authorIdentityView.shownAuthor?.authorID == authorBadges.author(of: barAuthorBadge),
               authorIdentityView.followBadge != badge else { return }
-        if authorPillAwaitsLandingInstall, isAwaitingAnyFlight || transitionCoordinator != nil { return }
+        if authorPillAwaitsLandingInstall, flight.isAwaitingAnyFlight || transitionCoordinator != nil { return }
         authorIdentityView.setFollowBadge(badge, animated: canAnimateBarItems)
     }
 
@@ -3059,7 +2999,7 @@ final class SnapFeedViewController: UIViewController {
         // A hero flight in progress whose post hydrated just now (cold tap):
         // fill in the flying card's chrome where it is. Its geometry is
         // data-independent, so only the text/avatar fade in.
-        if let flightChrome {
+        if let flightChrome = flight.flightChrome {
             UIView.transition(with: flightChrome, duration: 0.15, options: [.transitionCrossDissolve]) {
                 self.configureFlightChrome(flightChrome)
             }
@@ -3755,7 +3695,7 @@ final class SnapFeedViewController: UIViewController {
     /// when the next page needed building, and the black rectangle came back
     /// unchanged.
     private func prewarmRestingComments(for id: PostID) {
-        guard !isAwaitingAnyFlight,
+        guard !flight.isAwaitingAnyFlight,
               !restingWarm.contains(id),
               isTextPage(id),
               let makeCommentsPanelContent else { return }
@@ -3790,7 +3730,7 @@ final class SnapFeedViewController: UIViewController {
     /// could not put them in that order could not see it.
     func debugPrewarmComments(for id: PostID) {
         guard collectionView.visibleCells.contains(where: { $0 is SnapFeedCell }),
-              !isAwaitingZoomPresentation else { return }
+              !flight.isAwaitingZoomPresentation else { return }
         // The whole warm at once: the turns the app spreads it over (#2136)
         // are `RunLoopTurn`'s, not this test seam's.
         prewarmCommentsSheet(for: id)
@@ -4232,7 +4172,7 @@ final class SnapFeedViewController: UIViewController {
         // the warm exists to fix, moved to a worse place. Playback is deferred
         // across the flight for exactly this reason; so is this now, and
         // `zoomTransitionDidEnd` picks it up on landing.
-        guard !isAwaitingZoomPresentation else { return }
+        guard !flight.isAwaitingZoomPresentation else { return }
         // The sheet's panel waits beside the page, not in it (#2087), and is
         // built over the turns after this one (#2136).
         stageCommentsSheetWarm(for: id)
@@ -4279,8 +4219,8 @@ final class SnapFeedViewController: UIViewController {
     /// Nothing is moving that ~100 ms of layout could stall.
     private var isQuietForCommentsWarm: Bool {
         transitionCoordinator == nil
-            && !isAwaitingZoomPresentation
-            && !isEngagedDismissalActive
+            && !flight.isAwaitingZoomPresentation
+            && !flight.isEngagedDismissalActive
             && !collectionView.isTracking
             && !collectionView.isDragging
             && !collectionView.isDecelerating
@@ -5095,13 +5035,13 @@ final class SnapFeedViewController: UIViewController {
             if let snapCell = collectionView.cellForItem(
                 at: IndexPath(item: activate, section: 0)
             ) as? SnapFeedCell {
-                snapCell.defersPlaybackForFlight = defersPlaybackForStagingFlight
+                snapCell.defersPlaybackForFlight = flight.defersPlaybackForStagingFlight
                 stampFlightMediaStart(on: snapCell)
                 // The chrome's hold takes the same net, for the same reason:
                 // stamped on `activeSnapCell` alone it reached nobody, and
                 // the ticker laid its train unheld, off-window, mid-flight
                 // (see `willDisplay`).
-                if isAwaitingZoomPresentation { snapCell.setChromeHeldForFlight(true) }
+                if flight.isAwaitingZoomPresentation { snapCell.setChromeHeldForFlight(true) }
             }
             lifecycleCell(at: activate)?.willBecomeActive()
             #if DEBUG
@@ -6157,7 +6097,7 @@ extension SnapFeedViewController: UICollectionViewDelegate {
         // leg always takes THIS one, because the cell is realized by the very
         // layout pass the presentation triggers. Stamping only in `apply` left
         // the flag false exactly when it mattered.
-        (cell as? SnapFeedCell)?.defersPlaybackForFlight = defersPlaybackForStagingFlight
+        (cell as? SnapFeedCell)?.defersPlaybackForFlight = flight.defersPlaybackForStagingFlight
         if let snapCell = cell as? SnapFeedCell { stampFlightMediaStart(on: snapCell) }
         // The same net, for the picture: a page can be handed the screen while
         // it is still being realized, and the hand-over reaches nothing. The
@@ -6176,7 +6116,7 @@ extension SnapFeedViewController: UICollectionViewDelegate {
             // bubbles arriving from the right and no fade. Only the page
             // that will be active is held: a neighbour realised during the
             // flight would never be released.
-            if isAwaitingZoomPresentation { (cell as? SnapFeedCell)?.setChromeHeldForFlight(true) }
+            if flight.isAwaitingZoomPresentation { (cell as? SnapFeedCell)?.setChromeHeldForFlight(true) }
             (cell as? SnapCellLifecycle)?.willBecomeActive()
         }
         // A text page's resting interface PRE-RENDERS on visibility (not
@@ -6206,7 +6146,7 @@ extension SnapFeedViewController: UICollectionViewDelegate {
             // chrome. `presentRestingComments` makes this decision properly:
             // engagement if the slot is free, preview if it is not.
             if let model = modelsByID[id], model.mediaURL == nil {
-                if Self.defersRestingCommentsForFlight, isAwaitingAnyFlight,
+                if Self.defersRestingCommentsForFlight, flight.isAwaitingAnyFlight,
                    commentsEngagedID == nil, commentsContentVC == nil {
                     installRestingPlaceholder(for: id, model: model, host: snapCell)
                 } else {
@@ -6566,7 +6506,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // exact insets even though it lives in the transition container.
         chrome.setFixedInsets(view.safeAreaInsets)
         configureFlightChrome(chrome)
-        flightChrome = chrome
+        flight.flightChrome = chrome
         return chrome
     }
 
@@ -6969,7 +6909,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     /// `reconcileRestingInterface` records. Those two paths restore the floors
     /// themselves, through here, once their flag is down.
     private func applyGrounds() {
-        guard !isEngagedDismissalActive else { return }
+        guard !flight.isEngagedDismissalActive else { return }
         let ground = resolvedGround()
         view.backgroundColor = ground
         collectionView.backgroundColor = ground
@@ -7065,15 +7005,15 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // landing — a cancelled push leaves these set, and a reused
         // controller would then start its next flight already believing it is
         // in one.
-        isAwaitingZoomPresentation = false
+        flight.isAwaitingZoomPresentation = false
         // A reused screen starts its next visit with no flight pending and
         // nothing hidden, whatever the last visit's flight left behind.
-        isAwaitingRevealPresentation = false
+        flight.isAwaitingRevealPresentation = false
         view.alpha = 1
         // And nothing the last visit's landing parked over it.
         ZoomLandingLeftovers.clear(over: view)
         donatedLiveView = nil
-        flightChrome = nil
+        flight.flightChrome = nil
         pageDriveStartOffset = nil
 
         // The tapped post is always the head of the window, so the pager goes
@@ -7150,7 +7090,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // won, which is "the thread disappears the instant I grab" exactly.
         // Declining here is what makes the visibility hold for the length of
         // the gesture.
-        guard !isEngagedDismissalActive else {
+        guard !flight.isEngagedDismissalActive else {
             return view.alpha = 1
         }
         view.alpha = hidden ? 0 : 1
@@ -7179,7 +7119,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     /// the grab has begun — and the engagement itself is not what is under
     /// test. This flips the flag and nothing else.
     func debugArmEngagedDismissal() {
-        isEngagedDismissalActive = true
+        flight.isEngagedDismissalActive = true
     }
     #endif
 
@@ -7192,8 +7132,8 @@ extension SnapFeedViewController: ZoomTransitionDestination {
 
     public func setZoomDismissState(_ state: ZoomDismissState) {
         guard let cell = activeSnapCell else { return }
-        if !isEngagedDismissalActive {
-            isEngagedDismissalActive = true
+        if !flight.isEngagedDismissalActive {
+            flight.isEngagedDismissalActive = true
             view.alpha = 1
             // The floors between the page and the card go transparent — the
             // page itself stays whole, so what shows around it as it shrinks is
@@ -7203,7 +7143,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
             cell.beginLiveGrab()
             // The card's replica of the interface would draw it a second
             // time under the live page: the page is the one copy.
-            flightChrome?.isHidden = true
+            flight.flightChrome?.isHidden = true
         }
         // Re-asserted every event, not just at arming: anything that hides the
         // page mid-grab is undone on the next frame the finger produces, so a
@@ -7224,8 +7164,8 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     /// Puts the page back together after a grab, committed or abandoned. Safe
     /// to call when no grab ran: the flag is the whole guard.
     private func endEngagedDismissalIfNeeded() {
-        guard isEngagedDismissalActive else { return }
-        isEngagedDismissalActive = false
+        guard flight.isEngagedDismissalActive else { return }
+        flight.isEngagedDismissalActive = false
         activeSnapCell?.endEngagedDismissal()
         // Through the resolver: this used to hand back a literal black, which
         // re-blacked a TEXT page even with its data present.
@@ -7244,12 +7184,12 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     /// player anywhere yet — and deferring only bought the viewer a beat of
     /// poster-then-black at the landing. The source says which flight this is.
     public func zoomTransitionWillBegin(flyingLivePlayer: Bool) {
-        isAwaitingZoomPresentation = true
+        flight.isAwaitingZoomPresentation = true
         // A start position belongs to ONE flight: this one tells its own, after
         // this, or none (#625).
-        flightMediaStart = nil
-        flightCarriesActivePlayer = flyingLivePlayer
-        activeSnapCell?.defersPlaybackForFlight = defersPlaybackForStagingFlight
+        flight.flightMediaStart = nil
+        flight.flightCarriesActivePlayer = flyingLivePlayer
+        activeSnapCell?.defersPlaybackForFlight = flight.defersPlaybackForStagingFlight
         // Reaches a cell only when this screen is being re-presented over a
         // page it already holds; the first present stamps both flags on the
         // cell as it is realised (`apply` / `willDisplay`).
@@ -7260,7 +7200,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
             // BETWEEN these two lines is the page decoding during the flight.
             print(String(format: "[zoom-live] %.3f willBegin flyingPlayer=%@ defers=%@",
                          CACurrentMediaTime(), flyingLivePlayer ? "Y" : "N",
-                         defersPlaybackForStagingFlight ? "Y" : "N"))
+                         flight.defersPlaybackForStagingFlight ? "Y" : "N"))
         }
         #endif
     }
@@ -7275,19 +7215,19 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     /// is late (#633). It is kept for the entry page instead: the first page
     /// `activePostID` names once it can, by the same fallback rule.
     public func zoomTransitionWillStartMedia(at seconds: TimeInterval) {
-        flightMediaStart = (activePostID, seconds)
+        flight.flightMediaStart = (activePostID, seconds)
         if let cell = activeSnapCell { stampFlightMediaStart(on: cell) }
     }
 
     /// Gives the entry page its start position — once, and only to the page
     /// showing the post the flight carried.
     private func stampFlightMediaStart(on cell: SnapFeedCell) {
-        guard let start = flightMediaStart,
+        guard let start = flight.flightMediaStart,
               let shown = cell.representedPostID,
               Self.isFlightEntryPage(shown, carried: start.postID, entry: activePostID)
         else { return }
         cell.flightMediaStartTime = start.seconds
-        flightMediaStart = nil
+        flight.flightMediaStart = nil
     }
 
     /// Whether the page showing `shown` is the one a flight's start position is
@@ -7325,7 +7265,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     /// at. Measured: `source attach surface -> false` (the card correctly
     /// declined) followed by a card reporting `frames=2`.
     public func zoomDonateLiveMediaView() -> UIView? {
-        guard !isAwaitingZoomPresentation else { return nil }
+        guard !flight.isAwaitingZoomPresentation else { return nil }
         guard let donated = activeSnapCell?.donateLiveRenderView() else { return nil }
         donatedLiveView = donated
         return donated
@@ -7352,7 +7292,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     }
 
     public func zoomTransitionWillDepart() {
-        isDepartingWithFlight = true
+        flight.isDepartingWithFlight = true
     }
 
     public func zoomTransitionDidEnd() {
@@ -7372,7 +7312,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // window space, at the instant one fades into the other. A delta here
         // is the "small jump at the end of the hero" a device shows.
         if LaunchArgument.landingProbe.isPassed(),
-           let window = view.window, let replica = flightChrome,
+           let window = view.window, let replica = flight.flightChrome,
            let page = activeSnapCell?.debugChrome {
             let a = replica.debugCaptionFrame(in: window), b = page.debugCaptionFrame(in: window)
             print(String(format: "[landing-probe] replica caption y=%.1f h=%.1f w=%.1f | page caption y=%.1f h=%.1f w=%.1f",
@@ -7390,12 +7330,12 @@ extension SnapFeedViewController: ZoomTransitionDestination {
             }
         }
         #endif
-        flightChrome = nil
-        isAwaitingZoomPresentation = false
+        flight.flightChrome = nil
+        flight.isAwaitingZoomPresentation = false
         installAuthorPillAfterLanding()
         // Back to the conservative reading for whatever presents next: this
         // controller outlives the flight that set it.
-        flightCarriesActivePlayer = true
+        flight.flightCarriesActivePlayer = true
         // The replica is gone; the page's own chrome comes in rather than
         // simply stopping being covered.
         activeSnapCell?.setChromeHeldForFlight(false)
@@ -7409,8 +7349,8 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // hidden page right after the landing tile adopted it, and the
         // deferred start below played a clip on a screen being removed. A
         // departing page only lets go, so the next visit starts clean.
-        let departing = isDepartingWithFlight
-        isDepartingWithFlight = false
+        let departing = flight.isDepartingWithFlight
+        flight.isDepartingWithFlight = false
         if departing {
             activeSnapCell?.releasePlaybackForDeparture()
             // ⚠️ AND THE SHARED BARS' STYLE (hero audit 2.16). `viewWillAppear`
@@ -8350,11 +8290,11 @@ extension SnapFeedViewController: ArrivalInvariantReporting {
     /// raised by a close) were all one of these left up.
     public func arrivalFacts() -> [(name: String, holds: Bool)] {
         [
-            ("feed.awaitingZoom", !isAwaitingZoomPresentation),
-            ("feed.awaitingReveal", !isAwaitingRevealPresentation),
-            ("feed.engagedDismissal", !isEngagedDismissalActive),
-            ("feed.flightChrome", flightChrome == nil),
-            ("feed.departing", !isDepartingWithFlight),
+            ("feed.awaitingZoom", !flight.isAwaitingZoomPresentation),
+            ("feed.awaitingReveal", !flight.isAwaitingRevealPresentation),
+            ("feed.engagedDismissal", !flight.isEngagedDismissalActive),
+            ("feed.flightChrome", flight.flightChrome == nil),
+            ("feed.departing", !flight.isDepartingWithFlight),
         ]
     }
 }
