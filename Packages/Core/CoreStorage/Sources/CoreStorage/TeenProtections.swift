@@ -14,7 +14,7 @@ import Foundation
 /// treated as a teen.
 ///
 /// ONE instance in the app (`AppContainer.teenProtections`, #2376), cleared on
-/// every account change by `ViewerStorageBinding`.
+/// sign-out by `ViewerStorageBinding`.
 public final class TeenProtections: @unchecked Sendable {
     /// The daily limit a teen account starts with on a device, in minutes.
     public static let defaultDailyLimitMinutes = 60
@@ -57,21 +57,9 @@ public final class TeenProtections: @unchecked Sendable {
         }
     }
 
-    /// Signed out, a guest, or another account not read yet: nobody here is
-    /// known to be a teen.
+    /// Signed out, or a guest: nobody here is known to be a teen.
     public func clear() {
         lock.withLock {
-            defaults.set(false, forKey: minorKey)
-            defaults.removeObject(forKey: accountKey)
-        }
-    }
-
-    /// `account` is here: what was recorded for another account (or for no
-    /// known account) goes, until `account`'s own read records it (#2376).
-    /// What was recorded for `account` stays.
-    public func clear(unlessRecordedFor account: String) {
-        lock.withLock {
-            guard defaults.string(forKey: accountKey) != account else { return }
             defaults.set(false, forKey: minorKey)
             defaults.removeObject(forKey: accountKey)
         }

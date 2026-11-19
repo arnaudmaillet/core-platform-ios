@@ -101,10 +101,11 @@ struct ViewerIsolationTests {
         #expect(!device.teen.isMinor)
     }
 
-    /// An account to account change with no sign-out between (#2376, the
-    /// owner's decision B): the previous account's teen flag goes at once,
-    /// rather than holding until the new account's read records its own.
-    @Test func anotherAccountWithoutASignOutIsNoTeenUntilItsOwnReadSaysSo() throws {
+    /// An account to account change with no sign-out between: the previous
+    /// account's teen flag holds until the new account's own read records its
+    /// bracket, so a teen switching to another teen account is never
+    /// unprotected meanwhile (fail-safe, #2376).
+    @Test func anotherAccountKeepsTheTeenFlagUntilItsOwnReadSaysOtherwise() throws {
         let device = Self.device(defaults: try Self.defaults())
         device.binding.enter(account: "A")
         device.binding.profileResolved(account: "A", profile: "pa")
@@ -112,11 +113,11 @@ struct ViewerIsolationTests {
         #expect(device.teen.isMinor)
 
         #expect(device.binding.enter(account: "B"))
-        #expect(!device.teen.isMinor, "A's teen flag held for B")
-        #expect(!device.teen.restrictsPurchases)
+        #expect(device.teen.isMinor, "a teen switching accounts went unprotected before the read")
+        #expect(device.teen.restrictsPurchases)
 
-        device.teen.record(account: "B", isMinor: true)
-        #expect(device.teen.isMinor)
+        device.teen.record(account: "B", isMinor: false)
+        #expect(!device.teen.isMinor)
     }
 
     /// The same account at a cold start (the scope starts unscoped on every

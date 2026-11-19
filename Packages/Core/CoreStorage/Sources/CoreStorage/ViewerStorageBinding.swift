@@ -12,9 +12,9 @@ import Foundation
 ///
 /// ⚠️ NOTHING IS WIPED: the stores are keyed per profile or per account
 /// (`StorageScope`), and keys are what keep viewers apart. The one exception
-/// is `TeenProtections`, whose flag is the device's: it is dropped the moment
-/// another account (or nobody) is here, and the account's own read records it
-/// again (`AccountRepository.currentAccount`).
+/// is `TeenProtections`, whose flag is the device's: a sign-out drops it, and
+/// on an account change it holds (fail-safe) until the new account's own read
+/// records its bracket (`AccountRepository.currentAccount`).
 @MainActor
 public final class ViewerStorageBinding {
     private let scope: StorageScope
@@ -38,11 +38,10 @@ public final class ViewerStorageBinding {
         }
         if case .member(account, _) = scope.owner { return false }
         scope.owner = .member(account: account, profile: nil)
-        // Another account's flag never protects (or restricts) this one: it
-        // goes until this account's read records its own. The same account
-        // coming back at a cold start keeps its flag, so a teen is protected
-        // from the first frame.
-        teenProtections.clear(unlessRecordedFor: account)
+        // The teen flag stays as it is until this account's own read records
+        // its bracket: fail-safe, so a teen switching to another teen account
+        // (or coming back at a cold start) is never unprotected meanwhile.
+        // Only a sign-out clears it.
         return true
     }
 
