@@ -10,20 +10,112 @@ import MediaCore
 import PostGrid
 import UIKit
 
+/// The groups' and channels' service (#2213): what a group or a channel
+/// thread, its info screen and its creation call, and the read behind a
+/// profile's Channels tab (#2232). `ChatRepository` answers all of it: the
+/// composition is typed, so a repository without it fails to compile
+/// instead of quietly drawing no groups (#2375).
+public typealias ChatConversationServicing = GroupChatServicing & ProfileChannelsReading
+
 /// The chat feature's entry point, resolved by the composition root and
 /// consumed through `ChatFeatureBuilding` by the app shell.
 @MainActor
 public struct ChatFeatureBuilder: ChatFeatureBuilding {
+    /// Everything Chat needs, handed in by the composition root (#2375):
+    /// each collaborator the app always wires is required, so forgetting one
+    /// fails to compile.
+    public struct Dependencies {
+        /// The conversations: the inbox, the threads, the viewer.
+        public var repository: any ChatProviding
+        /// The app's one memory of each screen's sections (#1774).
+        public var presence: SectionPresenceStore
+        /// The voice messages played (#2104).
+        public var voicePlayed: VoicePlayedStore
+        /// Suggestions, and the peers' faces and handles for every row and
+        /// thread: one repository answers both.
+        public var connections: any SuggestionsProviding & PeerAvatarProviding
+        /// The compose picker's and the inbox search's people directory.
+        public var people: any PeopleDirectoryProviding
+        public var imagePipeline: ImagePipeline
+        public var router: any Router
+        /// The SAME history the global search screen writes to.
+        public var recentSearches: RecentSearchStore
+        /// The thread's camera and library (#681).
+        public var mediaPicker: ChatMediaPickerFactory
+        /// The inbox opens on its last rows and a conversation on its last
+        /// 200 messages, offline and at a cold start (#897). Nil when the
+        /// device store can't be opened: they are kept in memory.
+        public var localStore: LocalStore?
+        /// The peers' relations, for the rows' mark (#2049).
+        public var relations: InboxRelations
+        /// Groups (#2214): creating one, its thread's senders, its info
+        /// screen. Nil with `-group-chats` off: Messages is DMs only.
+        public var groups: (any GroupChatServicing)?
+        /// Channels (#2215): their rows in Chats (#2230), creating one,
+        /// its thread's reader bar, its info screen, its join requests, and
+        /// a profile's Channels tab (#2232). Nil with `-channels` off:
+        /// Messages has none of it.
+        public var channels: (any ChatConversationServicing)?
+        /// The Posts page under a group's or a channel's info header
+        /// (#2237): Feed's own grid page. A test's nil page draws the page's
+        /// status alone.
+        public var postsPage: @MainActor () -> (any PostGridPage)?
+        /// The conversation's peer pill (#752): its relation glyph and its
+        /// follow, over the app's one copy of where the viewer stands with
+        /// each person (#2049).
+        public var socialGraph: any SocialGraphWriting
+        public var followRelations: any SocialGraphReading
+        public var entities: any ProfileEntityReading & ProfileEntityWriting
+
+        public init(
+            repository: any ChatProviding,
+            presence: SectionPresenceStore,
+            voicePlayed: VoicePlayedStore,
+            connections: any SuggestionsProviding & PeerAvatarProviding,
+            people: any PeopleDirectoryProviding,
+            imagePipeline: ImagePipeline,
+            router: any Router,
+            recentSearches: RecentSearchStore,
+            mediaPicker: @escaping ChatMediaPickerFactory,
+            localStore: LocalStore?,
+            relations: InboxRelations,
+            groups: (any GroupChatServicing)?,
+            channels: (any ChatConversationServicing)?,
+            postsPage: @escaping @MainActor () -> (any PostGridPage)?,
+            socialGraph: any SocialGraphWriting,
+            followRelations: any SocialGraphReading,
+            entities: any ProfileEntityReading & ProfileEntityWriting
+        ) {
+            self.repository = repository
+            self.presence = presence
+            self.voicePlayed = voicePlayed
+            self.connections = connections
+            self.people = people
+            self.imagePipeline = imagePipeline
+            self.router = router
+            self.recentSearches = recentSearches
+            self.mediaPicker = mediaPicker
+            self.localStore = localStore
+            self.relations = relations
+            self.groups = groups
+            self.channels = channels
+            self.postsPage = postsPage
+            self.socialGraph = socialGraph
+            self.followRelations = followRelations
+            self.entities = entities
+        }
+    }
+
     private let repository: any ChatProviding
-    private let connections: (any SuggestionsProviding)?
-    /// The compose picker's search backing. Optional like `connections`: a
-    /// composition without it still opens the picker, which then browses
-    /// recents and suggestions and simply finds nothing when typed into.
-    private let people: (any PeopleDirectoryProviding)?
-    private let imagePipeline: ImagePipeline?
-    private let router: (any Router)?
+    /// Suggestions, and the avatar source: it already caches the profiles
+    /// the rows need, and the two surfaces are one tab apart.
+    private let connections: any SuggestionsProviding & PeerAvatarProviding
+    /// The compose picker's search backing.
+    private let people: any PeopleDirectoryProviding
+    private let imagePipeline: ImagePipeline
+    private let router: any Router
     /// The SAME history the global search screen writes to.
-    private let recentSearches: RecentSearchStore?
+    private let recentSearches: RecentSearchStore
     /// Shared list→thread warm-start context (the builder is a long-lived
     /// singleton in the container, so this is one directory app-wide).
     private let directory: ConversationDirectory
@@ -33,28 +125,28 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
     /// the list it should disappear from.
     private let catalog: InboxCatalog
     /// The conversation's peer pill (#752): its relation glyph, "+" follows
-    /// through `socialGraph`; nil graphs draw none. `entities` is the app's
-    /// one copy of where the viewer stands with each person (#2049).
-    private let socialGraph: (any SocialGraphWriting)?
-    private let followRelations: (any SocialGraphReading)?
-    private let entities: (any ProfileEntityReading & ProfileEntityWriting)?
-    /// The thread's camera and library (#681); nil sends text only.
-    private let mediaPicker: ChatMediaPickerFactory?
+    /// through `socialGraph`. `entities` is the app's one copy of where the
+    /// viewer stands with each person (#2049).
+    private let socialGraph: any SocialGraphWriting
+    private let followRelations: any SocialGraphReading
+    private let entities: any ProfileEntityReading & ProfileEntityWriting
+    /// The thread's camera and library (#681).
+    private let mediaPicker: ChatMediaPickerFactory
     /// The inbox and the last conversations on the device (#897).
     private let deviceCache: ChatLocalCache?
     /// The peers' relations, for the rows' mark and its "+" (#2049): the
     /// inbox's and its search's, over the app's `EntityStore`.
-    private let relations: InboxRelations?
+    private let relations: InboxRelations
     /// Groups (#2214, `-group-chats`): creating one, its thread's senders,
-    /// its info screen. Nil — the flag off, or a repository with no groups —
-    /// and Messages is DMs only, as it was.
+    /// its info screen. Nil — the flag off — and Messages is DMs only, as it
+    /// was.
     private let groups: (any GroupChatServicing)?
     /// Channels (#2215, `-channels`): their rows in Chats (#2230), creating
     /// one from the "+" menu and the inbox search, its thread's reader bar,
-    /// its info screen, and the join requests in Requests. Nil — the flag
-    /// off, or a repository with no channels — and Messages has none of it,
-    /// as it was.
-    private let channels: (any GroupChatServicing)?
+    /// its info screen, the join requests in Requests, and a profile's
+    /// Channels tab (#2232). Nil — the flag off — and Messages has none of
+    /// it, as it was.
+    private let channels: (any ChatConversationServicing)?
     /// "Share as a Post" on a channel's creation and info screens (#2216):
     /// with the channels (`-channels`), which draw showcases.
     private let sharesShowcases: Bool
@@ -62,57 +154,37 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
     private let groupNotes = GroupSessionNotes()
     /// The Posts page under a group's or a channel's info header (#2237):
     /// Feed's own grid page, the factory the profile and the place use,
-    /// handed by the app. Nil (a test) draws the page's status alone.
-    private let postsPage: (() -> any PostGridPage)?
+    /// handed by the app. A nil page (a test) draws the page's status alone.
+    private let postsPage: @MainActor () -> (any PostGridPage)?
     /// The app's one memory of each screen's sections (#1774) and of the
     /// voice messages played (#2104), handed by the app (#2376).
     private let presence: SectionPresenceStore
     private let voicePlayed: VoicePlayedStore
 
-    /// `localStore`: the inbox opens on its last rows and a conversation on
-    /// its last 200 messages, offline and at a cold start (#897). Nil keeps
-    /// them in memory.
-    public init(
-        repository: any ChatProviding,
-        presence: SectionPresenceStore,
-        voicePlayed: VoicePlayedStore,
-        connections: (any SuggestionsProviding)? = nil,
-        people: (any PeopleDirectoryProviding)? = nil,
-        imagePipeline: ImagePipeline? = nil,
-        router: (any Router)? = nil,
-        recentSearches: RecentSearchStore? = nil,
-        mediaPicker: ChatMediaPickerFactory? = nil,
-        localStore: LocalStore? = nil,
-        relations: InboxRelations? = nil,
-        showsGroups: Bool = DebugFlags.isOn("-group-chats"),
-        showsChannels: Bool = DebugFlags.isOn("-channels"),
-        postsPage: (() -> any PostGridPage)? = nil,
-        socialGraph: (any SocialGraphWriting)? = nil,
-        followRelations: (any SocialGraphReading)? = nil,
-        entities: (any ProfileEntityReading & ProfileEntityWriting)? = nil
-    ) {
-        self.presence = presence
-        self.voicePlayed = voicePlayed
-        self.postsPage = postsPage
-        groups = showsGroups ? repository as? any GroupChatServicing : nil
-        channels = showsChannels ? repository as? any GroupChatServicing : nil
-        sharesShowcases = showsChannels
-        self.socialGraph = socialGraph
-        self.followRelations = followRelations
-        self.entities = entities
-        self.relations = relations
-        self.mediaPicker = mediaPicker
+    public init(dependencies: Dependencies) {
+        let repository = dependencies.repository
+        presence = dependencies.presence
+        voicePlayed = dependencies.voicePlayed
+        postsPage = dependencies.postsPage
+        groups = dependencies.groups
+        channels = dependencies.channels
+        sharesShowcases = dependencies.channels != nil
+        socialGraph = dependencies.socialGraph
+        followRelations = dependencies.followRelations
+        entities = dependencies.entities
+        relations = dependencies.relations
+        mediaPicker = dependencies.mediaPicker
         let directory = ConversationDirectory()
         self.directory = directory
-        let deviceCache = localStore.map(ChatLocalCache.init(store:))
+        let deviceCache = dependencies.localStore.map(ChatLocalCache.init(store:))
         self.deviceCache = deviceCache
         catalog = InboxCatalog(repository: repository, directory: directory, deviceCache: deviceCache)
         self.repository = repository
-        self.connections = connections
-        self.people = people
-        self.imagePipeline = imagePipeline
-        self.router = router
-        self.recentSearches = recentSearches
+        connections = dependencies.connections
+        people = dependencies.people
+        imagePipeline = dependencies.imagePipeline
+        router = dependencies.router
+        recentSearches = dependencies.recentSearches
     }
 
     /// Assembles the inbox: one catalog shared by the two conversation-backed
@@ -145,8 +217,8 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
     /// its Channels tab, over the same repository. Nil with them off — no
     /// profile then has the tab.
     public func makeProfileChannels() -> (any ProfileChannelsProviding)? {
-        guard channels != nil, let reader = repository as? any ProfileChannelsReading else { return nil }
-        return ProfileChannels(service: reader)
+        guard let channels else { return nil }
+        return ProfileChannels(service: channels)
     }
 
     public func makeInboxViewController(
@@ -159,7 +231,7 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
             // The suggestions repository doubles as the avatar source: it
             // already caches the profiles these rows need, and the two
             // surfaces are one tab apart.
-            avatars: connections as? any PeerAvatarProviding,
+            avatars: connections,
             relations: relations
         )
         // Context-menu previews show the real thread screen in `.preview`
@@ -187,7 +259,7 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         let requests = MessageRequestsViewController(
             viewModel: requestsModel,
             imagePipeline: imagePipeline,
-            avatars: connections as? any PeerAvatarProviding,
+            avatars: connections,
             // The faces wear the relation mark, as All's (#2088).
             relations: relations
         )
@@ -211,7 +283,7 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
             let hidden = MessageRequestsViewController(
                 viewModel: MessageRequestsViewModel(catalog: catalog, router: router, folder: .hiddenRequests),
                 imagePipeline: imagePipeline,
-                avatars: connections as? any PeerAvatarProviding,
+                avatars: connections,
                 relations: relations
             )
             hidden.threadPreviewProvider = makeThreadPreview
@@ -219,7 +291,7 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         }
         let suggestions = SuggestionsViewController(
             viewModel: SuggestionsViewModel(
-                repository: connections ?? EmptySuggestionsRepository(),
+                repository: connections,
                 router: router,
                 deviceCache: deviceCache
             ),
@@ -238,7 +310,7 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         let searchResults = InboxSearchResultsViewController(
             viewModel: searchViewModel,
             imagePipeline: imagePipeline,
-            avatars: connections as? any PeerAvatarProviding,
+            avatars: connections,
             relations: relations
         )
         // A target, not a conversation — the same seam the compose picker rides,
@@ -247,9 +319,9 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         searchViewModel.onOpenConversation = { [router] target in
             switch target {
             case .existing(let conversationID):
-                router?.route(to: .conversation(conversationID))
+                router.route(to: .conversation(conversationID))
             case .draft(let peer, let displayName, let handle):
-                router?.route(to: .messageUser(peer, stub: ProfileIdentityStub(
+                router.route(to: .messageUser(peer, stub: ProfileIdentityStub(
                     handle: handle, displayName: displayName
                 )))
             }
@@ -316,10 +388,10 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         // way out would land behind it.
         let leave: @MainActor ([AppRoute]) -> Void = { [weak sheet, router] routes in
             guard let sheet else {
-                routes.forEach { router?.route(to: $0) }
+                routes.forEach { router.route(to: $0) }
                 return
             }
-            _ = sheet.closePresentation { routes.forEach { router?.route(to: $0) } }
+            _ = sheet.closePresentation { routes.forEach { router.route(to: $0) } }
         }
         creation.onCreated = { [catalog, groupNotes, sharesShowcases] id in
             groupNotes.created[id] = Date()
@@ -359,7 +431,7 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         }
         let screen = ChannelJoinRequestsViewController(viewModel: model, imagePipeline: imagePipeline)
         screen.onOpenProfile = { [router] profileID, name in
-            router?.route(to: .profile(profileID, stub: ProfileIdentityStub(handle: nil, displayName: name)))
+            router.route(to: .profile(profileID, stub: ProfileIdentityStub(handle: nil, displayName: name)))
         }
         return screen
     }
@@ -378,13 +450,13 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
             onChange()
             catalog.refresh()
         }
-        let screen = ChannelInfoViewController(viewModel: model, imagePipeline: imagePipeline, postsPage: postsPage?())
+        let screen = ChannelInfoViewController(viewModel: model, imagePipeline: imagePipeline, postsPage: postsPage())
         screen.onOpenProfile = { [router] profileID, name in
-            router?.route(to: .profile(profileID, stub: ProfileIdentityStub(handle: nil, displayName: name)))
+            router.route(to: .profile(profileID, stub: ProfileIdentityStub(handle: nil, displayName: name)))
         }
         // "Share as a Post" (#2216): the Text Post screen over the info
         // screen, the channel's card attached.
-        screen.onShareAsPost = { [router] embed in router?.route(to: .composeShowcase(embed)) }
+        screen.onShareAsPost = { [router] embed in router.route(to: .composeShowcase(embed)) }
         // Left: the row goes, and the viewer is back in the inbox.
         screen.onLeft = { [weak screen, catalog] in
             catalog.delete([id])
@@ -410,9 +482,9 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
                 // The inbox behind the thread lists it.
                 catalog.refresh()
                 if let sheet {
-                    _ = sheet.closePresentation { router?.route(to: .conversation(id)) }
+                    _ = sheet.closePresentation { router.route(to: .conversation(id)) }
                 } else {
-                    router?.route(to: .conversation(id))
+                    router.route(to: .conversation(id))
                 }
             }
             sheet?.pushViewController(
@@ -437,7 +509,7 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         }
         return GroupMemberPickerViewController(
             viewModel: model, title: title, nextTitle: nextTitle, imagePipeline: imagePipeline,
-            avatars: connections as? any PeerAvatarProviding
+            avatars: connections
         )
     }
 
@@ -451,9 +523,9 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
             setMuted: { [catalog] muted, until, done in catalog.setMute(id, muted: muted, until: until, completion: done) }
         )
         model.onChange = onChange
-        let screen = GroupInfoViewController(viewModel: model, imagePipeline: imagePipeline, postsPage: postsPage?())
+        let screen = GroupInfoViewController(viewModel: model, imagePipeline: imagePipeline, postsPage: postsPage())
         screen.onOpenProfile = { [router] profileID, name in
-            router?.route(to: .profile(profileID, stub: ProfileIdentityStub(handle: nil, displayName: name)))
+            router.route(to: .profile(profileID, stub: ProfileIdentityStub(handle: nil, displayName: name)))
         }
         screen.onAddMembers = { [self] presenter, excluded, memberCount, completion in
             let picker = makeMemberPicker(
@@ -479,12 +551,12 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
     /// What a group's or a channel's thread needs (#2214, #2215); nil with
     /// neither.
     private func groupThreadContext() -> GroupThreadContext? {
-        guard let conversationService = groups ?? channels else { return nil }
+        guard let conversationService = groups ?? channels.map({ $0 as any GroupChatServicing }) else { return nil }
         var context = GroupThreadContext(
             service: conversationService,
             makeInfo: { [self] id, onChange in makeGroupInfo(id, onChange: onChange) },
             openProfile: { [router] id, name in
-                router?.route(to: .profile(id, stub: name.isEmpty ? nil : ProfileIdentityStub(handle: nil, displayName: name)))
+                router.route(to: .profile(id, stub: name.isEmpty ? nil : ProfileIdentityStub(handle: nil, displayName: name)))
             },
             createdAt: { [groupNotes] id in groupNotes.created[id] },
             knownKind: { [directory] id in directory.summary(for: id)?.kind }
@@ -533,7 +605,7 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         viewModel.onDidSendMessage = { [catalog] id, message in
             catalog.recordSentMessage(message, in: id)
         }
-        viewModel.onDidUploadMedia = { [imagePipeline] image, url in imagePipeline?.store(image, for: url) }
+        viewModel.onDidUploadMedia = { [imagePipeline] image, url in imagePipeline.store(image, for: url) }
         // A draft that just became real: the inbox has never heard of it, so
         // the viewer would otherwise swipe back from a thread they started to
         // a list without it.
@@ -555,7 +627,7 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         let driver = ConversationThreadDriver(
             viewModel: viewModel,
             viewer: repository,
-            avatars: connections as? any PeerAvatarProviding,
+            avatars: connections,
             // The thread's pin is the inbox's: a peek offers no pinning.
             pins: mode == .full ? catalog : nil,
             mediaPicker: mode == .full ? mediaPicker : nil,
@@ -565,8 +637,7 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
             driver: driver,
             mode: mode,
             prefill: prefill,
-            // The app always hands one; a test without it draws placeholders.
-            imagePipeline: imagePipeline ?? ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            imagePipeline: imagePipeline,
             presence: presence,
             voicePlayed: voicePlayed,
             socialGraph: socialGraph,
@@ -609,12 +680,4 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
 @MainActor
 final class GroupSessionNotes {
     var created: [ConversationID: Date] = [:]
-}
-
-/// Stands in when the app is composed without a social-graph client: the
-/// surface renders its empty state rather than the feature failing to build.
-private struct EmptySuggestionsRepository: SuggestionsProviding {
-    func suggestions(limit: Int) async throws -> [SuggestedAccount] { [] }
-    func follow(_ profileID: ProfileID) async throws -> FollowOutcome { .following }
-    func unfollow(_ profileID: ProfileID) async throws {}
 }

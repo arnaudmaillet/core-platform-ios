@@ -178,15 +178,10 @@ struct ProfileChannelsTests {
     @Test func withTheFlagOffNoProfileHasChannels() async throws {
         let read = try await make(channels: false).ownedChannels(of: ProfileID("prof-12"))
         #expect(read.isEmpty)
-        let off = ChatFeatureBuilder(
-            repository: make(channels: false),
-            presence: SectionPresenceStore(scope: StorageScope()),
-            voicePlayed: VoicePlayedStore(scope: StorageScope()), showsGroups: false, showsChannels: false
-        )
+        let off = ChatFeatureBuilder(dependencies: .testing(repository: make(channels: false)))
         #expect(off.makeProfileChannels() == nil)
-        let on = ChatFeatureBuilder(repository: make(),
-        presence: SectionPresenceStore(scope: StorageScope()),
-        voicePlayed: VoicePlayedStore(scope: StorageScope()), showsGroups: false, showsChannels: true)
+        let repository = make()
+        let on = ChatFeatureBuilder(dependencies: .testing(repository: repository, channels: repository))
         #expect(on.makeProfileChannels() != nil)
     }
 }

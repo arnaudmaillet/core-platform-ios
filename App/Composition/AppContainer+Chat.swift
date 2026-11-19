@@ -132,10 +132,12 @@ extension AppContainer {
     }
 
     func makeChatFeature() -> any ChatFeatureBuilding {
-        ChatFeatureBuilder(
+        ChatFeatureBuilder(dependencies: .init(
             repository: chatRepository,
             presence: sectionPresence,
             voicePlayed: voicePlayed,
+            // Suggestions, and every row's and thread's faces: the same
+            // repository.
             connections: socialConnectionsRepository,
             people: peopleDirectoryRepository,
             imagePipeline: imagePipeline,
@@ -147,6 +149,10 @@ extension AppContainer {
             // The inbox and the last 50 conversations × 200 messages (#897).
             localStore: localStore,
             relations: inboxRelations,
+            // Groups (#2214) and channels (#2215), each behind its flag: the
+            // same repository answers both.
+            groups: DebugFlags.isOn("-group-chats") ? chatRepository : nil,
+            channels: DebugFlags.isOn("-channels") ? chatRepository : nil,
             // The Posts page under a group's or a channel's info header (#2237):
             // For You's own grid, as the profile's and the place's pages — the
             // text posts that showcase it, laid out as a profile's Posts.
@@ -157,6 +163,6 @@ extension AppContainer {
             socialGraph: profileRepository,
             followRelations: profileRepository,
             entities: entityStore
-        )
+        ))
     }
 }
