@@ -2,7 +2,7 @@ import DesignSystem
 import HeroPage
 import MediaCore
 import MediaUI
-import ProfileSettings
+import ProfileData
 import UIKit
 
 /// The profile's hero header (`HeroHeaderView`, #1654): the person's avatar,

@@ -1,7 +1,7 @@
 import DesignSystem
 import MediaCore
 import MediaUI
-import ProfileSettings
+import ProfileData
 import UIKit
 
 /// The Edit Profile screen: a native inset-grouped list (Settings / Instagram

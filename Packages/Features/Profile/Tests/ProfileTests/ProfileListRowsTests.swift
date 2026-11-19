@@ -7,7 +7,7 @@ import PostGrid
 import Testing
 import UIKit
 @testable import Profile
-@testable import ProfileSettings
+@testable import ProfileData
 
 /// The profile's post lists (#2243; the only style since #2290): which of its
 /// pages are the vertical lists whose text posts are rows, the ground it

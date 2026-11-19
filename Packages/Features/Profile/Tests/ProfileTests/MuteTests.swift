@@ -6,10 +6,11 @@ import CoreNetworkingMocks
 import Foundation
 import Testing
 @testable import Profile
-@testable import ProfileSettings
+@testable import ProfileData
 
 /// Mute (#403, backend #722), end to end over the mock BFF: the profile
-/// menu's per-scope toggles and Settings → Safety → Muted Accounts.
+/// menu's per-scope toggles. Settings → Safety → Muted Accounts is
+/// `MutedAccountsTests`.
 @MainActor
 struct MuteTests {
     private struct Session: AuthSessionProviding {
@@ -54,70 +55,6 @@ struct MuteTests {
             try? await Task.sleep(for: .milliseconds(5))
         }
         return condition()
-    }
-
-    /// Muting stores the scopes, re-muting replaces them, the relation reads
-    /// them back, and none unmutes. Follows are untouched.
-    @Test func scopesRoundTripAndNoneUnmutes() async throws {
-        let repository = makeRepository()
-        let target = ProfileID("prof-3")
-        let relationBefore = try await repository.followRelation(to: target)
-        #expect(try await repository.muteScopes(for: target) == .none)
-
-        try await repository.setMuteScopes(MuteScopes(posts: true, messages: true), for: target)
-        #expect(try await repository.muteScopes(for: target) == MuteScopes(posts: true, messages: true))
-        try await repository.setMuteScopes(MuteScopes(stories: true), for: target)
-        #expect(try await repository.muteScopes(for: target) == MuteScopes(stories: true))
-        #expect(try await repository.followRelation(to: target) == relationBefore, "a mute isn't a block")
-
-        try await repository.setMuteScopes(.none, for: target)
-        #expect(try await repository.muteScopes(for: target) == .none)
-    }
-
-    /// A post menu's Mute (#1498 §3) is the POSTS scope alone: their
-    /// stories and messages keep whatever mute they had, and the undo lifts
-    /// the posts only.
-    @Test func aPostMenusMuteTouchesThePostsScopeOnly() async throws {
-        let repository = makeRepository()
-        let target = ProfileID("prof-3")
-        try await repository.setMuteScopes(MuteScopes(messages: true), for: target)
-
-        try await repository.setPostsMuted(true, for: target)
-        #expect(try await repository.muteScopes(for: target) == MuteScopes(posts: true, messages: true))
-
-        try await repository.setPostsMuted(false, for: target)
-        #expect(try await repository.muteScopes(for: target) == MuteScopes(messages: true))
-    }
-
-    /// A post menu's Block of one profile blocks it, and names it.
-    @Test func aPostMenusBlockBlocksTheProfile() async throws {
-        let repository = makeRepository()
-        let target = ProfileID("prof-4")
-        #expect(try await repository.block(target, wholeAccount: false) == [target])
-        #expect(try await repository.followRelation(to: target) == .blocked)
-    }
-
-    /// The muted list is hydrated, newest first, and Unmute drops the row.
-    @Test func theMutedListUnmutes() async throws {
-        let repository = makeRepository()
-        try await repository.setMuteScopes(MuteScopes(posts: true), for: ProfileID("prof-7"))
-        try await Task.sleep(for: .milliseconds(20))
-        try await repository.setMuteScopes(MuteScopes(messages: true), for: ProfileID("prof-3"))
-
-        let viewModel = MutedAccountsViewModel(muting: repository)
-        await viewModel.load()
-        guard case .loaded(let muted) = viewModel.phase else {
-            Issue.record("the list didn't load")
-            return
-        }
-        #expect(muted.map(\.id.rawValue) == ["prof-3", "prof-7"])
-        #expect(muted.allSatisfy { $0.handle != $0.id.rawValue })
-        #expect(MutedAccountsViewModel.detail(for: muted[0]) == "@\(muted[0].handle) · Messages")
-
-        try await viewModel.unmute(muted[0])
-        guard case .loaded(let left) = viewModel.phase else { return }
-        #expect(left.map(\.id.rawValue) == ["prof-7"])
-        #expect(try await repository.muteScopes(for: ProfileID("prof-3")) == .none)
     }
 
     /// The profile's toggle flips one scope at once and says so.
@@ -204,6 +141,5 @@ struct MuteTests {
         #expect(ProfileViewModel.muteMessage(handle: "@ada", scopes: MuteScopes(posts: true)) == "Muted @ada's posts")
         #expect(ProfileViewModel.muteMessage(handle: "@ada", scopes: MuteScopes(posts: true, messages: true)) == "Muted @ada's posts and messages")
         #expect(ProfileViewModel.muteMessage(handle: "@ada", scopes: MuteScopes(posts: true, stories: true, messages: true)) == "Muted @ada's posts, stories and messages")
-        #expect(MutedAccountsViewController.footer.contains("aren't told"))
     }
 }

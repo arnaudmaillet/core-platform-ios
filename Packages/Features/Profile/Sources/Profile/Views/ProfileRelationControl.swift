@@ -1,5 +1,5 @@
 import Foundation
-import ProfileSettings
+import ProfileData
 
 /// The relationship's one control on someone else's profile, beside Message:
 /// Follow, Requested, or — once followed — the mute bell.

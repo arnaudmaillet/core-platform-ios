@@ -2,7 +2,7 @@ import CoreContracts
 import CoreNetworking
 import CoreStorage
 import Foundation
-import ProfileSettings
+import ProfileData
 
 /// Edit Profile → Video banner (#944): the viewer's banner from the loop of
 /// one of their own video posts, or none.

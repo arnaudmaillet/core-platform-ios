@@ -4,7 +4,7 @@ import Foundation
 import PostGrid
 import Testing
 @testable import Profile
-@testable import ProfileSettings
+@testable import ProfileData
 
 // The gallery's source of truth on its own (#846): no view model, no fetch.
 

@@ -9,8 +9,8 @@ import MapsInterface
 import MediaCore
 import MediaPlayback
 import PostGrid
+import ProfileData
 import ProfileInterface
-import ProfileSettings
 import ShareSheet
 import UIKit
 

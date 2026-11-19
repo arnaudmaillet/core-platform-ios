@@ -8,6 +8,7 @@ import OSLog
 import ProfileInterface
 import UIKit
 import SearchInterface
+import SettingsInterface
 
 /// Maps `AppRoute`s onto the app shell. In-app taps, universal links, and push
 /// notification payloads all end up here — one navigation code path.
@@ -32,6 +33,7 @@ final class RouteResolver: Router {
     /// (as its router), so injecting them directly would be a construction
     /// cycle. The closures are only called when a route actually fires.
     private let profileFeature: () -> any ProfileFeatureBuilding
+    private let settingsFeature: () -> any SettingsFeatureBuilding
     private let feedFeature: () -> any FeedFeatureBuilding
     private let chatFeature: () -> any ChatFeatureBuilding
     /// Puts the viewer's balance in a pushed screen's header — today, every
@@ -60,6 +62,7 @@ final class RouteResolver: Router {
     init(
         searchFeature: @escaping () -> any SearchFeatureBuilding,
         profileFeature: @escaping () -> any ProfileFeatureBuilding,
+        settingsFeature: @escaping () -> any SettingsFeatureBuilding,
         feedFeature: @escaping () -> any FeedFeatureBuilding,
         chatFeature: @escaping () -> any ChatFeatureBuilding,
         attachBalance: @escaping (UIViewController) -> Void,
@@ -72,6 +75,7 @@ final class RouteResolver: Router {
         self.makePlacePage = makePlacePage
         self.searchFeature = searchFeature
         self.profileFeature = profileFeature
+        self.settingsFeature = settingsFeature
         self.feedFeature = feedFeature
         self.chatFeature = chatFeature
         self.attachBalance = attachBalance
@@ -348,20 +352,12 @@ final class RouteResolver: Router {
         case .supervisionInvite(let code):
             // A family invite link or QR code (#417): the accept screen, the
             // code filled in. A guest signs up first (`gatedAction`).
-            guard let accept = profileFeature().makeSupervisionAcceptViewController(code: code) else {
-                logger.debug("No supervision on this account; dropping the invite link")
-                return
-            }
-            push(accept, using: navigator)
+            push(settingsFeature().makeSupervisionAcceptViewController(code: code), using: navigator)
 
         case .supervision(let otherAccountID):
             // A supervision notification (#1106): Family and Teens, then
             // that link's page if it still exists.
-            guard let page = profileFeature().makeFamilyAndTeensViewController(openingSupervisionWith: otherAccountID) else {
-                logger.debug("No account; dropping the supervision route")
-                return
-            }
-            push(page, using: navigator)
+            push(settingsFeature().makeFamilyAndTeensViewController(openingSupervisionWith: otherAccountID), using: navigator)
 
         case .messageUser(let profileID, let stub):
             // Pushed immediately, with whatever identity the origin knew. The

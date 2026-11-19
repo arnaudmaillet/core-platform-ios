@@ -11,8 +11,8 @@ import CoreStorage
 import DesignSystem
 import MediaPlayback
 import PostGrid
-import Profile
 import MediaCore
+import SettingsInterface
 import UIKit
 import VoiceKit
 import VoiceKitUI
@@ -524,11 +524,9 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
             try? await Task.sleep(for: .milliseconds(600))
             if offer != nil {
                 await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
-                    PasskeyOffer.presentIfDue(
+                    container.settingsFeature.presentPasskeyOfferIfDue(
                         on: { [weak self] in self?.mainTabCoordinator?.activeNavigationController?.topViewController },
                         afterSignUp: offer == .signUp,
-                        manager: container.accountSessions,
-                        authorizer: AppContainer.makePasskeyAuthorizer(for: container.environment),
                         completion: { done.resume() }
                     )
                 }

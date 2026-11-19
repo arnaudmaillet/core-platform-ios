@@ -6,7 +6,7 @@ import MediaPlayback
 import Testing
 import UIKit
 @testable import Profile
-@testable import ProfileSettings
+@testable import ProfileData
 
 private actor CardProfileProvider: ProfileProviding {
     private let profile: UserProfile

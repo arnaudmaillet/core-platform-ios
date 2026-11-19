@@ -103,21 +103,10 @@ public protocol ProfileFeatureBuilding {
     /// the switcher opens complete on its first frame.
     func makeProfileSwitcher() -> ProfileSwitcherPresenting?
 
-    /// Settings for a guest (guest mode): only what works without an account
-    /// — the app-wide section (preferences, help, legal) — with "Log in or sign
-    /// up", which calls `onSignIn`, where Log Out would be.
-    func makeGuestSettingsViewController(onSignIn: @escaping () -> Void) -> UIViewController
-
-    /// The screen that accepts a family supervision invite (#417), opened by
-    /// a `core-platform.click/family/<code>` link with the code filled in.
-    /// Nothing is linked until the viewer confirms there. Nil when the
-    /// account can't take one.
-    func makeSupervisionAcceptViewController(code: String) -> UIViewController?
-
-    /// Settings → Family and Teens, opening the supervision with
-    /// `otherAccountID` once the page has it (#1106) — a supervision
-    /// notification's destination. Nil for an account it can't be shown to.
-    func makeFamilyAndTeensViewController(openingSupervisionWith otherAccountID: String?) -> UIViewController?
+    /// A post of `author`'s came back (Settings → Recently Deleted → Restore,
+    /// #887): the profile screens drop the gallery pages they kept, so a
+    /// revisit doesn't open on pages without it.
+    func invalidateGallery(of author: ProfileID)
 }
 
 public extension ProfileFeatureBuilding {

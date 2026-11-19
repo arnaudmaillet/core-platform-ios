@@ -1,6 +1,6 @@
 import DesignSystem
 import PostGrid
-import ProfileSettings
+import ProfileData
 
 /// A page in the profile's pager.
 ///

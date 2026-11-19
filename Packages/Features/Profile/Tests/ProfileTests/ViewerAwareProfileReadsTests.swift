@@ -7,7 +7,7 @@ import Foundation
 import PostGrid
 import Testing
 @testable import Profile
-@testable import ProfileSettings
+@testable import ProfileData
 
 /// The profile screen reading the server's viewer-aware answers (#447,
 /// backend #689/#691): a profile shown to no one but its owner reads as

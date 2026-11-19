@@ -1,0 +1,125 @@
+import CoreModels
+import Foundation
+import Testing
+@testable import ProfileData
+
+struct ProfileDisplayModelTests {
+    private func profile(
+        handle: String = "ada",
+        displayName: String = "Ada Lovelace",
+        bio: String = "",
+        avatarURL: URL? = nil,
+        followers: CountEstimate = .unavailable,
+        following: CountEstimate = .unavailable,
+        reactions: CountEstimate = .unavailable
+    ) -> UserProfile {
+        UserProfile(
+            id: ProfileID("prof-1"),
+            handle: handle,
+            displayName: displayName,
+            bio: bio,
+            avatarURL: avatarURL,
+            websiteURL: nil,
+            isVerified: false,
+            followerCount: followers,
+            followingCount: following,
+            reactionCount: reactions
+        )
+    }
+
+    /// The banner is its own media (#1444, the owner's 2026-10-19 call): a
+    /// photo avatar still stands in for a missing banner, an animated one —
+    /// which has no photo — never does.
+    @Test func theBannerFallsBackOnAPhotoAvatarOnly() {
+        let photo = URL(string: "https://cdn.example/ada.jpg")!
+        #expect(ProfileDisplayModel(profile: profile(avatarURL: photo)).bannerImageURL == photo)
+        let sheet = URL(string: "mock://avatar-sheet/4#avatar-sheet")!
+        #expect(ProfileDisplayModel(profile: profile(avatarURL: sheet)).bannerImageURL == nil,
+                "a sheet avatar became the banner")
+    }
+
+    @Test func prefixesHandleWithSigil() {
+        let model = ProfileDisplayModel(profile: profile(handle: "ada"))
+        #expect(model.handle == "@ada")
+    }
+
+    @Test func buildsMonogramFromDisplayName() {
+        #expect(ProfileDisplayModel(profile: profile(displayName: "Ada Lovelace")).avatarMonogram == "AL")
+        #expect(ProfileDisplayModel(profile: profile(displayName: "Cher")).avatarMonogram == "C")
+        // Falls back to the handle when the display name is blank.
+        #expect(ProfileDisplayModel(profile: profile(handle: "grace", displayName: "")).avatarMonogram == "G")
+    }
+
+    @Test func hidesEmptyBio() {
+        #expect(ProfileDisplayModel(profile: profile(bio: "   ")).hasBio == false)
+        #expect(ProfileDisplayModel(profile: profile(bio: "hi")).hasBio == true)
+    }
+
+    @Test func abbreviatesCounts() {
+        #expect(ProfileDisplayModel.abbreviate(0) == "0")
+        #expect(ProfileDisplayModel.abbreviate(999) == "999")
+        #expect(ProfileDisplayModel.abbreviate(1_000) == "1K")
+        #expect(ProfileDisplayModel.abbreviate(1_234) == "1.2K")
+        #expect(ProfileDisplayModel.abbreviate(12_500) == "12.5K")
+        #expect(ProfileDisplayModel.abbreviate(1_500_000) == "1.5M")
+    }
+
+    @Test func formatsCountEstimates() {
+        #expect(ProfileDisplayModel.format(.exact(0)) == "0")
+        #expect(ProfileDisplayModel.format(.exact(1_234)) == "1.2K")
+        #expect(ProfileDisplayModel.format(.atLeast(200)) == "200+")
+        #expect(ProfileDisplayModel.format(.atLeast(1_000)) == "1K+")
+        #expect(ProfileDisplayModel.format(.unavailable) == nil)
+    }
+
+    @Test func distinguishesZeroFromUnavailable() {
+        // A user with no followers reads "0"; an unreadable counter has no
+        // text at all, and the column is not drawn.
+        #expect(ProfileDisplayModel(profile: profile(followers: .exact(0))).followerText == "0")
+        #expect(ProfileDisplayModel(profile: profile(followers: .unavailable)).followerText == nil)
+    }
+
+    /// A dash where a count should be reads as a defect, so a missing counter
+    /// hides its column instead — every column alike, since a row that hid
+    /// Views and dashed Followers would be two rules for one thing.
+    @Test func hidesMissingCounts() {
+        let model = ProfileDisplayModel(profile: profile(followers: .unavailable, following: .unavailable))
+        #expect(model.followerText == nil)
+        #expect(model.followingText == nil)
+    }
+
+    @Test func formatsWebsiteInstagramStyle() {
+        // Scheme and "www." stripped, trailing slash trimmed, path kept.
+        #expect(ProfileDisplayModel.websiteDisplay(URL(string: "https://www.ada.dev/notes/")) == "ada.dev/notes")
+        #expect(ProfileDisplayModel.websiteDisplay(URL(string: "http://ada.dev")) == "ada.dev")
+        #expect(ProfileDisplayModel.websiteDisplay(nil) == nil)
+    }
+
+    /// The header's third column is LIKES (2026-09-30: views are shown
+    /// nowhere) — counter.v1's profile-scoped LIKE, abbreviated like every
+    /// other count, "+" on a bounded estimate.
+    @Test func formatsLikes() {
+        #expect(ProfileDisplayModel(profile: profile(reactions: .exact(1_234))).likesText == "1.2K")
+        #expect(ProfileDisplayModel(profile: profile(reactions: .atLeast(200))).likesText == "200+")
+    }
+
+    @Test func likesAreHiddenWhenUnprojected() {
+        // Wherever counter.v1 doesn't project the metric (the fleet today),
+        // the band must not claim "0" — nor draw a dash.
+        let model = ProfileDisplayModel(profile: profile())
+        #expect(model.likesText == nil)
+    }
+
+    @Test func bannerMirrorsAvatarUntilCoverAssetExists() {
+        // profile.v1 has no cover-media field yet; the banner reuses the avatar.
+        let url = URL(string: "https://cdn.example/ada.jpg")
+        #expect(ProfileDisplayModel(profile: profile(avatarURL: url)).bannerImageURL == url)
+        #expect(ProfileDisplayModel(profile: profile()).bannerImageURL == nil)
+    }
+
+    @Test func derivesEstimateFromEdgeSample() {
+        // A complete page → exact; a truncated page → "at least".
+        #expect(CountEstimate.fromSample(count: 2, hasMore: false) == .exact(2))
+        #expect(CountEstimate.fromSample(count: 200, hasMore: true) == .atLeast(200))
+    }
+}

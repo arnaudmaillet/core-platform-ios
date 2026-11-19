@@ -1,7 +1,7 @@
 import CoreModels
 import Foundation
 import PostGrid
-import ProfileSettings
+import ProfileData
 
 /// A profile's Channels tab (#2232, behind `-channels`): the channels the
 /// profile owns, and what a row's button does.

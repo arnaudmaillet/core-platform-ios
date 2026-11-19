@@ -1,6 +1,6 @@
 import CoreModels
-import DesignSystem
 import CoreStorage
+import DesignSystem
 import FeedInterface
 import Foundation
 import MediaCore
@@ -8,7 +8,7 @@ import PostGrid
 import Testing
 import UIKit
 @testable import Profile
-@testable import ProfileSettings
+@testable import ProfileData
 
 /// Which tabs a profile shows, and where the two new ones get their contents.
 ///

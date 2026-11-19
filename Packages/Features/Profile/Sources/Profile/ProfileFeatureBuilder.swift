@@ -1,22 +1,16 @@
-import AppPreferences
-import AuthInterface
-import CacheKit
-import MediaCore
 import CoreModels
 import CoreNavigation
+import CoreStorage
+import DesignSystem
 import FeedInterface
 import LocalStore
 import MapsInterface
+import MediaCore
 import MediaPlayback
-import CoreStorage
-import DesignSystem
 import PostGrid
+import ProfileData
 import ProfileInterface
-// Settings, Account and the profile's data live in their own target (#2382,
-// stage 1). Re-exported so the app's `import Profile` reaches what it always
-// did (the account repository, `PasskeyOffer`, `SettingsLinks`…); stage 3
-// gives Settings an interface of its own and this goes.
-@_exported import ProfileSettings
+import SettingsInterface
 import UIKit
 
 /// The profile feature's entry point, resolved by the composition root and
@@ -48,23 +42,13 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
     private let cache: ProfileCache
     /// Followers, Following and Friends on the device (#1776).
     private let relationshipsCache: ProfileRelationshipsLocalCache?
-    /// The settings screens' last answers on the device (#1776).
-    private let settingsCache: SettingsLocalCache?
     private let imagePipeline: ImagePipeline
     private let router: (any Router)?
-    /// Reads the viewer's account for the settings screen (own profile only).
-    private let account: (any AccountProviding)?
     /// Multi-profile switching for the account (lists profiles, switches active).
     private let switching: (any ProfileSwitching)?
-    /// Lists and ends the account's sessions (Settings → Security and Login).
-    /// Nil leaves that section on its coming-soon page.
-    private let accountSessions: (any AccountSessionsManaging)?
-    /// Active restrictions on the account (Safety → Account Status). Nil
-    /// leaves the row under Coming Soon.
-    private let accountStatus: (any AccountStatusProviding)?
-    /// Push preferences (Settings → Notifications, #392). Nil leaves the
-    /// section on its coming-soon page.
-    private let notificationPreferences: (any NotificationPreferencesManaging)?
+    /// Settings and Account (#2382), through its interface: the own
+    /// profile's gear, and Edit Profile's Account Type and list privacy rows.
+    private let settings: any SettingsFeatureBuilding
     /// The gem-shop items a profile wears (#944): Edit Profile's Video
     /// Banner row. Nil hides the row.
     private let profileItems: (any ProfileItemAccess)?
@@ -77,11 +61,8 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
         relationships: (any ProfileRelationshipsProviding)? = nil,
         imagePipeline: ImagePipeline,
         router: (any Router)? = nil,
-        account: (any AccountProviding)? = nil,
         switching: (any ProfileSwitching)? = nil,
-        accountSessions: (any AccountSessionsManaging)? = nil,
-        accountStatus: (any AccountStatusProviding)? = nil,
-        notificationPreferences: (any NotificationPreferencesManaging)? = nil,
+        settings: any SettingsFeatureBuilding,
         profileItems: (any ProfileItemAccess)? = nil,
         /// The device store (#893): the viewer's own profile and the profiles
         /// they visited open on their last content at a cold start. Nil keeps
@@ -90,7 +71,6 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
     ) {
         self.cache = ProfileCache(store: localStore)
         self.relationshipsCache = localStore.map(ProfileRelationshipsLocalCache.init(store:))
-        self.settingsCache = localStore.map(SettingsLocalCache.init(store:))
         self.repository = repository
         self.reporting = reporting
         self.shareTargeting = shareTargeting
@@ -98,28 +78,9 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
         self.relationships = relationships
         self.imagePipeline = imagePipeline
         self.router = router
-        self.account = account
         self.switching = switching
-        self.accountSessions = accountSessions
-        self.accountStatus = accountStatus
-        self.notificationPreferences = notificationPreferences
+        self.settings = settings
         self.profileItems = profileItems
-    }
-
-    /// Find Friends from Contacts (#412): the account matches the hashes,
-    /// the profile repository follows on the app's follow channel. Nil
-    /// when either is missing.
-    private func makeContactFriends(account: any AccountProviding) -> (() -> UIViewController)? {
-        guard let finder = account as? any ContactProfileFinding,
-              let following = repository as? any ContactFollowing else { return nil }
-        return { [router, followEvents, imagePipeline] in
-            ContactFriendsViewController(
-                viewModel: ContactFriendsViewModel(
-                    finder: finder, following: following, router: router, followEvents: followEvents
-                ),
-                imagePipeline: imagePipeline
-            )
-        }
     }
 
     private func makeSwitcherFactory() -> ProfileSwitcherMenuFactory? {
@@ -147,64 +108,6 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                 imagePipeline: imagePipeline
             )
         }
-    }
-
-    /// A family supervision invite opened from a link (#417): the code filled
-    /// in, nothing linked until the viewer taps Link. Once linked, the screen
-    /// steps back and says so. Nil when the account can't take one.
-    /// Family and Teens from a supervision notification (#1106): the same
-    /// page Settings opens, which then opens the link with `otherAccountID`
-    /// if it still exists. Reached outside Settings, its protection rows
-    /// open nothing (there is no Settings stack to open them in).
-    public func makeFamilyAndTeensViewController(openingSupervisionWith otherAccountID: String?) -> UIViewController? {
-        guard let account else { return nil }
-        let page = FamilyAndTeensViewController(
-            isTeen: { try await account.currentAccount().ageBracket.isTeen },
-            supervision: account as? any SupervisionManaging,
-            imagePipeline: imagePipeline,
-            router: router
-        )
-        page.pendingSupervisionAccountID = otherAccountID
-        return page
-    }
-
-    public func makeSupervisionAcceptViewController(code: String) -> UIViewController? {
-        guard let account, let manager = account as? any SupervisionManaging else { return nil }
-        return SupervisionAcceptViewController(
-            model: SupervisionAcceptModel(manager: manager, code: code),
-            resolveTeen: { try await account.currentAccount().ageBracket.isTeen }
-        ) { accept, link in
-            let navigation = accept.navigationController
-            accept.closeScreen()
-            if let landing = navigation?.topViewController ?? navigation {
-                Feedback.success(SupervisionCopy.linkedToast(link), from: landing)
-            }
-        }
-    }
-
-    public func makeGuestSettingsViewController(onSignIn: @escaping () -> Void) -> UIViewController {
-        SettingsViewController(
-            switching: nil,
-            switcher: nil,
-            makeDestination: { section in
-                switch section {
-                // Device settings need no account: a guest's choices stay on
-                // this iPhone like anyone's (#468).
-                case .playback, .display, .emojis, .mediaComments, .language:
-                    AppPreferencesViewController(page: section)
-                case .storage:
-                    makeStorageSettings()
-                case .help:
-                    SettingsLinksViewController.help(links: .current)
-                case .legal:
-                    SettingsLinksViewController.legal(links: .current, version: SettingsLinksViewController.appVersion())
-                default:
-                    nil
-                }
-            },
-            onLogout: {},
-            onSignIn: onSignIn
-        )
     }
 
     public func makeProfileSwitcher() -> ProfileSwitcherPresenting? {
@@ -245,7 +148,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
             makeGridPage: gridPageFactory,
             shareTargeting: shareTargeting,
             onLogout: onLogout,
-            makeEditViewController: { [imagePipeline, gallery, profileItems] profile, onSaved in
+            makeEditViewController: { [imagePipeline, gallery, profileItems, settings] profile, onSaved in
                 let editor = EditProfileViewController(
                     viewModel: EditProfileViewModel(
                         repository: repository, seed: profile,
@@ -254,20 +157,11 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                     ),
                     imagePipeline: imagePipeline
                 )
-                if let types = repository as? any AccountTypeManaging {
-                    editor.onOpenAccountType = { [weak editor] in
-                        editor?.navigationController?.pushViewController(
-                            AccountTypeViewController(manager: types, verifier: repository as? any VerificationRequesting),
-                            animated: true
-                        )
-                    }
+                editor.onOpenAccountType = { [weak editor] in
+                    editor?.navigationController?.pushViewController(settings.makeAccountTypeViewController(), animated: true)
                 }
-                if let lists = repository as? any ListPrivacyManaging {
-                    editor.onOpenPrivacy = { [weak editor] in
-                        editor?.navigationController?.pushViewController(
-                            ListPrivacyViewController(manager: lists).cachingSettings(in: settingsCache), animated: true
-                        )
-                    }
+                editor.onOpenPrivacy = { [weak editor] in
+                    editor?.navigationController?.pushViewController(settings.makeListPrivacyViewController(), animated: true)
                 }
                 return editor
             },
@@ -275,224 +169,8 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
             // routed arrival gets the profile without the global actions. Edit
             // Profile is deliberately NOT gated — editing your own bio is a
             // profile action, and it is safe at any stack depth.
-            makeSettingsViewController: onLogout.flatMap { onLogout in
-                account.map { account in
-                    { [switching, accountSessions, accountStatus, reporting, gallery, notificationPreferences, imagePipeline,
-                       makeWalletSection = self.makeWalletSection] in
-                        SettingsViewController(
-                            switching: switching,
-                            switcher: makeSwitcherFactory(),
-                            makeDestination: { section in
-                                switch section {
-                                case .account:
-                                    AccountSettingsViewController(
-                                        account: account,
-                                        lifecycle: account as? any AccountLifecycleManaging,
-                                        onAccountDeleted: onLogout,
-                                        deactivator: account as? any AccountDeactivating,
-                                        stepUp: accountSessions as? any CredentialStepUp,
-                                        contactChanger: accountSessions as? any ContactChanging,
-                                        onDeactivated: onLogout,
-                                        deletionChecklist: deletionChecklist
-                                    )
-                                case .security:
-                                    accountSessions.map { sessions in
-                                        SecuritySettingsViewController(
-                                            viewModel: SecuritySettingsViewModel(sessions: sessions),
-                                            onSignedOutEverywhere: onLogout,
-                                            makeCheckup: {
-                                                SecurityCheckupViewController(
-                                                    account: account, sessions: sessions, authenticator: DeviceAuthenticator()
-                                                )
-                                            },
-                                            makeTwoStep: (sessions as? any TwoStepManaging & CredentialStepUp).map { twoStep in
-                                                { TwoStepViewController(account: account, manager: twoStep, stepUp: twoStep) }
-                                            },
-                                            makePasskeys: (sessions as? any PasskeysManaging & CredentialStepUp).map { passkeys in
-                                                { [makePasskeyAuthorizer] in
-                                                    PasskeysViewController(
-                                                        model: PasskeysModel(manager: passkeys, authorizer: makePasskeyAuthorizer()),
-                                                        stepUp: passkeys,
-                                                        passkeyStepUp: passkeys as? any PasskeyStepUp
-                                                    )
-                                                }
-                                            },
-                                            passkeysAvailable: (sessions as? any PasskeysManaging).map { passkeys in
-                                                { await passkeys.passkeysAvailable() }
-                                            },
-                                            makeAuthorizedApps: (sessions as? any AuthorizedAppsManaging).map { apps in
-                                                { [imagePipeline] in
-                                                    AuthorizedAppsViewController(
-                                                        viewModel: AuthorizedAppsViewModel(manager: apps),
-                                                        imagePipeline: imagePipeline
-                                                    )
-                                                }
-                                            }
-                                        )
-                                    }
-                                case .safety:
-                                    (repository as? any BlockedAccountsManaging).map { blocks in
-                                        var destinations: [SafetySettingsViewController.Destination] = [
-                                            .init(title: "Blocked Accounts", symbolName: "nosign") {
-                                                BlockedAccountsViewController(
-                                                    viewModel: BlockedAccountsViewModel(blocks: blocks),
-                                                    imagePipeline: imagePipeline
-                                                )
-                                            }
-                                        ]
-                                        let muting = repository as? any ProfileMuting
-                                        if let muting {
-                                            destinations.append(.init(title: "Muted Accounts", symbolName: "speaker.slash") {
-                                                MutedAccountsViewController(
-                                                    viewModel: MutedAccountsViewModel(muting: muting),
-                                                    imagePipeline: imagePipeline
-                                                )
-                                            })
-                                        }
-                                        if let restricting = repository as? any ProfileRestricting {
-                                            destinations.append(.init(title: "Restricted Accounts", symbolName: "person.crop.circle.badge.minus") {
-                                                RestrictedAccountsViewController(
-                                                    viewModel: RestrictedAccountsViewModel(restricting: restricting),
-                                                    imagePipeline: imagePipeline
-                                                )
-                                            })
-                                        }
-                                        if let limits = repository as? any InteractionLimitsManaging {
-                                            destinations.append(.init(title: "Limits", symbolName: "hand.raised") {
-                                                LimitInteractionsViewController(manager: limits).cachingSettings(in: settingsCache)
-                                            })
-                                        }
-                                        let filters = repository as? any CommentFiltersManaging
-                                        if let filters {
-                                            destinations.append(.init(title: "Hidden Words", symbolName: "text.badge.xmark") {
-                                                HiddenWordsViewController(manager: filters).cachingSettings(in: settingsCache)
-                                            })
-                                        }
-                                        if let accountStatus {
-                                            destinations.append(.init(title: "Account Status", symbolName: "checkmark.shield") {
-                                                AccountStatusViewController(
-                                                    status: accountStatus,
-                                                    reviewer: accountStatus as? any ModerationDecisionReviewing
-                                                )
-                                            })
-                                        }
-                                        // The repository that files reports lists them back.
-                                        let history = reporting as? any ReportHistoryProviding
-                                        if let history {
-                                            destinations.append(.init(title: "Your Reports", symbolName: "flag") {
-                                                YourReportsViewController(
-                                                    history: history,
-                                                    appeals: accountStatus as? any ModerationDecisionReviewing
-                                                )
-                                            })
-                                        }
-                                        return SafetySettingsViewController(
-                                            destinations: destinations,
-                                            planned: (muting == nil ? ["Muted accounts"] : [])
-                                                + (filters == nil ? ["Hidden words and comment filters"] : [])
-                                                + (history == nil ? ["Your reports"] : [])
-                                                + (accountStatus == nil ? ["Account status"] : [])
-                                        )
-                                    }
-                                case .notifications:
-                                    notificationPreferences.map {
-                                        NotificationSettingsViewController(manager: $0).cachingSettings(in: settingsCache)
-                                    }
-                                case .activity:
-                                    YourActivityViewController(makeRecentlyDeleted: {
-                                        guard let trash = gallery as? any PostTrashManaging,
-                                              let viewer = repository as? any ProfileViewerResolving else { return nil }
-                                        return {
-                                            RecentlyDeletedViewController(
-                                                viewModel: RecentlyDeletedViewModel(
-                                                    trash: trash, viewer: viewer,
-                                                    // A restored post is back in the author's gallery: a
-                                                    // revisit must not open on the pages without it (#887).
-                                                    onRestored: { [cache] author in cache.removeGallery(for: author) },
-                                                    onPostRestored: onPostRestored
-                                                ),
-                                                imagePipeline: imagePipeline
-                                            )
-                                        }
-                                    }())
-                                case .adsAndData:
-                                    (account as? any AccountConsentManaging).map { manager in
-                                        ConsentsViewController(manager: manager, makeDeleteAccount: {
-                                            (account as? any AccountLifecycleManaging).map { lifecycle in
-                                                DeleteAccountViewController(
-                                                    viewModel: DeleteAccountViewModel(lifecycle: lifecycle, checklist: deletionChecklist),
-                                                    onAccountDeleted: onLogout,
-                                                    stepUp: accountSessions as? any CredentialStepUp,
-                                                    canceller: lifecycle as? any AccountDeletionCancelling
-                                                )
-                                            }
-                                        }, settingsCache: settingsCache)
-                                    }
-                                case .playback, .display, .emojis, .mediaComments, .language:
-                                    AppPreferencesViewController(page: section)
-                                case .storage:
-                                    makeStorageSettings()
-                                case .help:
-                                    SettingsLinksViewController.help(links: .current)
-                                case .legal:
-                                    SettingsLinksViewController.legal(links: .current, version: SettingsLinksViewController.appVersion())
-                                case .privacy:
-                                    (repository as? any ProfileVisibilityManaging).map { visibility in
-                                        PrivacySectionViewController(
-                                            viewModel: PrivacySectionViewModel(
-                                                visibility: visibility,
-                                                requests: repository as? any FollowRequestsManaging,
-                                                windows: repository as? any PostWindowManaging,
-                                                comments: repository as? any CommentAudienceManaging,
-                                                sharing: repository as? any PostSharingManaging,
-                                                audiences: repository as? any InteractionAudienceManaging,
-                                                tabs: repository as? any ProfileTabVisibilityManaging
-                                            ),
-                                            makeListPrivacy: (repository as? any ListPrivacyManaging).map { lists in
-                                                { ListPrivacyViewController(manager: lists).cachingSettings(in: settingsCache) }
-                                            },
-                                            makeDataTransparency: { DataTransparencyViewController() },
-                                            makeActivityDiscovery: (repository as? any ActivityDiscoveryManaging).map { manager in
-                                                {
-                                                    ActivityDiscoveryViewController(
-                                                        manager: manager,
-                                                        shareLinks: repository as? any ShareLinkManaging,
-                                                        makeContactFriends: makeContactFriends(account: account)
-                                                    ).cachingSettings(in: settingsCache)
-                                                }
-                                            },
-                                            makeLocationSharing: (repository as? any LocationSharingManaging).map { manager in
-                                                { LocationSharingViewController(manager: manager).cachingSettings(in: settingsCache) }
-                                            },
-                                            imagePipeline: imagePipeline
-                                        )
-                                    }
-                                case .familyAndTeens:
-                                    // Throws on a failed read: never "adult" by default (#799).
-                                    FamilyAndTeensViewController(
-                                        isTeen: { try await account.currentAccount().ageBracket.isTeen },
-                                        // Parental Supervision (#417).
-                                        supervision: account as? any SupervisionManaging,
-                                        imagePipeline: imagePipeline,
-                                        router: router
-                                    )
-                                case .whatYouSee:
-                                    (repository as? any FeedPreferencesManaging).map { preferences in
-                                        WhatYouSeeViewController(preferences: preferences, interestTags: interestTags, isTeen: {
-                                            try await account.currentAccount().ageBracket.isTeen
-                                        }).cachingSettings(in: settingsCache)
-                                    }
-                                // The wallet's history (#400): the app's screen,
-                                // which reads the server wallet.
-                                case .wallet:
-                                    makeWalletSection?()
-                                default: nil
-                                }
-                            },
-                            onLogout: onLogout
-                        )
-                    }
-                }
+            makeSettingsViewController: onLogout.map { [settings] onLogout in
+                { settings.makeSettingsViewController(onLogout: onLogout) }
             },
             switcherFactory: onLogout == nil ? nil : makeSwitcherFactory(),
             makeRelationshipsViewController: makeRelationshipsFactory(),
@@ -553,9 +231,6 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
     /// The wallet the gallery cards' like chips stake from — the app's one
     /// instance. Nil leaves the chips counters.
     public var wallet: (any WalletStaking)?
-    /// Settings → Wallet and Purchases (#400): built by the composition
-    /// root, which can read the server wallet. Nil leaves it coming soon.
-    public var makeWalletSection: (@MainActor () -> UIViewController)?
     /// Builds a gallery's card staking with the app's live post counts
     /// (#896): a like in the feed shows on the profile's cards. Nil: the
     /// cards stake from `wallet` and keep the counts they loaded.
@@ -580,47 +255,14 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
     public var followEvents: FollowGraphEvents? {
         didSet { cache.observe(followEvents) }
     }
-    /// A post of the viewer's own the server deleted here, and one restored
-    /// from Recently Deleted (#896): the composition root writes them to the
-    /// app's `EntityStore`, so the feeds and For You drop the post — and let
-    /// it in again. Nil: only this profile's gallery knows.
+    /// A post of the viewer's own the server deleted here (#896): the
+    /// composition root writes it to the app's `EntityStore`, so the feeds and
+    /// For You drop the post. Nil: only this profile's gallery knows.
+    /// (Settings → Recently Deleted restores, through `SettingsAssembly`.)
     public var onPostDeleted: (@MainActor (PostID) -> Void)?
-    public var onPostRestored: (@MainActor (PostID) -> Void)?
-    /// The active profile's interest tags (timeline #662), for What You See.
-    /// Nil leaves the Your Interests section out.
-    public var interestTags: (any InterestTagsManaging)?
-    /// The app's one cache coordinator, through which Settings → Storage
-    /// measures and clears every cache, and applies the storage limit and
-    /// the cellular choice (#899). Nil leaves Storage with the caches it
-    /// names itself.
-    public var cacheCoordinator: CacheCoordinator?
 
-    /// Makes the device's passkeys for Settings → Passkeys (#551): the
-    /// system sheet by default; the app hands in a simulated one in mock mode,
-    /// whose relying party no device is associated with.
-    public var makePasskeyAuthorizer: @MainActor () -> any PasskeyAuthorizing = { PlatformPasskeyAuthorizer() }
-
-    /// Settings → Storage, on the app's coordinator.
-    private func makeStorageSettings() -> StorageSettingsViewController {
-        StorageSettingsViewController(model: StorageSettingsModel(
-            inventory: .standard(coordinator: cacheCoordinator),
-            coordinator: cacheCoordinator
-        ))
-    }
-
-    /// What Delete Account names before the irreversible step (#402): every
-    /// profile on the account, and what is left in the wallet.
-    private var deletionChecklist: @Sendable () async -> DeletionChecklist? {
-        let switching = switching
-        let wallet = wallet
-        return {
-            let profiles = try? await switching?.accountProfiles()
-            return DeletionChecklist(
-                profileHandles: profiles?.map(\.handle),
-                likes: wallet?.balance,
-                gems: wallet?.snapshot().gems
-            )
-        }
+    public func invalidateGallery(of author: ProfileID) {
+        cache.removeGallery(for: author)
     }
 
     public func makeProfileViewController(for profileID: ProfileID, identityStub: ProfileIdentityStub?) -> UIViewController {

@@ -1,6 +1,6 @@
 import CoreNavigation
 import Foundation
-import ProfileSettings
+import ProfileData
 
 /// The public web address of a profile.
 ///

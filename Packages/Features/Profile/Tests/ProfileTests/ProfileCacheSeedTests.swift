@@ -2,7 +2,7 @@ import CoreModels
 import Foundation
 import Testing
 @testable import Profile
-@testable import ProfileSettings
+@testable import ProfileData
 
 private actor SeedStubProvider: ProfileProviding {
     let profile: UserProfile

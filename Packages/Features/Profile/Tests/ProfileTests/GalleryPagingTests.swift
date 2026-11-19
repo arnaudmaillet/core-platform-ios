@@ -7,7 +7,7 @@ import Foundation
 import PostGrid
 import Testing
 @testable import Profile
-@testable import ProfileSettings
+@testable import ProfileData
 
 // The profile gallery, page by page (#634).
 

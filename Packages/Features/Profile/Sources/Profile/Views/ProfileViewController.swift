@@ -1,16 +1,17 @@
-import LaunchArguments
-import MediaCore
 import CoreModels
-import CoreStorage
-import ProfileInterface
 import CoreNavigation
+import CoreStorage
+import DesignSystem
 import FeedInterface
 import HeroPage
+import LaunchArguments
 import MapsInterface
+import MediaCore
 import MediaPlayback
-import DesignSystem
 import PostGrid
-import ProfileSettings
+import ProfileData
+import ProfileInterface
+import SettingsInterface
 import ShareSheet
 import UIKit
 
@@ -132,7 +133,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     private(set) weak var debugLastUndoToast: ToastView?
     #endif
 
-    /// The own-profile settings gear; pushes `AccountSettingsViewController`.
+    /// The own-profile settings gear; pushes Settings (`SettingsFeatureBuilding`).
     private var settingsItem: UIBarButtonItem?
     /// Keeps the corner item — Follow or Requested (#2248) — and the shell's
     /// balance two bubbles: iOS 26 groups adjacent bar items into one platter
@@ -948,16 +949,15 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
                 }
                 self.pushSettings()
                 guard let sectionName else { return }
-                guard let section = SettingsSection(rawValue: sectionName) else {
-                    QAWait.fail("open-settings", "unknown section \(sectionName)")
-                    return
-                }
                 QAWait.until("open-settings section", { [weak self] in
                     guard let navigation = self?.navigationController else { return false }
-                    return navigation.topViewController is SettingsViewController
+                    return navigation.topViewController is any SettingsSectionOpening
                         && navigation.transitionCoordinator == nil
                 }) { [weak self] in
-                    (self?.navigationController?.topViewController as? SettingsViewController)?.open(section)
+                    let settings = self?.navigationController?.topViewController as? any SettingsSectionOpening
+                    if settings?.openSection(named: sectionName) == false {
+                        QAWait.fail("open-settings", "unknown section \(sectionName)")
+                    }
                 }
             }
         }

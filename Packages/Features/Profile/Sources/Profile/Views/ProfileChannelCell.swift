@@ -3,7 +3,7 @@ import DesignSystem
 import MediaCore
 import MediaUI
 import PostGrid
-import ProfileSettings
+import ProfileData
 import UIKit
 
 /// A profile's Channels row's words (#2232), each in one place.
