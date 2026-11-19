@@ -1,5 +1,6 @@
 import CoreModels
 import CoreNavigation
+import CoreStorage
 import FeedInterface
 import Foundation
 import MediaCore
@@ -266,7 +267,9 @@ struct ShelfCloseTests {
         init(cards: [GalleryPost] = []) {
             let pipeline = ImagePipeline(fetcher: SilentFetcher())
             lead = ShelfLeadFixture(pipeline: pipeline, videoPlayback: nil)
-            page = PostGridPageView(imagePipeline: pipeline, style: .discover, videoPlayback: nil)
+            page = PostGridPageView(imagePipeline: pipeline, style: .discover, videoPlayback: nil,
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            withheldPosts: UnavailablePosts())
             // Rendered before it has a window, so the rows apply unanimated.
             lead.render(following: cards)
             window.rootViewController = host

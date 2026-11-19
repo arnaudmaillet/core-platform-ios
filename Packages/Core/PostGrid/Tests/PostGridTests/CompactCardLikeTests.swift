@@ -43,9 +43,9 @@ struct CompactCardLikeTests {
     /// Bound, the tile reads the viewer's stake — red once there is any —
     /// and the count stays the post's. Binding spends nothing.
     @Test func aBoundTileReadsTheViewersStake() {
-        let wallet = WalletStore(defaults: Self.defaults())
+        let wallet = WalletStore(defaults: Self.defaults(), scope: StorageScope())
         let before = wallet.balance
-        let staking = PostCardStaking(wallet: wallet)
+        let staking = PostCardStaking(wallet: wallet, saves: PostBookmarkStore(scope: StorageScope()))
         let cell = tile()
         staking.bindReadout(cell, to: Self.post.id)
         #expect(cell.debugIsStaked == false)
@@ -60,9 +60,9 @@ struct CompactCardLikeTests {
 
     /// Recycled, the tile forgets the last post's stake.
     @Test func aRecycledTileForgetsTheStake() {
-        let wallet = WalletStore(defaults: Self.defaults())
+        let wallet = WalletStore(defaults: Self.defaults(), scope: StorageScope())
         _ = wallet.stake(.likes(1), on: "tile-1")
-        let staking = PostCardStaking(wallet: wallet)
+        let staking = PostCardStaking(wallet: wallet, saves: PostBookmarkStore(scope: StorageScope()))
         let cell = tile()
         staking.bindReadout(cell, to: Self.post.id)
         #expect(cell.debugIsStaked)

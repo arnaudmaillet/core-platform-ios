@@ -130,6 +130,9 @@ final class WalletSheetViewController: UIViewController {
 
     /// The history's first pages on the device (#1776).
     private let historyCache: WalletHistoryLocalCache?
+    /// Who is here, as the app's one storage scope holds it (#2376): "How it
+    /// works" is shown once per account.
+    private let owner: @MainActor () -> StorageScope.Owner
 
     init(
         wallet: WalletStore,
@@ -138,8 +141,10 @@ final class WalletSheetViewController: UIViewController {
         openFeedHero: OpenFeedHero? = nil,
         findPosts: (() -> Void)? = nil,
         makeShop: (() -> UIViewController)? = nil,
-        historyCache: WalletHistoryLocalCache? = nil
+        historyCache: WalletHistoryLocalCache? = nil,
+        owner: @escaping @MainActor () -> StorageScope.Owner
     ) {
+        self.owner = owner
         self.historyCache = historyCache
         self.wallet = wallet
         self.claimer = WalletClaimer(wallet: wallet)
@@ -290,7 +295,7 @@ final class WalletSheetViewController: UIViewController {
         super.viewDidAppear(animated)
         // How it works shows by itself once per account (#1480), the first
         // time the Wallet has landed.
-        guard WalletHowItWorks.shouldShow(for: StorageScope.shared.owner) else { return }
+        guard WalletHowItWorks.shouldShow(for: owner()) else { return }
         #if DEBUG
         // A QA run drives the sheet itself: `-wallet-how-it-works-seen`, or
         // any of the sheet's own hooks, keeps the page away.
@@ -562,7 +567,7 @@ final class WalletSheetViewController: UIViewController {
     /// How it works (#1480), pushed in the sheet.
     private func openHowItWorks() {
         guard navigationController?.topViewController === self else { return }
-        WalletHowItWorks.markSeen(by: StorageScope.shared.owner)
+        WalletHowItWorks.markSeen(by: owner())
         pushInSheet(WalletHowItWorksViewController())
     }
 

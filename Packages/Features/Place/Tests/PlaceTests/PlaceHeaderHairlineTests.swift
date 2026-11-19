@@ -35,7 +35,9 @@ struct PlaceHeaderHairlineTests {
     }
 
     private func page(_ posts: [GalleryPost], style: PostGridPageView.Style = .discover) -> PostGridPageView {
-        let page = PostGridPageView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: style)
+        let page = PostGridPageView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: style,
+        bookmarks: PostBookmarkStore(scope: StorageScope()),
+        withheldPosts: UnavailablePosts())
         page.frame = CGRect(x: 0, y: 0, width: 393, height: 3000)
         page.setCorpusComplete(true)
         page.render(.content(posts))
@@ -53,7 +55,10 @@ struct PlaceHeaderHairlineTests {
             placeName: "Paris • City Cluster",
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
             videoPlayback: nil,
-            loadPosts: { [] }, presence: SectionPresenceStore(scope: StorageScope()),
+            loadPosts: { [] },
+            presence: SectionPresenceStore(scope: StorageScope()),
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            withheldPosts: UnavailablePosts(),
             openPost: { _, _, _ in }
         )
         #expect(place.debugHeader.drawsFootHairline)

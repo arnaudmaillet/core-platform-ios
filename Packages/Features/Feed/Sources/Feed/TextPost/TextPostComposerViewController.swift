@@ -131,7 +131,7 @@ final class TextPostComposerViewController: UIViewController {
         wallet: (any WalletReading)?,
         makeWalletSheet: (@MainActor () -> UIViewController)?,
         entities: (any EntityReading & EntityWriting)? = nil,
-        bookmarks: PostBookmarkStore = .shared,
+        bookmarks: PostBookmarkStore,
         attaching embed: PostEmbed? = nil
     ) {
         self.openingEmbed = embed

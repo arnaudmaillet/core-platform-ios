@@ -3,6 +3,7 @@ import CoreContracts
 import CoreModels
 import CoreNetworking
 import CoreNetworkingMocks
+import CoreStorage
 import EntityStore
 import Foundation
 import MediaCore
@@ -96,7 +97,9 @@ struct ProfileFollowChannelTests {
     /// settles the rows are asked again, and Edit / Delete join them without
     /// the row being configured again.
     @Test func theOwnProfilesRowsGainTheirMenuWhenTheRelationshipSettles() throws {
-        let page = PostGridPageView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .list)
+        let page = PostGridPageView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .list,
+        bookmarks: PostBookmarkStore(scope: StorageScope()),
+        withheldPosts: UnavailablePosts())
         var isOwnProfile = false
         page.authorMenuActions = { _ in isOwnProfile ? [.edit {}, .delete {}] : [] }
         page.frame = CGRect(x: 0, y: 0, width: 402, height: 874)

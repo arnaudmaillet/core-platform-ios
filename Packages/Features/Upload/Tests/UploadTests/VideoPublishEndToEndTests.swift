@@ -123,7 +123,8 @@ struct VideoPublishEndToEndTests {
             authSession: ViewerSessionStub(),
             uploadTransport: MockMediaUploadTransport(store: blobStore),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
-            composedChannel: ComposedPostChannel()
+            composedChannel: ComposedPostChannel(),
+            publishedVideos: PublishedVideoFiles(root: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true))
         )
 
         let handed = Handed()

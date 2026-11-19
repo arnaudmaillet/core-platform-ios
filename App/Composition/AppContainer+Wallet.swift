@@ -20,7 +20,7 @@ import Wallet
 // since an extension holds no stored property; they are built here.
 extension AppContainer {
     func makeWalletStore() -> WalletStore {
-        let store = WalletStore()
+        let store = WalletStore(scope: storageScope)
         // A member's likes are points committed through `wallet.Stake`
         // (#676): every stake lands in the outbox too, and the sender commits
         // it — 10 s after the last tap, on leaving the post, on going to the
@@ -47,7 +47,7 @@ extension AppContainer {
     @MainActor
     func startWalletServerSync() {
         guard walletServerSync == nil else { return }
-        let sync = WalletServerSync(wallet: walletStore)
+        let sync = WalletServerSync(wallet: walletStore, scope: storageScope)
         sync.start()
         walletServerSync = sync
     }
@@ -83,7 +83,9 @@ extension AppContainer {
                     )
                 }
             },
-            historyCache: walletHistoryCache
+            historyCache: walletHistoryCache,
+            // "How it works", once per account: who is here (#2376).
+            owner: { [storageScope] in storageScope.owner }
         )
     }
 
@@ -144,6 +146,7 @@ extension AppContainer {
             accountID: MockAuthService.accountID,
             wallet: walletStore,
             store: ProfileItemStore(),
+            teen: teenProtections,
             isMember: { [unowned self] in self.memberGate.isMember }
         )
     }

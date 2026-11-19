@@ -51,15 +51,9 @@ final public class SnapAuthorFollowStore {
     /// answer would come a call later.
     private let viewer: @MainActor () -> ProfileID?
 
-    /// The active profile, as the app's `StorageScope` holds it.
-    public static func activeProfile() -> ProfileID? {
-        guard case .member(_, let profile?) = StorageScope.shared.owner else { return nil }
-        return ProfileID(profile)
-    }
-
     public init(
         writer: (any SocialGraphWriting)?, reader: (any SocialGraphReading)?, entities: any ProfileEntityReading & ProfileEntityWriting = EntityStore(),
-        viewer: @escaping @MainActor () -> ProfileID? = SnapAuthorFollowStore.activeProfile
+        viewer: @escaping @MainActor () -> ProfileID?
     ) {
         self.writer = writer
         self.reader = reader

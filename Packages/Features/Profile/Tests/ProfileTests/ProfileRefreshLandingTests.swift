@@ -105,7 +105,8 @@ struct ProfileRefreshLandingTests {
             repository: profiles, gallery: gallery, source: .profile(ProfileID("prof-kenji"))
         )
         let screen = ProfileViewController(
-            viewModel: viewModel, imagePipeline: ImagePipeline(fetcher: SilentFetcher()), makeGridPage: TestGridPages.factory(), presence: SectionPresenceStore(scope: StorageScope()), onLogout: nil
+            viewModel: viewModel, imagePipeline: ImagePipeline(fetcher: SilentFetcher()), makeGridPage: TestGridPages.factory(),
+            presence: SectionPresenceStore(scope: StorageScope()), onLogout: nil
         )
         // ⚠️ A PRESENCE OF ITS OWN (#1773). The shared store is the test
         // host's defaults, which the suites with an empty Kenji write into
@@ -113,7 +114,7 @@ struct ProfileRefreshLandingTests {
         // without their bones — a different first load from one run to the
         // next.
         screen.galleryPager.presence = SectionPresenceStore(
-            defaults: UserDefaults(suiteName: "refresh-landing-\(UUID().uuidString)")!
+            defaults: UserDefaults(suiteName: "refresh-landing-\(UUID().uuidString)")!, scope: StorageScope()
         )
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 393, height: 852))
         window.rootViewController = UINavigationController(rootViewController: screen)

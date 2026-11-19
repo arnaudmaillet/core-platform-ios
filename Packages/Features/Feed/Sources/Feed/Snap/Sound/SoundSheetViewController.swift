@@ -318,6 +318,8 @@ final class SoundSheetViewController: UIViewController {
     private var tileByID: [PostID: Tile]
     private let imagePipeline: ImagePipeline
     private let savedSounds: SavedSoundStore
+    /// The app's one saved pile, for a tile's menu Save row (#2376).
+    private let bookmarks: PostBookmarkStore
     /// The app's one player pool, which a pushed section plays on too.
     private let videoPlayback: VideoPlaybackController?
     /// The video tiles playing on their own (#884); nil without a pool.
@@ -404,7 +406,8 @@ final class SoundSheetViewController: UIViewController {
         sections: [SoundSheetSection],
         tiles: [Tile],
         imagePipeline: ImagePipeline,
-        savedSounds: SavedSoundStore = SavedSoundStore(),
+        savedSounds: SavedSoundStore,
+        bookmarks: PostBookmarkStore,
         videoPlayback: VideoPlaybackController? = nil,
         watchedPosts: Int = 0
     ) {
@@ -417,6 +420,7 @@ final class SoundSheetViewController: UIViewController {
         self.tileByID = Dictionary(tiles.map { ($0.postID, $0) }, uniquingKeysWith: { first, _ in first })
         self.imagePipeline = imagePipeline
         self.savedSounds = savedSounds
+        self.bookmarks = bookmarks
         self.videoPlayback = videoPlayback
         record = RecordPlayback(playing: false, available: sound.previewURL != nil)
         autoplay = videoPlayback.map { SoundSheetAutoplay(pool: $0, imagePipeline: imagePipeline) }
@@ -2356,7 +2360,8 @@ extension SoundSheetViewController: UICollectionViewDelegate {
                 // screen holds. A tap on the preview opens the post.
                 let anchor: UIView? = collectionView?.cellForItem(at: indexPath) ?? self?.view
                 guard let anchor else { return nil }
-                let rows = PostMenuRows(bookmarks: PostBookmarkStore.shared).rows(for: post, anchor: anchor)
+                guard let bookmarks = self?.bookmarks else { return nil }
+                let rows = PostMenuRows(bookmarks: bookmarks).rows(for: post, anchor: anchor)
                 return PostCardMenu.menu(for: rows, author: nil)
             }
         )

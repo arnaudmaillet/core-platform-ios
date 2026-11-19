@@ -90,12 +90,22 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     public let authorMarks: PostAuthorMarks
     /// The posts the server withholds from this viewer, learnt on any feed
     /// (#2048): every feed and the For You grid drop the ones not on show.
-    private let unavailablePosts = UnavailablePosts.shared
+    /// The app's one record (#2376).
+    private let unavailablePosts: UnavailablePosts
+    /// The viewer's saved pile (#837): the app's one (#2376), which every
+    /// feed, card and grid page this root builds reads and writes.
+    private let bookmarks: PostBookmarkStore
+    /// What the viewer viewed (#1344): every vertical feed records into the
+    /// app's one pile, which the profile's History tab reads (#2376).
+    private let viewHistory: PostViewHistoryStore
+    /// The sounds the viewer saved, for the sound sheet's star (#2376).
+    private let savedSounds: SavedSoundStore
+    /// The profile using the app, for the author marks: its own posts wear no
+    /// badge from the first frame (#2098).
+    private let viewerProfile: @MainActor () -> ProfileID?
     /// The Text Post page's drafts. The app hands in its one store (built
     /// once in `AppContainer`, charter P4); a test hands in one of its own.
-    /// Nil is the fallback for a caller that has neither, and it costs a file
-    /// read on every composer — which is why the app never leaves it nil.
-    private let postDrafts: PostDraftStore?
+    private let postDrafts: PostDraftStore
     /// Which sound a clip is set to, for the sound sheet. Nil: every clip is
     /// its own "original sound", played straight from the clip.
     private let soundProvider: (any PostSoundProviding)?
@@ -133,7 +143,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         /// reach. Optional: without it the cards simply hide their counter,
         /// which is what they did before.
         postCounters: (any PostCounterReading)? = nil,
-        postDrafts: PostDraftStore? = nil,
+        postDrafts: PostDraftStore,
         soundProvider: (any PostSoundProviding)? = nil,
         useSound: (@MainActor (PostSound) -> Void)? = nil,
         /// Discover's own corpus — `DiscoveryFeedRepository` over
@@ -149,8 +159,21 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         entities: (any EntityReading & EntityWriting)? = nil,
         /// The post share sheet's quick-send row (#1710) — the profile
         /// sheet's own source. Nil: the sheet has no row of people.
-        shareTargeting: (any ShareTargeting)? = nil
+        shareTargeting: (any ShareTargeting)? = nil,
+        /// The app's one saved pile, viewing history, record of withheld
+        /// posts and saved sounds (#2376).
+        bookmarks: PostBookmarkStore,
+        viewHistory: PostViewHistoryStore,
+        unavailablePosts: UnavailablePosts,
+        savedSounds: SavedSoundStore,
+        /// The active profile, as the app's storage scope holds it.
+        viewerProfile: @escaping @MainActor () -> ProfileID?
     ) {
+        self.bookmarks = bookmarks
+        self.viewHistory = viewHistory
+        self.unavailablePosts = unavailablePosts
+        self.savedSounds = savedSounds
+        self.viewerProfile = viewerProfile
         self.shareTargeting = shareTargeting
         self.entities = entities ?? EntityStore()
         self.discovery = discovery
@@ -165,7 +188,8 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         self.moderation = moderation
         self.followEvents = followEvents
         authorMarks = PostAuthorMarks(
-            writer: socialGraph, reader: followRelations, entities: self.entities, followEvents: followEvents
+            writer: socialGraph, reader: followRelations, entities: self.entities, followEvents: followEvents,
+            viewer: viewerProfile
         )
         self.makeProfileSwitcher = makeProfileSwitcher
         self.repository = repository
@@ -629,7 +653,8 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     public func makePostGridPage(style: PostGridPageStyle, savesPosts: Bool) -> any PostGridPage {
         // The app's one pool, the same instance For You's tabs borrow from.
         let page = PostGridPages.make(
-            style: style, imagePipeline: imagePipeline, videoPlayback: videoPlayback, savesPosts: savesPosts,
+            style: style, imagePipeline: imagePipeline, videoPlayback: videoPlayback,
+            bookmarks: savesPosts ? bookmarks : nil, withheldPosts: unavailablePosts,
             postOpenWarm: postOpenWarm
         )
         // A card's author band wears its relation mark (#2300).
@@ -646,6 +671,8 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             imagePipeline: imagePipeline,
             // The app's one pool, the same instance For You's tabs borrow from.
             videoPlayback: videoPlayback,
+            bookmarks: bookmarks,
+            withheldPosts: unavailablePosts,
             // What the app holds, drawn before the hydration lands (#1863).
             held: { [self] id in heldGalleryPost(id) },
             hydrate: { ids in
@@ -682,7 +709,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         }
         // The results draw their posts' live counts, and their like chips
         // stake from the app's one wallet (#896) — For You's cards' binding.
-        let staking = wallet.map { PostCardStaking(wallet: $0, entities: entities) }
+        let staking = wallet.map { PostCardStaking(wallet: $0, entities: entities, saves: bookmarks) }
         surface.staking = staking
         // …and their author bands wear the relation mark (#2300).
         surface.authorMarks = authorMarks
@@ -691,6 +718,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         surface.makeGallery = { [self] in
             let gallery = DiscoverGalleryViewController(
                 imagePipeline: imagePipeline, videoPlayback: videoPlayback,
+                bookmarks: bookmarks, withheldPosts: unavailablePosts,
                 header: PushedScreenHeader(wallet: balanceWallet, makeWalletSheet: makeWalletSheet, router: router),
                 // The same binding as the results it was pushed from.
                 staking: staking,
@@ -1434,6 +1462,9 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             followRelations: followRelations,
             followEvents: followEvents,
             entities: entities,
+            bookmarks: bookmarks,
+            savedSounds: savedSounds,
+            viewer: viewerProfile,
             soundProvider: soundProvider,
             useSound: useSound,
             // The sound sheet's grid opens a NEW feed of the posts with that
@@ -1447,7 +1478,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             prewarmPosts: { ids in await repository.prewarm(ids) }
         )
         // Every vertical feed records what the viewer viewed (#1344).
-        feed.viewHistory = .shared
+        feed.viewHistory = viewHistory
         // The side list's posts (#1425, #1473): the Discover pool
         // (`DiscoveryFeedRepository`) as the app already holds it, else as it
         // loads; the feed's own repository when there is no pool.
@@ -1496,7 +1527,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     /// entry held so it is never fetched back, its empty first page of
     /// comments — and from then on the sheet is that post's.
     public func makeTextPostScreen(publisher: any TextPostPublishing) -> UIViewController {
-        makeTextPostScreen(publisher: publisher, bookmarks: .shared)
+        makeTextPostScreen(publisher: publisher, bookmarks: bookmarks)
     }
 
     /// A channel's "Share as a Post" (#2216): the same screen, its card
@@ -1504,7 +1535,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     /// Opened at its full height: the card and the words need the room the
     /// keyboard would ask for anyway. Without `-channels`, the plain screen.
     public func makeTextPostScreen(publisher: any TextPostPublishing, attaching embed: PostEmbed) -> UIViewController {
-        makeTextPostScreen(publisher: publisher, bookmarks: .shared, attaching: embed)
+        makeTextPostScreen(publisher: publisher, bookmarks: bookmarks, attaching: embed)
     }
 
     /// The same, over `bookmarks` — the app's one pile outside tests.
@@ -1566,7 +1597,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         )
         let composer = TextPostComposerViewController(
             panel: panel,
-            drafts: postDrafts ?? PostDraftStore(),
+            drafts: postDrafts,
             imagePipeline: imagePipeline,
             router: router,
             // The composer's wallet is its badge alone: none for a guest.

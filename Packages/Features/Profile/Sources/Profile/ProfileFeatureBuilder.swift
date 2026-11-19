@@ -32,10 +32,13 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
     /// One store for every profile screen: the gallery filter is a GLOBAL
     /// user preference, so all view models read and write the same place.
     private let galleryPreferences = GalleryPreferences()
-    /// The viewer's saved pile: the app's one, a view over the EntityStore's
-    /// saved fact (#896), so a save made in a feed is on the gallery's cards.
-    /// See `PostBookmarkStore`.
-    private let bookmarks = PostBookmarkStore.shared
+    /// The viewer's saved pile: the app's one (#2376), a view over the
+    /// EntityStore's saved fact (#896), so a save made in a feed is on the
+    /// gallery's cards. See `PostBookmarkStore`.
+    private let bookmarks: PostBookmarkStore
+    /// What the viewer viewed (#1344): the app's one pile, which the feeds
+    /// record into (#2376).
+    private let viewHistory: PostViewHistoryStore
     /// Which tabs each profile had last time (#1773): the app's one store
     /// (#2376).
     private let presence: SectionPresenceStore
@@ -71,9 +74,13 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
         /// they visited open on their last content at a cold start. Nil keeps
         /// the profile cache in memory.
         localStore: LocalStore? = nil,
-        presence: SectionPresenceStore
+        presence: SectionPresenceStore,
+        bookmarks: PostBookmarkStore,
+        viewHistory: PostViewHistoryStore
     ) {
         self.presence = presence
+        self.bookmarks = bookmarks
+        self.viewHistory = viewHistory
         self.cache = ProfileCache(store: localStore)
         self.relationshipsCache = localStore.map(ProfileRelationshipsLocalCache.init(store:))
         self.repository = repository
@@ -140,7 +147,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                 // dependency nothing reads.
                 bookmarks: bookmarks,
                 // The History tab's pile (#1344): the own profile's only.
-                viewHistory: .shared,
+                viewHistory: viewHistory,
                 source: .currentUser,
                 router: router,
                 cache: cache,
@@ -186,7 +193,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
             makeChannelCreation: makeChannelCreation
         )
         controller.feedHero = openFeedHero
-        controller.staking = makeCardStaking?() ?? wallet.map(PostCardStaking.init)
+        controller.staking = makeCardStaking?() ?? wallet.map { PostCardStaking(wallet: $0, saves: bookmarks) }
         return controller
     }
 
@@ -323,7 +330,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
             channels: makeChannelsModel(isOwnProfile: viewModel.isOwnProfile)
         )
         controller.feedHero = openFeedHero
-        controller.staking = makeCardStaking?() ?? wallet.map(PostCardStaking.init)
+        controller.staking = makeCardStaking?() ?? wallet.map { PostCardStaking(wallet: $0, saves: bookmarks) }
         return controller
     }
 

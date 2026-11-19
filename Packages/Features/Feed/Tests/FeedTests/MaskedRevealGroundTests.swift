@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import MediaCore
 import MediaPlayback
 import Testing
@@ -21,13 +22,16 @@ struct MaskedRevealGroundTests {
 
     private func feed(_ models: [FeedItemDisplayModel]) -> SnapFeedViewController {
         let controller = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: QuietFeed()),
+            viewModel: FeedViewModel(repository: QuietFeed(), unavailablePosts: UnavailablePosts()),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             makeCommentsPanelContent: { _ in
                 let panel = UIViewController()
                 panel.view.backgroundColor = .clear
                 return panel
-            }
+            },
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            savedSounds: SavedSoundStore(scope: StorageScope()),
+            viewer: { nil }
         )
         controller.loadViewIfNeeded()
         controller.view.frame = CGRect(x: 0, y: 0, width: 390, height: 844)

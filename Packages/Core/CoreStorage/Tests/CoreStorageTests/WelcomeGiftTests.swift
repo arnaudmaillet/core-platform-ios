@@ -33,7 +33,7 @@ struct WelcomeGiftTests {
     }
 
     private func makeWallet() -> WalletStore {
-        WalletStore(defaults: defaults, now: { [clock] in clock.now })
+        WalletStore(defaults: defaults, now: { [clock] in clock.now }, scope: StorageScope())
     }
 
     @Test func nothingIsOpenBeforeAGuestOpensIt() {

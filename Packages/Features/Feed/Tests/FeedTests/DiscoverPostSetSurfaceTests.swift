@@ -1,8 +1,10 @@
 import CoreModels
+import CoreStorage
 import FeedInterface
 import Foundation
 import MediaCore
 import PostGrid
+import PostSurfaces
 import Testing
 import UIKit
 @testable import Feed
@@ -25,7 +27,7 @@ struct DiscoverPostSetSurfaceTests {
         return PostSetSurfaceViewController(
             style: style,
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
-            videoPlayback: nil,
+            videoPlayback: nil, bookmarks: PostBookmarkStore(scope: StorageScope()), withheldPosts: UnavailablePosts(),
             // Answers in its own order, as a timeline does.
             hydrate: { ids in ids.reversed().compactMap { byID[$0] } }
         )

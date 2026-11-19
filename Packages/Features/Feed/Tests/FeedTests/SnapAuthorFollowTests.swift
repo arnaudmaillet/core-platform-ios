@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import DesignSystem
 import MediaCore
 import MediaUI
@@ -37,11 +38,14 @@ struct SnapAuthorFollowTests {
         events: FollowGraphEvents? = nil
     ) -> SnapFeedViewController {
         let feed = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: FollowFeedProvider()),
+            viewModel: FeedViewModel(repository: FollowFeedProvider(), unavailablePosts: UnavailablePosts()),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             socialGraph: graph,
             followRelations: readable ? graph : nil,
-            followEvents: events
+            followEvents: events,
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            savedSounds: SavedSoundStore(scope: StorageScope()),
+            viewer: { nil }
         )
         let nav = UINavigationController(rootViewController: UIViewController())
         nav.pushViewController(feed, animated: false)
@@ -201,9 +205,12 @@ struct SnapAuthorFollowTests {
     @Test func aFollowTapReplacesTheBadgeAndNothingElse() async throws {
         let graph = GatedFollowGraph()
         let feed = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: FollowFeedProvider()),
+            viewModel: FeedViewModel(repository: FollowFeedProvider(), unavailablePosts: UnavailablePosts()),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
-            socialGraph: graph, followRelations: graph
+            socialGraph: graph, followRelations: graph,
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            savedSounds: SavedSoundStore(scope: StorageScope()),
+            viewer: { nil }
         )
         let nav = UINavigationController(rootViewController: UIViewController())
         nav.pushViewController(feed, animated: false)
@@ -243,9 +250,12 @@ struct SnapAuthorFollowTests {
         graph: GatedFollowGraph, relation: FollowRelation
     ) async throws -> (SnapFeedViewController, SnapAuthorIdentityView, UIWindow) {
         let feed = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: FollowFeedProvider()),
+            viewModel: FeedViewModel(repository: FollowFeedProvider(), unavailablePosts: UnavailablePosts()),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
-            socialGraph: graph, followRelations: graph
+            socialGraph: graph, followRelations: graph,
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            savedSounds: SavedSoundStore(scope: StorageScope()),
+            viewer: { nil }
         )
         let nav = UINavigationController(rootViewController: UIViewController())
         nav.pushViewController(feed, animated: false)
@@ -531,8 +541,11 @@ struct SnapAuthorFollowTests {
 struct SnapAttributionItemTests {
     private static func feed() -> SnapFeedViewController {
         let feed = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: FollowFeedProvider()),
-            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+            viewModel: FeedViewModel(repository: FollowFeedProvider(), unavailablePosts: UnavailablePosts()),
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            savedSounds: SavedSoundStore(scope: StorageScope()),
+            viewer: { nil }
         )
         feed.loadViewIfNeeded()
         return feed

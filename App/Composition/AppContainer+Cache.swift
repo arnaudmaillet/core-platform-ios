@@ -30,7 +30,7 @@ extension AppContainer {
         UIAssetCaches.shared.attach(to: cacheCoordinator)
         // The author's just-published clips (#898): a Videos namespace once
         // the first one is kept.
-        PublishedVideoFiles.shared.attach(to: cacheCoordinator)
+        publishedVideos.attach(to: cacheCoordinator)
         // What the coordinator's namespaces cannot hold (#898): every memory
         // signal also releases the playback pools' idle players, frame
         // generators and return players; the background sweeps the upload
@@ -62,11 +62,11 @@ extension AppContainer {
         store.register(with: cacheCoordinator)
         // The app's saved pile writes its fact here, and every save glyph
         // reads and observes it.
-        PostBookmarkStore.shared.facts = store
+        postBookmarks.facts = store
         entityFollowSubscription = store.follow(followGraphEvents)
         // Every point the viewer stakes, from any surface, moves the post's
         // count (and every undo or refund moves it back).
-        walletStakeLikes = WalletStakeLikes(wallet: walletStore, entities: store)
+        walletStakeLikes = WalletStakeLikes(wallet: walletStore, entities: store, scope: storageScope)
         // Rebuilt from the device at a cold start, and a delete reaches the
         // device's lists (`restoreEntitiesFromDevice`).
         entityDeviceBacking = feedLocalCache.map { EntityDeviceBacking(entities: store, cache: $0) }
@@ -79,7 +79,7 @@ extension AppContainer {
         // it refills on the first online load.
         try? CodableFileStore<[FeedEntry]>(name: "feed-first-page").clear()
         do {
-            let store = try LocalStore(viewer: { LocalStoreViewer(StorageScope.shared.owner) })
+            let store = try LocalStore(viewer: { [storageScope] in LocalStoreViewer(storageScope.owner) })
             self.cacheCoordinator.register(store)
             return store
         } catch {

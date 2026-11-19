@@ -1,6 +1,7 @@
 import CoreModels
 import CoreStorage
 import Foundation
+import PostSurfaces
 import Testing
 @testable import Feed
 @testable import ThreadKit
@@ -30,7 +31,8 @@ struct CommentPreferencesStreamTests {
         let defaults = UserDefaults(suiteName: "comment-prefs-\(UUID().uuidString)")!
         let store = MediaCommentPreferencesStore(defaults: defaults)
         store.update(mutate)
-        return (FeedViewModel(repository: StillFeedProvider(), commentPreferences: store), store)
+        return (FeedViewModel(repository: StillFeedProvider(), commentPreferences: store,
+        unavailablePosts: UnavailablePosts()), store)
     }
 
     @Test func byDefaultBothSurfacesRender() {

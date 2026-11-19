@@ -76,7 +76,7 @@ struct ProfileTakingLongerTests {
         )
         // Never seen: the pages show their bones while they load.
         screen.galleryPager.presence = SectionPresenceStore(
-            defaults: UserDefaults(suiteName: "taking-longer-\(UUID().uuidString)")!
+            defaults: UserDefaults(suiteName: "taking-longer-\(UUID().uuidString)")!, scope: StorageScope()
         )
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 393, height: 852))
         window.rootViewController = UINavigationController(rootViewController: screen)

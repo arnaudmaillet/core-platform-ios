@@ -46,7 +46,7 @@ struct SoundSheetTests {
             sections: content.sections,
             tiles: content.tiles,
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
-            savedSounds: saved ?? Self.isolatedStore()
+            savedSounds: saved ?? Self.isolatedStore(), bookmarks: PostBookmarkStore(scope: StorageScope())
         )
     }
 
@@ -86,7 +86,7 @@ struct SoundSheetTests {
     /// A pile of its own, so a test never reads or writes the device's.
     private static func isolatedStore() -> SavedSoundStore {
         let suite = "SoundSheetTests.\(UUID().uuidString)"
-        return SavedSoundStore(defaults: UserDefaults(suiteName: suite) ?? .standard)
+        return SavedSoundStore(defaults: UserDefaults(suiteName: suite) ?? .standard, scope: StorageScope())
     }
 
     /// The sheet laid out at `height`, WITHOUT a window: a visible window in
@@ -808,7 +808,9 @@ struct SoundSheetTests {
             sound: PostSound(id: "clip-01", title: nil, artist: nil, previewURL: nil, artworkURL: nil, duration: 30),
             authorHandle: "ava", fallbackArtworkURL: nil,
             sections: content.sections, tiles: tiles,
-            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            savedSounds: SavedSoundStore(scope: StorageScope()),
+            bookmarks: PostBookmarkStore(scope: StorageScope())
         )
         _ = controller.wrappedInSheet()
         controller.loadViewIfNeeded()
@@ -830,7 +832,9 @@ struct SoundSheetTests {
             fallbackArtworkURL: nil,
             sections: content.sections,
             tiles: content.tiles,
-            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            savedSounds: SavedSoundStore(scope: StorageScope()),
+            bookmarks: PostBookmarkStore(scope: StorageScope())
         )
         var selected: [PostID] = []
         controller.onSelectPost = { selected.append($0) }

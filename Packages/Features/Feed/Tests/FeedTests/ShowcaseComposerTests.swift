@@ -3,6 +3,7 @@ import CoreStorage
 import FeedInterface
 import MediaCore
 import PostGrid
+import PostSurfaces
 import Testing
 import UIKit
 @testable import Feed
@@ -101,7 +102,13 @@ struct ShowcaseComposerTests {
             repository: HeldFeed(),
             commentsProvider: Viewer(),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
-            postDrafts: PostDraftStore(name: draftsFile)
+            postDrafts: PostDraftStore(name: draftsFile,
+            scope: StorageScope()),
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            viewHistory: PostViewHistoryStore(scope: StorageScope()),
+            unavailablePosts: UnavailablePosts(),
+            savedSounds: SavedSoundStore(scope: StorageScope()),
+            viewerProfile: { nil }
         ).makeTextPostScreen(publisher: publisher, bookmarks: pile, attaching: embed, showsEmbeds: showsEmbeds)
         let navigation = try #require(screen as? UINavigationController)
         let composer = try #require(navigation.viewControllers.first as? TextPostComposerViewController)

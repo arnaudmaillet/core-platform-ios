@@ -24,7 +24,9 @@ import Foundation
 @MainActor
 public final class CountryAccessService: CountryAccess {
     /// Teen protections (#401): no country unlocks or packs for 13–17.
-    public var purchasesRestricted: Bool { TeenProtections.shared.restrictsPurchases }
+    public var purchasesRestricted: Bool { teen.restrictsPurchases }
+    /// The app's one record of the account's age bracket (#2376).
+    private let teen: TeenProtections
 
     /// The member's home country — what `homeCountry` answers for a member.
     private let accountHomeCountry: String
@@ -48,12 +50,14 @@ public final class CountryAccessService: CountryAccess {
 
     public init(
         accountID: String, homeCountry: String, wallet: WalletStore, unlocks: CountryUnlockStore,
+        teen: TeenProtections,
         activity: [String: (likes: Int64, posts: Int)],
         isMember: @escaping @MainActor () -> Bool = { true },
         locator: (any CurrentCountryLocating)? = nil,
         covers: [String: CountryCover] = [:],
         geo: (any GeoDiscovery_V1_GeoDiscoveryServiceClientInterface)? = nil
     ) {
+        self.teen = teen
         self.geo = geo
         self.covers = covers
         self.accountID = accountID

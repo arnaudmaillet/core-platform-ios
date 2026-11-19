@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import Foundation
 import MediaCore
 import PostGrid
@@ -23,7 +24,9 @@ struct GridLandingGateTests {
 
     private func page(_ posts: [GalleryPost]) -> PostGridPageView {
         let page = PostGridPageView(
-            imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .grid
+            imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .grid,
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            withheldPosts: UnavailablePosts()
         )
         page.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
         page.render(.content(posts))
@@ -80,7 +83,9 @@ struct GridRepeatedRoundTripTests {
 
     private func page(_ count: Int) -> PostGridPageView {
         let page = PostGridPageView(
-            imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .grid
+            imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .grid,
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            withheldPosts: UnavailablePosts()
         )
         page.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
         page.render(.content((0..<count).map {
@@ -173,7 +178,9 @@ struct GridHiddenCellRecyclingTests {
     /// actually recycles when the grid scrolls.
     private func page(_ count: Int = 120) -> PostGridPageView {
         let page = PostGridPageView(
-            imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .grid
+            imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .grid,
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            withheldPosts: UnavailablePosts()
         )
         page.frame = CGRect(x: 0, y: 0, width: 393, height: 500)
         page.render(.content((0..<count).map {

@@ -78,7 +78,7 @@ public final class PostDraftStore {
 
     /// `name` is the file the drafts live in; the default is the app's one
     /// list. A test passes its own, so it never reads the app's drafts.
-    public init(name: String = "post-drafts", scope: StorageScope = .shared) {
+    public init(name: String = "post-drafts", scope: StorageScope) {
         self.name = name
         self.scope = scope
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first

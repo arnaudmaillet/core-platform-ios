@@ -229,8 +229,9 @@ final public class PostGridPageView: UIView {
     /// `PostGridPage.show`, as it was handed over — shown again, without
     /// them, when a post it holds is learnt unavailable (#2048).
     var hostedState: PostGridPageState?
-    /// The record those posts are read from: the app's; a test's own.
-    var withheldPosts: UnavailablePosts = .shared
+    /// The record those posts are read from: the app's one (#2376); a test's
+    /// own.
+    var withheldPosts: UnavailablePosts
     let withheldObservation = NotificationTokens()
     /// The order the view model handed over, kept so an append can be
     /// recognised as one before arrangement permutes it.
@@ -979,12 +980,18 @@ final public class PostGridPageView: UIView {
         }
     }
 
+    /// - Parameters:
+    ///   - bookmarks: the app's one saved pile (#2376), for the save control;
+    ///     nil offers none.
+    ///   - withheldPosts: the app's one record of the posts this viewer may
+    ///     no longer see (#2048).
     public init(
         imagePipeline: ImagePipeline, style: Style, videoPlayback: VideoPlaybackController? = nil,
-        bookmarks: PostBookmarkStore? = .shared
+        bookmarks: PostBookmarkStore?, withheldPosts: UnavailablePosts
     ) {
         self.imagePipeline = imagePipeline
         self.bookmarks = bookmarks
+        self.withheldPosts = withheldPosts
         videoPool = videoPlayback
         #if DEBUG
         CarouselPlaybackAudit.capturePoolTrace()

@@ -1,5 +1,6 @@
 import CoreModels
 import CoreNavigation
+import CoreStorage
 import MediaCore
 import MediaPlayback
 import Testing
@@ -68,9 +69,12 @@ struct SnapDismissalKindTests {
         _ models: [FeedItemDisplayModel], panels: PanelBuilds? = nil
     ) -> SnapFeedViewController {
         let controller = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: MuteFeedProvider()),
+            viewModel: FeedViewModel(repository: MuteFeedProvider(), unavailablePosts: UnavailablePosts()),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
-            makeCommentsPanelContent: panels.map { builds in { id in builds.make(id) } }
+            makeCommentsPanelContent: panels.map { builds in { id in builds.make(id) } },
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            savedSounds: SavedSoundStore(scope: StorageScope()),
+            viewer: { nil }
         )
         controller.loadViewIfNeeded()
         controller.view.frame = CGRect(x: 0, y: 0, width: 390, height: 844)

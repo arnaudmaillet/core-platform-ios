@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import DesignSystem
 import MediaCore
 import Testing
@@ -15,8 +16,11 @@ import UIKit
 struct SnapPushedPageChromeTests {
     private func feed() -> SnapFeedViewController {
         let controller = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: EmptyFeedProvider()),
-            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+            viewModel: FeedViewModel(repository: EmptyFeedProvider(), unavailablePosts: UnavailablePosts()),
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            savedSounds: SavedSoundStore(scope: StorageScope()),
+            viewer: { nil }
         )
         controller.loadViewIfNeeded()
         controller.view.frame = CGRect(x: 0, y: 0, width: 402, height: 874)

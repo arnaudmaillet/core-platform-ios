@@ -233,7 +233,8 @@ struct SeedKeepsTheFirstCueTests {
                 body: "This is a longer thought number \($0) worth reading.", createdAt: Date(timeIntervalSince1970: 1000)
             )
         }
-        let viewModel = FeedViewModel(repository: NoFeed(), commentsProvider: WarmedComments(sentences))
+        let viewModel = FeedViewModel(repository: NoFeed(), commentsProvider: WarmedComments(sentences),
+        unavailablePosts: UnavailablePosts())
         let id = PostID("post-0042")
 
         let seed = viewModel.commentStreams(for: id)

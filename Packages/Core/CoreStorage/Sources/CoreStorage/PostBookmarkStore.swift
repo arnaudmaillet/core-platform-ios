@@ -15,7 +15,7 @@ public protocol PostSaveFacts: AnyObject, Sendable {
 
 /// Where a save made on the device goes to the server (#837): engagement's
 /// SavePost / UnsavePost, queued while offline and replayed. The app hands
-/// its one (`SavedPostsSync`) to `PostBookmarkStore.shared` at launch; a store
+/// its one (`SavedPostsSync`) to its one `PostBookmarkStore` at launch; a store
 /// without one (tests, previews) stays on the device.
 public protocol PostSaveSyncing: AnyObject, Sendable {
     /// The viewer saved (or unsaved) a post on this device, as `owner`: the
@@ -46,17 +46,12 @@ public protocol PostSaveSyncing: AnyObject, Sendable {
 /// came back for. The server's list reads the same way.
 ///
 /// **A view over the EntityStore's saved fact (#896).** One instance in the app
-/// (`shared`), handed the store as its `facts`: a save writes the pile — the
+/// (`AppContainer.postBookmarks`, #2376), handed the store as its `facts`: a save writes the pile — the
 /// device's record and its order — and then the fact, which every screen
 /// observes; a read asks the fact first, the pile when the fact is unknown.
 /// The pile stays the persistence: the fact is memory, bounded and wiped on a
 /// viewer change.
 public final class PostBookmarkStore: @unchecked Sendable {
-    /// The app's one pile: every surface reads and writes it, so the facts it
-    /// writes are the ones every screen observes. The app hands it the
-    /// EntityStore (`facts`) at launch.
-    public static let shared = PostBookmarkStore()
-
     private static let baseKey = "profile.savedPostIDs"
     private let defaults: UserDefaults
     /// Whose pile: the active profile's (`StorageScope`).
@@ -86,7 +81,9 @@ public final class PostBookmarkStore: @unchecked Sendable {
         set { lock.withLock { _sync = newValue } }
     }
 
-    public convenience init(defaults: UserDefaults = .standard, scope: StorageScope = .shared) {
+    /// The app's one pile is built by the composition root and handed to every
+    /// surface, so the facts it writes are the ones every screen observes.
+    public convenience init(defaults: UserDefaults = .standard, scope: StorageScope) {
         self.init(defaults: defaults, scope: scope, launchArguments: ProcessInfo.processInfo.arguments)
     }
 
@@ -197,7 +194,7 @@ public final class PostBookmarkStore: @unchecked Sendable {
     private var pendingLaunchHooks: LaunchHooks?
     private var launchHooksObserver: NSObjectProtocol?
 
-    /// ⚠️ NOT AT INIT (#1074): the app's one pile (`shared`) is made before
+    /// ⚠️ NOT AT INIT (#1074): the app's one pile may be made before
     /// the viewer is known, while the scope is still unscoped, and a reset
     /// there cleared the original key — never the member's pile. The hooks
     /// wait for the scope to name a viewer — a guest, or a member whose

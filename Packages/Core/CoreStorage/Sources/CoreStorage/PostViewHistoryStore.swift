@@ -14,10 +14,10 @@ import LaunchArguments
 /// A re-viewed post moves to the front rather than appearing twice, and the
 /// pile keeps the `capacity` most recent. Each view keeps WHEN it happened,
 /// which the tab groups by day (#1344).
+///
+/// ONE pile in the app (`AppContainer.viewHistory`, #2376): the feed records
+/// into it, the profile reads it.
 public final class PostViewHistoryStore: @unchecked Sendable {
-    /// The app's one pile: the feed records into it, the profile reads it.
-    public static let shared = PostViewHistoryStore()
-
     static let baseKey = "profile.viewHistory"
     /// When each post in the pile was last viewed, in seconds since 1970 —
     /// beside the ids rather than in them, so a pile written before the times
@@ -43,7 +43,7 @@ public final class PostViewHistoryStore: @unchecked Sendable {
     private var _onChange: (() -> Void)?
 
     public init(
-        defaults: UserDefaults = .standard, scope: StorageScope = .shared,
+        defaults: UserDefaults = .standard, scope: StorageScope,
         now: @escaping @Sendable () -> Date = Date.init
     ) {
         self.defaults = defaults

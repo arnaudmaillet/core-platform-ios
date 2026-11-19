@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import MediaCore
 import MediaPlayback
 import PostGrid
@@ -25,8 +26,11 @@ import UIKit
 struct CarouselPageSyncTests {
     private func feed() -> SnapFeedViewController {
         let controller = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: SilentFeedProvider()),
-            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+            viewModel: FeedViewModel(repository: SilentFeedProvider(), unavailablePosts: UnavailablePosts()),
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            savedSounds: SavedSoundStore(scope: StorageScope()),
+            viewer: { nil }
         )
         controller.loadViewIfNeeded()
         return controller

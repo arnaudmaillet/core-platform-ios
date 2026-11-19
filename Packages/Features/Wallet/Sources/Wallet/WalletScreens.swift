@@ -19,11 +19,13 @@ public enum WalletScreens {
         openFeedHero: (@MainActor ([PostID], UIViewController, SnapFeedHeroOrigin) -> Void)? = nil,
         findPosts: (() -> Void)? = nil,
         makeShop: (() -> UIViewController)? = nil,
-        historyCache: WalletHistoryLocalCache? = nil
+        historyCache: WalletHistoryLocalCache? = nil,
+        /// Who is here: the app's one storage scope's owner (#2376).
+        owner: @escaping @MainActor () -> StorageScope.Owner
     ) -> UIViewController {
         WalletSheetViewController(
             wallet: wallet, lookUpPosts: lookUpPosts, imagePipeline: imagePipeline, openFeedHero: openFeedHero,
-            findPosts: findPosts, makeShop: makeShop, historyCache: historyCache
+            findPosts: findPosts, makeShop: makeShop, historyCache: historyCache, owner: owner
         ).wrappedInSheet()
     }
 

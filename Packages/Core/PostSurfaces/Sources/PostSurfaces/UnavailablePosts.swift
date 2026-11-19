@@ -5,8 +5,8 @@ import Foundation
 /// window's hydration that answered GONE (`FixedPostsFeedProvider`), or a
 /// comments panel's revalidation that answered not-found (#1409).
 ///
-/// One per app (`FeedFeatureBuilder`), shared by every feed and the For You
-/// grid: a post learnt unavailable on one surface leaves the others' pages
+/// One per app (`AppContainer.unavailablePosts`, #2376), handed to every
+/// feed and grid page: a post learnt unavailable on one surface leaves the others' pages
 /// and tiles not yet shown. Only the page in front at the moment it is learnt
 /// keeps "This post isn't available", until the viewer leaves it.
 ///
@@ -16,9 +16,6 @@ import Foundation
 /// session.
 @MainActor
 public final class UnavailablePosts {
-    /// The app's one record. A test builds its own.
-    public static let shared = UnavailablePosts()
-
     /// Posted with the posts just learnt under `idsKey`.
     public static let didChange = Notification.Name("UnavailablePostsDidChange")
     static let idsKey = "ids"

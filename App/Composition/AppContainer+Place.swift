@@ -33,7 +33,9 @@ extension AppContainer {
             router: routeResolver,
             authorMarks: feedBuilder.authorMarks,
             postOpenWarm: feedBuilder.postOpenWarm,
-            presence: sectionPresence
+            presence: sectionPresence,
+            bookmarks: postBookmarks,
+            unavailablePosts: unavailablePosts
         )
     }
 }

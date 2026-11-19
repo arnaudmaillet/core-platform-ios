@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import MediaCore
 import MediaPlayback
 import Testing
@@ -31,9 +32,12 @@ import UIKit
 struct SnapToolbarCompositionTests {
     private func feed(reporting: (any ContentReporting)? = StubReporter()) -> SnapFeedViewController {
         let controller = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: EmptyProvider()),
+            viewModel: FeedViewModel(repository: EmptyProvider(), unavailablePosts: UnavailablePosts()),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
-            reporting: reporting
+            reporting: reporting,
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            savedSounds: SavedSoundStore(scope: StorageScope()),
+            viewer: { nil }
         )
         controller.loadViewIfNeeded()
         controller.view.frame = CGRect(x: 0, y: 0, width: 390, height: 844)

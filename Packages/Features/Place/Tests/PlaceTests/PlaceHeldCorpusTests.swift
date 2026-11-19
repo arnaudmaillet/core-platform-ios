@@ -3,6 +3,7 @@ import CoreStorage
 import Foundation
 import MediaCore
 import PostGrid
+import PostSurfaces
 import Testing
 import UIKit
 @testable import Place
@@ -35,7 +36,10 @@ struct PlaceHeldCorpusTests {
             loadPosts: {
                 while !gate.isOpen { try? await Task.sleep(for: .milliseconds(2)) }
                 return loaded
-            }, presence: SectionPresenceStore(scope: StorageScope()),
+            },
+            presence: SectionPresenceStore(scope: StorageScope()),
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            withheldPosts: UnavailablePosts(),
             openPost: { _, _, _ in }
         )
     }

@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import MediaCore
 import Testing
 import UIKit
@@ -59,9 +60,12 @@ struct SnapComposerKeyboardCeilingTests {
 
     private func makeFeed(_ models: [FeedItemDisplayModel], panels: Panels) -> SnapFeedViewController {
         let controller = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: CeilingMuteProvider()),
+            viewModel: FeedViewModel(repository: CeilingMuteProvider(), unavailablePosts: UnavailablePosts()),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
-            makeCommentsPanelContent: { id in panels.make(id) }
+            makeCommentsPanelContent: { id in panels.make(id) },
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            savedSounds: SavedSoundStore(scope: StorageScope()),
+            viewer: { nil }
         )
         controller.loadViewIfNeeded()
         controller.view.frame = CGRect(x: 0, y: 0, width: 390, height: 844)

@@ -325,7 +325,7 @@ public actor PostComposer: PostComposing {
         posterFrame: @escaping @Sendable (ExportedVideo) async -> UIImage? = {
             await VideoExporter().posterImage(for: $0)
         },
-        publishedVideos: PublishedVideoFiles = .shared,
+        publishedVideos: PublishedVideoFiles,
         resolveMaxAttempts: Int = 6,
         resolvePollSeconds: Double = 1,
         now: @escaping @Sendable () -> Date = { Date() },

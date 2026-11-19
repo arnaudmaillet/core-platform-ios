@@ -31,11 +31,12 @@ extension AppContainer {
     func startSavedPostsSync() {
         guard savedPostsSync == nil else { return }
         let sync = SavedPostsSync(
-            store: .shared,
+            store: postBookmarks,
             outbox: SaveOutbox(),
-            transport: EngagementSavedPosts(client: Engagement_V1_EngagementServiceClient(client: authenticatedRPCClient))
+            transport: EngagementSavedPosts(client: Engagement_V1_EngagementServiceClient(client: authenticatedRPCClient)),
+            scope: storageScope
         )
-        PostBookmarkStore.shared.sync = sync
+        postBookmarks.sync = sync
         sync.start()
         savedPostsSync = sync
     }
@@ -134,7 +135,16 @@ extension AppContainer {
             localCache: feedLocalCache,
             entities: entityStore,
             // A post's share sheet sends to the profile sheet's people (#1710).
-            shareTargeting: profileShareTargetsRepository
+            shareTargeting: profileShareTargetsRepository,
+            // The viewer's stores (#2376): the app's one of each.
+            bookmarks: postBookmarks,
+            viewHistory: viewHistory,
+            unavailablePosts: unavailablePosts,
+            savedSounds: savedSounds,
+            viewerProfile: { [storageScope] in
+                guard case .member(_, let profile?) = storageScope.owner else { return nil }
+                return ProfileID(profile)
+            }
         )
     }
 

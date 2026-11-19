@@ -24,7 +24,7 @@ struct MapDockedPlacesTests {
     )
 
     @Test func togglingDocksThenUndocks() {
-        let store = MapDockedPlacesStore(defaults: makeSuite())
+        let store = MapDockedPlacesStore(defaults: makeSuite(), scope: StorageScope())
         #expect(!store.isDocked(Self.paris.url))
         #expect(store.toggle(Self.paris) == true)
         #expect(store.isDocked(Self.paris.url))
@@ -35,7 +35,7 @@ struct MapDockedPlacesTests {
 
     /// The dock shows them in the order they were pinned; a re-pin goes last.
     @Test func theListKeepsPinOrder() {
-        let store = MapDockedPlacesStore(defaults: makeSuite())
+        let store = MapDockedPlacesStore(defaults: makeSuite(), scope: StorageScope())
         store.toggle(Self.paris)
         store.toggle(Self.spain)
         #expect(store.entries == [Self.paris, Self.spain])
@@ -47,12 +47,12 @@ struct MapDockedPlacesTests {
     /// Two stores on one defaults are one list: the place page's and the map's.
     @Test func everyStoreReadsTheSameList() {
         let defaults = makeSuite()
-        MapDockedPlacesStore(defaults: defaults).toggle(Self.spain)
-        #expect(MapDockedPlacesStore(defaults: defaults).isDocked(Self.spain.url))
+        MapDockedPlacesStore(defaults: defaults, scope: StorageScope()).toggle(Self.spain)
+        #expect(MapDockedPlacesStore(defaults: defaults, scope: StorageScope()).isDocked(Self.spain.url))
     }
 
     @Test func everyWritePostsTheChange() {
-        let store = MapDockedPlacesStore(defaults: makeSuite())
+        let store = MapDockedPlacesStore(defaults: makeSuite(), scope: StorageScope())
         var posts = 0
         let observer = NotificationCenter.default.addObserver(
             forName: MapDockedPlacesStore.didChangeNotification, object: store, queue: nil
@@ -86,11 +86,12 @@ struct MapDockedPlacesTests {
     /// The page's pin is the store's, keyed by the place's public link.
     @Test func thePagesPinIsTheDocksToggle() {
         let defaults = makeSuite()
-        let pin = MapsFeatureBuilder.dockPin(for: Self.spain, store: MapDockedPlacesStore(defaults: defaults))
+        let pin = MapsFeatureBuilder.dockPin(for: Self.spain, store: MapDockedPlacesStore(defaults: defaults,
+        scope: StorageScope()))
         #expect(!pin.isFollowing())
         #expect(pin.toggle())
         // The map's own store reads the page's write.
-        #expect(MapDockedPlacesStore(defaults: defaults).entries == [Self.spain])
+        #expect(MapDockedPlacesStore(defaults: defaults, scope: StorageScope()).entries == [Self.spain])
         #expect(pin.isFollowing())
     }
 

@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import Foundation
 import MapsInterface
 import Testing
@@ -36,7 +37,7 @@ struct MapProfilePinServiceTests {
     /// cannot read each other's lists — `.standard` is one shared mutable
     /// object and these tests write to it.
     private func makeStore(_ name: String = UUID().uuidString) -> MapFavoritesStore {
-        MapFavoritesStore(defaults: UserDefaults(suiteName: name)!)
+        MapFavoritesStore(defaults: UserDefaults(suiteName: name)!, scope: StorageScope())
     }
 
     private func makeService(
@@ -134,7 +135,7 @@ struct MapProfilePinServiceTests {
         defaults.removePersistentDomain(forName: suite)
         defaults.set(["prof-7"], forKey: "maps.pinnedFavoriteProfileIDs")
         let service = makeService(
-            store: MapFavoritesStore(defaults: defaults), followed: [ProfileID("prof-9")]
+            store: MapFavoritesStore(defaults: defaults, scope: StorageScope()), followed: [ProfileID("prof-9")]
         )
 
         #expect(await service.categories(for: ProfileID("prof-7")) == [.dock])

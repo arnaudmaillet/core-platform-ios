@@ -87,7 +87,8 @@ struct FeedHapticRolesTests {
     /// past, again after coming back under, never without the finger.
     @Test func theShelfsPullIsArmedOncePerCrossing() {
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
-        let shelf = PostShelfSection(imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()), videoPlayback: nil)
+        let shelf = PostShelfSection(imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()), videoPlayback: nil,
+        bookmarks: PostBookmarkStore(scope: StorageScope()))
         shelf.frame = CGRect(x: 0, y: 0, width: 402, height: 800)
         window.addSubview(shelf)
         window.isHidden = false

@@ -486,8 +486,11 @@ struct BoostControlTests {
     /// toolbar's.
     @Test func feedTrailingRunIsEmptyWithoutAWallet() {
         let feed = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: InertFeedProvider()),
-            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+            viewModel: FeedViewModel(repository: InertFeedProvider(), unavailablePosts: UnavailablePosts()),
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            savedSounds: SavedSoundStore(scope: StorageScope()),
+            viewer: { nil }
         )
         feed.loadViewIfNeeded()
         #expect((feed.navigationItem.rightBarButtonItems ?? []).isEmpty)
@@ -523,12 +526,15 @@ struct BoostControlTests {
         let suite = "boost-control-tests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defaults.removePersistentDomain(forName: suite)
-        let wallet = WalletStore(defaults: defaults)
+        let wallet = WalletStore(defaults: defaults, scope: StorageScope())
         let feed = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: InertFeedProvider()),
+            viewModel: FeedViewModel(repository: InertFeedProvider(), unavailablePosts: UnavailablePosts()),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             wallet: wallet,
-            showsBalance: showsBalance
+            showsBalance: showsBalance,
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            savedSounds: SavedSoundStore(scope: StorageScope()),
+            viewer: { nil }
         )
         feed.loadViewIfNeeded()
         return (feed, wallet)

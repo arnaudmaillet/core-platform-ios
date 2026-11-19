@@ -1,8 +1,10 @@
 import CoreModels
 import CoreNavigation
+import CoreStorage
 import FeedInterface
 import MediaCore
 import PostGrid
+import PostSurfaces
 import Testing
 import Transitions
 import UIKit
@@ -190,7 +192,13 @@ struct HeroElectionTests {
         let tabs = UITabBarController()
         let builder = FeedFeatureBuilder(
             repository: SilentElectionProvider(),
-            imagePipeline: ImagePipeline(fetcher: SilentElectionFetcher())
+            imagePipeline: ImagePipeline(fetcher: SilentElectionFetcher()),
+            postDrafts: PostDraftStore(scope: StorageScope()),
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            viewHistory: PostViewHistoryStore(scope: StorageScope()),
+            unavailablePosts: UnavailablePosts(),
+            savedSounds: SavedSoundStore(scope: StorageScope()),
+            viewerProfile: { nil }
         )
 
         init() {

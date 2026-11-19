@@ -1,3 +1,4 @@
+import CoreStorage
 import Foundation
 import Testing
 @testable import Maps
@@ -16,7 +17,7 @@ struct MapPlaceFollowStoreTests {
     }
 
     @Test func togglingFollowsThenUnfollows() {
-        let store = MapPlaceFollowStore(defaults: makeSuite())
+        let store = MapPlaceFollowStore(defaults: makeSuite(), scope: StorageScope())
         #expect(!store.isFollowed("city:paris"))
         #expect(store.followedPlaceIDs.isEmpty)
 
@@ -32,7 +33,7 @@ struct MapPlaceFollowStoreTests {
     /// The active favorites list is the union of everything toggled ON —
     /// following one place never disturbs another.
     @Test func followsAccumulateIndependently() {
-        let store = MapPlaceFollowStore(defaults: makeSuite())
+        let store = MapPlaceFollowStore(defaults: makeSuite(), scope: StorageScope())
         store.toggle("city:paris")
         store.toggle("region:idf")
         store.toggle("country:spain")
@@ -43,15 +44,15 @@ struct MapPlaceFollowStoreTests {
     /// The set survives the store instance — it is the DEFAULTS that hold it.
     @Test func followsPersistAcrossInstances() {
         let defaults = makeSuite()
-        MapPlaceFollowStore(defaults: defaults).toggle("city:paris")
-        #expect(MapPlaceFollowStore(defaults: defaults).isFollowed("city:paris"))
+        MapPlaceFollowStore(defaults: defaults, scope: StorageScope()).toggle("city:paris")
+        #expect(MapPlaceFollowStore(defaults: defaults, scope: StorageScope()).isFollowed("city:paris"))
     }
 
     /// Every write posts the change notification, scoped to the store that
     /// wrote (parallel suites must not count each other's writes) — what the
     /// map observes to re-apply an active Favorites refinement.
     @Test func everyTogglePostsTheChangeNotification() {
-        let store = MapPlaceFollowStore(defaults: makeSuite())
+        let store = MapPlaceFollowStore(defaults: makeSuite(), scope: StorageScope())
         var posts = 0
         let observer = NotificationCenter.default.addObserver(
             forName: MapPlaceFollowStore.didChangeNotification, object: store, queue: nil

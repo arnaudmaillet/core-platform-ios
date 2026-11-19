@@ -1,5 +1,7 @@
 import CoreModels
+import CoreStorage
 import MediaCore
+import PostSurfaces
 import Testing
 import UIKit
 @testable import Feed
@@ -11,9 +13,12 @@ import UIKit
 struct SnapFirstPageLoaderTests {
     private func feed(_ provider: any FeedProviding) -> SnapFeedViewController {
         let controller = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: provider),
+            viewModel: FeedViewModel(repository: provider, unavailablePosts: UnavailablePosts()),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
-            reporting: SilentReporter()
+            reporting: SilentReporter(),
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            savedSounds: SavedSoundStore(scope: StorageScope()),
+            viewer: { nil }
         )
         controller.loadViewIfNeeded()
         controller.view.frame = CGRect(x: 0, y: 0, width: 390, height: 844)

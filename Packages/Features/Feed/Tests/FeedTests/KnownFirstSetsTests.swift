@@ -1,9 +1,11 @@
 import CoreModels
+import CoreStorage
 import EntityStore
 import FeedInterface
 import Foundation
 import MediaCore
 import PostGrid
+import PostSurfaces
 import Synchronization
 import Testing
 import UIKit
@@ -23,7 +25,7 @@ struct KnownFirstSetsTests {
         PostSetSurfaceViewController(
             style: style,
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
-            videoPlayback: nil,
+            videoPlayback: nil, bookmarks: PostBookmarkStore(scope: StorageScope()), withheldPosts: UnavailablePosts(),
             held: { id in held.contains(id.rawValue) ? Self.post(id.rawValue) : nil },
             hydrate: hydrate
         )
@@ -63,7 +65,13 @@ struct KnownFirstSetsTests {
         store.upsert(author)
         store.replacePost(post)
         let feed = FeedFeatureBuilder(
-            repository: EmptyFeed(), imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()), entities: store
+            repository: EmptyFeed(), imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            postDrafts: PostDraftStore(scope: StorageScope()), entities: store,
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            viewHistory: PostViewHistoryStore(scope: StorageScope()),
+            unavailablePosts: UnavailablePosts(),
+            savedSounds: SavedSoundStore(scope: StorageScope()),
+            viewerProfile: { nil }
         )
         #expect(feed.heldGalleryPost(PostID("p1")) != nil)
         #expect(feed.heldGalleryPost(PostID("p1"))?.reactionCount == nil, "an unknown count drew a zero")
@@ -81,7 +89,13 @@ struct KnownFirstSetsTests {
     @Test func aClusterWithAColdMemberOpensOnWhatIsHeld() {
         let held = Self.entry("rep")
         let builder = FeedFeatureBuilder(
-            repository: MirrorFeed(held: [held]), imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+            repository: MirrorFeed(held: [held]), imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            postDrafts: PostDraftStore(scope: StorageScope()),
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            viewHistory: PostViewHistoryStore(scope: StorageScope()),
+            unavailablePosts: UnavailablePosts(),
+            savedSounds: SavedSoundStore(scope: StorageScope()),
+            viewerProfile: { nil }
         )
         let feed = builder.makeSnapFeedViewController(postIDs: [PostID("rep"), PostID("cold")], ownsInteractiveDismissal: true)
         #expect((feed as? SnapFeedViewController)?.orderedIDs == [PostID("rep")], "the held representative waited")

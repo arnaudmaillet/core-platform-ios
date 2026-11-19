@@ -29,7 +29,7 @@ struct WalletStakesTests {
 
     @Test func aStakeIsActiveUntilItSettles() {
         let clock = Clock(Self.epoch)
-        let store = WalletStore(defaults: Self.defaults(), now: { clock.now })
+        let store = WalletStore(defaults: Self.defaults(), now: { clock.now }, scope: StorageScope())
         store.boost(targetID: "post-1", amount: 10)
 
         let active = store.stakes()
@@ -49,7 +49,7 @@ struct WalletStakesTests {
     /// Adding to a stake does not restart its clock.
     @Test func moreOnTheSamePostKeepsTheFirstStakesClock() {
         let clock = Clock(Self.epoch)
-        let store = WalletStore(defaults: Self.defaults(), now: { clock.now })
+        let store = WalletStore(defaults: Self.defaults(), now: { clock.now }, scope: StorageScope())
         store.boost(targetID: "post-1", amount: 10)
         clock.advance(by: 3600)
         store.boost(targetID: "post-1", amount: 10)
@@ -61,7 +61,7 @@ struct WalletStakesTests {
 
     @Test func activeStakesComeFirstSoonestFirstThenSettledNewestFirst() {
         let clock = Clock(Self.epoch)
-        let store = WalletStore(defaults: Self.defaults(), now: { clock.now })
+        let store = WalletStore(defaults: Self.defaults(), now: { clock.now }, scope: StorageScope())
         store.boost(targetID: "old", amount: 10)
         clock.advance(by: 3600)
         store.boost(targetID: "older-settled-first", amount: 10)
@@ -74,7 +74,7 @@ struct WalletStakesTests {
     }
 
     @Test func anUndoneStakeLeavesNothingToSettle() {
-        let store = WalletStore(defaults: Self.defaults(), now: { Self.epoch })
+        let store = WalletStore(defaults: Self.defaults(), now: { Self.epoch }, scope: StorageScope())
         store.boost(targetID: "post-1", amount: 10)
         _ = store.undoBoost(targetID: "post-1", amount: 10)
         #expect(store.stakes().isEmpty)
@@ -98,7 +98,7 @@ struct WalletStakesTests {
 
     @Test func theDemoLedgerSeedsOnceWithActiveAndSettledStakes() {
         let defaults = Self.defaults()
-        let store = WalletStore(defaults: defaults, now: { Self.epoch })
+        let store = WalletStore(defaults: defaults, now: { Self.epoch }, scope: StorageScope())
         let balance = store.balance
         let ids = (0..<8).map { "post-\($0)" }
         store.seedDemoStakesIfNeeded(targetIDs: ids)
@@ -117,7 +117,7 @@ struct WalletStakesTests {
         let defaults = Self.defaults()
         defaults.set(true, forKey: "wallet.seeded")
         defaults.set(["legacy": 30], forKey: "wallet.boostTotals")
-        let store = WalletStore(defaults: defaults, now: { Self.epoch })
+        let store = WalletStore(defaults: defaults, now: { Self.epoch }, scope: StorageScope())
         #expect(store.stakes().first?.isSettled == true)
     }
 }

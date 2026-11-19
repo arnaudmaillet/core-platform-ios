@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import MediaCore
 import MediaPlayback
 import Testing
@@ -75,9 +76,12 @@ struct SnapViewportPlaybackSpecTests {
 
         init(_ models: [FeedItemDisplayModel]) {
             feed = SnapFeedViewController(
-                viewModel: FeedViewModel(repository: MuteProvider()),
+                viewModel: FeedViewModel(repository: MuteProvider(), unavailablePosts: UnavailablePosts()),
                 imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
-                makeCommentsPanelContent: { _ in UIViewController() }
+                makeCommentsPanelContent: { _ in UIViewController() },
+                bookmarks: PostBookmarkStore(scope: StorageScope()),
+                savedSounds: SavedSoundStore(scope: StorageScope()),
+                viewer: { nil }
             )
             feed.loadViewIfNeeded()
             feed.view.frame = CGRect(x: 0, y: 0, width: 390, height: 844)

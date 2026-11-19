@@ -1,5 +1,6 @@
 import CoreModels
 import CoreNavigation
+import CoreStorage
 import MediaCore
 import PostGrid
 import Testing
@@ -30,14 +31,20 @@ struct PushedListBackSwipeTests {
         let pipeline = ImagePipeline(fetcher: SilentFetcher())
         return [
             ("Discover mosaic", DiscoverGalleryViewController(
-                imagePipeline: pipeline, videoPlayback: nil, header: header(), openPost: nil
+                imagePipeline: pipeline, videoPlayback: nil,
+                bookmarks: PostBookmarkStore(scope: StorageScope()),
+                withheldPosts: UnavailablePosts(), header: header(), openPost: nil
             )),
             ("Following list", PushedPostListViewController(
-                kind: .following, imagePipeline: pipeline, videoPlayback: nil, staking: nil,
+                kind: .following, imagePipeline: pipeline, videoPlayback: nil,
+                bookmarks: PostBookmarkStore(scope: StorageScope()),
+                withheldPosts: UnavailablePosts(), staking: nil,
                 header: header(), openPost: nil
             )),
             ("Friends list", PushedPostListViewController(
-                kind: .friends, imagePipeline: pipeline, videoPlayback: nil, staking: nil,
+                kind: .friends, imagePipeline: pipeline, videoPlayback: nil,
+                bookmarks: PostBookmarkStore(scope: StorageScope()),
+                withheldPosts: UnavailablePosts(), staking: nil,
                 header: header(), openPost: nil
             ))
         ]

@@ -11,17 +11,36 @@ import Testing
 /// excluded): no `static let shared = <Type>(…)` declaration, no
 /// `<Type>.shared`, and no `<Type> = .shared` default value.
 ///
+/// And ONE `StorageScope` (#2376): the stores observe their scope's change
+/// notification with THEIR scope as the object, so a store built over a
+/// second scope would never follow the viewer, and nothing would visibly
+/// fail. `StorageScope(` appears once in production code, in
+/// `App/Composition/AppContainer.swift`, and no `scope: StorageScope = …`
+/// default lets a store pick its own.
+///
 /// A repository guard (`RepoGuards`, #2371): every pull request runs it.
 struct ViewerStoreGuardTests {
     /// The per-viewer stores.
     static let viewerTypes: [String] = [
+        "StorageScope",
+        "PostBookmarkStore",
+        "PostViewHistoryStore",
         "SectionPresenceStore",
+        "TeenProtections",
+        "UnavailablePosts",
         "VoicePlayedStore",
+        "PublishedVideoFiles",
+        "WalletStore",
+        "LikeOutbox",
+        "PostDraftStore",
+        "SavedSoundStore",
+        "MapDockedPlacesStore",
+        "MapFavoritesStore",
+        "MapPlaceFollowStore",
     ]
 
-    /// Types whose `shared` is still DECLARED, with no caller left: CoreStorage
-    /// loses it in the next stage of #2376.
-    static let declarationsStillThere: Set<String> = ["SectionPresenceStore"]
+    /// The one file that builds the app's `StorageScope`.
+    static let scopeOwner = "App/Composition/AppContainer.swift"
 
     /// `"<file path relative to the repository>: <type>"` → why that file may
     /// still name the type's `shared`. Empty, and meant to stay so.
@@ -52,6 +71,17 @@ struct ViewerStoreGuardTests {
         let defaultValue = #"\b"# + type + #"\??\s*=\s*\.shared\b"#
         return code.range(of: reference, options: .regularExpression) != nil
             || code.range(of: defaultValue, options: .regularExpression) != nil
+    }
+
+    /// How many times `code` builds a `StorageScope`.
+    static func scopeConstructions(in code: String) -> Int {
+        let regex = try! NSRegularExpression(pattern: #"\bStorageScope\s*\("#)
+        return regex.numberOfMatches(in: code, range: NSRange(code.startIndex..., in: code))
+    }
+
+    /// Whether `code` gives a `StorageScope` parameter a default value.
+    static func defaultsAScope(in code: String) -> Bool {
+        code.range(of: #":\s*StorageScope\s*=\s*"#, options: .regularExpression) != nil
     }
 
     static var root: URL {
@@ -95,8 +125,15 @@ struct ViewerStoreGuardTests {
         let other = AStore.shared // a comment naming AStore.shared
         init(store: AStore? = .shared) {}
         let fine = AStore(defaults: .standard)
+        init(scope: StorageScope = .shared) {}
+        let scope = StorageScope()
+        let owner = StorageScope.Owner.guest
         """
         let code = Self.code(text)
+        #expect(Self.defaultsAScope(in: code))
+        #expect(!Self.defaultsAScope(in: "init(scope: StorageScope) {}"))
+        #expect(Self.scopeConstructions(in: code) == 1)
+        #expect(Self.scopeConstructions(in: Self.code("/// `StorageScope(owner:)` in a doc comment")) == 0)
         #expect(Self.declaresShared("AStore", in: code))
         #expect(Self.usesShared("AStore", in: code))
         #expect(!Self.declaresShared("AStore", in: "static let sharedKey = AStore.key"))
@@ -114,11 +151,23 @@ struct ViewerStoreGuardTests {
         for file in files {
             for type in Self.viewerTypes where Self.allowed["\(file.path): \(type)"] == nil {
                 if Self.usesShared(type, in: file.code) { found.append("\(file.path): \(type).shared") }
-                if !Self.declarationsStillThere.contains(type), Self.declaresShared(type, in: file.code) {
-                    found.append("\(file.path): static shared \(type)")
-                }
+                if Self.declaresShared(type, in: file.code) { found.append("\(file.path): static shared \(type)") }
             }
         }
         #expect(found.isEmpty, "A per-viewer store reached through a global — hand it in from AppContainer: \(found)")
+    }
+
+    @Test func theAppBuildsOneStorageScope() throws {
+        let files = Self.sources()
+        let owner = try #require(files.first { $0.path == Self.scopeOwner }, "\(Self.scopeOwner) was not found")
+        #expect(Self.scopeConstructions(in: owner.code) == 1, "AppContainer builds the app's one StorageScope, once")
+
+        let elsewhere = files
+            .filter { $0.path != Self.scopeOwner && Self.scopeConstructions(in: $0.code) > 0 }
+            .map(\.path)
+        #expect(elsewhere.isEmpty, "A StorageScope built outside AppContainer never follows the viewer: \(elsewhere)")
+
+        let defaulted = files.filter { Self.defaultsAScope(in: $0.code) }.map(\.path)
+        #expect(defaulted.isEmpty, "A store's scope is handed in, never defaulted: \(defaulted)")
     }
 }

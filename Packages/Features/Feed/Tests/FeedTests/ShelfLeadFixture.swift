@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import Foundation
 import MediaCore
 import MediaPlayback
@@ -20,7 +21,8 @@ final class ShelfLeadFixture {
         videoPlayback: VideoPlaybackController? = nil,
         width: CGFloat = 393
     ) {
-        shelf = PostShelfSection(imagePipeline: pipeline, videoPlayback: videoPlayback)
+        shelf = PostShelfSection(imagePipeline: pipeline, videoPlayback: videoPlayback,
+        bookmarks: PostBookmarkStore(scope: StorageScope()))
         stack = GridLeadStack(sections: [shelf])
         shelf.title = "Following"
         stack.listTitle = "For you"

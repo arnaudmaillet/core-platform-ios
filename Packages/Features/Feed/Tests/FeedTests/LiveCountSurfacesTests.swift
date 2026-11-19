@@ -19,7 +19,7 @@ struct LiveCountSurfacesTests {
         let name = "live-count-surfaces-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: name)!
         defaults.removePersistentDomain(forName: name)
-        return WalletStore(defaults: defaults)
+        return WalletStore(defaults: defaults, scope: StorageScope())
     }
 
     private static func post(_ id: String, likes: Int64?) -> GalleryPost {
@@ -50,10 +50,11 @@ struct LiveCountSurfacesTests {
         let surface = PostSetSurfaceViewController(
             style: .cards,
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
-            videoPlayback: nil,
+            videoPlayback: nil, bookmarks: PostBookmarkStore(scope: StorageScope()), withheldPosts: UnavailablePosts(),
             hydrate: { ids in ids.compactMap { byID[$0] } }
         )
-        surface.staking = PostCardStaking(wallet: Self.wallet(), entities: entities)
+        surface.staking = PostCardStaking(wallet: Self.wallet(), entities: entities,
+        saves: PostBookmarkStore(scope: StorageScope()))
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
         let navigation = UINavigationController(rootViewController: surface)
         window.rootViewController = navigation
@@ -89,8 +90,11 @@ struct LiveCountSurfacesTests {
     @Test func aFollowingCardsFlightAndStandInsDrawTheLiveCount() {
         let entities = EntityStore()
         let lead = ShelfLeadFixture(pipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()), videoPlayback: nil)
-        lead.shelf.staking = PostCardStaking(wallet: Self.wallet(), entities: entities)
-        let page = PostGridPageView(imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()), style: .discover, videoPlayback: nil)
+        lead.shelf.staking = PostCardStaking(wallet: Self.wallet(), entities: entities,
+        saves: PostBookmarkStore(scope: StorageScope()))
+        let page = PostGridPageView(imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()), style: .discover, videoPlayback: nil,
+        bookmarks: PostBookmarkStore(scope: StorageScope()),
+        withheldPosts: UnavailablePosts())
         let card = Self.post("c1", likes: 123)
         entities.mergeCounts([card.id: PostCounts(likes: 123)])
 

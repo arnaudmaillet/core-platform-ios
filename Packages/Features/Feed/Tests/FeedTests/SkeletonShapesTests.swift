@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import DesignSystem
 import Foundation
 import MediaCore
@@ -15,7 +16,9 @@ import UIKit
 struct SkeletonShapesTests {
     @Test func discoversColdSkeletonIsItsMosaic() {
         let time = ManualLoadingClock()
-        let page = PostGridPageView(imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()), style: .discover)
+        let page = PostGridPageView(imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()), style: .discover,
+        bookmarks: PostBookmarkStore(scope: StorageScope()),
+        withheldPosts: UnavailablePosts())
         page.skeletonClock = time.clock
         page.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
         page.layoutIfNeeded()
@@ -34,7 +37,8 @@ struct SkeletonShapesTests {
         let width: CGFloat = 393
         #expect(PostShelfSection.loadingHeight(forWidth: width, textRow: true)
             > PostShelfSection.loadingHeight(forWidth: width))
-        let shelf = PostShelfSection(imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()), videoPlayback: nil)
+        let shelf = PostShelfSection(imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()), videoPlayback: nil,
+        bookmarks: PostBookmarkStore(scope: StorageScope()))
         _ = shelf.apply(.init(title: "Following", posts: [], isLoading: true))
         #expect(shelf.preferredHeight(forWidth: width) == PostShelfSection.loadingHeight(forWidth: width))
         shelf.skeletonHasTextRow = true
@@ -46,7 +50,7 @@ struct SkeletonShapesTests {
         let surface = PostSetSurfaceViewController(
             style: .discover,
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
-            videoPlayback: nil,
+            videoPlayback: nil, bookmarks: PostBookmarkStore(scope: StorageScope()), withheldPosts: UnavailablePosts(),
             // Posts that never hydrate in the test's time.
             hydrate: { _ in
                 try? await Task.sleep(for: .seconds(3600))

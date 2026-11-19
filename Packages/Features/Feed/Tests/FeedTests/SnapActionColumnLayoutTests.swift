@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import DesignSystem
 import MediaCore
 import Testing
@@ -787,9 +788,12 @@ struct SnapActionColumnLayoutTests {
     /// it, so it is what truncates first.
     @Test func theThreadsDayRidesTheBarLeftOfTheLikes() throws {
         let controller = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: ColumnSilentProvider()),
+            viewModel: FeedViewModel(repository: ColumnSilentProvider(), unavailablePosts: UnavailablePosts()),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
-            reporting: nil
+            reporting: nil,
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            savedSounds: SavedSoundStore(scope: StorageScope()),
+            viewer: { nil }
         )
         controller.loadViewIfNeeded()
         controller.view.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
@@ -825,9 +829,12 @@ struct SnapActionColumnLayoutTests {
     /// with nowhere to file a report, no Report.
     @Test func theShareSheetHoldsWhatTheMenuDid() {
         let controller = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: ColumnSilentProvider()),
+            viewModel: FeedViewModel(repository: ColumnSilentProvider(), unavailablePosts: UnavailablePosts()),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
-            reporting: nil
+            reporting: nil,
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            savedSounds: SavedSoundStore(scope: StorageScope()),
+            viewer: { nil }
         )
         #expect(controller.shareSheetActions(for: PostID("p1")).map(\.title) == ["Not interested"])
     }

@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import Foundation
 import MediaCore
 import Testing
@@ -51,7 +52,10 @@ struct SnapGonePostTests {
 
     private func makeFeed(_ viewModel: FeedViewModel) -> SnapFeedViewController {
         let controller = SnapFeedViewController(
-            viewModel: viewModel, imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+            viewModel: viewModel, imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            savedSounds: SavedSoundStore(scope: StorageScope()),
+            viewer: { nil }
         )
         controller.loadViewIfNeeded()
         controller.view.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
@@ -154,7 +158,7 @@ struct SnapGonePostTests {
     @Test func aNewPostAtTheIndexOnShowIsAPageChange() async throws {
         let server = Server()
         server.window = ids("a", "b", "c")
-        let viewModel = FeedViewModel(repository: server)
+        let viewModel = FeedViewModel(repository: server, unavailablePosts: UnavailablePosts())
         let feed = makeFeed(viewModel)
         #expect(await eventually { feed.orderedIDs == ids("a", "b", "c") }, "the feed never loaded")
         try settle(feed, on: 0)
@@ -199,7 +203,7 @@ struct SnapGonePostTests {
     /// A page with no model is never a text page: unknown is not text.
     @Test func aMissingModelIsNeverAText() throws {
         let server = Server()
-        let feed = makeFeed(FeedViewModel(repository: server))
+        let feed = makeFeed(FeedViewModel(repository: server, unavailablePosts: UnavailablePosts()))
         #expect(!feed.isTextPage(PostID("nowhere")))
         #expect(!feed.isTextPage(nil))
         withExtendedLifetime(feed) {}

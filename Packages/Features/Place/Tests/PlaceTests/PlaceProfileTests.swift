@@ -1,5 +1,6 @@
 import CoreModels
 import CoreNavigation
+import PostSurfaces
 import Transitions
 import CoreStorage
 import DesignSystem
@@ -47,7 +48,10 @@ struct PlaceProfileTests {
             videoPlayback: nil,
             following: following,
             wallet: wallet,
-            loadPosts: { posts }, presence: SectionPresenceStore(scope: StorageScope()),
+            loadPosts: { posts },
+            presence: SectionPresenceStore(scope: StorageScope()),
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            withheldPosts: UnavailablePosts(),
             openPost: { _, _, _ in }
         )
         // The reader's reveal, as `PlaceFeatureBuilder` wires it, reduced to
@@ -216,7 +220,10 @@ struct PlaceProfileTests {
             postIDs: [], placeName: "Paris • City Cluster",
             identity: PlaceIdentity(flag: flag, subtitle: "France"),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
-            videoPlayback: nil, loadPosts: { [] }, presence: SectionPresenceStore(scope: StorageScope()), openPost: { _, _, _ in }
+            videoPlayback: nil, loadPosts: { [] },
+            presence: SectionPresenceStore(scope: StorageScope()),
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            withheldPosts: UnavailablePosts(), openPost: { _, _, _ in }
         )
         laidOut(profile)
         #expect(profile.debugFlag.image === flag)
@@ -551,9 +558,12 @@ struct PlaceProfileTests {
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             videoPlayback: nil,
             following: ClusterGalleryFollowing(isFollowing: { false }, toggle: { true }),
-            wallet: WalletStore(defaults: Self.makeWalletDefaults()),
+            wallet: WalletStore(defaults: Self.makeWalletDefaults(), scope: StorageScope()),
             showsBalance: false,
-            loadPosts: { [] }, presence: SectionPresenceStore(scope: StorageScope()), openPost: { _, _, _ in }
+            loadPosts: { [] },
+            presence: SectionPresenceStore(scope: StorageScope()),
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            withheldPosts: UnavailablePosts(), openPost: { _, _, _ in }
         )
         laidOut(profile)
         #expect(profile.debugTrailingItems.isEmpty, "a guest's place page shows the balance")
@@ -575,8 +585,11 @@ struct PlaceProfileTests {
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             videoPlayback: nil,
             following: ClusterGalleryFollowing(isFollowing: { false }, toggle: { true }),
-            wallet: WalletStore(defaults: Self.makeWalletDefaults()),
-            loadPosts: { [] }, presence: SectionPresenceStore(scope: StorageScope()), openPost: { _, _, _ in }
+            wallet: WalletStore(defaults: Self.makeWalletDefaults(), scope: StorageScope()),
+            loadPosts: { [] },
+            presence: SectionPresenceStore(scope: StorageScope()),
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            withheldPosts: UnavailablePosts(), openPost: { _, _, _ in }
         )
         laidOut(profile)
         // No posts, no banner: the bannerless page (its skeleton until then).
@@ -636,7 +649,10 @@ struct PlaceProfileTests {
             ),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             videoPlayback: nil,
-            loadPosts: { [] }, presence: SectionPresenceStore(scope: StorageScope()), openPost: { _, _, _ in }
+            loadPosts: { [] },
+            presence: SectionPresenceStore(scope: StorageScope()),
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            withheldPosts: UnavailablePosts(), openPost: { _, _, _ in }
         )
         var toasts: [String] = []
         profile.confirmDock = { _, docked in toasts.append(PlaceProfileViewController.dockToast(docked: docked)) }
@@ -767,7 +783,10 @@ struct PlaceProfileTests {
             placeName: "Paris • City Cluster",
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             videoPlayback: nil,
-            loadPosts: { try await answers.next() }, presence: SectionPresenceStore(scope: StorageScope()),
+            loadPosts: { try await answers.next() },
+            presence: SectionPresenceStore(scope: StorageScope()),
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            withheldPosts: UnavailablePosts(),
             openPost: { _, _, _ in }
         )
     }

@@ -1,7 +1,9 @@
 import CoreModels
+import CoreStorage
 import DesignSystem
 import Foundation
 import MediaCore
+import PostSurfaces
 import Testing
 import UIKit
 @testable import Feed
@@ -129,11 +131,14 @@ struct FailedFirstLoadRetryTests {
 
     @Test func aFailedTimelineOffersTryAgainWhichReloadsIt() async throws {
         let feed = FlakyFeed()
-        let viewModel = FeedViewModel(repository: feed)
+        let viewModel = FeedViewModel(repository: feed, unavailablePosts: UnavailablePosts())
         let screen = SnapFeedViewController(
             viewModel: viewModel,
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
-            makeCommentsPanelContent: { _ in UIViewController() }
+            makeCommentsPanelContent: { _ in UIViewController() },
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            savedSounds: SavedSoundStore(scope: StorageScope()),
+            viewer: { nil }
         )
         screen.loadViewIfNeeded()
         var states: [FeedViewModel.RenderState] = []

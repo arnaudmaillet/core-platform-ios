@@ -191,7 +191,7 @@ public final class SavedPostsSync: PostSaveSyncing {
         store: PostBookmarkStore,
         outbox: SaveOutbox,
         transport: any SavedPostsTransport,
-        scope: StorageScope = .shared,
+        scope: StorageScope,
         defaults: UserDefaults = .standard,
         retryDelays: [TimeInterval] = [2, 5, 15, 60],
         listFreshness: TimeInterval = 30,

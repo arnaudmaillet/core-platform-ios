@@ -122,7 +122,7 @@ public actor AccountRepository: AccountProviding, AccountLifecycleManaging, Acco
     public init(
         accountClient: any Account_V1_AccountServiceClientInterface,
         authSession: any AuthSessionProviding,
-        teenProtections: TeenProtections = .shared
+        teenProtections: TeenProtections
     ) {
         self.accountClient = accountClient
         self.authSession = authSession

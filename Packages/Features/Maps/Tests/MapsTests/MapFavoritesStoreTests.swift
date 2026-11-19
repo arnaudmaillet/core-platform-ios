@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import Foundation
 import MapsInterface
 import Testing
@@ -14,7 +15,7 @@ struct MapFavoritesStoreTests {
         let suite = "maps-favorites-tests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defaults.removePersistentDomain(forName: suite)
-        return MapFavoritesStore(defaults: defaults)
+        return MapFavoritesStore(defaults: defaults, scope: StorageScope())
     }
 
     @Test func startsUncuratedAsNilNotEmpty() {
@@ -57,7 +58,7 @@ struct MapFavoritesStoreTests {
         defaults.removePersistentDomain(forName: suite)
         defaults.set(["prof-7"], forKey: "maps.pinnedFavoriteProfileIDs")
 
-        let store = MapFavoritesStore(defaults: defaults)
+        let store = MapFavoritesStore(defaults: defaults, scope: StorageScope())
 
         #expect(store.pinnedProfileIDs(in: .dock) == [ProfileID("prof-7")])
         // The two rows are new lists: an old install has never curated them,

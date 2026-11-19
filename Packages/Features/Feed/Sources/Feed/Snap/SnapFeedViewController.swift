@@ -109,8 +109,10 @@ final class SnapFeedViewController: UIViewController {
     /// still exposes no save API — but the profile now has a Saved tab, and two
     /// surfaces reading one list is precisely what a store is for. See
     /// `PostBookmarkStore` for what a client-owned list can and cannot claim.
-    /// The app's one (`shared`) outside tests.
+    /// The app's one pile outside tests (#2376).
     private let bookmarks: PostBookmarkStore
+    /// The sounds the viewer saved, for the sound sheet (#2376).
+    private let savedSounds: SavedSoundStore
     /// Keeps the save glyph on the saved fact of the post it draws (#1067):
     /// a save or unsave made on another surface — a card, a grid behind a
     /// sheet, the post's "..." elsewhere — writes the EntityStore's fact
@@ -494,7 +496,9 @@ final class SnapFeedViewController: UIViewController {
         followRelations: (any SocialGraphReading)? = nil,
         followEvents: FollowGraphEvents? = nil,
         entities: any EntityReading & EntityWriting = EntityStore(),
-        bookmarks: PostBookmarkStore = .shared,
+        bookmarks: PostBookmarkStore,
+        savedSounds: SavedSoundStore,
+        viewer: @escaping @MainActor () -> ProfileID?,
         soundProvider: (any PostSoundProviding)? = nil,
         useSound: (@MainActor (PostSound) -> Void)? = nil,
         openFeedHero: (@MainActor ([PostID], UIViewController, SnapFeedHeroOrigin) -> Void)? = nil,
@@ -516,8 +520,11 @@ final class SnapFeedViewController: UIViewController {
         self.makeWalletSheet = makeWalletSheet
         self.showsBalance = showsBalance
         self.reporting = reporting
-        self.followStore = SnapAuthorFollowStore(writer: socialGraph, reader: followRelations, entities: entities)
+        self.followStore = SnapAuthorFollowStore(
+            writer: socialGraph, reader: followRelations, entities: entities, viewer: viewer
+        )
         self.bookmarks = bookmarks
+        self.savedSounds = savedSounds
         super.init(nibName: nil, bundle: nil)
         savedObservation = entities.observePosts { [weak self] change in
             // The footer like's count moves with the store (#1924).
@@ -1229,7 +1236,7 @@ final class SnapFeedViewController: UIViewController {
                 QAWait.until("-save-elsewhere", { [weak self] in self?.activeModel != nil }) { [weak self] in
                     guard let self, let id = self.activeModel?.id else { return }
                     let before = self.drawnBookmarkSymbol
-                    let saved = PostBookmarkStore.shared.toggle(id.rawValue)
+                    let saved = self.bookmarks.toggle(id.rawValue)
                     print("[qa] -save-elsewhere: \(id.rawValue) saved=\(saved) glyph \(before) -> \(self.drawnBookmarkSymbol)")
                 }
             }
@@ -4594,7 +4601,7 @@ final class SnapFeedViewController: UIViewController {
 
     /// Where every post the viewer opens or swipes onto is recorded — the
     /// profile's History tab (#1344). Nil records nothing (tests, previews);
-    /// the app's feeds get `PostViewHistoryStore.shared` from the builder.
+    /// the app's feeds get the app's one pile from the builder (#2376).
     ///
     /// ⚠️ ON ACTIVATION, NO DWELL (the owner, 2026-10-17: "tous les posts
     /// consultés/ouverts, comme Instagram ou TikTok"). A 2 s dwell missed
@@ -4797,6 +4804,8 @@ final class SnapFeedViewController: UIViewController {
             sections: content.sections,
             tiles: content.tiles,
             imagePipeline: imagePipeline,
+            savedSounds: savedSounds,
+            bookmarks: bookmarks,
             // The tiles play on the app's one pool, beside this page (#884).
             videoPlayback: videoPlayback,
             // This post: set to the sound, counted, shown nowhere (#1147).

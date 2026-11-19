@@ -61,6 +61,7 @@ extension AppContainer {
             homeCountry: "FR",
             wallet: walletStore,
             unlocks: unlocks,
+            teen: teenProtections,
             activity: CountryAccessService.mockActivity(in: mockBackend),
             isMember: { [unowned self] in self.memberGate.isMember },
             locator: currentCountry,
@@ -144,7 +145,9 @@ extension AppContainer {
             locator: currentCountry,
             // The pins of the last viewports, so a cold start opens the map on
             // its markers (#893).
-            localStore: localStore
+            localStore: localStore,
+            // The map's own stores are the active profile's (#2376).
+            storageScope: storageScope
         )
     }
 

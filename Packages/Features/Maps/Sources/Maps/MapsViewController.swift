@@ -24,8 +24,8 @@ import WalletInterface
 /// The pin-tap hero transition and the live-preview video pool arrive in Step B
 /// (the `didSelect` and annotation-view seams are marked below).
 final class MapsViewController: UIViewController {
-    /// The places pinned to the dock (#1598).
-    private let dockedPlaces = MapDockedPlacesStore()
+    /// The places pinned to the dock (#1598): the builder's one store.
+    private let dockedPlaces: MapDockedPlacesStore
     #if DEBUG
     /// `-maps-offer-country` ran (#1600).
     var didDebugOfferCountry = false
@@ -429,6 +429,7 @@ final class MapsViewController: UIViewController {
         viewModel: MapsViewModel,
         favoritesRepository: any MapFavoritesProviding,
         pinService: MapProfilePinService,
+        dockedPlaces: MapDockedPlacesStore,
         imagePipeline: ImagePipeline,
         iconCatalog: (any AnimatedIconProviding)? = nil,
         previewCatalog: AnimatedIconCatalog? = nil,
@@ -465,6 +466,7 @@ final class MapsViewController: UIViewController {
         self.viewModel = viewModel
         self.favoritesRepository = favoritesRepository
         self.pinService = pinService
+        self.dockedPlaces = dockedPlaces
         self.imagePipeline = imagePipeline
         self.iconCatalog = iconCatalog
         self.previewCatalog = previewCatalog

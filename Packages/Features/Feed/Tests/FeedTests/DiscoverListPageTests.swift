@@ -38,7 +38,9 @@ struct DiscoverListPageTests {
     }
 
     private func page(_ posts: [GalleryPost], complete: Bool = true) -> PostGridPageView {
-        let page = PostGridPageView(imagePipeline: pipeline(), style: .discover)
+        let page = PostGridPageView(imagePipeline: pipeline(), style: .discover,
+        bookmarks: PostBookmarkStore(scope: StorageScope()),
+        withheldPosts: UnavailablePosts())
         // TALL, so the first run of cards AND the first chunk are realized:
         // three media cards alone can outgrow a phone's height, and the hero
         // questions below read realized cells.
@@ -297,7 +299,9 @@ struct DiscoverListPageTests {
     }
 
     private func pairedPage(_ posts: [GalleryPost]) -> PostGridPageView {
-        let page = PostGridPageView(imagePipeline: pipeline(), style: .discover)
+        let page = PostGridPageView(imagePipeline: pipeline(), style: .discover,
+        bookmarks: PostBookmarkStore(scope: StorageScope()),
+        withheldPosts: UnavailablePosts())
         page.frame = CGRect(x: 0, y: 0, width: 393, height: 6000)
         page.setCorpusComplete(true)
         page.render(.content(posts))
@@ -390,7 +394,9 @@ struct DiscoverListPageTests {
     /// Landings stay inserts with blocks in the list.
     @Test func pairedPagesLandAsInserts() {
         let posts = verticalCorpus(90)
-        let page = PostGridPageView(imagePipeline: pipeline(), style: .discover)
+        let page = PostGridPageView(imagePipeline: pipeline(), style: .discover,
+        bookmarks: PostBookmarkStore(scope: StorageScope()),
+        withheldPosts: UnavailablePosts())
         page.frame = CGRect(x: 0, y: 0, width: 393, height: 3000)
         page.setCorpusComplete(false)
         page.render(.content(Array(posts[..<25])))
@@ -439,7 +445,7 @@ struct DiscoverGalleryTests {
         let suite = "discover-gallery-tests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defaults.removePersistentDomain(forName: suite)
-        return WalletStore(defaults: defaults)
+        return WalletStore(defaults: defaults, scope: StorageScope())
     }
 
     private static func gallery(
@@ -448,7 +454,7 @@ struct DiscoverGalleryTests {
     ) -> DiscoverGalleryViewController {
         DiscoverGalleryViewController(
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
-            videoPlayback: nil,
+            videoPlayback: nil, bookmarks: PostBookmarkStore(scope: StorageScope()), withheldPosts: UnavailablePosts(),
             header: PushedScreenHeader(wallet: wallet, makeWalletSheet: nil, router: nil),
             openPost: openPost
         )

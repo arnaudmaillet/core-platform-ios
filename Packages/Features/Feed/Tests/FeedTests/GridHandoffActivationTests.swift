@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import Foundation
 import MediaCore
 import MediaPlayback
@@ -29,7 +30,9 @@ struct GridHandoffActivationTests {
         PostGridPageView(
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             style: .discover,
-            videoPlayback: VideoPlaybackController(source: FixedVideoSource())
+            videoPlayback: VideoPlaybackController(source: FixedVideoSource()),
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            withheldPosts: UnavailablePosts()
         )
     }
 

@@ -1,6 +1,8 @@
+import CoreStorage
 import MediaCore
 import CoreModels
 import FeedInterface
+import PostSurfaces
 import Testing
 @testable import Feed
 
@@ -27,7 +29,13 @@ struct SnapFeedPresentationTests {
     private func makeBuilder() -> FeedFeatureBuilder {
         FeedFeatureBuilder(
             repository: StubFeedProvider(),
-            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            postDrafts: PostDraftStore(scope: StorageScope()),
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            viewHistory: PostViewHistoryStore(scope: StorageScope()),
+            unavailablePosts: UnavailablePosts(),
+            savedSounds: SavedSoundStore(scope: StorageScope()),
+            viewerProfile: { nil }
         )
     }
 }

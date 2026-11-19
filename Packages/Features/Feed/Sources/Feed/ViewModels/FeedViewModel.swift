@@ -211,11 +211,11 @@ public final class FeedViewModel {
         router: (any Router)? = nil,
         commentPreferences: MediaCommentPreferencesStore = .standard,
         entities: (any EntityReading & EntityWriting)? = nil,
-        unavailablePosts: UnavailablePosts? = nil,
+        unavailablePosts: UnavailablePosts,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.entities = entities ?? EntityStore()
-        self.unavailablePosts = unavailablePosts ?? UnavailablePosts()
+        self.unavailablePosts = unavailablePosts
         self.commentPreferences = commentPreferences
         self.repository = repository
         self.cacheRevalidation = cacheRevalidation

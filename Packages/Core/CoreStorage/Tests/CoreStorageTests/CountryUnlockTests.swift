@@ -8,12 +8,12 @@ struct CountryUnlockTests {
     private func defaults() -> UserDefaults { UserDefaults(suiteName: UUID().uuidString)! }
 
     @Test func aFreshWalletHasTheSeededGems() {
-        let wallet = WalletStore(defaults: defaults())
+        let wallet = WalletStore(defaults: defaults(), scope: StorageScope())
         #expect(wallet.snapshot().gems == WalletStore.Policy.seededGems)
     }
 
     @Test func spendingGemsIsAllOrNothing() {
-        let wallet = WalletStore(defaults: defaults())
+        let wallet = WalletStore(defaults: defaults(), scope: StorageScope())
         #expect(wallet.spendGems(30) == .spent(remaining: WalletStore.Policy.seededGems - 30))
         #expect(wallet.snapshot().gems == WalletStore.Policy.seededGems - 30)
         #expect(wallet.spendGems(1_000) == .insufficient(gems: WalletStore.Policy.seededGems - 30))

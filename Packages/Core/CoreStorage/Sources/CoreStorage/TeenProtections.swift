@@ -12,9 +12,10 @@ import Foundation
 /// The age comes from `account.v1`'s age bracket, recorded whenever the app
 /// reads the account; a guest, or an account with no date of birth, is not
 /// treated as a teen.
+///
+/// ONE instance in the app (`AppContainer.teenProtections`, #2376), cleared on
+/// every account change by `ViewerStorageBinding`.
 public final class TeenProtections: @unchecked Sendable {
-    public static let shared = TeenProtections()
-
     /// The daily limit a teen account starts with on a device, in minutes.
     public static let defaultDailyLimitMinutes = 60
 
@@ -56,9 +57,21 @@ public final class TeenProtections: @unchecked Sendable {
         }
     }
 
-    /// Signed out, or a guest: nobody here is known to be a teen.
+    /// Signed out, a guest, or another account not read yet: nobody here is
+    /// known to be a teen.
     public func clear() {
         lock.withLock {
+            defaults.set(false, forKey: minorKey)
+            defaults.removeObject(forKey: accountKey)
+        }
+    }
+
+    /// `account` is here: what was recorded for another account (or for no
+    /// known account) goes, until `account`'s own read records it (#2376).
+    /// What was recorded for `account` stays.
+    public func clear(unlessRecordedFor account: String) {
+        lock.withLock {
+            guard defaults.string(forKey: accountKey) != account else { return }
             defaults.set(false, forKey: minorKey)
             defaults.removeObject(forKey: accountKey)
         }

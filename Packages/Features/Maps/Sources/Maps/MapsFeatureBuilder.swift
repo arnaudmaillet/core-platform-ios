@@ -1,6 +1,7 @@
 import CoreLocation
 import CoreModels
 import CoreNavigation
+import CoreStorage
 import FeedInterface
 import LaunchArguments
 import LocalStore
@@ -35,7 +36,10 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
     /// feeds both consumers — the gallery header's toggle and the map's
     /// Favorites sub-filter — which is what makes the toggle show up on the
     /// map at all.
-    private let placeFollows = MapPlaceFollowStore()
+    private let placeFollows: MapPlaceFollowStore
+    /// The places pinned to the dock (#1598), for every map this builder
+    /// makes and every place page's "Add Pin to Map".
+    private let dockedPlaces: MapDockedPlacesStore
 
     /// The interface-typed seam the composition root hands to other features.
     public var profilePinning: any MapProfilePinning { pinService }
@@ -112,8 +116,14 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
         locator: (any CurrentCountryLocating)? = nil,
         /// The device store (#893): the map opens on the pins of its last
         /// viewports at a cold start. Nil keeps the map in memory only.
-        localStore: LocalStore? = nil
+        localStore: LocalStore? = nil,
+        /// The app's one storage scope (#2376): the map's own stores — the
+        /// followed places, the people rails, the dock — are the active
+        /// profile's.
+        storageScope: StorageScope
     ) {
+        self.placeFollows = MapPlaceFollowStore(scope: storageScope)
+        self.dockedPlaces = MapDockedPlacesStore(scope: storageScope)
         self.pinsCache = localStore.map(MapPinsLocalCache.init(store:))
         self.peopleCache = localStore.map(MapPeopleLocalCache.init(store:))
         self.isMember = isMember
@@ -132,7 +142,7 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
         self.openProfile = openProfile
         self.openConversation = openConversation
         self.pinService = MapProfilePinService(
-            store: MapFavoritesStore(), favorites: favoritesRepository
+            store: MapFavoritesStore(scope: storageScope), favorites: favoritesRepository
         )
         #if DEBUG
         // ⚠️ ONE DECORATION, TWO STAND-INS, and both are the same shape of
@@ -214,6 +224,7 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
         let feedFeature = feedFeature
         let placeFeature = placeFeature
         let placeFollows = placeFollows
+        let dockedPlaces = dockedPlaces
         let map = MapsViewController(
             viewModel: MapsViewModel(
                 repository: repository,
@@ -223,6 +234,7 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
             ),
             favoritesRepository: favoritesRepository,
             pinService: pinService,
+            dockedPlaces: dockedPlaces,
             imagePipeline: imagePipeline,
             iconCatalog: iconCatalog,
             previewCatalog: previewCatalog,
@@ -263,7 +275,9 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
                     postIDs: postIDs,
                     title: place.galleryTitle,
                     rank: place.rankBadge,
-                    identity: Self.placeIdentity(of: place, countryCode: countryCode, centre: centre),
+                    identity: Self.placeIdentity(
+                        of: place, countryCode: countryCode, centre: centre, dockedPlaces: dockedPlaces
+                    ),
                     // The header's follow toggle, bound to THIS place's
                     // identity in the map's own store — which is also what
                     // the Favorites sub-filter reads, so the button and the
@@ -306,7 +320,8 @@ extension MapsFeatureBuilder {
     /// its subtitle — a country's continent, a city's country; neither for a
     /// place in no country (at sea) — and its share link, for its QR code.
     static func placeIdentity(
-        of place: MapPlace, countryCode: String, centre: CLLocationCoordinate2D? = nil
+        of place: MapPlace, countryCode: String, centre: CLLocationCoordinate2D? = nil,
+        dockedPlaces: MapDockedPlacesStore
     ) -> PlaceIdentity? {
         let country = CountryAtlas.shared.country(code: countryCode)
         let link = shareURL(of: place, countryCode: countryCode, centre: centre)
@@ -315,14 +330,16 @@ extension MapsFeatureBuilder {
             subtitle: country.map { place.kind == .country ? $0.continent : $0.name },
             shareURL: link,
             query: placeQuery(of: place, countryCode: countryCode, centre: centre),
-            dockPin: link.map { dockPin(for: MapDockedPlacesStore.Entry(url: $0.absoluteString, name: place.name)) }
+            dockPin: link.map {
+                dockPin(for: MapDockedPlacesStore.Entry(url: $0.absoluteString, name: place.name), store: dockedPlaces)
+            }
         )
     }
 
     /// The place page's "Add Pin to Map" (#1598), bound to the map's dock:
     /// the place by its public link, the one identity every route agrees on.
     static func dockPin(
-        for entry: MapDockedPlacesStore.Entry, store: MapDockedPlacesStore = MapDockedPlacesStore()
+        for entry: MapDockedPlacesStore.Entry, store: MapDockedPlacesStore
     ) -> ClusterGalleryFollowing {
         return ClusterGalleryFollowing(
             isFollowing: { store.isDocked(entry.url) },
@@ -366,7 +383,11 @@ extension MapsFeatureBuilder {
     /// server page by page, its identity from the atlas — a country's name,
     /// flag and continent; a city's name, its country's flag and name. Nil
     /// for a country the atlas does not know.
-    public static func placePage(for link: PlaceLink, place placeFeature: any PlaceFeatureBuilding) -> UIViewController? {
+    /// `storageScope`: the app's one (#2376), whose profile's dock the page's
+    /// "Add Pin to Map" writes.
+    public static func placePage(
+        for link: PlaceLink, place placeFeature: any PlaceFeatureBuilding, storageScope: StorageScope
+    ) -> UIViewController? {
         let place: MapPlace
         let countryCode: String
         let centre: CLLocationCoordinate2D?
@@ -381,7 +402,10 @@ extension MapsFeatureBuilder {
             countryCode = code ?? ""
             centre = CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
         }
-        guard let identity = placeIdentity(of: place, countryCode: countryCode, centre: centre) else { return nil }
+        guard let identity = placeIdentity(
+            of: place, countryCode: countryCode, centre: centre,
+            dockedPlaces: MapDockedPlacesStore(scope: storageScope)
+        ) else { return nil }
         return placeFeature.makePlacePage(title: place.galleryTitle, identity: identity)
     }
 }

@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import Foundation
 import MediaCore
 import PostGrid
@@ -30,7 +31,9 @@ struct FeedWarmWindowTests {
 
     private func page() -> PostGridPageView {
         let page = PostGridPageView(
-            imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .list
+            imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .list,
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            withheldPosts: UnavailablePosts()
         )
         page.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
         page.render(.content(posts(40)))
@@ -78,7 +81,9 @@ struct FeedWarmWindowTests {
     /// what is coming, and no post to name.
     @Test func aSkeletonPageWarmsNothing() {
         let page = PostGridPageView(
-            imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .list
+            imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .list,
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            withheldPosts: UnavailablePosts()
         )
         page.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
         page.render(.loading)

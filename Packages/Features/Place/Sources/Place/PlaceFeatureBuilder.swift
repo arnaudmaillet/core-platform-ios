@@ -34,6 +34,8 @@ public final class PlaceFeatureBuilder: PlaceFeatureBuilding {
     private let authorMarks: PostAuthorMarks?
     private let postOpenWarm: PostOpenWarm?
     private let presence: SectionPresenceStore
+    private let bookmarks: PostBookmarkStore
+    private let unavailablePosts: UnavailablePosts
     /// The balance the pushed screens' header wears: only where likes move
     /// (#2336).
     private var balanceWallet: (any WalletStaking)? { showsBalance() ? wallet : nil }
@@ -59,9 +61,15 @@ public final class PlaceFeatureBuilder: PlaceFeatureBuilding {
         authorMarks: PostAuthorMarks?,
         postOpenWarm: PostOpenWarm?,
         /// The app's one memory of each screen's sections (#1774, #2376).
-        presence: SectionPresenceStore
+        presence: SectionPresenceStore,
+        /// The app's one saved pile and record of withheld posts (#2376): the
+        /// page's cards and pushed lists read the ones every feed does.
+        bookmarks: PostBookmarkStore,
+        unavailablePosts: UnavailablePosts
     ) {
         self.presence = presence
+        self.bookmarks = bookmarks
+        self.unavailablePosts = unavailablePosts
         self.feed = feed
         self.hydrate = hydrate
         self.placePosts = placePosts
@@ -148,6 +156,8 @@ public final class PlaceFeatureBuilder: PlaceFeatureBuilding {
                 }
             },
             presence: presence,
+            bookmarks: bookmarks,
+            withheldPosts: unavailablePosts,
             openPost: { [feed] presenter, origin, ids in
                 feed.presentSnapFeedHero(postIDs: ids, from: presenter, origin: origin)
             }
@@ -174,13 +184,14 @@ public final class PlaceFeatureBuilder: PlaceFeatureBuilding {
         gallery.authorMarks = authorMarks
         // The titles' pushes — For You's own pushed screens, with the header
         // they wear there (`PushedScreenHeader`).
-        let staking = wallet.map { PostCardStaking(wallet: $0, entities: entities) }
+        let staking = wallet.map { PostCardStaking(wallet: $0, entities: entities, saves: bookmarks) }
         let openHero: (UIViewController, SnapFeedHeroOrigin, [PostID]) -> Void = { [feed] presenter, origin, ids in
             feed.presentSnapFeedHero(postIDs: ids, from: presenter, origin: origin)
         }
         gallery.makePostList = { [self] in
             let list = PushedPostListViewController(
                 kind: .popular, imagePipeline: imagePipeline, videoPlayback: videoPlayback,
+                bookmarks: bookmarks, withheldPosts: unavailablePosts,
                 staking: staking,
                 header: PushedScreenHeader(wallet: balanceWallet, makeWalletSheet: makeWalletSheet, router: router),
                 openPost: openHero
@@ -192,6 +203,7 @@ public final class PlaceFeatureBuilder: PlaceFeatureBuilding {
         gallery.makeGallery = { [self] in
             let pushed = DiscoverGalleryViewController(
                 imagePipeline: imagePipeline, videoPlayback: videoPlayback,
+                bookmarks: bookmarks, withheldPosts: unavailablePosts,
                 header: PushedScreenHeader(wallet: balanceWallet, makeWalletSheet: makeWalletSheet, router: router),
                 staking: staking,
                 openPost: openHero

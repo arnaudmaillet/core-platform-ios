@@ -1,5 +1,6 @@
 import CoreModels
 import CoreNavigation
+import CoreStorage
 import MediaCore
 import MediaPlayback
 import PostGrid
@@ -207,8 +208,11 @@ struct SnapMediaFramingTests {
 
     private func feed(_ models: [FeedItemDisplayModel]) -> SnapFeedViewController {
         let controller = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: FramingMuteFeedProvider()),
-            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+            viewModel: FeedViewModel(repository: FramingMuteFeedProvider(), unavailablePosts: UnavailablePosts()),
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            savedSounds: SavedSoundStore(scope: StorageScope()),
+            viewer: { nil }
         )
         controller.loadViewIfNeeded()
         controller.view.frame = CGRect(x: 0, y: 0, width: 390, height: 844)

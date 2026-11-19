@@ -58,7 +58,10 @@ struct SoundSheetAutoplayTests {
             sections: dealt.sections,
             tiles: tiles,
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
-            savedSounds: SavedSoundStore(defaults: UserDefaults(suiteName: "SoundSheetAutoplay.\(UUID().uuidString)")!),
+            savedSounds: SavedSoundStore(
+                defaults: UserDefaults(suiteName: "SoundSheetAutoplay.\(UUID().uuidString)")!, scope: StorageScope()
+            ),
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
             videoPlayback: pool
         )
     }

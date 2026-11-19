@@ -56,18 +56,19 @@ public final class PostCardStaking {
     private var observer: NSObjectProtocol?
 
     /// Each card keeps the count its post was configured with.
-    public convenience init(wallet: any WalletStaking) {
-        self.init(wallet: wallet, entities: nil)
+    public convenience init(wallet: any WalletStaking, saves: PostBookmarkStore) {
+        self.init(wallet: wallet, entities: nil, saves: saves)
     }
 
     /// - Parameter entities: where the cards' counts come from. Nil: each
     ///   card keeps the count its post was configured with.
     /// - Parameter saves: the pile whose answers a bound row's save glyph
-    ///   draws again when the store says a save changed.
+    ///   draws again when the store says a save changed: the app's one
+    ///   (#2376).
     public init(
         wallet: any WalletStaking,
         entities: (any PostEntityReading & PostEntityWriting)?,
-        saves: PostBookmarkStore = .shared
+        saves: PostBookmarkStore
     ) {
         self.wallet = wallet
         self.entities = entities

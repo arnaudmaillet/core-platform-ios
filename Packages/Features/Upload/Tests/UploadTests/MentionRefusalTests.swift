@@ -40,7 +40,8 @@ struct MentionRefusalTests {
             viewer: nil,
             uploadTransport: MockMediaUploadTransport(store: blobStore, faults: faults),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
-            composedChannel: ComposedPostChannel()
+            composedChannel: ComposedPostChannel(),
+            publishedVideos: PublishedVideoFiles(root: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true))
         )
     }
 

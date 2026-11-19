@@ -3,6 +3,7 @@ import CoreNavigation
 import Foundation
 import CoreNetworking
 import EntityStore
+import PostSurfaces
 import Testing
 @testable import Feed
 
@@ -137,7 +138,8 @@ struct FeedViewModelTests {
 
     @Test func tappingAuthorRoutesToProfile() {
         let router = SpyRouter()
-        let viewModel = FeedViewModel(repository: FakeFeedProvider(), router: router)
+        let viewModel = FeedViewModel(repository: FakeFeedProvider(), router: router,
+        unavailablePosts: UnavailablePosts())
         // No entries loaded yet → the route carries no identity stub.
         viewModel.didTapAuthor(ProfileID("prof-99"))
         #expect(router.routes == [.profile(ProfileID("prof-99"), stub: nil)])
@@ -147,7 +149,8 @@ struct FeedViewModelTests {
     /// pill says it is theirs, and the router pushes their profile.
     @Test func thePillRoutesToTheProfileCard() {
         let router = SpyRouter()
-        let viewModel = FeedViewModel(repository: FakeFeedProvider(), router: router)
+        let viewModel = FeedViewModel(repository: FakeFeedProvider(), router: router,
+        unavailablePosts: UnavailablePosts())
         viewModel.didTapAuthorPill(ProfileID("prof-99"), isViewer: false)
         #expect(router.routes == [.profileCard(ProfileID("prof-99"), stub: nil)])
 
@@ -174,7 +177,8 @@ struct FeedViewModelTests {
         let entities = EntityStore()
         entities.setRelation(.mutual, for: author.id)
         let router = SpyRouter()
-        let viewModel = FeedViewModel(repository: provider, router: router, entities: entities)
+        let viewModel = FeedViewModel(repository: provider, router: router, entities: entities,
+        unavailablePosts: UnavailablePosts())
         async let states = collectStates(viewModel) { $0.items.count == 1 }
         viewModel.viewDidLoad()
         _ = await states
@@ -193,7 +197,8 @@ struct FeedViewModelTests {
 
     @Test func tappingCommentsRoutesToComments() {
         let router = SpyRouter()
-        let viewModel = FeedViewModel(repository: FakeFeedProvider(), router: router)
+        let viewModel = FeedViewModel(repository: FakeFeedProvider(), router: router,
+        unavailablePosts: UnavailablePosts())
         viewModel.didTapComments(PostID("post-7"))
         #expect(router.routes == [.comments(PostID("post-7"))])
     }
@@ -202,7 +207,7 @@ struct FeedViewModelTests {
         let provider = FakeFeedProvider()
         provider.cached = makeEntries(0..<3)
         provider.pages[""] = .success(FeedPage(entries: makeEntries(0..<5), nextPageToken: nil, isCold: false))
-        let viewModel = FeedViewModel(repository: provider)
+        let viewModel = FeedViewModel(repository: provider, unavailablePosts: UnavailablePosts())
 
         async let states = collectStates(viewModel) { $0.items.count == 5 }
         viewModel.viewDidLoad()
@@ -224,7 +229,8 @@ struct FeedViewModelTests {
         // The network ranks differently: post 5 first, post 1 again later.
         let network = makeEntries(5..<7) + makeEntries(1..<2) + makeEntries(7..<8)
         provider.pages[""] = .success(FeedPage(entries: network, nextPageToken: nil, isCold: false))
-        let viewModel = FeedViewModel(repository: provider, cacheRevalidation: .keepShown)
+        let viewModel = FeedViewModel(repository: provider, cacheRevalidation: .keepShown,
+        unavailablePosts: UnavailablePosts())
 
         async let states = collectStates(viewModel) { $0.items.count >= 5 }
         viewModel.viewDidLoad()
@@ -238,7 +244,7 @@ struct FeedViewModelTests {
     @Test func coldFlagSurfacesAndClearsOnRefresh() async {
         let provider = FakeFeedProvider()
         provider.pages[""] = .success(FeedPage(entries: makeEntries(0..<2), nextPageToken: nil, isCold: true))
-        let viewModel = FeedViewModel(repository: provider)
+        let viewModel = FeedViewModel(repository: provider, unavailablePosts: UnavailablePosts())
 
         async let first = collectStates(viewModel) { $0.phase == .content }
         viewModel.viewDidLoad()
@@ -255,7 +261,7 @@ struct FeedViewModelTests {
         provider.pages[""] = .success(FeedPage(entries: makeEntries(0..<10), nextPageToken: "10", isCold: false))
         // Overlapping page: items 8..<10 repeat and must not duplicate.
         provider.pages["10"] = .success(FeedPage(entries: makeEntries(8..<20), nextPageToken: nil, isCold: false))
-        let viewModel = FeedViewModel(repository: provider)
+        let viewModel = FeedViewModel(repository: provider, unavailablePosts: UnavailablePosts())
 
         async let initial = collectStates(viewModel) { $0.items.count == 10 }
         viewModel.viewDidLoad()
@@ -273,7 +279,7 @@ struct FeedViewModelTests {
     @Test func networkFailureWithEmptyFeedShowsRetryMessage() async {
         let provider = FakeFeedProvider()
         provider.pages[""] = .failure(.transport(message: "offline"))
-        let viewModel = FeedViewModel(repository: provider)
+        let viewModel = FeedViewModel(repository: provider, unavailablePosts: UnavailablePosts())
 
         async let states = collectStates(viewModel) {
             if case .failed = $0.phase { return true } else { return false }
@@ -289,7 +295,7 @@ struct FeedViewModelTests {
     @Test func anOfflineEmptyTimelineSaysYoureOffline() async {
         let provider = FakeFeedProvider()
         provider.pages[""] = .failure(.transport(message: "offline", failure: .offline))
-        let viewModel = FeedViewModel(repository: provider)
+        let viewModel = FeedViewModel(repository: provider, unavailablePosts: UnavailablePosts())
 
         async let states = collectStates(viewModel) {
             if case .failed = $0.phase { return true } else { return false }
@@ -309,7 +315,7 @@ struct FeedViewModelTests {
         let provider = FakeFeedProvider()
         provider.pages[""] = .failure(.transport(message: "offline"))
         let monitor = ConnectivityMonitor(offlineGrace: 0)
-        let viewModel = FeedViewModel(repository: provider)
+        let viewModel = FeedViewModel(repository: provider, unavailablePosts: UnavailablePosts())
         viewModel.connectivity = monitor
         async let failed = collectStates(viewModel) {
             if case .failed = $0.phase { return true } else { return false }
@@ -333,7 +339,7 @@ struct FeedViewModelTests {
     /// its way is ignored rather than cancelling it.
     private func supersededFirstPage() async -> (FeedViewModel, GatedFirstPageProvider, () -> [FeedViewModel.RenderState]) {
         let provider = GatedFirstPageProvider()
-        let viewModel = FeedViewModel(repository: provider)
+        let viewModel = FeedViewModel(repository: provider, unavailablePosts: UnavailablePosts())
         viewModel.connectivity = ConnectivityMonitor(offlineGrace: 0)
         var states: [FeedViewModel.RenderState] = []
         viewModel.onStateChange = { states.append($0) }
@@ -393,7 +399,7 @@ struct FeedViewModelTests {
         let provider = FakeFeedProvider()
         provider.cached = makeEntries(0..<4)
         provider.pages[""] = .failure(.transport(message: "offline"))
-        let viewModel = FeedViewModel(repository: provider)
+        let viewModel = FeedViewModel(repository: provider, unavailablePosts: UnavailablePosts())
 
         async let states = collectStates(viewModel) { $0.items.count == 4 }
         viewModel.viewDidLoad()

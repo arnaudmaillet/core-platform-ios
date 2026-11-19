@@ -1,3 +1,4 @@
+import CoreStorage
 import FeedInterface
 import Foundation
 import MediaCore
@@ -23,7 +24,9 @@ enum TestGridPages {
         let pipeline = imagePipeline ?? ImagePipeline(fetcher: SilentFetcher())
         return { style, savesPosts in
             PostGridPages.make(
-                style: style, imagePipeline: pipeline, videoPlayback: videoPlayback, savesPosts: savesPosts
+                style: style, imagePipeline: pipeline, videoPlayback: videoPlayback,
+                bookmarks: savesPosts ? PostBookmarkStore(scope: StorageScope()) : nil,
+                withheldPosts: UnavailablePosts()
             )
         }
     }

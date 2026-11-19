@@ -130,10 +130,10 @@ final class StorageSettingsTests {
     @Test func clearAllLeavesDraftsTheOutboxAndPreferences() async throws {
         let (coordinator, caches) = try populated()
         let draftsName = "storage-settings-drafts-\(UUID().uuidString)"
-        let drafts = PostDraftStore(name: draftsName)
+        let drafts = PostDraftStore(name: draftsName, scope: StorageScope())
         let draft = try #require(drafts.save("half a post"))
         defer { drafts.delete(draft.id) }
-        let outbox = LikeOutbox(defaults: defaults)
+        let outbox = LikeOutbox(defaults: defaults, scope: StorageScope())
         let target = LikeOutbox.Target.post("p1")
         outbox.record(likes: 3, on: target)
         let playback = MediaPlaybackPreferencesStore(defaults: defaults)
@@ -148,7 +148,7 @@ final class StorageSettingsTests {
         await model.clear(nil)
 
         #expect(model.report?.total == 0)
-        #expect(PostDraftStore(name: draftsName).draft(draft.id)?.text == "half a post")
+        #expect(PostDraftStore(name: draftsName, scope: StorageScope()).draft(draft.id)?.text == "half a post")
         #expect(outbox.pendingLikes(on: target) == 3)
         #expect(playback.preferences.autoplay == .never)
         withExtendedLifetime(caches) {}

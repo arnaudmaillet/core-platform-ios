@@ -46,7 +46,8 @@ struct VoicePostPublishTests {
             authSession: Session(),
             uploadTransport: MockMediaUploadTransport(store: blobStore),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
-            composedChannel: ComposedPostChannel()
+            composedChannel: ComposedPostChannel(),
+            publishedVideos: PublishedVideoFiles(root: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true))
         )
         let voice = try take()
         let entry = try await composer.publishVoicePost(caption: "", voice: voice, as: nil, idempotencyKey: "voice-post-key-1")
