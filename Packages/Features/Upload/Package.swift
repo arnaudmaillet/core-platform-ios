@@ -12,6 +12,8 @@ let package = Package(
         // The Text Post screen is drawn by Feed. The INTERFACE only — Upload
         // hands it a publisher, the way Chat hands it a thread driver.
         .package(path: "../../FeatureInterfaces/FeedInterface"),
+        // What the app opens from here (#2375): `UploadFeatureBuilding`.
+        .package(path: "../../FeatureInterfaces/UploadInterface"),
         .package(path: "../../Kit/CoreContracts"),
         .package(path: "../../Kit/CoreModels"),
         // Its launch arguments, declared (#2374).
@@ -38,6 +40,7 @@ let package = Package(
             dependencies: [
                 "AuthInterface",
                 "FeedInterface",
+                "UploadInterface",
                 "CoreContracts",
                 "CoreModels",
                 "LaunchArguments",

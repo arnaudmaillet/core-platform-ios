@@ -4,6 +4,7 @@ import CoreModels
 import CoreNetworking
 import CoreNetworkingMocks
 import Foundation
+import NotificationsInterface
 import Testing
 @testable import Notifications
 

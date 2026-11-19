@@ -2,7 +2,6 @@ import ChatInterface
 import CoreNavigation
 import DesignSystem
 import UIKit
-import Wallet
 
 /// Owns the Messages tab: the paged inbox (All / Requests / Suggestions),
 /// promoted from a sub-screen of the feed to a primary root tab. Threads open

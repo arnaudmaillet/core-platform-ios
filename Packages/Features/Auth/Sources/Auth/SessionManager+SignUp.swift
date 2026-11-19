@@ -38,16 +38,6 @@ public enum CodeSignIn: Equatable, Sendable {
     case needsSecondStep(SecondStepChallenge)
 }
 
-/// When the shell offers to create a passkey (#840).
-public enum PasskeyOfferMoment: Equatable, Sendable {
-    /// Right after a sign-up: the new token's `auth_time` is fresh, so
-    /// registering needs no step-up.
-    case signUp
-    /// After a sign-in by code or Apple / Google: offered when the account
-    /// has none, at most once in a while.
-    case signIn
-}
-
 /// A provider that signs people in natively and hands back an id_token.
 public enum FederatedProvider: Equatable, Sendable {
     case apple, google
