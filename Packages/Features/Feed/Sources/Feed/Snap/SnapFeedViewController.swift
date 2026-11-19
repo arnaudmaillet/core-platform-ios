@@ -275,25 +275,13 @@ final class SnapFeedViewController: UIViewController {
     /// cancelled grab can take it back.
     private var donatedLiveView: VideoRenderView?
     /// The two facts whose AND is the surface's visibility.
-    private var isOnScreen = false
-    /// The surface THIS screen last made audible, so leaving only clears its own.
-    private weak var ownAudibleSurface: VideoRenderView?
-    private var isAudioYielded = false
-    /// Through the pool's byte cache when there is one (#895).
-    private lazy var songPlayer = FeedSongPlayer(playback: videoPlayback)
-    /// The page whose song the viewer paused from the sound sheet's record
-    /// (#1148): its song stays paused, where it was, until resumed — another
-    /// page plays its own.
-    private var songPausedFor: PostID?
-    /// The post whose track the song player holds (#1849): another post's
-    /// starts it again from its start.
-    private var songPostID: PostID?
-    /// A hold on a carousel's page is holding its track.
-    private var isSongHeld = false
-    /// The sound sheet open over the page, mirroring it (#1148).
-    private weak var soundSheet: SoundSheetViewController?
-    private var coverSpinTimer: Timer?
-    private var isForeground = true
+    private(set) var isOnScreen = false
+    /// What is heard, the song, the records' spin, the share of the screen,
+    /// Background Play and Picture in Picture (`SnapSoundPlayback`). Built on
+    /// first use; building it does nothing else.
+    private lazy var soundPlayback = SnapSoundPlayback(
+        host: self, videoPlayback: videoPlayback, imagePipeline: imagePipeline, soundState: soundState
+    )
     /// Slid aside by the shell — the notifications drawer open over it
     /// (#1703): on screen, not watched, so nothing plays.
     private var isSetAside = false
@@ -308,21 +296,12 @@ final class SnapFeedViewController: UIViewController {
     /// one more source of `viewportShare`, so the clip's sound follows it and
     /// the clip pauses below half, as under a pushed screen.
     func setVisibleShare(_ share: CGFloat) {
-        viewportShare.report(share)
+        soundPlayback.viewportShare.report(share)
     }
 
     /// Whether the pages' lifecycle counts the screen as watched — what lets
     /// the post on show play. Internal for tests.
     var debugIsWatchedByLifecycle: Bool { lifecycle.isVisible }
-    /// Background Play (#483): this screen's clip went on playing when the
-    /// app left the screen, and the screen was left exactly as it was.
-    private var isPlayingInBackground = false
-    /// Picture in Picture (#483): the surface this screen readied for the
-    /// floating window, so leaving only lets go of its own.
-    private weak var ownPictureInPictureSurface: VideoRenderView?
-    /// The app left with a clip readied: the screen waits, untouched, for the
-    /// system to open the window — or gives up and pauses as usual.
-    private var isAwaitingPictureInPicture = false
     /// Unregisters its notification tokens when this VC (and thus the bag) is
     /// released — a nonisolated deinit can't touch the VC's main-actor state.
     private let appObservers = NotificationTokens()
@@ -929,9 +908,9 @@ final class SnapFeedViewController: UIViewController {
         if let coordinator = transitionCoordinator, !isMovingToParent, !isBeingPresented,
            navigationController?.isBeingPresented != true, !flight.isAwaitingAnyFlight,
            let cover = ViewportShare.cover(of: coordinator, .from) {
-            viewportShare.track(coordinator, cover: cover, coversAtEnd: false)
+            soundPlayback.viewportShare.track(coordinator, cover: cover, coversAtEnd: false)
         } else {
-            viewportShare.report(1)
+            soundPlayback.viewportShare.report(1)
         }
         isOnScreen = true
         refreshVisibility()
@@ -1419,41 +1398,12 @@ final class SnapFeedViewController: UIViewController {
         // a grab carries this very player to its tile.
         if !isMovingFromParent, !isBeingDismissed, navigationController?.isBeingDismissed != true,
            !flight.isAwaitingAnyFlight, let cover = ViewportShare.cover(of: coordinator, .to) {
-            viewportShare.track(coordinator, cover: cover, coversAtEnd: true)
+            soundPlayback.viewportShare.track(coordinator, cover: cover, coversAtEnd: true)
         }
     }
 
-    /// The share of this screen still on screen (#1914): what its clip's gate
-    /// reads — it plays at half and above, and its sound follows the share.
-    private lazy var viewportShare: ViewportShare = {
-        let share = ViewportShare(host: view)
-        share.onChange = { [weak self] value in self?.viewportShareDidChange(value) }
-        return share
-    }()
-
-    private var viewportSharePlays = true
-
-    private func viewportShareDidChange(_ share: CGFloat) {
-        #if DEBUG
-        publishViewportProbe()
-        #endif
-        let volume = ViewportShare.volume(at: share)
-        videoPlayback?.setAudibleVolume(volume)
-        songPlayer.volume = volume
-        let plays = ViewportShare.plays(at: share)
-        guard plays != viewportSharePlays else { return }
-        viewportSharePlays = plays
-        refreshVisibility()
-        // Every record of the post's sound turns with it (#1148), the sound
-        // sheet's included (the owner 2026-10-31: the sheet's record kept
-        // turning over a post its expansion had paused). Asked now, and once
-        // more after the turn, for a pause the player settles a beat later.
-        refreshCoverSpin()
-        DispatchQueue.main.async { [weak self] in self?.refreshCoverSpin() }
-    }
-
     /// The share now, for tests.
-    var debugViewportShare: ViewportShare { viewportShare }
+    var debugViewportShare: ViewportShare { soundPlayback.viewportShare }
 
     #if DEBUG
     /// `-viewport-probe` (#1970): the share's state as an accessibility
@@ -1475,7 +1425,8 @@ final class SnapFeedViewController: UIViewController {
         probe.accessibilityIdentifier = String(
             format: "viewport;plays=%d;covered=%d;share=%.2f",
             // From the share: `onChange` is told before `plays` is updated.
-            ViewportShare.plays(at: viewportShare.share) ? 1 : 0, viewportShare.isCovered ? 1 : 0, viewportShare.share
+            ViewportShare.plays(at: soundPlayback.viewportShare.share) ? 1 : 0,
+            soundPlayback.viewportShare.isCovered ? 1 : 0, soundPlayback.viewportShare.share
         )
     }
     #endif
@@ -1679,13 +1630,13 @@ final class SnapFeedViewController: UIViewController {
                     self?.onMediaPageChanged?(id, page)
                     // A carousel paused by a tap plays again on its next page,
                     // as the arriving clip does: the track with it (#1849).
-                    if let self, self.songPausedFor == id, SnapSoundState.isCarousel(model) {
-                        self.songPausedFor = nil
+                    if let self, self.soundPlayback.songPausedFor == id, SnapSoundState.isCarousel(model) {
+                        self.soundPlayback.songPausedFor = nil
                         cell?.setPausedMarkVisible(false)
                     }
                     // A collection's pages are clips and photographs: turning
                     // one changes what there is to hear, and what it is called.
-                    self?.refreshAudibleSurface()
+                    self?.soundPlayback.refreshAudibleSurface()
                     if let self, let index = self.lifecycle.activeIndex,
                        self.orderedIDs.indices.contains(index), self.orderedIDs[index] == id {
                         self.updateBarChrome(at: index)
@@ -1741,9 +1692,9 @@ final class SnapFeedViewController: UIViewController {
                 if SnapSoundState.isCarousel(model) {
                     cell.onPostTrackTap = { [weak self, weak cell] in
                         guard let self, let cell else { return }
-                        self.togglePostTrack(on: cell, id: id)
+                        self.soundPlayback.togglePostTrack(on: cell, id: id)
                     }
-                    cell.onPostTrackHold = { [weak self] held in self?.holdPostTrack(held) }
+                    cell.onPostTrackHold = { [weak self] held in self?.soundPlayback.holdPostTrack(held) }
                 } else {
                     cell.onPostTrackTap = nil
                     cell.onPostTrackHold = nil
@@ -2696,12 +2647,12 @@ final class SnapFeedViewController: UIViewController {
         appObservers.add(center.addObserver(
             forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.setForeground(false) }
+            MainActor.assumeIsolated { self?.soundPlayback.setForeground(false) }
         })
         appObservers.add(center.addObserver(
             forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.setForeground(true) }
+            MainActor.assumeIsolated { self?.soundPlayback.setForeground(true) }
         })
         // ⚠️ THE FLOATING WINDOW IS CLOSED ONCE THE APP IS ACTIVE (#483). Asked
         // as the app only enters the foreground (the app's icon tapped), the
@@ -2721,134 +2672,13 @@ final class SnapFeedViewController: UIViewController {
         FeedSoundSession.shared.followVoiceFloor()
         for name in [FeedSoundSession.didTurnOn, FeedSoundSession.didTurnOff, FeedSoundSession.audibilityDidChange] {
             appObservers.add(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.refreshAudibleSurface() }
+                MainActor.assumeIsolated { self?.soundPlayback.refreshAudibleSurface() }
             })
         }
         // (A keyboard-session rail yield used to live here: the engaged
         // composer rose into the rail's column, so the rail conceded the
         // band while typing. The engagement fades the rail outright now, so
         // there is no overlap left to arbitrate.)
-    }
-
-    private func setForeground(_ foreground: Bool) {
-        if !foreground {
-            let keepsPlaying = continueInBackground()
-            isPlayingInBackground = keepsPlaying
-            let floats = awaitPictureInPicture()
-            // Nothing is paused or silenced: the page keeps its player, for the
-            // Lock Screen's controls, the floating window, or both.
-            if keepsPlaying || floats { return }
-        }
-        if foreground {
-            isAwaitingPictureInPicture = false
-            videoPlayback?.stopPictureInPicture()
-            if isPlayingInBackground {
-                isPlayingInBackground = false
-                videoPlayback?.endBackgroundPlayback()
-            }
-        }
-        isForeground = foreground
-        refreshVisibility()
-    }
-
-    /// Picture in Picture (#483): when this screen readied its clip, leaves it
-    /// playing for the window the system opens as the app resigns. A window
-    /// that does not come — or that the viewer closes while the app is away —
-    /// hands the page back to the usual pause.
-    private func awaitPictureInPicture() -> Bool {
-        guard let videoPlayback, ownPictureInPictureSurface != nil,
-              videoPlayback.isPictureInPictureArmed, MediaPlaybackPolicy.floatsInPictureInPicture
-        else { return false }
-        isAwaitingPictureInPicture = true
-        Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(1.5))
-            guard let self, isAwaitingPictureInPicture, !(self.videoPlayback?.isPictureInPictureActive ?? false) else { return }
-            pictureInPictureEnded()
-        }
-        return true
-    }
-
-    /// The window closed (or never opened) while the app is away: unless
-    /// Background Play keeps the clip going, the page pauses as it would have.
-    private func pictureInPictureEnded() {
-        guard isAwaitingPictureInPicture else { return }
-        isAwaitingPictureInPicture = false
-        // ⚠️ CLOSED INTO THE APP, NOT AWAY FROM IT. The window's "back to the
-        // app" closes it a moment before the app is in the foreground: read
-        // as "closed while away", the page paused, its picture went black and
-        // the clip came back from elsewhere (the owner's device, 2026-11-06).
-        // The page keeps playing; the foreground takes over.
-        if videoPlayback?.pictureInPictureClosedIntoApp == true { return }
-        guard !isPlayingInBackground, UIApplication.shared.applicationState == .background else { return }
-        isForeground = false
-        refreshVisibility()
-    }
-
-    /// Readies the page that owns the screen for the floating window — or lets
-    /// go of this screen's, when the setting is off or the screen is covered.
-    private func refreshPictureInPicture(ownerCell: SnapFeedCell? = nil) {
-        guard let videoPlayback, !isAwaitingPictureInPicture else { return }
-        var surface: VideoRenderView?
-        // A single clip floats, never a carousel's muted one (#1849); and only
-        // while the viewer hears the feed (#1931, #483): a readied window
-        // makes the session `.playback`, which a phone on silent would hear
-        // before any volume key. A ringing phone hears it already.
-        if MediaPlaybackPolicy.floatsInPictureInPicture, videoPlayback.feedSound.isHeard,
-           isOnScreen, isForeground, let owner = playbackOwner,
-           ownerModel.map(SnapSoundState.clipIsHeard(in:)) ?? true,
-           let cell = ownerCell ?? lifecycleCell(at: owner) as? SnapFeedCell {
-            surface = cell.audibleSurface
-        }
-        if surface == nil {
-            // Only lets go of what this screen readied: a feed pushed on top
-            // owns the window now.
-            guard ownPictureInPictureSurface != nil else { return }
-            ownPictureInPictureSurface = nil
-            videoPlayback.armPictureInPicture(for: nil)
-            return
-        }
-        guard videoPlayback.armPictureInPicture(for: surface) else { return }
-        ownPictureInPictureSurface = surface
-        videoPlayback.onPictureInPictureChange = { [weak self] active in
-            guard let self else { return }
-            if active {
-                isAwaitingPictureInPicture = true
-            } else {
-                pictureInPictureEnded()
-            }
-        }
-    }
-
-    /// Background Play (#483): keeps the clip this screen is being heard
-    /// through playing off screen — only when the viewer turned it on, the
-    /// feed is heard (the sound turned on, or a ringing phone: #1931, a phone
-    /// on silent never hears it through the background), and this screen (not
-    /// one under it) owns the sound.
-    private func continueInBackground() -> Bool {
-        guard MediaPlaybackPolicy.playsInBackground, isOnScreen, !isAudioYielded,
-              let videoPlayback, videoPlayback.feedSound.isHeard, let surface = ownAudibleSurface,
-              surface === videoPlayback.currentAudibleSurface
-        else { return false }
-        let model = playbackOwner.flatMap { $0 < orderedIDs.count ? modelsByID[orderedIDs[$0]] : nil }
-        guard videoPlayback.continueInBackground(surface, nowPlaying: Self.nowPlaying(for: model)) else { return false }
-        if let url = model?.thumbnailURL {
-            let pipeline = imagePipeline
-            Task { [weak videoPlayback] in
-                guard let image = try? await pipeline.image(for: url) else { return }
-                videoPlayback?.setNowPlayingArtwork(image)
-            }
-        }
-        return true
-    }
-
-    /// The Lock Screen's two lines: the caption's first line (or what the
-    /// clip is), and its author.
-    static func nowPlaying(for model: FeedItemDisplayModel?) -> NowPlayingInfo {
-        let caption = model?.caption?
-            .split(whereSeparator: \.isNewline).first
-            .map { $0.trimmingCharacters(in: .whitespaces) } ?? ""
-        let title = caption.isEmpty ? "Video" : String(caption.prefix(80))
-        return NowPlayingInfo(title: title, artist: model?.authorName ?? "")
     }
 
     // MARK: - Rendering
@@ -3224,7 +3054,7 @@ final class SnapFeedViewController: UIViewController {
         // at `willDisplay`, every later one at configure.
         snapCell(for: id)?.setPostUnavailable(true)
         if activeModel?.id == id { applyToolbarPostActions(for: id) }
-        refreshAudibleSurface()
+        soundPlayback.refreshAudibleSurface()
     }
 
     /// The toolbar's post actions — save, repost, ⋯ — for the page in front:
@@ -4892,10 +4722,11 @@ final class SnapFeedViewController: UIViewController {
 
     // MARK: - Active-item lifecycle
 
-    private func refreshVisibility() {
+    func refreshVisibility() {
         // A screen pushed over this one past half the viewport pauses it, and
         // its pop gives it back at half (#1914, `viewportShare`).
-        let isWatched = isOnScreen && isForeground && !isSetAside && ViewportShare.plays(at: viewportShare.share)
+        let isWatched = isOnScreen && soundPlayback.isForeground && !isSetAside
+            && ViewportShare.plays(at: soundPlayback.viewportShare.share)
         // Off screen, nothing is planned ahead: the warmed and kept players go
         // back and every head preload is cancelled. The next activation plans
         // again (`warmSettledWindow`).
@@ -4911,8 +4742,8 @@ final class SnapFeedViewController: UIViewController {
         }
         apply(lifecycle.setVisible(isWatched))
         lifecycleActiveID = lifecycle.activeIndex.flatMap { orderedIDs.indices.contains($0) ? orderedIDs[$0] : nil }
-        refreshAudibleSurface()
-        setCoverSpinWatch(isWatched)
+        soundPlayback.refreshAudibleSurface()
+        soundPlayback.setCoverSpinWatch(isWatched)
     }
 
     /// The page playback follows: the one covering most of the screen.
@@ -4943,7 +4774,8 @@ final class SnapFeedViewController: UIViewController {
         if let owner {
             (lifecycleCell(at: owner) as? SnapFeedCell)?.setOwnsViewport(true)
         }
-        refreshAudibleSurface()
+        // The sound changes hands in this same turn (#1791).
+        soundPlayback.refreshAudibleSurface()
         // The pill changes owner with the picture (#1791): one rule — the
         // page covering most of the screen — so the author and the clip
         // change hands on the same frame, in either direction. ⚠️ AND A TEXT
@@ -5177,187 +5009,6 @@ final class SnapFeedViewController: UIViewController {
         soundState.attribution(for: model)
     }
 
-    // MARK: - Sound
-
-    /// Hears the page that owns the screen — or nothing, when the feed is
-    /// muted, covered, or in the background.
-    ///
-    /// Asked on every change of any of those: the owner moving (a scroll), a
-    /// carousel turning its page, the screen appearing or leaving, the app
-    /// going to the background, and the viewer's toggle.
-    ///
-    /// - Parameter ownerCell: the owner's cell when the caller holds it — a
-    ///   cell being displayed is not yet one the collection view hands back.
-    private func refreshAudibleSurface(ownerCell: SnapFeedCell? = nil) {
-        refreshSong()
-        refreshPictureInPicture(ownerCell: ownerCell)
-        guard let videoPlayback else { return }
-        var surface: VideoRenderView?
-        // A carousel's clips are never heard: the post's track is its sound
-        // (#1849, `refreshSong`).
-        // A volume key turns the sound on while this screen owns it (#1931).
-        videoPlayback.feedSound.setWatching(
-            isOnScreen && isForeground && !isAudioYielded, by: self,
-            readsRinger: MediaPlaybackPolicy.playsInBackground || MediaPlaybackPolicy.floatsInPictureInPicture
-        )
-        if isOnScreen, isForeground, !isAudioYielded,
-           let owner = playbackOwner, ownerModel.map(SnapSoundState.clipIsHeard(in:)) ?? true,
-           let cell = ownerCell ?? lifecycleCell(at: owner) as? SnapFeedCell {
-            surface = cell.audibleSurface
-        }
-        // Only ever CLEARS what this screen set: another feed pushed on top
-        // owns the sound now, and this one leaving must not silence it.
-        if surface == nil, !Self.leavingClearsAudibleSurface(
-            videoPlayback.currentAudibleSurface, own: ownAudibleSurface, screen: viewIfLoaded
-        ) {
-            ownAudibleSurface = nil
-            return
-        }
-        ownAudibleSurface = surface
-        videoPlayback.setAudibleSurface(surface)
-    }
-
-    /// Whether a screen whose page no longer wants to be heard should silence
-    /// the surface the pool is hearing now.
-    ///
-    /// ⚠️ **THE SURFACE THIS SCREEN NAMED IS NOT ALWAYS THE ONE IT HEARS.** A
-    /// landing that hands the page the flight card's live view
-    /// (`SnapFeedCell.adoptLiveRenderView` → `VideoPlaybackController
-    /// .adoptSurface`) moves the pool's audible surface onto that view, and
-    /// the one this screen remembered is thrown away. Asked by identity alone,
-    /// the screen then took the adopted view for ANOTHER feed's and left it
-    /// talking: a map marker's feed closed onto the place page with its clip
-    /// still heard, because the Activity row the close lands on plays the very
-    /// same player (the post the viewer was on is that row).
-    ///
-    /// So a surface is this screen's when it is the one it named OR one of its
-    /// own views — the page's surface lives in this screen's hierarchy whatever
-    /// swapped it in. A surface nobody holds any more (nil) is cleared too: its
-    /// player may still be heard, and no screen is listening to it. Only a live
-    /// surface elsewhere — a feed pushed on top — is left alone.
-    static func leavingClearsAudibleSurface(
-        _ current: UIView?, own: UIView?, screen: UIView?
-    ) -> Bool {
-        guard let current else { return true }
-        if current === own { return true }
-        guard let screen else { return false }
-        return current.isDescendant(of: screen)
-    }
-
-    /// The sound of a page with no clip — a photograph, a collection of
-    /// them, a text post — played while that page owns the screen, under the
-    /// same rules as a clip's (see `FeedSongPlayer`), and nothing under Power
-    /// Saving (#580; `SnapSoundState.song`).
-    private func refreshSong() {
-        // A post's track starts from its start when the post becomes the page
-        // that owns the screen, and runs on through its pages (#1849): another
-        // post — the same song or not — starts it again.
-        if let owned = ownerModel?.id, owned != songPostID {
-            songPlayer.stop()
-            songPostID = owned
-            if songPausedFor != owned { songPausedFor = nil }
-            isSongHeld = false
-        }
-        var song: URL?
-        if let model = ownerModel, trackMayRun(model) {
-            song = soundState.song(for: model)
-        }
-        songPlayer.play(song)
-    }
-
-    /// Whether `model`'s track may run now, heard or muted: the post owns
-    /// the screen in the foreground, nothing took the audio, and the viewer
-    /// has neither paused nor held it. The song's rule, and the muted
-    /// record's (#1875).
-    private func trackMayRun(_ model: FeedItemDisplayModel) -> Bool {
-        isOnScreen && isForeground && !isAudioYielded && !isSongHeld
-            && model.id != songPausedFor && !unavailablePostIDs.contains(model.id)
-    }
-
-    /// Whether the post on screen PLAYS — what every record of its sound
-    /// turns for (#1148), on silent too (#1931).
-    private var postIsPlaying: Bool {
-        SnapSoundState.postPlays(
-            onScreen: isOnScreen,
-            clipAdvancing: activeSnapCell?.isClipAdvancing ?? false,
-            songPlaying: songPlayer.isPlaying
-        )
-    }
-
-    /// The post that owns the screen.
-    private var ownerModel: FeedItemDisplayModel? {
-        guard let owner = playbackOwner, orderedIDs.indices.contains(owner) else { return nil }
-        return modelsByID[orderedIDs[owner]]
-    }
-
-    /// A tap on a carousel's page (#1849): the post's track and the clip on
-    /// screen pause together, or resume together. On a picture page the
-    /// picture wears the stopped mark, as a clip's does.
-    private func togglePostTrack(on cell: SnapFeedCell, id: PostID) {
-        let pausing: Bool
-        if cell.canTogglePlayback, let paused = cell.togglePlayback() {
-            pausing = paused
-        } else {
-            pausing = songPausedFor != id
-            cell.setPausedMarkVisible(pausing)
-        }
-        songPausedFor = pausing ? id : nil
-        refreshSong()
-        refreshCoverSpin()
-    }
-
-    /// A hold on a carousel's page holds its track, as it holds its clip.
-    private func holdPostTrack(_ held: Bool) {
-        isSongHeld = held
-        refreshSong()
-        refreshCoverSpin()
-    }
-
-    /// Turns the records while the page's media plays — a clip running, or a
-    /// song — AND THE POST HAS A SOUND, and stops them when it does not: a
-    /// tap-to-pause, a hold, the sound sheet covering the page, the screen
-    /// leaving. The sound half is each record's own guard (#1871): a "No
-    /// audio" face never turns, so this keeps asking one question for all.
-    ///
-    /// ASKED rather than told: a clip pauses through half a dozen doors (the
-    /// viewer's tap, a hold, a sheet, a flight, a stall), and a quarter-second
-    /// look at the player is one rule where wiring every door would be six.
-    private func refreshCoverSpin() {
-        let playing = postIsPlaying
-        // The sound bubble's record turns while the post PLAYS — muted too
-        // (#1148, reversing #683's audible-only turn; the mute is the badge)
-        // — and so does the panel's slot, where a TEXT page's sound lives
-        // (#692), and the sound sheet's record.
-        activeSnapCell?.setSoundSpinning(playing)
-        // The footer's record too (#1999): the media page's sound lives there.
-        footerSoundButton.setSpinning(playing)
-        (commentsContentVC as? PostDetailViewController)?.setRailSoundSpinning(playing)
-        (previewRestingVC as? PostDetailViewController)?.setRailSoundSpinning(playing)
-        // Two tracks, never together (the owner, 2026-10-31): the post
-        // playing again — the viewer's tap on it — stops the sheet's own.
-        if playing, let soundSheet, soundSheet.isTrackEngaged {
-            soundSheet.releaseTrack()
-        }
-    }
-
-    private func setCoverSpinWatch(_ on: Bool) {
-        coverSpinTimer?.invalidate()
-        coverSpinTimer = nil
-        if on {
-            coverSpinTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
-                MainActor.assumeIsolated { self?.refreshCoverSpin() }
-            }
-        }
-        refreshCoverSpin()
-    }
-
-    /// Silences this screen's sound while something else is heard over it —
-    /// the sound sheet covering the page — and gives it back after.
-    func yieldAudio(_ yielded: Bool) {
-        isAudioYielded = yielded
-        refreshAudibleSurface()
-    }
-
     // MARK: - Sound sheet
 
     /// The attribution's tap: the sound the page is set to, in a sheet.
@@ -5403,14 +5054,14 @@ final class SnapFeedViewController: UIViewController {
         // The record is the sheet's own track (the owner, 2026-10-31): its
         // preview covers the page while it plays (`onCoverChanged`), and the
         // page playing again stops it (`refreshCoverSpin`).
-        soundSheet = sheet
+        soundPlayback.soundSheet = sheet
         sheet.onCoverChanged = { [weak self] covering in
             covered?.setCoveredBySheet(covering)
-            self?.yieldAudio(covering)
+            self?.soundPlayback.yieldAudio(covering)
         }
         sheet.onDismissed = { [weak self] in
             covered?.setCoveredBySheet(false)
-            self?.yieldAudio(false)
+            self?.soundPlayback.yieldAudio(false)
         }
         // The expanded sheet pauses the post, and its collapse or its going
         // plays it again: the sheet declares itself a cover (#1970), and
@@ -5875,7 +5526,7 @@ final class SnapFeedViewController: UIViewController {
         }
     }
 
-    private func lifecycleCell(at index: Int) -> SnapCellLifecycle? {
+    func lifecycleCell(at index: Int) -> SnapCellLifecycle? {
         guard orderedIDs.indices.contains(index) else { return nil }
         return collectionView.cellForItem(at: IndexPath(item: index, section: 0)) as? SnapCellLifecycle
     }
@@ -5985,7 +5636,7 @@ final class SnapFeedViewController: UIViewController {
     /// Decodes `display` under this stay's owner, made here on first
     /// visibility; off screen, the plan only waits for the next stay.
     private func applyImagePlan(_ display: [ImageRequest]) {
-        guard isOnScreen && isForeground else {
+        guard isOnScreen && soundPlayback.isForeground else {
             pendingImagePlan = display
             return
         }
@@ -6105,7 +5756,7 @@ extension SnapFeedViewController: UICollectionViewDelegate {
         // re-stated to every cell as it appears.
         (cell as? SnapFeedCell)?.setOwnsViewport(playbackOwner == indexPath.item)
         // And the sound follows the picture's owner, for the same reason.
-        if playbackOwner == indexPath.item { refreshAudibleSurface(ownerCell: cell as? SnapFeedCell) }
+        if playbackOwner == indexPath.item { soundPlayback.refreshAudibleSurface(ownerCell: cell as? SnapFeedCell) }
         if lifecycle.activeIndex == indexPath.item {
             // ⚠️ THE HOLD, TOO, IS STAMPED HERE — `zoomTransitionWillBegin`
             // held `activeSnapCell`, and on a finger's tap that cell does not
@@ -7404,7 +7055,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         return mirrored
     }
 
-    private var activeSnapCell: SnapFeedCell? {
+    var activeSnapCell: SnapFeedCell? {
         guard let index = lifecycle.activeIndex else { return nil }
         return collectionView.cellForItem(at: IndexPath(item: index, section: 0)) as? SnapFeedCell
     }
@@ -7848,7 +7499,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
             videoPlayback.rescope(card, to: id.rawValue)
             videoPlayback.setPeakBitRate(MediaPlaybackPolicy.peakBitRate, in: card)
             card.revealOnFirstFrame()
-            refreshAudibleSurface()
+            soundPlayback.refreshAudibleSurface()
             sideList?.listView.reconcileNow()
         } else if let handoff, videoPlayback.hasPlayer(in: card) {
             videoPlayback.seek(toSeconds: handoff.seconds, in: card, toleranceSeconds: 0)
@@ -8353,6 +8004,21 @@ private final class BarAuthorBadge: AuthorBadgeDrawing {
     }
 
     var drawsAuthorBadgeOnScreen: Bool { owner?.view.window != nil }
+}
+
+// MARK: - The sound's host (#2387)
+
+extension SnapFeedViewController: SnapSoundPlaybackHost {
+    var viewportShareHost: UIView { view }
+
+    func displayModel(for id: PostID) -> FeedItemDisplayModel? { modelsByID[id] }
+
+    func drawSoundSpinning(_ playing: Bool) {
+        activeSnapCell?.setSoundSpinning(playing)
+        footerSoundButton.setSpinning(playing)
+        (commentsContentVC as? PostDetailViewController)?.setRailSoundSpinning(playing)
+        (previewRestingVC as? PostDetailViewController)?.setRailSoundSpinning(playing)
+    }
 }
 
 // MARK: - How it is left (#1144)

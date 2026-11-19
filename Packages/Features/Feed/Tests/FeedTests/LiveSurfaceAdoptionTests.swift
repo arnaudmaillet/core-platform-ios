@@ -124,7 +124,7 @@ struct LiveSurfaceAdoptionTests {
         #expect(pool.currentAudibleSurface === card, "the premise: the adoption moves what is heard")
         #expect(pool.currentAudibleSurface !== named, "the premise: identity alone calls it someone else's")
         #expect(pool.isMuted(in: card) == false)
-        #expect(SnapFeedViewController.leavingClearsAudibleSurface(
+        #expect(SnapSoundPlayback.leavingClearsAudibleSurface(
             pool.currentAudibleSurface, own: named, screen: screen
         ), "the adopted surface is this screen's own view")
 
@@ -141,10 +141,10 @@ struct LiveSurfaceAdoptionTests {
         screen.addSubview(mine)
         other.addSubview(theirs)
 
-        #expect(!SnapFeedViewController.leavingClearsAudibleSurface(theirs, own: nil, screen: screen))
-        #expect(!SnapFeedViewController.leavingClearsAudibleSurface(theirs, own: mine, screen: screen))
-        #expect(SnapFeedViewController.leavingClearsAudibleSurface(mine, own: nil, screen: screen))
-        #expect(SnapFeedViewController.leavingClearsAudibleSurface(theirs, own: theirs, screen: nil))
-        #expect(SnapFeedViewController.leavingClearsAudibleSurface(nil, own: mine, screen: screen))
+        #expect(!SnapSoundPlayback.leavingClearsAudibleSurface(theirs, own: nil, screen: screen))
+        #expect(!SnapSoundPlayback.leavingClearsAudibleSurface(theirs, own: mine, screen: screen))
+        #expect(SnapSoundPlayback.leavingClearsAudibleSurface(mine, own: nil, screen: screen))
+        #expect(SnapSoundPlayback.leavingClearsAudibleSurface(theirs, own: theirs, screen: nil))
+        #expect(SnapSoundPlayback.leavingClearsAudibleSurface(nil, own: mine, screen: screen))
     }
 }

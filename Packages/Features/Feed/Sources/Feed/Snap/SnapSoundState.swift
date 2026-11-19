@@ -15,9 +15,9 @@ import ThreadKit
 /// screen passes the real one (the default), tests their own, and no test
 /// ever forces the shared answer.
 ///
-/// The screen keeps the audible surface and Picture in Picture (the playback
-/// pool's wiring), the song player, the spin timer, the sheet's presentation
-/// and every redraw.
+/// The impure half — the audible surface and Picture in Picture (the playback
+/// pool's wiring), the song player, the spin timer — is `SnapSoundPlayback`;
+/// the screen keeps the sheet's presentation and every redraw.
 ///
 /// Unit-tested without a screen (`SnapSoundStateTests`).
 @MainActor
