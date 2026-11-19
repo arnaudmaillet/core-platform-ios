@@ -83,7 +83,7 @@ extension AppContainer {
     }
 
     func makeFeedBuilder() -> FeedFeatureBuilder {
-        FeedFeatureBuilder(
+        FeedFeatureBuilder(dependencies: .init(
             repository: feedRepository,
             engagementProvider: feedRepository,
             commentsProvider: commentsRepository,
@@ -145,7 +145,7 @@ extension AppContainer {
                 guard case .member(_, let profile?) = storageScope.owner else { return nil }
                 return ProfileID(profile)
             }
-        )
+        ))
     }
 
     func makeDiscoveryRepository() -> DiscoveryFeedRepository {

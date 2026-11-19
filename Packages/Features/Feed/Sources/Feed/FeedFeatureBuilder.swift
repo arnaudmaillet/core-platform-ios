@@ -20,6 +20,152 @@ import LaunchArguments
 /// consumed through `FeedFeatureBuilding` by the app shell.
 @MainActor
 public struct FeedFeatureBuilder: FeedFeatureBuilding {
+    /// Everything Feed needs, handed in by the composition root (#2375).
+    /// Nothing has a default: forgetting a collaborator fails to compile.
+    /// The ones the app always wires and the screens can't do without are
+    /// required. An optional one is either absent in production (said on
+    /// it) or one whose absence is a screen's documented fallback — a row
+    /// withheld, a counter hidden — which the app always fills and the
+    /// package's tests leave out.
+    public struct Dependencies {
+        /// The timeline: posts, their pages and the feed's own mirror.
+        public var repository: any FeedProviding
+        /// Likes and their counts. Nil (a test): the counts stay as loaded.
+        public var engagementProvider: (any EngagementProviding)?
+        /// A post's comments, and the warm of its first ones (#2002). Nil (a
+        /// test): no comments, and no warm.
+        public var commentsProvider: (any CommentsProviding)?
+        /// Live updates. Nil (a test): the feed reads only what it asks for.
+        public var realtime: (any FeedRealtimeSubscribing)?
+        /// The posts the viewer just composed, prepended where they belong.
+        public var composedPosts: ComposedPostChannel
+        public var router: any Router
+        public var imagePipeline: ImagePipeline
+        /// The app's one player pool. Nil (a test): stills, and no warm.
+        public var videoPlayback: VideoPlaybackController?
+        /// Vends the profile switcher for the comments composer's avatar
+        /// menu: a factory, one switcher per surface. A nil switcher leaves
+        /// the composer's face inert.
+        public var makeProfileSwitcher: @MainActor () -> (any ProfileSwitcherPresenting)?
+        /// The viewer's point balance, shared with every surface that shows
+        /// or spends it. Nil (a test): the boost buttons are inert.
+        public var wallet: (any WalletStaking)?
+        /// The wallet/claim sheet the balance badge opens: the shell's, the
+        /// map's own. Nil (a test): the badge is display-only.
+        public var makeWalletSheet: (@MainActor () -> UIViewController)?
+        /// Whether the viewer is shown a balance at all — asked as each
+        /// screen is built. A guest is not (#1146).
+        public var showsBalance: @MainActor () -> Bool
+        /// Files moderation reports from a post card's "...". Nil (a test):
+        /// no Report row.
+        public var reporting: (any ContentReporting)?
+        /// Follows an author: the pill's "+" and the menu's Unfollow. Nil (a
+        /// test): neither.
+        public var socialGraph: (any SocialGraphWriting)?
+        /// Whether the viewer follows an author. Nil (a test): no "+".
+        public var followRelations: (any SocialGraphReading)?
+        /// A post menu's Mute and Block (#1498 §3). Nil (a test): neither.
+        public var moderation: (any SocialGraphModerating)?
+        /// The app's one follow-change channel, so the pill's "+" agrees with
+        /// a follow made on any other surface.
+        public var followEvents: FollowGraphEvents
+        /// The numbers the timeline does not carry, so a card can show reach.
+        /// Nil (a test): the cards hide their counter.
+        public var postCounters: (any PostCounterReading)?
+        /// The Text Post page's drafts: the app's one store.
+        public var postDrafts: PostDraftStore
+        /// Which sound a clip is set to, for the sound sheet. Nil on the
+        /// local fleet, whose post contract carries no audio yet: every clip
+        /// is its own "original sound".
+        public var soundProvider: (any PostSoundProviding)?
+        /// "Use this sound" — the shell opens its camera with it. Nil (a
+        /// test): the button is hidden.
+        public var useSound: (@MainActor (PostSound) -> Void)?
+        /// Discover's own corpus (`GetDiscoveryFeed`). Nil (a test):
+        /// Discover is the following timeline.
+        public var discovery: (any FeedProviding)?
+        /// For You's corpora on the device (#893). Nil when the device store
+        /// can't be opened: the tab opens on skeletons.
+        public var localCache: FeedLocalCache?
+        /// The app's one post and profile per id (#896).
+        public var entities: any EntityReading & EntityWriting
+        /// The post share sheet's quick-send row (#1710). Nil (a test): the
+        /// sheet has no row of people.
+        public var shareTargeting: (any ShareTargeting)?
+        /// The app's one saved pile, viewing history, record of withheld
+        /// posts and saved sounds (#2376).
+        public var bookmarks: PostBookmarkStore
+        public var viewHistory: PostViewHistoryStore
+        public var unavailablePosts: UnavailablePosts
+        public var savedSounds: SavedSoundStore
+        /// The active profile, as the app's storage scope holds it.
+        public var viewerProfile: @MainActor () -> ProfileID?
+
+        public init(
+            repository: any FeedProviding,
+            engagementProvider: (any EngagementProviding)?,
+            commentsProvider: (any CommentsProviding)?,
+            realtime: (any FeedRealtimeSubscribing)?,
+            composedPosts: ComposedPostChannel,
+            router: any Router,
+            imagePipeline: ImagePipeline,
+            videoPlayback: VideoPlaybackController?,
+            makeProfileSwitcher: @escaping @MainActor () -> (any ProfileSwitcherPresenting)?,
+            wallet: (any WalletStaking)?,
+            makeWalletSheet: (@MainActor () -> UIViewController)?,
+            showsBalance: @escaping @MainActor () -> Bool,
+            reporting: (any ContentReporting)?,
+            socialGraph: (any SocialGraphWriting)?,
+            followRelations: (any SocialGraphReading)?,
+            moderation: (any SocialGraphModerating)?,
+            followEvents: FollowGraphEvents,
+            postCounters: (any PostCounterReading)?,
+            postDrafts: PostDraftStore,
+            soundProvider: (any PostSoundProviding)?,
+            useSound: (@MainActor (PostSound) -> Void)?,
+            discovery: (any FeedProviding)?,
+            localCache: FeedLocalCache?,
+            entities: any EntityReading & EntityWriting,
+            shareTargeting: (any ShareTargeting)?,
+            bookmarks: PostBookmarkStore,
+            viewHistory: PostViewHistoryStore,
+            unavailablePosts: UnavailablePosts,
+            savedSounds: SavedSoundStore,
+            viewerProfile: @escaping @MainActor () -> ProfileID?
+        ) {
+            self.repository = repository
+            self.engagementProvider = engagementProvider
+            self.commentsProvider = commentsProvider
+            self.realtime = realtime
+            self.composedPosts = composedPosts
+            self.router = router
+            self.imagePipeline = imagePipeline
+            self.videoPlayback = videoPlayback
+            self.makeProfileSwitcher = makeProfileSwitcher
+            self.wallet = wallet
+            self.makeWalletSheet = makeWalletSheet
+            self.showsBalance = showsBalance
+            self.reporting = reporting
+            self.socialGraph = socialGraph
+            self.followRelations = followRelations
+            self.moderation = moderation
+            self.followEvents = followEvents
+            self.postCounters = postCounters
+            self.postDrafts = postDrafts
+            self.soundProvider = soundProvider
+            self.useSound = useSound
+            self.discovery = discovery
+            self.localCache = localCache
+            self.entities = entities
+            self.shareTargeting = shareTargeting
+            self.bookmarks = bookmarks
+            self.viewHistory = viewHistory
+            self.unavailablePosts = unavailablePosts
+            self.savedSounds = savedSounds
+            self.viewerProfile = viewerProfile
+        }
+    }
+
     private let repository: any FeedProviding
     private let engagementProvider: (any EngagementProviding)?
     private let commentsProvider: (any CommentsProviding)?
@@ -29,8 +175,8 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     /// Shared with the place page (#2381).
     public let postOpenWarm: PostOpenWarm?
     private let realtime: (any FeedRealtimeSubscribing)?
-    private let composedPosts: ComposedPostChannel?
-    private let router: (any Router)?
+    private let composedPosts: ComposedPostChannel
+    private let router: any Router
     private let imagePipeline: ImagePipeline
     private let videoPlayback: VideoPlaybackController?
     /// Vends the profile switcher for the comments composer's avatar menu.
@@ -38,8 +184,9 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     /// A FACTORY, not an instance: `ProfileSwitcherPresenting` caches its
     /// pre-formatted rows from the last `reload()`, so each surface that
     /// offers switching holds its own — sharing one would make two screens
-    /// race over the same row cache. Nil leaves the composer's face inert.
-    private let makeProfileSwitcher: (@MainActor () -> (any ProfileSwitcherPresenting)?)?
+    /// race over the same row cache. A nil switcher leaves the composer's
+    /// face inert.
+    private let makeProfileSwitcher: @MainActor () -> (any ProfileSwitcherPresenting)?
     /// The viewer's point balance, shared with every surface that shows or
     /// spends it (the map toolbar's badge, the rail's boost anchor, the
     /// comments bar). One instance app-wide — `WalletStore`'s change post is
@@ -74,9 +221,8 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     /// A post menu's Mute and Block (#1498 §3). Nil: neither row is offered.
     private let moderation: (any SocialGraphModerating)?
     /// The app's one follow-change channel, so the pill's "+" agrees with a
-    /// follow or unfollow made on any other surface. Nil: each feed keeps the
-    /// answers it asked for, and re-asks on a return.
-    private let followEvents: FollowGraphEvents?
+    /// follow or unfollow made on any other surface.
+    private let followEvents: FollowGraphEvents
     /// The app's one post and profile per id (#896): every snap feed reads
     /// the viewer's relation to an author from it, so a follow on one feed
     /// is the badge of all of them.
@@ -121,81 +267,34 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         for key in retiredContextKeys { defaults.removeObject(forKey: key) }
     }
 
-    public init(
-        repository: any FeedProviding,
-        engagementProvider: (any EngagementProviding)? = nil,
-        commentsProvider: (any CommentsProviding)? = nil,
-        realtime: (any FeedRealtimeSubscribing)? = nil,
-        composedPosts: ComposedPostChannel? = nil,
-        router: (any Router)? = nil,
-        imagePipeline: ImagePipeline,
-        videoPlayback: VideoPlaybackController? = nil,
-        makeProfileSwitcher: (@MainActor () -> (any ProfileSwitcherPresenting)?)? = nil,
-        wallet: (any WalletStaking)? = nil,
-        makeWalletSheet: (@MainActor () -> UIViewController)? = nil,
-        showsBalance: @escaping @MainActor () -> Bool = { true },
-        reporting: (any ContentReporting)? = nil,
-        socialGraph: (any SocialGraphWriting)? = nil,
-        followRelations: (any SocialGraphReading)? = nil,
-        moderation: (any SocialGraphModerating)? = nil,
-        followEvents: FollowGraphEvents? = nil,
-        /// Reads the numbers the timeline does not carry, so a card can show
-        /// reach. Optional: without it the cards simply hide their counter,
-        /// which is what they did before.
-        postCounters: (any PostCounterReading)? = nil,
-        postDrafts: PostDraftStore,
-        soundProvider: (any PostSoundProviding)? = nil,
-        useSound: (@MainActor (PostSound) -> Void)? = nil,
-        /// Discover's own corpus — `DiscoveryFeedRepository` over
-        /// `GetDiscoveryFeed`, the same pool for guests and members. Nil:
-        /// Discover is the following timeline, as before the backend served
-        /// one.
-        discovery: (any FeedProviding)? = nil,
-        /// For You's corpora on the device (#893): the tab opens on the last
-        /// session's pages, then revalidates. Nil: it opens on skeletons.
-        localCache: FeedLocalCache? = nil,
-        /// The app's entity store. Nil: this builder's screens share one of
-        /// their own.
-        entities: (any EntityReading & EntityWriting)? = nil,
-        /// The post share sheet's quick-send row (#1710) — the profile
-        /// sheet's own source. Nil: the sheet has no row of people.
-        shareTargeting: (any ShareTargeting)? = nil,
-        /// The app's one saved pile, viewing history, record of withheld
-        /// posts and saved sounds (#2376).
-        bookmarks: PostBookmarkStore,
-        viewHistory: PostViewHistoryStore,
-        unavailablePosts: UnavailablePosts,
-        savedSounds: SavedSoundStore,
-        /// The active profile, as the app's storage scope holds it.
-        viewerProfile: @escaping @MainActor () -> ProfileID?
-    ) {
-        self.bookmarks = bookmarks
-        self.viewHistory = viewHistory
-        self.unavailablePosts = unavailablePosts
-        self.savedSounds = savedSounds
-        self.viewerProfile = viewerProfile
-        self.shareTargeting = shareTargeting
-        self.entities = entities ?? EntityStore()
-        self.discovery = discovery
-        self.localCache = localCache
-        self.postDrafts = postDrafts
-        self.soundProvider = soundProvider
-        self.useSound = useSound
-        self.postCounters = postCounters
-        self.reporting = reporting
-        self.socialGraph = socialGraph
-        self.followRelations = followRelations
-        self.moderation = moderation
-        self.followEvents = followEvents
+    public init(dependencies: Dependencies) {
+        bookmarks = dependencies.bookmarks
+        viewHistory = dependencies.viewHistory
+        unavailablePosts = dependencies.unavailablePosts
+        savedSounds = dependencies.savedSounds
+        viewerProfile = dependencies.viewerProfile
+        shareTargeting = dependencies.shareTargeting
+        entities = dependencies.entities
+        discovery = dependencies.discovery
+        localCache = dependencies.localCache
+        postDrafts = dependencies.postDrafts
+        soundProvider = dependencies.soundProvider
+        useSound = dependencies.useSound
+        postCounters = dependencies.postCounters
+        reporting = dependencies.reporting
+        socialGraph = dependencies.socialGraph
+        followRelations = dependencies.followRelations
+        moderation = dependencies.moderation
+        followEvents = dependencies.followEvents
         authorMarks = PostAuthorMarks(
-            writer: socialGraph, reader: followRelations, entities: self.entities, followEvents: followEvents,
-            viewer: viewerProfile
+            writer: dependencies.socialGraph, reader: dependencies.followRelations, entities: dependencies.entities,
+            followEvents: dependencies.followEvents, viewer: dependencies.viewerProfile
         )
-        self.makeProfileSwitcher = makeProfileSwitcher
-        self.repository = repository
-        self.engagementProvider = engagementProvider
-        self.commentsProvider = commentsProvider
-        postOpenWarm = commentsProvider.map { provider in
+        makeProfileSwitcher = dependencies.makeProfileSwitcher
+        repository = dependencies.repository
+        engagementProvider = dependencies.engagementProvider
+        commentsProvider = dependencies.commentsProvider
+        postOpenWarm = dependencies.commentsProvider.map { provider in
             PostOpenWarm(
                 prefetch: { id in await provider.prefetchTopComments(for: id) },
                 isHeld: { id in provider.holdsComments(for: id) },
@@ -203,15 +302,15 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                 previews: { ids in await provider.prefetchPreviews(for: ids) }
             )
         }
-        self.realtime = realtime
-        self.composedPosts = composedPosts
-        self.router = router
-        self.imagePipeline = imagePipeline
-        self.videoPlayback = videoPlayback
-        self.wallet = wallet
-        self.makeWalletSheet = makeWalletSheet
+        realtime = dependencies.realtime
+        composedPosts = dependencies.composedPosts
+        router = dependencies.router
+        imagePipeline = dependencies.imagePipeline
+        videoPlayback = dependencies.videoPlayback
+        wallet = dependencies.wallet
+        makeWalletSheet = dependencies.makeWalletSheet
         Self.forgetRetiredForYouModes(in: .standard)
-        self.showsBalance = showsBalance
+        showsBalance = dependencies.showsBalance
         // Every grid's tiles follow the feed's playback policy — Autoplay,
         // the network, Low Power Mode — For You's and a profile's alike (#580).
         GridVideoPlaybackCoordinator.allowsAutoplay = { MediaPlaybackPolicy.autoplays }
@@ -1502,13 +1601,13 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         viewModel: PostDetailViewModel,
         threadChrome: Bool,
         imagePipeline: ImagePipeline,
-        makeProfileSwitcher: (@MainActor () -> (any ProfileSwitcherPresenting)?)?,
+        makeProfileSwitcher: @MainActor () -> (any ProfileSwitcherPresenting)?,
         wallet: (any WalletStaking)?
     ) -> PostDetailViewController {
         PostDetailViewController(
             viewModel: viewModel,
             imagePipeline: imagePipeline,
-            profileSwitcher: makeProfileSwitcher?(),
+            profileSwitcher: makeProfileSwitcher(),
             wallet: wallet,
             threadChrome: threadChrome,
             // Every snap page's comments group by day under Recent (#757).

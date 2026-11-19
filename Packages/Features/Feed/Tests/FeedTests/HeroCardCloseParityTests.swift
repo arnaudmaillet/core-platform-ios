@@ -265,7 +265,7 @@ struct HeroCardCloseParityTests {
         let presenter = UIViewController()
         let nav: UINavigationController
         let tabs = UITabBarController()
-        let builder = FeedFeatureBuilder(
+        let builder = FeedFeatureBuilder(dependencies: .testing(
             repository: SilentProvider(),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             postDrafts: PostDraftStore(scope: StorageScope()),
@@ -274,7 +274,7 @@ struct HeroCardCloseParityTests {
             unavailablePosts: UnavailablePosts(),
             savedSounds: SavedSoundStore(scope: StorageScope()),
             viewerProfile: { nil }
-        )
+        ))
 
         init() {
             nav = UINavigationController(rootViewController: presenter)

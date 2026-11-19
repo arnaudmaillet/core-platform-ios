@@ -138,7 +138,7 @@ struct TextPostComposePageTests {
             defaults: UserDefaults(suiteName: "text-post.bookmarks.tests.\(UUID().uuidString)")!,
             scope: StorageScope(owner: .member(account: "acc-1", profile: "prof-1"))
         )
-        let screen = FeedFeatureBuilder(
+        let screen = FeedFeatureBuilder(dependencies: .testing(
             repository: posts,
             commentsProvider: comments,
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
@@ -149,7 +149,7 @@ struct TextPostComposePageTests {
             unavailablePosts: UnavailablePosts(),
             savedSounds: SavedSoundStore(scope: StorageScope()),
             viewerProfile: { nil }
-        ).makeTextPostScreen(publisher: publisher, bookmarks: pile, recordsVoice: recordsVoice)
+        )).makeTextPostScreen(publisher: publisher, bookmarks: pile, recordsVoice: recordsVoice)
         let navigation = try #require(screen as? UINavigationController)
         #expect(navigation.modalPresentationStyle == .pageSheet, "a sheet, not a full screen")
         let composer = try #require(navigation.viewControllers.first as? TextPostComposerViewController)
@@ -488,7 +488,7 @@ struct TextPostComposePageTests {
         let entities = EntityStore()
         weak var released: TextPostComposerViewController?
         autoreleasepool {
-            let navigation = FeedFeatureBuilder(
+            let navigation = FeedFeatureBuilder(dependencies: .testing(
                 repository: RememberingFeed(),
                 imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
                 postDrafts: PostDraftStore(scope: StorageScope()),
@@ -498,7 +498,7 @@ struct TextPostComposePageTests {
                 unavailablePosts: UnavailablePosts(),
                 savedSounds: SavedSoundStore(scope: StorageScope()),
                 viewerProfile: { nil }
-            ).makeTextPostScreen(publisher: RecordingPublisher()) as? UINavigationController
+            )).makeTextPostScreen(publisher: RecordingPublisher()) as? UINavigationController
             released = navigation?.viewControllers.first as? TextPostComposerViewController
             #expect(released != nil)
         }

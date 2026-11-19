@@ -64,7 +64,7 @@ struct KnownFirstSetsTests {
         let post = Post(id: PostID("p1"), authorID: author.id, caption: "", attachments: [], publishedAt: Date())
         store.upsert(author)
         store.replacePost(post)
-        let feed = FeedFeatureBuilder(
+        let feed = FeedFeatureBuilder(dependencies: .testing(
             repository: EmptyFeed(), imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             postDrafts: PostDraftStore(scope: StorageScope()), entities: store,
             bookmarks: PostBookmarkStore(scope: StorageScope()),
@@ -72,7 +72,7 @@ struct KnownFirstSetsTests {
             unavailablePosts: UnavailablePosts(),
             savedSounds: SavedSoundStore(scope: StorageScope()),
             viewerProfile: { nil }
-        )
+        ))
         #expect(feed.heldGalleryPost(PostID("p1")) != nil)
         #expect(feed.heldGalleryPost(PostID("p1"))?.reactionCount == nil, "an unknown count drew a zero")
         store.setLikeCount(9, for: PostID("p1"))
@@ -88,7 +88,7 @@ struct KnownFirstSetsTests {
     /// the held members, the opening post first.
     @Test func aClusterWithAColdMemberOpensOnWhatIsHeld() {
         let held = Self.entry("rep")
-        let builder = FeedFeatureBuilder(
+        let builder = FeedFeatureBuilder(dependencies: .testing(
             repository: MirrorFeed(held: [held]), imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             postDrafts: PostDraftStore(scope: StorageScope()),
             bookmarks: PostBookmarkStore(scope: StorageScope()),
@@ -96,7 +96,7 @@ struct KnownFirstSetsTests {
             unavailablePosts: UnavailablePosts(),
             savedSounds: SavedSoundStore(scope: StorageScope()),
             viewerProfile: { nil }
-        )
+        ))
         let feed = builder.makeSnapFeedViewController(postIDs: [PostID("rep"), PostID("cold")], ownsInteractiveDismissal: true)
         #expect((feed as? SnapFeedViewController)?.orderedIDs == [PostID("rep")], "the held representative waited")
         // The opening post unknown: its loading page, as before — no seed.
