@@ -376,7 +376,9 @@ jobs:
     needs: discover
     if: ${{ needs.discover.outputs.count != '0' && vars.MACOS_RUNNER != 'github' }}
     runs-on: macos-latest
-    timeout-minutes: 60
+    # develop selects every package: 56.5 min on 34378740c, past 60 once
+    # ThreadKit gained a test target (4e46aafd2). A hosted job may run 6 h.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
 
