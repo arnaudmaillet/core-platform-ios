@@ -6,23 +6,27 @@ import WalletInterface
 /// `StakePackSelling`, as `CountryAccessService` is to `CountryAccess`.
 ///
 /// The pack lives in `WalletStore` beside the gems that buy it and the points
-/// its shots stake: one store, one persistence, one change post. A member's
+/// its shots stake: one store, one persistence, one change signal. A member's
 /// pack is the server's (#1475): `wallet.v1`'s `BuyStakePack`, its packs on
 /// sale and `Wallet.stake_shots`; a guest's is the device's mock.
 @MainActor
 public final class StakePackService: StakePackSelling {
     private let wallet: WalletStore
-    private var observer: NSObjectProtocol?
+    /// What `observeChanges` hands out: relayed from the wallet, on main.
+    private let changes = StoreChanges<Void>()
+    private var walletObservation: StoreObservation?
 
     public init(wallet: WalletStore) {
         self.wallet = wallet
         // A shot fired in the feed, a pack bought, gems earned: the shop
         // re-reads on any of them.
-        observer = NotificationCenter.default.addObserver(
-            forName: WalletStore.didChangeNotification, object: wallet, queue: .main
-        ) { _ in
-            NotificationCenter.default.post(name: .stakePackDidChange, object: nil)
+        walletObservation = wallet.changes.observe(on: .main) { [changes] in
+            changes.send()
         }
+    }
+
+    public func observeChanges(_ handler: @escaping @MainActor @Sendable () -> Void) -> StoreObservation {
+        changes.observeOnMain { handler() }
     }
 
     /// The pack loaded, or the standard one when none is.

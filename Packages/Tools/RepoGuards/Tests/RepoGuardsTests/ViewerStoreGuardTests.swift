@@ -11,10 +11,9 @@ import Testing
 /// excluded): no `static let shared = <Type>(…)` declaration, no
 /// `<Type>.shared`, and no `<Type> = .shared` default value.
 ///
-/// And ONE `StorageScope` (#2376): the stores observe their scope's change
-/// notification with THEIR scope as the object, so a store built over a
-/// second scope would never follow the viewer, and nothing would visibly
-/// fail. `StorageScope(` appears once in production code, in
+/// And ONE `StorageScope` (#2376): the stores observe THEIR scope's
+/// `ownerChanges`, so a store built over a second scope would never follow
+/// the viewer, and nothing would visibly fail. `StorageScope(` appears once in production code, in
 /// `App/Composition/AppContainer.swift`, and no `scope: StorageScope = …`
 /// default lets a store pick its own.
 ///

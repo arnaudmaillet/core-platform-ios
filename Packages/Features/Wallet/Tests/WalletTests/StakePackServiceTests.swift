@@ -9,10 +9,7 @@ import WalletInterface
 @MainActor
 @Suite(.serialized)
 struct StakePackServiceTests {
-    /// Every wallet this suite makes, kept for the process. A seller keeps
-    /// its observer for the app's lifetime, filtered on its wallet's
-    /// address; a wallet freed here could hand that address to a later one,
-    /// and a dead seller would answer for it.
+    /// Every wallet this suite makes, kept for the process.
     private static var wallets: [WalletStore] = []
 
     private static func freshWallet() -> WalletStore {
@@ -44,16 +41,18 @@ struct StakePackServiceTests {
     @Test func aChangeOfItsWalletReachesTheShop() async {
         let wallet = Self.freshWallet()
         let seller = StakePackService(wallet: wallet)
-        var heard = 0
-        let observer = NotificationCenter.default.addObserver(forName: .stakePackDidChange, object: nil, queue: .main) { _ in
-            MainActor.assumeIsolated { heard += 1 }
-        }
-        defer { NotificationCenter.default.removeObserver(observer) }
+        @MainActor final class Heard { var count = 0 }
+        let heard = Heard()
+        let observation = seller.observeChanges { heard.count += 1 }
 
-        NotificationCenter.default.post(name: WalletStore.didChangeNotification, object: Self.freshWallet())
-        NotificationCenter.default.post(name: WalletStore.didChangeNotification, object: wallet)
+        Self.freshWallet().changes.send()
+        wallet.changes.send()
+        #expect(heard.count == 1)
 
-        #expect(heard == 1)
+        // Over once the Shop lets the observation go.
+        observation.cancel()
+        wallet.changes.send()
+        #expect(heard.count == 1)
         withExtendedLifetime(seller) {}
     }
 }

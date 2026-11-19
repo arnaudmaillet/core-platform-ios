@@ -199,12 +199,9 @@ struct WalletStakePackTests {
 
     @Test func buyingAndShootingPostScopedChangeNotifications() async {
         let store = WalletStore(defaults: Self.defaults(), scope: StorageScope())
-        let center = NotificationCenter.default
         let counter = Counter()
-        let token = center.addObserver(forName: WalletStore.didChangeNotification, object: store, queue: nil) { _ in
-            counter.increment()
-        }
-        defer { center.removeObserver(token) }
+        let observation = store.changes.observe { counter.increment() }
+        defer { observation.cancel() }
 
         store.buyStakePack()
         store.stake(.shot, on: "post-1")

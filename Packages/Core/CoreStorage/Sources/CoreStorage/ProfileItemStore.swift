@@ -58,7 +58,9 @@ public enum ProfileItemPurchase: Equatable, Sendable {
 /// (core-platform-backend#915 and its catalogue, #892): a set of item ids
 /// per account id, in `UserDefaults`.
 public final class ProfileItemStore: @unchecked Sendable {
-    public static let didChangeNotification = Notification.Name("profile.items.didChange")
+    /// Sent after an item is granted, on the thread that granted it (#2376:
+    /// was the `profile.items.didChange` notification).
+    public let changes = StoreChanges<Void>()
 
     private let defaults: UserDefaults
     private let lock = NSLock()
@@ -108,7 +110,7 @@ public final class ProfileItemStore: @unchecked Sendable {
             if added { defaults.set(owned.sorted(), forKey: Self.key(accountID)) }
             return added
         }
-        if inserted { NotificationCenter.default.post(name: Self.didChangeNotification, object: self) }
+        if inserted { changes.send() }
         return inserted
     }
 

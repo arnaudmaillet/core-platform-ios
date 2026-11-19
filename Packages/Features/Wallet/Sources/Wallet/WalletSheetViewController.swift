@@ -109,6 +109,8 @@ final class WalletSheetViewController: UIViewController {
 
     private var countdownTimer: Timer?
     private let walletObservers = NotificationTokens()
+    /// The wallet's own changes, heard for this sheet's lifetime.
+    private var walletObservation: StoreObservation?
 
     /// Room under the bar before the balance: the balance's air (#1494).
     private static let topInset: CGFloat = Spacing.xl
@@ -258,12 +260,10 @@ final class WalletSheetViewController: UIViewController {
             await wallet.refreshStakesFromServer()
         }
 
+        walletObservation = wallet.changes.observeOnMain { [weak self] in
+            self?.refresh()
+        }
         walletObservers.replace(with: [
-            NotificationCenter.default.addObserver(
-                forName: WalletStore.didChangeNotification, object: wallet, queue: .main
-            ) { [weak self] _ in
-                MainActor.assumeIsolated { self?.refresh() }
-            },
             NotificationCenter.default.addObserver(
                 forName: WalletClaimer.didChangeNotification, object: claimer, queue: .main
             ) { [weak self] _ in

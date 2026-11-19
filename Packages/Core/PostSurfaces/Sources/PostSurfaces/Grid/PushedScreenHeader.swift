@@ -60,6 +60,10 @@ final public class PushedScreenHeader: NSObject {
     /// Wakes the badge when the hourly claim unlocks — the one state change
     /// that arrives by CLOCK, so no store notification announces it.
     private var claimUnlockTimer: Timer?
+    /// The wallet's changes, heard for as long as this header lives: it
+    /// replaces a selector registration, which went with the object, so a
+    /// pushed screen's header stops hearing when the screen goes (#2376).
+    private var walletObservation: StoreObservation?
 
     private(set) lazy var searchItem: UIBarButtonItem = {
         let item = UIBarButtonItem(
@@ -72,8 +76,8 @@ final public class PushedScreenHeader: NSObject {
     }()
 
     /// - Parameters:
-    ///   - wallet: the app's ONE store (`WalletStore`'s change post is scoped
-    ///     to the instance). Nil leaves the header with search alone.
+    ///   - wallet: the app's ONE store (its `changes` are the instance's).
+    ///     Nil leaves the header with search alone.
     ///   - makeWalletSheet: the shell's claim sheet. Nil makes the badge a
     ///     read-out: a control with nothing behind it is not offered.
     public init(
@@ -99,12 +103,11 @@ final public class PushedScreenHeader: NSObject {
             walletItem = makeWalletItem()
             apply()
         }
-        // Selector-based, so the registration goes with this object — a pushed
+        // Kept on this object, so the observation goes with it — a pushed
         // screen's header dies with the screen, every pop.
-        NotificationCenter.default.addObserver(
-            self, selector: #selector(walletDidChange),
-            name: WalletStore.didChangeNotification, object: wallet
-        )
+        walletObservation = wallet.changes.observe { [weak self] in
+            self?.walletDidChange()
+        }
         walletItem = makeWalletItem()
         refresh()
     }
@@ -138,7 +141,7 @@ final public class PushedScreenHeader: NSObject {
         return item
     }
 
-    @objc nonisolated private func walletDidChange() {
+    nonisolated private func walletDidChange() {
         guard Thread.isMainThread else {
             DispatchQueue.main.async { [weak self] in self?.walletDidChange() }
             return
@@ -182,5 +185,8 @@ final public class PushedScreenHeader: NSObject {
     var debugTrailingIdentifiers: [String] {
         (host?.navigationItem.rightBarButtonItems ?? []).map { $0.identifier ?? "?" }
     }
+
+    /// The count the balance badge draws.
+    var debugRenderedBalance: String? { badge.renderedCount }
     #endif
 }

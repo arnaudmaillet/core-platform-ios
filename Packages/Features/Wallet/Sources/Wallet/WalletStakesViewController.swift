@@ -58,7 +58,7 @@ final class WalletStakesViewController: UIViewController {
     private var entries: [PostID: GalleryPost]
     private var postLoads = WalletStakePostLoads()
     private var countdownTimer: Timer?
-    private let walletObservers = NotificationTokens()
+    private var walletObservation: StoreObservation?
     /// A Try Again on its way.
     private var isRetrying = false
 
@@ -105,13 +105,9 @@ final class WalletStakesViewController: UIViewController {
         )
         buildCollection()
 
-        walletObservers.replace(with: [
-            NotificationCenter.default.addObserver(
-                forName: WalletStore.didChangeNotification, object: wallet, queue: .main
-            ) { [weak self] _ in
-                MainActor.assumeIsolated { self?.refresh() }
-            },
-        ])
+        walletObservation = wallet.changes.observeOnMain { [weak self] in
+            self?.refresh()
+        }
         refresh()
         // The server's listing as of now; its change notice redraws.
         Task { [weak self] in await self?.reloadListing() }

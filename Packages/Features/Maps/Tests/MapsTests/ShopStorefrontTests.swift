@@ -1,3 +1,4 @@
+import CoreStorage
 import DesignSystem
 import MapsInterface
 import Testing
@@ -42,6 +43,11 @@ struct ShopStorefrontTests {
         var loaded: (id: String, shotsLeft: Int)?
         private(set) var bought: [String] = []
         init(access: FakeAccess) { self.access = access }
+
+        let changes = StoreChanges<Void>()
+        func observeChanges(_ handler: @escaping @MainActor @Sendable () -> Void) -> StoreObservation {
+            changes.observeOnMain { handler() }
+        }
         static let tiers: [(id: String, shots: Int, price: Int)] = [("shots_3", 3, 50), ("shots_10", 10, 150), ("shots_25", 25, 325)]
         var offers: [StakePackOffer] {
             Self.tiers.map { tier in
@@ -129,6 +135,28 @@ struct ShopStorefrontTests {
         let buy = try #require(menu.children.first as? UIAction)
         #expect(buy.attributes.contains(.disabled))
         #expect(buy.subtitle?.contains("don't stack") == true)
+    }
+
+    /// ⚠️ THE SCREEN KEEPS ITS SELLER'S OBSERVATION (#2376): a pack loaded
+    /// elsewhere (the feed fired the last shot, another screen bought one)
+    /// redraws the shelf, and the observation ends with the screen — the
+    /// selector registration it replaced did both.
+    @Test func aPackChangeRedrawsTheShelfUntilTheScreenGoes() throws {
+        let access = FakeAccess()
+        let packs = FakePacks(access: access)
+        weak var released: ShopStorefrontViewController?
+        try autoreleasepool {
+            let front = ShopStorefrontViewController(access: access, stakePacks: packs)
+            front.loadViewIfNeeded()
+            #expect(packs.changes.debugObservationCount == 1)
+            packs.loaded = ("shots_10", 4)
+            packs.changes.send()
+            let loaded = try #require(front.packCards.first { $0.offer.id == "shots_10" })
+            #expect(loaded.badgeLabel.text == "LOADED")
+            released = front
+        }
+        #expect(released == nil, "the observation kept the screen alive")
+        #expect(packs.changes.debugObservationCount == 0, "the observation outlived the screen")
     }
 
     /// Buying goes through the pack the menu belongs to.

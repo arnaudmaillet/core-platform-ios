@@ -38,6 +38,7 @@ struct SearchResultsWalletBadgeTests {
     /// change to hear. No store, no storage, no server.
     private final class FakeWallet: WalletReading, @unchecked Sendable {
         var reading = WalletSnapshot(balance: 250)
+        let changes = StoreChanges<Void>()
         var balance: Int { reading.balance }
         var stakeableBalance: Int { reading.balance }
         var stakeShots: Int { reading.stakeShots }
@@ -48,7 +49,7 @@ struct SearchResultsWalletBadgeTests {
         /// What the store does after every spend or claim.
         func change(balance: Int) {
             reading = WalletSnapshot(balance: balance)
-            NotificationCenter.default.post(name: WalletStore.didChangeNotification, object: self)
+            changes.send()
         }
     }
 

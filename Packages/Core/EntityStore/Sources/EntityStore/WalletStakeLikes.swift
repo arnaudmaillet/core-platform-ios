@@ -28,7 +28,7 @@ public final class WalletStakeLikes: @unchecked Sendable {
     private let lock = NSLock()
     private var baseline: [String: Int]
     private var owner: StorageScope.Owner
-    private var observer: NSObjectProtocol?
+    private var walletObservation: StoreObservation?
 
     public init(wallet: any WalletReading, entities: EntityStore, scope: StorageScope) {
         self.wallet = wallet
@@ -36,15 +36,9 @@ public final class WalletStakeLikes: @unchecked Sendable {
         self.scope = scope
         owner = scope.owner
         baseline = Self.totals(of: wallet)
-        observer = NotificationCenter.default.addObserver(
-            forName: WalletStore.didChangeNotification, object: wallet, queue: nil
-        ) { [weak self] _ in
+        walletObservation = wallet.changes.observe { [weak self] in
             self?.walletDidChange()
         }
-    }
-
-    deinit {
-        if let observer { NotificationCenter.default.removeObserver(observer) }
     }
 
     /// Internal for tests: the wallet moved — on whatever thread moved it.

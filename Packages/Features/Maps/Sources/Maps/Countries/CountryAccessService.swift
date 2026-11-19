@@ -43,6 +43,9 @@ public final class CountryAccessService: CountryAccess {
     private let postedCountries: Set<String>
     private let covers: [String: CountryCover]
     private var observers: [NSObjectProtocol] = []
+    /// The wallet's and the unlocks' changes, heard for the service's
+    /// lifetime — the injected instances', the app's ones (#2376).
+    private var storeObservations: [StoreObservation] = []
     /// geo_discovery.v1, for a member whose wallet is the server's (#1475).
     private let geo: (any GeoDiscovery_V1_GeoDiscoveryServiceClientInterface)?
     /// The countries the server last listed for the account, home included.
@@ -74,8 +77,12 @@ public final class CountryAccessService: CountryAccess {
         // screen): the map re-reads on either.
         // So do the device's country and the viewer: a sign-in opens the
         // account's countries, a sign-out closes them.
-        for name in [WalletStore.didChangeNotification, CountryUnlockStore.didChangeNotification,
-                     .currentCountryDidChange, .viewerDidChange] {
+        storeObservations = [wallet.changes, unlocks.changes].map { changes in
+            changes.observe(on: .main) {
+                NotificationCenter.default.post(name: .countryAccessDidChange, object: nil)
+            }
+        }
+        for name in [Notification.Name.currentCountryDidChange, .viewerDidChange] {
             observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { _ in
                 NotificationCenter.default.post(name: .countryAccessDidChange, object: nil)
             })

@@ -14,6 +14,11 @@ struct ShopGoalItemsTests {
         var items: [ProfileItem] { [.videoBanner] }
         func owns(_ item: ProfileItem) -> Bool { owned.contains(item) }
         func buy(_ item: ProfileItem) async -> ProfileItemPurchase { .unavailable }
+
+        let changes = StoreChanges<Void>()
+        func observeChanges(_ handler: @escaping @MainActor @Sendable () -> Void) -> StoreObservation {
+            changes.observeOnMain { handler() }
+        }
     }
 
     @Test func theCandidatesAreTheProfileItems() {

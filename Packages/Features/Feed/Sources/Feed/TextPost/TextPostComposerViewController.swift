@@ -104,7 +104,7 @@ final class TextPostComposerViewController: UIViewController {
     private var isSortAvailable = false
     private let walletBadge = WalletBadgeButton()
     private var walletBadgeItem: UIBarButtonItem?
-    private let walletObservers = NotificationTokens()
+    private var walletObservation: StoreObservation?
     /// The saved pile: the app's one (`shared`) outside tests.
     private let bookmarks: PostBookmarkStore
     private lazy var bookmarkItem = SnapFooterToolbar.makeSaveItem { [weak self] in self?.toggleBookmark() }
@@ -865,13 +865,9 @@ final class TextPostComposerViewController: UIViewController {
         // bar the same frozen wrapper (the feed's measured finding).
         walletBadge.onFittedWidthChange = { [weak self] in self?.refreshWalletItem() }
         refreshWalletBadge()
-        walletObservers.replace(with: [
-            NotificationCenter.default.addObserver(
-                forName: WalletStore.didChangeNotification, object: wallet, queue: .main
-            ) { [weak self] _ in
-                MainActor.assumeIsolated { self?.refreshWalletBadge() }
-            },
-        ])
+        walletObservation = wallet.changes.observeOnMain { [weak self] in
+            self?.refreshWalletBadge()
+        }
         return item
     }
 

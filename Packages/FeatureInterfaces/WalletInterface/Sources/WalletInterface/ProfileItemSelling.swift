@@ -13,6 +13,10 @@ public protocol ProfileItemSelling: AnyObject {
     func price(of item: ProfileItem) -> Int
     /// Buys it — through the server for a member (#1475), so it waits.
     func buy(_ item: ProfileItem) async -> ProfileItemPurchase
+    /// Calls `handler` on the main actor whenever an item is granted, for as
+    /// long as the caller keeps the observation (#2376: was the
+    /// `profile.items.didChange` notification, heard from any store).
+    func observeChanges(_ handler: @escaping @MainActor @Sendable () -> Void) -> StoreObservation
 }
 
 public extension ProfileItemSelling {

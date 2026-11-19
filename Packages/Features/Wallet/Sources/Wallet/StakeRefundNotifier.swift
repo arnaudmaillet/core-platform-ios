@@ -12,18 +12,18 @@ import UIKit
 /// say why. The toast rides whatever screen is in front: the stake may settle
 /// long after the post was left.
 ///
-/// ⚠️ SELECTOR-BASED (`WalletBadgeInstaller`'s rule): the registration goes
-/// with the notifier.
+/// ⚠️ THE OBSERVATION IS KEPT ON THE NOTIFIER (`WalletBadgeInstaller`'s
+/// rule): it goes with the notifier, as the selector registration did.
 @MainActor
 public final class StakeRefundNotifier {
     private let window: UIWindow
+    private var refundObservation: StoreObservation?
 
     public init(wallet: WalletStore, window: UIWindow) {
         self.window = window
-        NotificationCenter.default.addObserver(
-            self, selector: #selector(stakeRefunded(_:)),
-            name: WalletStore.stakeRefundedNotification, object: wallet
-        )
+        refundObservation = wallet.stakeRefunds.observe { [weak self] refund in
+            self?.stakeRefunded(refund)
+        }
     }
 
     /// The toast's words for `amount` likes back.
@@ -33,8 +33,8 @@ public final class StakeRefundNotifier {
             : "\(amount) likes couldn't be staked and are back in your balance"
     }
 
-    @objc private nonisolated func stakeRefunded(_ note: Notification) {
-        let amount = note.userInfo?[WalletStore.stakeRefundAmountKey] as? Int ?? 0
+    private nonisolated func stakeRefunded(_ refund: WalletStakeRefund) {
+        let amount = refund.amount
         guard amount > 0 else { return }
         Task { @MainActor [weak self] in self?.tell(amount) }
     }

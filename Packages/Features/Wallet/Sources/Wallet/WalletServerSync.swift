@@ -11,6 +11,8 @@ public final class WalletServerSync {
     private let wallet: WalletStore
     private let scope: StorageScope
     private var observers: [NSObjectProtocol] = []
+    /// The scope's and the wallet's changes, heard from `start()` on.
+    private var storeObservations: [StoreObservation] = []
     private var wake: Timer?
 
     public init(wallet: WalletStore, scope: StorageScope) {
@@ -20,26 +22,26 @@ public final class WalletServerSync {
 
     public func start() {
         let center = NotificationCenter.default
-        observers = [
+        storeObservations = [
             // A new viewer — a sign-in among them, whose welcome gift the
             // server credits a moment after (#1008): read now, and again
             // shortly.
-            center.addObserver(forName: StorageScope.didChangeNotification, object: scope, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated {
-                    self?.refresh()
-                    self?.refreshAgain(after: 3)
-                }
+            scope.ownerChanges.observeOnMain { [weak self] in
+                self?.refresh()
+                self?.refreshAgain(after: 3)
             },
+            // A claim answered, a refresh applied: the countdown it carries
+            // may have moved.
+            wallet.changes.observeOnMain { [weak self] in
+                self?.armWake()
+            },
+        ]
+        observers = [
             center.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.refresh() }
             },
             center.addObserver(forName: ConnectivityMonitor.didRecoverNotification, object: ConnectivityMonitor.shared, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.refresh() }
-            },
-            // A claim answered, a refresh applied: the countdown it carries
-            // may have moved.
-            center.addObserver(forName: WalletStore.didChangeNotification, object: wallet, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.armWake() }
             },
         ]
         refresh()

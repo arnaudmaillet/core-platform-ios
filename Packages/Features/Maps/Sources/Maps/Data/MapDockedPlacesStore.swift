@@ -29,7 +29,7 @@ public final class MapDockedPlacesStore: @unchecked Sendable {
     private var key: String { scope.profileKey(Self.baseKey, adoptingLegacyIn: defaults) }
     private let lock = NSLock()
 
-    private var scopeObserver: NSObjectProtocol?
+    private var scopeObservation: StoreObservation?
 
     public init(defaults: UserDefaults = .standard, scope: StorageScope) {
         self.defaults = defaults
@@ -38,16 +38,10 @@ public final class MapDockedPlacesStore: @unchecked Sendable {
         // reads the dock as it loads, before the active profile is known
         // (measured: no entry at launch, the pinned place under the
         // profile's key). A new owner is a new list — announced as one.
-        scopeObserver = NotificationCenter.default.addObserver(
-            forName: StorageScope.didChangeNotification, object: scope, queue: nil
-        ) { [weak self] _ in
+        scopeObservation = scope.ownerChanges.observe { [weak self] in
             guard let self else { return }
             NotificationCenter.default.post(name: Self.didChangeNotification, object: self)
         }
-    }
-
-    deinit {
-        if let scopeObserver { NotificationCenter.default.removeObserver(scopeObserver) }
     }
 
     /// Posted after every write, whatever screen made it: the map's dock

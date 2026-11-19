@@ -50,6 +50,12 @@ public final class ProfileItemService: ProfileItemAccess, ProfileItemSelling {
         wallet.catalogPrice(of: item.catalogID) ?? item.gemPrice
     }
 
+    /// The store's grants: the only ownership change this service makes on
+    /// the device (a server-backed purchase is the wallet's change).
+    public func observeChanges(_ handler: @escaping @MainActor @Sendable () -> Void) -> StoreObservation {
+        store.changes.observeOnMain { handler() }
+    }
+
     public func buy(_ item: ProfileItem) async -> ProfileItemPurchase {
         guard isMember(), !teen.restrictsPurchases else { return .unavailable }
         guard !owns(item) else { return .alreadyOwned }

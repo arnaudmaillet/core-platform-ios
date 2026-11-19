@@ -588,6 +588,11 @@ final class AppContainer {
     private(set) lazy var likeStaking: WalletLikeStaking = makeLikeStaking()
     /// Commits `likeOutbox`; started with `walletStore`.
     var likeOutboxSender: LikeOutboxSender?
+    /// Likes the server did not take (#1775), in the viewer's words: sent by
+    /// `likeOutboxSender` on the main actor, heard by the shell
+    /// (`MainTabCoordinator`), which names no Feed type (#2376: was the
+    /// `LikeOutboxSender.likesGivenBack` notification).
+    let likesGivenBack = StoreChanges<String>()
     /// The wallet history's first pages in `localStore` (#1776).
     private(set) lazy var walletHistoryCache: WalletHistoryLocalCache? = localStore.map(WalletHistoryLocalCache.init(store:))
 

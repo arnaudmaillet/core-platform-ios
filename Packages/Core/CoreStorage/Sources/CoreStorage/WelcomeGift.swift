@@ -21,9 +21,6 @@ public final class WelcomeGift: @unchecked Sendable {
         public static let firstLaunch = 50
     }
 
-    /// Fired after the gift opens or settles, with `object:` the gift.
-    public static let didChangeNotification = Notification.Name("welcomeGift.didChange")
-
     private enum Key {
         static let openedAt = "welcomeGift.openedAt"
         static let settled = "welcomeGift.settled"
@@ -57,12 +54,10 @@ public final class WelcomeGift: @unchecked Sendable {
     /// A guest is here: opens the gift if this device never had one. A no-op
     /// on an open or settled gift.
     public func open() {
-        let opened: Bool = lock.withLock {
-            guard !defaults.bool(forKey: Key.settled), openedAtLocked() == nil else { return false }
+        lock.withLock {
+            guard !defaults.bool(forKey: Key.settled), openedAtLocked() == nil else { return }
             defaults.set(now().timeIntervalSince1970, forKey: Key.openedAt)
-            return true
         }
-        if opened { postDidChange() }
     }
 
     /// A member is here: credits an open gift to `wallet` and settles it, for
@@ -72,19 +67,18 @@ public final class WelcomeGift: @unchecked Sendable {
     /// not start one on a later sign-out.
     @discardableResult
     public func settle(into wallet: WalletStore) -> Int {
-        let outcome: (credited: Int, changed: Bool) = lock.withLock {
-            guard !defaults.bool(forKey: Key.settled) else { return (0, false) }
+        let credited: Int = lock.withLock {
+            guard !defaults.bool(forKey: Key.settled) else { return 0 }
             let amount = openedAtLocked() == nil ? 0 : Policy.firstLaunch
             defaults.set(true, forKey: Key.settled)
-            return (amount, true)
+            return amount
         }
         // Credit after the gift settles, so a re-entrant settle can't pay twice.
         // ⚠️ NOT WHEN THE WALLET IS THE SERVER'S (#1008): the server credits
         // the gift itself when the guest's session ends into a member's, and
         // a local credit would be a second one the next read takes back.
-        if wallet.server == nil { wallet.credit(outcome.credited) }
-        if outcome.changed { postDidChange() }
-        return outcome.credited
+        if wallet.server == nil { wallet.credit(credited) }
+        return credited
     }
 
     // MARK: - Private
@@ -93,9 +87,5 @@ public final class WelcomeGift: @unchecked Sendable {
         defaults.object(forKey: Key.openedAt) == nil
             ? nil
             : Date(timeIntervalSince1970: defaults.double(forKey: Key.openedAt))
-    }
-
-    private func postDidChange() {
-        NotificationCenter.default.post(name: Self.didChangeNotification, object: self)
     }
 }

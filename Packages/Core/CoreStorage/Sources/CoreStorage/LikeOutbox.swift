@@ -75,8 +75,9 @@ public final class LikeOutbox: @unchecked Sendable {
     /// How long after a target's last tap its batch is committed.
     public static let idleCommitDelay: TimeInterval = 10
 
-    /// Fired after every change, `object:` the outbox.
-    public static let didChangeNotification = Notification.Name("likeOutbox.didChange")
+    /// Sent after every change, on the thread that made it (#2376: was the
+    /// `likeOutbox.didChange` notification).
+    public let changes = StoreChanges<Void>()
 
     private let defaults: UserDefaults
     private let key: String
@@ -234,7 +235,7 @@ public final class LikeOutbox: @unchecked Sendable {
             return true
         }
         if changed {
-            NotificationCenter.default.post(name: Self.didChangeNotification, object: self)
+            changes.send()
         }
     }
 }

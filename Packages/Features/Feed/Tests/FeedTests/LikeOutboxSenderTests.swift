@@ -84,12 +84,7 @@ struct LikeOutboxSenderTests {
     @Test func likesThatDidNotGoAreAnnounced() async throws {
         let (sender, wallet, _, staking) = make()
         var announced: [LikesGivenBack] = []
-        let token = NotificationCenter.default.addObserver(
-            forName: LikeOutboxSender.likesGivenBack, object: sender, queue: nil
-        ) { note in
-            if let back = note.userInfo?[LikeOutboxSender.givenBackKey] as? LikesGivenBack { announced.append(back) }
-        }
-        defer { NotificationCenter.default.removeObserver(token) }
+        sender.onLikesGivenBack = { announced.append($0) }
 
         staking.then(.failure(LikeStakeRejected(reason: "post gone")))
         staking.then(.success(LikeStakeAnswer(outcome: .staked, spent: 1, myTotal: 1)))

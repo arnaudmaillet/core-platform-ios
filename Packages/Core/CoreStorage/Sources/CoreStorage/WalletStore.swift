@@ -556,17 +556,16 @@ public final class WalletStore: @unchecked Sendable {
         static let stakePackTier = "wallet.stakePackTier"
     }
 
-    /// Fired after every balance-affecting change, on whatever thread made
-    /// it, with `object:` the store instance that changed.
-    public static let didChangeNotification = Notification.Name("wallet.didChange")
+    /// Sent after every balance-affecting change, on whatever thread made
+    /// it (#2376: was the `wallet.didChange` notification).
+    public let changes = StoreChanges<Void>()
 
-    /// Fired when likes staked on a post came back to the balance because the
+    /// Sent when likes staked on a post came back to the balance because the
     /// server did not spend them — a refusal, a clamp, an expired batch
     /// (#1775): the viewer is told, never left to find a smaller stake.
-    /// `userInfo`: `stakeRefundAmountKey` (Int), `stakeRefundTargetKey` (String).
-    public static let stakeRefundedNotification = Notification.Name("wallet.stakeRefunded")
-    public static let stakeRefundAmountKey = "amount"
-    public static let stakeRefundTargetKey = "targetID"
+    /// Always after the `changes` the refund caused (#2376: was the
+    /// `wallet.stakeRefunded` notification).
+    public let stakeRefunds = StoreChanges<WalletStakeRefund>()
 
     private let defaults: UserDefaults
     private let lock = NSLock()
@@ -578,7 +577,7 @@ public final class WalletStore: @unchecked Sendable {
     /// The demo plan's posts (`seedDemoStakesIfNeeded`), kept for an account
     /// that arrives after the plan was asked for.
     private var demoStakeTargets: [String]?
-    private var scopeObserver: NSObjectProtocol?
+    private var scopeObservation: StoreObservation?
 
     /// Where a member's stakes go to be committed through `wallet.Stake`
     /// (#676): every stake that lands here is recorded there too, and an undo
@@ -622,9 +621,7 @@ public final class WalletStore: @unchecked Sendable {
         applyLaunchArguments()
         seedIfNeeded()
         // A member arriving gets their own wallet, seeded the first time.
-        scopeObserver = NotificationCenter.default.addObserver(
-            forName: StorageScope.didChangeNotification, object: scope, queue: nil
-        ) { [weak self] _ in
+        scopeObservation = scope.ownerChanges.observe { [weak self] in
             guard let self else { return }
             applyLaunchArguments()
             seedIfNeeded()
@@ -1158,10 +1155,7 @@ public final class WalletStore: @unchecked Sendable {
         guard unspent > 0 else { return }
         guard refund(targetID: targetID, amount: unspent) != nil else { return }
         postDidChange()
-        NotificationCenter.default.post(
-            name: Self.stakeRefundedNotification, object: self,
-            userInfo: [Self.stakeRefundAmountKey: unspent, Self.stakeRefundTargetKey: targetID]
-        )
+        stakeRefunds.send(WalletStakeRefund(amount: unspent, targetID: targetID))
     }
 
     /// Buys a ×100 cartridge pack with gems: `Policy.StakePack.shots` shots
@@ -1410,9 +1404,23 @@ public final class WalletStore: @unchecked Sendable {
     }
 
     private func postDidChange() {
-        // Outside the lock, `object: self` — unscoped posts break parallel
-        // test suites (MapFavoritesStore's rule).
-        NotificationCenter.default.post(name: Self.didChangeNotification, object: self)
+        // Outside the lock, on this instance only: unscoped posts break
+        // parallel test suites (MapFavoritesStore's rule).
+        changes.send()
+    }
+}
+
+/// Likes staked on a target that came back to the balance
+/// (`WalletStore.stakeRefunds`).
+public struct WalletStakeRefund: Equatable, Sendable {
+    /// How many likes came back.
+    public let amount: Int
+    /// The post or comment they had been staked on.
+    public let targetID: String
+
+    public init(amount: Int, targetID: String) {
+        self.amount = amount
+        self.targetID = targetID
     }
 }
 

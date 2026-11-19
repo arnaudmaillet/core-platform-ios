@@ -98,12 +98,6 @@ public final class PostBookmarkStore: @unchecked Sendable {
         #endif
     }
 
-    #if DEBUG
-    deinit {
-        if let observer = launchHooksObserver { NotificationCenter.default.removeObserver(observer) }
-    }
-    #endif
-
     /// Most recently saved first.
     public var savedPostIDs: [String] {
         lock.withLock { defaults.array(forKey: key) as? [String] ?? [] }
@@ -192,7 +186,8 @@ public final class PostBookmarkStore: @unchecked Sendable {
     }
 
     private var pendingLaunchHooks: LaunchHooks?
-    private var launchHooksObserver: NSObjectProtocol?
+    /// Ends with the store, or once the hooks ran.
+    private var launchHooksObservation: StoreObservation?
 
     /// ⚠️ NOT AT INIT (#1074): the app's one pile may be made before
     /// the viewer is known, while the scope is still unscoped, and a reset
@@ -205,14 +200,12 @@ public final class PostBookmarkStore: @unchecked Sendable {
             .map { $0.split(separator: ",").map(String.init) }
         let hooks = LaunchHooks(reset: LaunchArgument.resetBookmarks.isPassed(in: arguments), seed: seed)
         guard hooks.reset || hooks.seed != nil else { return }
-        let observer = NotificationCenter.default.addObserver(
-            forName: StorageScope.didChangeNotification, object: scope, queue: nil
-        ) { [weak self] _ in
+        let observation = scope.ownerChanges.observe { [weak self] in
             self?.runLaunchHooksIfViewerKnown()
         }
         lock.withLock {
             pendingLaunchHooks = hooks
-            launchHooksObserver = observer
+            launchHooksObservation = observation
         }
         runLaunchHooksIfViewerKnown()
     }
@@ -223,12 +216,12 @@ public final class PostBookmarkStore: @unchecked Sendable {
         case .unscoped, .member(_, nil): return
         }
         // Taken under the lock, so a change racing this one runs nothing twice.
-        typealias Run = (hooks: LaunchHooks, cleared: [String], memory: (any PostSaveFacts)?, done: NSObjectProtocol?)
+        typealias Run = (hooks: LaunchHooks, cleared: [String], memory: (any PostSaveFacts)?, done: StoreObservation?)
         let run: Run? = lock.withLock {
             guard let hooks = pendingLaunchHooks else { return nil }
             pendingLaunchHooks = nil
-            let done = launchHooksObserver
-            launchHooksObserver = nil
+            let done = launchHooksObservation
+            launchHooksObservation = nil
             let pile = key
             var cleared: [String] = []
             if hooks.reset {
@@ -240,7 +233,7 @@ public final class PostBookmarkStore: @unchecked Sendable {
             return (hooks, cleared, _facts, done)
         }
         guard let run else { return }
-        if let done = run.done { NotificationCenter.default.removeObserver(done) }
+        run.done?.cancel()
         // The saved facts every screen observes say it too: a glyph drawn
         // from a fact already in memory re-draws empty (or seeded).
         let seeded = Set(run.hooks.seed ?? [])

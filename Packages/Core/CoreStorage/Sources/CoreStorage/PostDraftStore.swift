@@ -70,7 +70,7 @@ public final class PostDraftStore {
     private let scope: StorageScope
     private var file: CodableFileStore<[PostDraft]>
     public private(set) var drafts: [PostDraft]
-    private var scopeObserver: NSObjectProtocol?
+    private var scopeObservation: StoreObservation?
     /// Where the drafts' voices live (#2209): one file per draft that has one,
     /// removed with it. Every profile's in the same folder; the names are
     /// unique, and only the list that names a file removes it.
@@ -87,10 +87,8 @@ public final class PostDraftStore {
         file = CodableFileStore(name: Self.fileName(name, scope: scope))
         drafts = Self.load(file, adoptingLegacy: name, scope: scope)
         // Another profile, another list: re-read when the viewer changes.
-        scopeObserver = NotificationCenter.default.addObserver(
-            forName: StorageScope.didChangeNotification, object: scope, queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.reload() }
+        scopeObservation = scope.ownerChanges.observeOnMain { [weak self] in
+            self?.reload()
         }
     }
 

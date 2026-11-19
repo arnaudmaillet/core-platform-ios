@@ -317,21 +317,16 @@ struct WalletStoreTests {
     }
 }
 
-/// Counts `WalletStore.didChangeNotification` posts scoped to one store.
+/// Counts one store's `changes`.
 private final class NotificationCounter: @unchecked Sendable {
     private let lock = NSLock()
     private var _count = 0
-    private var token: NSObjectProtocol?
+    private var observation: StoreObservation?
     var count: Int { lock.withLock { _count } }
     init(object: WalletStore) {
-        token = NotificationCenter.default.addObserver(
-            forName: WalletStore.didChangeNotification, object: object, queue: nil
-        ) { [weak self] _ in
+        observation = object.changes.observe { [weak self] in
             guard let self else { return }
             self.lock.withLock { self._count += 1 }
         }
-    }
-    deinit {
-        if let token { NotificationCenter.default.removeObserver(token) }
     }
 }

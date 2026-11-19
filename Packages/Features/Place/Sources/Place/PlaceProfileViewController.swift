@@ -190,9 +190,9 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab>,
     /// it is the same sheet every other badge opens and the five must never
     /// diverge. Nil leaves the badge display-only.
     private let makeWalletSheet: (@MainActor () -> UIViewController)?
-    /// Held in a bag rather than a property: a main-actor screen's `deinit`
-    /// is nonisolated and may not even read one to unregister it.
-    private let walletObservers = NotificationTokens()
+    /// The wallet's changes, heard for this screen's lifetime: the
+    /// observation stops by itself when it goes (#2376).
+    private var walletObservation: StoreObservation?
     /// The follow state as last rendered, so the dock hand-over can redraw
     /// the button without asking the caller's store again.
     private var followState = false
@@ -1705,11 +1705,9 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab>,
         refreshWalletBadge()
         // Spends and claims wherever they happen — a boost in the feed pushed
         // over this page, a claim taken on the map beneath it.
-        walletObservers.add(NotificationCenter.default.addObserver(
-            forName: WalletStore.didChangeNotification, object: wallet, queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.refreshWalletBadge() }
-        })
+        walletObservation = wallet.changes.observeOnMain { [weak self] in
+            self?.refreshWalletBadge()
+        }
     }
 
     private func makeWalletItem() -> UIBarButtonItem {

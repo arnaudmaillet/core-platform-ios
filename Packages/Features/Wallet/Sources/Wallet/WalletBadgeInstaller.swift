@@ -59,6 +59,9 @@ public final class WalletBadgeInstaller: NSObject {
     /// Wakes the badge when the hourly claim unlocks. One-shot, re-armed from
     /// every refresh.
     private var claimUnlockTimer: Timer?
+    /// The store's changes, heard for exactly as long as this installer
+    /// lives (#2376: a selector registration did that before).
+    private var walletObservation: StoreObservation?
 
     /// - Parameter apply: hands the host a bar item to install. Called
     ///   immediately, and again with a FRESH item whenever the count's fitted
@@ -88,15 +91,13 @@ public final class WalletBadgeInstaller: NSObject {
         // The store-change half of the badge's freshness — spends and claims,
         // wherever they happen.
         //
-        // ⚠️ SELECTOR-BASED, not a block observer, and that is what makes a
-        // per-screen installer safe: Foundation drops a selector registration
-        // with the object, where a block observer's token lives on in the
-        // centre until someone removes it — and a pushed profile's installer
-        // dies with the profile, every push, with nobody left to remove it.
-        NotificationCenter.default.addObserver(
-            self, selector: #selector(walletDidChange),
-            name: WalletStore.didChangeNotification, object: wallet
-        )
+        // ⚠️ KEPT ON THIS OBJECT, and that is what makes a per-screen
+        // installer safe: the observation stops when it goes, with the
+        // installer — and a pushed profile's installer dies with the profile,
+        // every push, with nobody left to remove anything.
+        walletObservation = wallet.changes.observe { [weak self] in
+            self?.walletDidChange()
+        }
         apply(makeItem())
         refresh()
     }
@@ -128,15 +129,15 @@ public final class WalletBadgeInstaller: NSObject {
     /// ADDRESS is used; the value is never read or written.
     nonisolated(unsafe) private static var attachmentKey: UInt8 = 0
 
-    // NO `deinit` TEARDOWN, and none is needed: the store registration is
-    // selector-based and goes with the object, and the claim timer captures
+    // NO `deinit` TEARDOWN, and none is needed: the store observation is
+    // kept on this object and goes with it, and the claim timer captures
     // `self` weakly, so a released installer only leaves a timer to fire once
     // into nothing.
 
     /// The store posts from whichever thread changed it, so the refresh hops
     /// to the main actor rather than assuming it — the `queue: .main` the block
     /// observer used to say.
-    @objc nonisolated private func walletDidChange() {
+    nonisolated private func walletDidChange() {
         guard Thread.isMainThread else {
             DispatchQueue.main.async { [weak self] in self?.walletDidChange() }
             return
@@ -214,6 +215,9 @@ public final class WalletBadgeInstaller: NSObject {
 
     /// Latches `-open-wallet` to one sheet per process.
     private static var didOpenAtLaunch = false
+
+    /// The count the badge draws — a test seam.
+    var debugRenderedBalance: String? { badge.renderedCount }
     #endif
 
     func presentSheet() {

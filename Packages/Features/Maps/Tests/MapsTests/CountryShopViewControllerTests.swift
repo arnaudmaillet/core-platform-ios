@@ -1,3 +1,4 @@
+import CoreStorage
 import DesignSystem
 import MapsInterface
 import Testing
@@ -240,6 +241,11 @@ struct CountryShopViewControllerTests {
         var shotsLeft = 0
         init(access: FakeAccess) { self.access = access }
 
+        let changes = StoreChanges<Void>()
+        func observeChanges(_ handler: @escaping @MainActor @Sendable () -> Void) -> StoreObservation {
+            changes.observeOnMain { handler() }
+        }
+
         var offer: StakePackOffer {
             StakePackOffer(shotsPerPack: 3, likesPerShot: 100, price: 50, shotsLeft: shotsLeft)
         }
@@ -249,7 +255,7 @@ struct CountryShopViewControllerTests {
             guard access.gems >= 50 else { return .insufficientGems(needed: 50, have: access.gems) }
             access.gems -= 50
             shotsLeft = 3
-            NotificationCenter.default.post(name: .stakePackDidChange, object: self)
+            changes.send()
             return .bought(shots: 3, remainingGems: access.gems)
         }
     }
@@ -371,7 +377,7 @@ struct CountryShopViewControllerTests {
 
         // Spent down (in the feed), the price comes back.
         packs.shotsLeft = 0
-        NotificationCenter.default.post(name: .stakePackDidChange, object: packs)
+        packs.changes.send()
         #expect(try packRow(shop).accessibilityValue == "50 crowns")
     }
 

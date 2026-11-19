@@ -300,6 +300,8 @@ final class SnapFeedViewController: UIViewController {
     /// Unregisters its notification tokens when this VC (and thus the bag) is
     /// released — a nonisolated deinit can't touch the VC's main-actor state.
     private let appObservers = NotificationTokens()
+    /// The wallet's changes, heard for this controller's lifetime.
+    private var walletObservation: StoreObservation?
 
     /// Builds the comments panel's content (the comments-only detail) for a
     /// post — injected by the feature builder so this VC needs none of the
@@ -2393,15 +2395,11 @@ final class SnapFeedViewController: UIViewController {
             // every store change — a rail spend, a comments-bar spend, or a
             // claim taken on the map while this screen sits in the stack
             // below.
-            appObservers.add(NotificationCenter.default.addObserver(
-                forName: WalletStore.didChangeNotification, object: wallet, queue: .main
-            ) { [weak self] _ in
-                MainActor.assumeIsolated {
-                    guard let self else { return }
-                    self.refreshWalletBadge()
-                    self.refreshVisibleBoostControls()
-                }
-            })
+            walletObservation = wallet?.changes.observeOnMain { [weak self] in
+                guard let self else { return }
+                self.refreshWalletBadge()
+                self.refreshVisibleBoostControls()
+            }
         }
         // Both pills' widths BEFORE their items are handed over: the bar reads
         // a custom view's size at hand-over (memory `bar-item-wrapper-drift`).

@@ -31,10 +31,8 @@ struct StorageScopeTests {
         let scope = StorageScope()
         final class Count: @unchecked Sendable { var value = 0 }
         let posts = Count()
-        let token = NotificationCenter.default.addObserver(
-            forName: StorageScope.didChangeNotification, object: scope, queue: nil
-        ) { _ in posts.value += 1 }
-        defer { NotificationCenter.default.removeObserver(token) }
+        let observation = scope.ownerChanges.observe { posts.value += 1 }
+        defer { observation.cancel() }
         scope.owner = .guest
         scope.owner = .guest
         scope.owner = .member(account: "A", profile: nil)

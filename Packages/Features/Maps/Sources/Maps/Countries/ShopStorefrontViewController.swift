@@ -102,6 +102,9 @@ public final class ShopStorefrontViewController: UIViewController {
     let stakePacks: (any StakePackSelling)?
     /// The profile items (#944): the video banner. Nil: no Profile shelf.
     let profileItems: (any ProfileItemSelling)?
+    /// The sellers' changes, heard for as long as this screen lives: they
+    /// replace selector registrations, which went with the screen (#2376).
+    private var stockObservations: [StoreObservation] = []
     let atlas: CountryAtlas
 
     private let scroll = UIScrollView()
@@ -179,11 +182,13 @@ public final class ShopStorefrontViewController: UIViewController {
             column.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor),
             column.widthAnchor.constraint(equalTo: scroll.frameLayoutGuide.widthAnchor),
         ])
-        for name in [
-            Notification.Name.countryAccessDidChange, .stakePackDidChange, ProfileItemStore.didChangeNotification,
-        ] {
-            NotificationCenter.default.addObserver(self, selector: #selector(stockChanged), name: name, object: nil)
-        }
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(stockChanged), name: .countryAccessDidChange, object: nil
+        )
+        stockObservations = [
+            stakePacks?.observeChanges { [weak self] in self?.stockChanged() },
+            profileItems?.observeChanges { [weak self] in self?.stockChanged() },
+        ].compactMap { $0 }
         registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (self: Self, _) in
             self.rebuild()
         }

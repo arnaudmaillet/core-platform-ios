@@ -115,7 +115,7 @@ final class SearchResultsViewController: UIViewController {
     /// Nil in a composition without the shell's claim sheet — the badge is then
     /// a read-out, not a control.
     private let makeWalletSheet: (@MainActor () -> UIViewController)?
-    private let walletObservers = NotificationTokens()
+    private var walletObservation: StoreObservation?
 
     /// What the field asks for: everything the bar has left beside the back
     /// button, floored at one perfect bubble.
@@ -324,11 +324,9 @@ final class SearchResultsViewController: UIViewController {
         refreshWalletBadge()
         // Spends and claims wherever they happen — a boost in a feed pushed
         // over this screen, a claim taken on the map beneath it.
-        walletObservers.add(NotificationCenter.default.addObserver(
-            forName: WalletStore.didChangeNotification, object: wallet, queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.refreshWalletBadge() }
-        })
+        walletObservation = wallet.changes.observeOnMain { [weak self] in
+            self?.refreshWalletBadge()
+        }
     }
 
     private func makeWalletItem() -> UIBarButtonItem {

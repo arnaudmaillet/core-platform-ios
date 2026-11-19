@@ -164,6 +164,12 @@ public final class LikeOutboxSender {
     private var timer: Timer?
     /// Removed with the sender (the token bag's deinit, not a main-actor one).
     private let observers = NotificationTokens()
+    /// The outbox's changes, heard from `start()` for the sender's lifetime.
+    private var outboxObservation: StoreObservation?
+    /// Told, on the main actor, when likes a batch asked for came back to the
+    /// balance (#1775; #2376: was the `likesGivenBack` notification). The app
+    /// says so over whatever screen is on top.
+    public var onLikesGivenBack: (@MainActor (LikesGivenBack) -> Void)?
     /// Whose recoveries flush the outbox; read by `start()`. Tests hand in
     /// their own — ⚠️ never flip `.shared`, other suites listen to it.
     var connectivity: ConnectivityMonitor = .shared
@@ -182,10 +188,10 @@ public final class LikeOutboxSender {
     /// a batch falls due.
     public func start() {
         let center = NotificationCenter.default
+        outboxObservation = outbox.changes.observeOnMain { [weak self] in
+            self?.schedule()
+        }
         observers.replace(with: [
-            center.addObserver(forName: LikeOutbox.didChangeNotification, object: outbox, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.schedule() }
-            },
             center.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.enterBackground() }
             },
@@ -299,24 +305,16 @@ public final class LikeOutboxSender {
     ///
     /// ⚠️ AND THE VIEWER IS TOLD (#1775). The heart emptied by itself, up to
     /// a minute after the taps, with no word: a final failure the viewer
-    /// never heard of. `likesGivenBack` carries what came back and why; the
-    /// app says so over whatever screen is on top.
+    /// never heard of. `onLikesGivenBack` is told what came back and why;
+    /// the app says so over whatever screen is on top.
     private func settle(_ batch: LikeOutbox.Batch, with answer: LikeStakeAnswer) {
         guard case .post(let postID) = batch.target else { return }
         let spent = answer.outcome == .staked ? answer.spent : 0
         wallet.settleCommittedStake(targetID: postID, asked: batch.likes, spent: spent)
         let back = batch.likes - spent
         guard back > 0 else { return }
-        NotificationCenter.default.post(
-            name: Self.likesGivenBack, object: self,
-            userInfo: [Self.givenBackKey: LikesGivenBack(postID: postID, likes: back, outcome: answer.outcome)]
-        )
+        onLikesGivenBack?(LikesGivenBack(postID: postID, likes: back, outcome: answer.outcome))
     }
-
-    /// Posted when likes a batch asked for came back to the balance (#1775).
-    public static let likesGivenBack = Notification.Name("LikeOutboxSender.likesGivenBack")
-    /// `likesGivenBack`'s `LikesGivenBack`.
-    public static let givenBackKey = "givenBack"
 }
 
 /// Likes that did not go, back in the balance (#1775): what the viewer is told.
