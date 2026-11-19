@@ -2148,11 +2148,11 @@ struct SnapCommentsPresentationTests {
     /// you can drag past the first/last post but never fling off the feed.
     @Test func pageDriveRubberBandResistsPastTheEnds() {
         let d: CGFloat = 800
-        #expect(SnapFeedViewController.rubberBand(0, dimension: d) == 0)
+        #expect(SnapPagerDrive.rubberBand(0, dimension: d) == 0)
         // Monotonic and bounded below the dimension…
         var previous: CGFloat = 0
         for raw in stride(from: CGFloat(40), through: 4000, by: 40) {
-            let mapped = SnapFeedViewController.rubberBand(raw, dimension: d)
+            let mapped = SnapPagerDrive.rubberBand(raw, dimension: d)
             #expect(mapped > previous)         // increasing
             #expect(mapped < d)                // never reaches a full page
             #expect(mapped < raw)              // always resists

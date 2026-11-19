@@ -82,7 +82,7 @@ struct MediaPlaybackPolicyTests {
 
     /// The Lock Screen's lines: the caption's first line and the author.
     @Test func theLockScreenNamesTheClipAndItsAuthor() {
-        #expect(SnapFeedViewController.nowPlaying(for: nil) == NowPlayingInfo(title: "Video", artist: ""))
+        #expect(SnapSoundPlayback.nowPlaying(for: nil) == NowPlayingInfo(title: "Video", artist: ""))
     }
 
     @Test func thePolicyReadsTheStoreAndTheNetwork() {

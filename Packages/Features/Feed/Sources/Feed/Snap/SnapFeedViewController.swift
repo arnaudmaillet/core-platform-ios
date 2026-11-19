@@ -169,13 +169,6 @@ final class SnapFeedViewController: UIViewController {
     /// `.black` by default, so every route that does not lend one is byte for
     /// byte what it was.
     private var emptyGround: UIColor = .black
-    /// The pull-to-close under way on a native push (#2045, #2046): where the
-    /// page rested, and the indicator in the gap it opens.
-    private var pullBaseOffset: CGFloat?
-    private var pullIndicator: PullToGoBackIndicator?
-    /// Whether the pull under way lifts the page: a media page's does; a text
-    /// page's lifts nothing (#2187), read once at the pull's first step.
-    private var pullLiftsPage = true
     /// The arrival screen's own LOADING state, drawn while the corpus is in
     /// flight — a SUBVIEW, never a ground.
     ///
@@ -216,18 +209,15 @@ final class SnapFeedViewController: UIViewController {
     /// The cell that showed the post on show as the items were swapped: it
     /// kept its comment surfaces running for it (#1798).
     private weak var reorderHeldCell: SnapFeedCell?
-    /// The clip time a presenting flight's picture showed, for the entry page
-    /// (#625) — see `zoomTransitionWillStartMedia(at:)`. A nil post is the
-    /// entry page of a feed that had no posts yet when the flight took off.
-    private var flightMediaStart: (postID: PostID?, seconds: TimeInterval)?
-    /// True between `zoomTransitionWillBegin` and `zoomTransitionDidEnd`. Cells
-    /// realized inside that window inherit the playback deferral, so a page
-    /// activating mid-flight cannot steal the render slot from the flying card.
-    private var isAwaitingZoomPresentation = false {
+    /// The flight flags, and what derives from them (`SnapFlightPhase`):
+    /// re-stated on every present, because this controller is reused.
+    private var flight = SnapFlightPhase() {
         didSet {
             // The flight is over, one way or another: a text page that stood
             // on its placeholder gets its real panel now (charter PR 5b).
-            if !isAwaitingZoomPresentation, oldValue { landDeferredRestingComments() }
+            if !flight.isAwaitingZoomPresentation, oldValue.isAwaitingZoomPresentation {
+                landDeferredRestingComments()
+            }
         }
     }
 
@@ -247,16 +237,9 @@ final class SnapFeedViewController: UIViewController {
     /// The page whose panel is waiting for the flight to land.
     private var deferredResting: (id: PostID, cell: SnapFeedCell, placeholder: RestingCommentsPlaceholderView)?
 
-    /// A text reveal is about to push this screen. The reveal is a navigation
-    /// push with its own animator, not a zoom presentation, so it never
-    /// reaches `zoomTransitionWillBegin` / `zoomTransitionDidEnd`: the
-    /// installer raises this before the push and `viewDidAppear` — the push's
-    /// landing — lowers it.
-    private(set) var isAwaitingRevealPresentation = false
-
-    /// Set by `zoomTransitionWillDepart`, read once by `zoomTransitionDidEnd`:
-    /// the ending flight takes this screen off screen.
-    private var isDepartingWithFlight = false
+    /// A text reveal is about to push this screen (`SnapFlightPhase`).
+    /// Internal for tests.
+    var isAwaitingRevealPresentation: Bool { flight.isAwaitingRevealPresentation }
 
     public func beginRevealPresentation() {
         // ⚠️ AN OPENING ONLY. The installer that calls this also builds every
@@ -267,58 +250,14 @@ final class SnapFeedViewController: UIViewController {
         // deferred the author pill and skipped the comments prewarm. An
         // opening is the one case where the screen is not yet in a window.
         guard viewIfLoaded?.window == nil else { return }
-        isAwaitingRevealPresentation = true
+        flight.isAwaitingRevealPresentation = true
     }
 
-    /// True while any flight — zoom or reveal — has this screen on its way.
-    private var isAwaitingAnyFlight: Bool {
-        isAwaitingZoomPresentation || isAwaitingRevealPresentation
+    /// Set by whoever pushes this screen, on both paths (`SnapFlightPhase`).
+    public var zoomOwnsInteractiveDismissal: Bool {
+        get { flight.zoomOwnsInteractiveDismissal }
+        set { flight.zoomOwnsInteractiveDismissal = newValue }
     }
-    /// Whether the card staging that presentation is flying THIS page's player
-    /// — the source's own answer, handed over by the transition controller.
-    ///
-    /// Defaults to the conservative reading and is RE-STATED on every present,
-    /// for the reason `zoomOwnsInteractiveDismissal` below is: this controller
-    /// is reused, so a leftover `false` from a map flight would silently unarm
-    /// the deferral for the next flight from a grid — where it is load-bearing.
-    private var flightCarriesActivePlayer = true
-    /// The two facts whose AND is the deferral. Read at all three stamping
-    /// sites, so a page realized mid-flight cannot disagree with the one the
-    /// flight staged over.
-    ///
-    /// ⚠️ A MAP FLIGHT DOES NOT DEFER, and the question "could the page start
-    /// sooner so the video is up earlier in the window" is CLOSED. Measured on
-    /// a present from a marker, `-zoom-live-log -media-log`, times relative to
-    /// the flight beginning:
-    ///
-    ///     +0 ms    willBegin flyingPlayer=N defers=N
-    ///     +68 ms   [page-play] start
-    ///     +230 ms  retry ADOPTED mid-flight — the first decoded frame
-    ///     +703 ms  landed
-    ///
-    /// A marker carries no player, so this reads false and the page starts as
-    /// early as there is a page to start. The 162 ms between the start and the
-    /// first frame is a remote asset decoding, not a policy, and the fade
-    /// begins in the same tick the frame exists.
-    ///
-    /// The only two ways to make that frame earlier are both refused: warming a
-    /// player for every visible marker would put an `AVPlayer` behind a 44pt
-    /// pin, spend pool loans the pool is already tight on and decode during
-    /// pan — the map's own invariant forbids the first and
-    /// `prewarmVisiblePosts` deliberately warms POSTS, not players; and a cheap
-    /// preview rendition is the standing contract ask
-    /// (`dev/issues/BACKEND_MEDIA_PREVIEW_RENDITIONS.md`). Until that ships the
-    /// card is not empty for those 162 ms: it flies the marker's sprite sheet,
-    /// animating, at the page's own framing.
-    private var defersPlaybackForStagingFlight: Bool {
-        isAwaitingZoomPresentation && flightCarriesActivePlayer
-    }
-    /// Set by whoever pushes this screen: true when a flight attached a grab to
-    /// it, false when it arrived by an ordinary push and the native edge swipe
-    /// should work. Written on BOTH paths rather than defaulted, because this
-    /// controller is REUSED and a stale answer from the previous presentation
-    /// is exactly the bug this would otherwise become.
-    public var zoomOwnsInteractiveDismissal = true
 
     /// The shell's bell — a tab-root feed's leading item while no back arrow
     /// or ✕ holds the edge (`HeaderAccessoryHosting`). The shell installs it
@@ -329,25 +268,13 @@ final class SnapFeedViewController: UIViewController {
     /// cancelled grab can take it back.
     private var donatedLiveView: VideoRenderView?
     /// The two facts whose AND is the surface's visibility.
-    private var isOnScreen = false
-    /// The surface THIS screen last made audible, so leaving only clears its own.
-    private weak var ownAudibleSurface: VideoRenderView?
-    private var isAudioYielded = false
-    /// Through the pool's byte cache when there is one (#895).
-    private lazy var songPlayer = FeedSongPlayer(playback: videoPlayback)
-    /// The page whose song the viewer paused from the sound sheet's record
-    /// (#1148): its song stays paused, where it was, until resumed — another
-    /// page plays its own.
-    private var songPausedFor: PostID?
-    /// The post whose track the song player holds (#1849): another post's
-    /// starts it again from its start.
-    private var songPostID: PostID?
-    /// A hold on a carousel's page is holding its track.
-    private var isSongHeld = false
-    /// The sound sheet open over the page, mirroring it (#1148).
-    private weak var soundSheet: SoundSheetViewController?
-    private var coverSpinTimer: Timer?
-    private var isForeground = true
+    private(set) var isOnScreen = false
+    /// What is heard, the song, the records' spin, the share of the screen,
+    /// Background Play and Picture in Picture (`SnapSoundPlayback`). Built on
+    /// first use; building it does nothing else.
+    private lazy var soundPlayback = SnapSoundPlayback(
+        host: self, videoPlayback: videoPlayback, imagePipeline: imagePipeline, soundState: soundState
+    )
     /// Slid aside by the shell — the notifications drawer open over it
     /// (#1703): on screen, not watched, so nothing plays.
     private var isSetAside = false
@@ -362,26 +289,12 @@ final class SnapFeedViewController: UIViewController {
     /// one more source of `viewportShare`, so the clip's sound follows it and
     /// the clip pauses below half, as under a pushed screen.
     func setVisibleShare(_ share: CGFloat) {
-        viewportShare.report(share)
+        soundPlayback.viewportShare.report(share)
     }
 
     /// Whether the pages' lifecycle counts the screen as watched — what lets
     /// the post on show play. Internal for tests.
     var debugIsWatchedByLifecycle: Bool { lifecycle.isVisible }
-    /// Background Play (#483): this screen's clip went on playing when the
-    /// app left the screen, and the screen was left exactly as it was.
-    private var isPlayingInBackground = false
-    /// Picture in Picture (#483): the surface this screen readied for the
-    /// floating window, so leaving only lets go of its own.
-    private weak var ownPictureInPictureSurface: VideoRenderView?
-    /// The app left with a clip readied: the screen waits, untouched, for the
-    /// system to open the window — or gives up and pauses as usual.
-    private var isAwaitingPictureInPicture = false
-    /// The inert page-chrome replica riding in the hero transition's flying
-    /// card. Held weakly for the duration of a flight so a post that hydrates
-    /// mid-flight (cold tap) can still fill in the replica's labels; the card
-    /// owns the view itself.
-    private weak var flightChrome: SnapChromeView?
     /// Unregisters its notification tokens when this VC (and thus the bag) is
     /// released — a nonisolated deinit can't touch the VC's main-actor state.
     private let appObservers = NotificationTokens()
@@ -447,8 +360,7 @@ final class SnapFeedViewController: UIViewController {
     /// The post that must open ALREADY SHOWING its comments — see
     /// `openComments(for:)`.
     private var pendingCommentsID: PostID?
-    private var isEngagedDismissalActive = false
-    private var commentsEngagedID: PostID?
+    private(set) var commentsEngagedID: PostID?
     /// A media post's comments, a native sheet, while one is up (#2087): the
     /// engagement above is a text page's and stays nil meanwhile.
     private var commentsSheet: SnapCommentsSheetSession?
@@ -537,13 +449,9 @@ final class SnapFeedViewController: UIViewController {
     private var pagerLock = ScrollLock()
     /// Every page whose media carousel the content freeze holds (#1738).
     private let carouselFreeze = CarouselFreezeLedger<SnapFeedCell>()
-    /// The pager's `contentOffset.y` captured when an interactive page-swipe
-    /// begins — the datum the drive offsets from. Nil when no drive is
-    /// live. The drive hand-moves `contentOffset` while the pager's own pan
-    /// stays disabled (the dead-end lock is untouched), so the finger
-    /// drives the leaving page directly and the engaged layer (all in the
-    /// cell) rides for free.
-    private var pageDriveStartOffset: CGFloat?
+    /// The page drive and the pull to go back (`SnapPagerDrive`). Built on
+    /// first use; building it does nothing else.
+    private lazy var pagerDrive = SnapPagerDrive(host: self)
 
     /// Files a post's Report. Nil withholds the row entirely: an action that
     /// cannot act is not offered — the grid's card menu follows the same rule.
@@ -987,11 +895,11 @@ final class SnapFeedViewController: UIViewController {
         // rises with the pop, and the clip resumes at half. Arriving on its
         // own (a push, a presentation, a flight), it owns the whole screen.
         if let coordinator = transitionCoordinator, !isMovingToParent, !isBeingPresented,
-           navigationController?.isBeingPresented != true, !isAwaitingAnyFlight,
+           navigationController?.isBeingPresented != true, !flight.isAwaitingAnyFlight,
            let cover = ViewportShare.cover(of: coordinator, .from) {
-            viewportShare.track(coordinator, cover: cover, coversAtEnd: false)
+            soundPlayback.viewportShare.track(coordinator, cover: cover, coversAtEnd: false)
         } else {
-            viewportShare.report(1)
+            soundPlayback.viewportShare.report(1)
         }
         isOnScreen = true
         refreshVisibility()
@@ -1095,11 +1003,11 @@ final class SnapFeedViewController: UIViewController {
         // the route, because on the hero path this fires WITH the transition
         // and would spend the engagement's layout inside the flight's last
         // frames — the one place this screen refuses to spend it.
-        if isAwaitingRevealPresentation {
+        if flight.isAwaitingRevealPresentation {
             // The reveal's landing: the deferred panel goes in BEFORE the
             // pending comments are applied, so a card opened on its comments
             // finds its panel exactly as it would have without the deferral.
-            isAwaitingRevealPresentation = false
+            flight.isAwaitingRevealPresentation = false
             landDeferredRestingComments()
             // The reveal held no chrome, so the band's train was laid during
             // the flight, unseen behind the replica: it enters now.
@@ -1111,7 +1019,7 @@ final class SnapFeedViewController: UIViewController {
         // An author that arrived under the push swaps in now (#1791); one a
         // flight is still holding waits for its landing.
         showPendingAuthor()
-        if !isAwaitingZoomPresentation { applyPendingComments(animated: true) }
+        if !flight.isAwaitingZoomPresentation { applyPendingComments(animated: true) }
         #if DEBUG
         runDebugAppearanceHooks()
         #endif
@@ -1478,42 +1386,13 @@ final class SnapFeedViewController: UIViewController {
         // screen's own pop or dismissal: the screen under it is no cover, and
         // a grab carries this very player to its tile.
         if !isMovingFromParent, !isBeingDismissed, navigationController?.isBeingDismissed != true,
-           !isAwaitingAnyFlight, let cover = ViewportShare.cover(of: coordinator, .to) {
-            viewportShare.track(coordinator, cover: cover, coversAtEnd: true)
+           !flight.isAwaitingAnyFlight, let cover = ViewportShare.cover(of: coordinator, .to) {
+            soundPlayback.viewportShare.track(coordinator, cover: cover, coversAtEnd: true)
         }
     }
 
-    /// The share of this screen still on screen (#1914): what its clip's gate
-    /// reads — it plays at half and above, and its sound follows the share.
-    private lazy var viewportShare: ViewportShare = {
-        let share = ViewportShare(host: view)
-        share.onChange = { [weak self] value in self?.viewportShareDidChange(value) }
-        return share
-    }()
-
-    private var viewportSharePlays = true
-
-    private func viewportShareDidChange(_ share: CGFloat) {
-        #if DEBUG
-        publishViewportProbe()
-        #endif
-        let volume = ViewportShare.volume(at: share)
-        videoPlayback?.setAudibleVolume(volume)
-        songPlayer.volume = volume
-        let plays = ViewportShare.plays(at: share)
-        guard plays != viewportSharePlays else { return }
-        viewportSharePlays = plays
-        refreshVisibility()
-        // Every record of the post's sound turns with it (#1148), the sound
-        // sheet's included (the owner 2026-10-31: the sheet's record kept
-        // turning over a post its expansion had paused). Asked now, and once
-        // more after the turn, for a pause the player settles a beat later.
-        refreshCoverSpin()
-        DispatchQueue.main.async { [weak self] in self?.refreshCoverSpin() }
-    }
-
     /// The share now, for tests.
-    var debugViewportShare: ViewportShare { viewportShare }
+    var debugViewportShare: ViewportShare { soundPlayback.viewportShare }
 
     #if DEBUG
     /// `-viewport-probe` (#1970): the share's state as an accessibility
@@ -1535,7 +1414,8 @@ final class SnapFeedViewController: UIViewController {
         probe.accessibilityIdentifier = String(
             format: "viewport;plays=%d;covered=%d;share=%.2f",
             // From the share: `onChange` is told before `plays` is updated.
-            ViewportShare.plays(at: viewportShare.share) ? 1 : 0, viewportShare.isCovered ? 1 : 0, viewportShare.share
+            ViewportShare.plays(at: soundPlayback.viewportShare.share) ? 1 : 0,
+            soundPlayback.viewportShare.isCovered ? 1 : 0, soundPlayback.viewportShare.share
         )
     }
     #endif
@@ -1624,7 +1504,7 @@ final class SnapFeedViewController: UIViewController {
         // page going away), the two disagreed by that much at landing — the
         // caption and the rail stepped up ~10pt as the replica faded into
         // the page (filmed on a device, 25 September 2026).
-        flightChrome?.setFixedInsets(view.safeAreaInsets)
+        flight.flightChrome?.setFixedInsets(view.safeAreaInsets)
         // The COMMENT PANEL too, and this is the seam that makes staging work
         // without anyone doing inset arithmetic by hand.
         //
@@ -1739,13 +1619,13 @@ final class SnapFeedViewController: UIViewController {
                     self?.onMediaPageChanged?(id, page)
                     // A carousel paused by a tap plays again on its next page,
                     // as the arriving clip does: the track with it (#1849).
-                    if let self, self.songPausedFor == id, SnapSoundState.isCarousel(model) {
-                        self.songPausedFor = nil
+                    if let self, self.soundPlayback.songPausedFor == id, SnapSoundState.isCarousel(model) {
+                        self.soundPlayback.songPausedFor = nil
                         cell?.setPausedMarkVisible(false)
                     }
                     // A collection's pages are clips and photographs: turning
                     // one changes what there is to hear, and what it is called.
-                    self?.refreshAudibleSurface()
+                    self?.soundPlayback.refreshAudibleSurface()
                     if let self, let index = self.lifecycle.activeIndex,
                        self.orderedIDs.indices.contains(index), self.orderedIDs[index] == id {
                         self.updateBarChrome(at: index)
@@ -1801,9 +1681,9 @@ final class SnapFeedViewController: UIViewController {
                 if SnapSoundState.isCarousel(model) {
                     cell.onPostTrackTap = { [weak self, weak cell] in
                         guard let self, let cell else { return }
-                        self.togglePostTrack(on: cell, id: id)
+                        self.soundPlayback.togglePostTrack(on: cell, id: id)
                     }
-                    cell.onPostTrackHold = { [weak self] held in self?.holdPostTrack(held) }
+                    cell.onPostTrackHold = { [weak self] held in self?.soundPlayback.holdPostTrack(held) }
                 } else {
                     cell.onPostTrackTap = nil
                     cell.onPostTrackHold = nil
@@ -1829,7 +1709,7 @@ final class SnapFeedViewController: UIViewController {
                     )
                 }
                 cell.onRequestCommentsPageDrive = { [weak self] phase, translation, velocity in
-                    self?.drivePageSwipe(phase, translation: translation, velocity: velocity)
+                    self?.pagerDrive.drivePageSwipe(phase, translation: translation, velocity: velocity)
                 }
                 // The sound bubble (#671): its face, and its tap. No hold since
                 // #1931: the sound follows the device.
@@ -2305,7 +2185,7 @@ final class SnapFeedViewController: UIViewController {
     /// presentation's transition, whose own bar animation already owns the
     /// items (a morph started under it lands in the flight's first frames).
     private var canAnimateBarItems: Bool {
-        view.window != nil && transitionCoordinator == nil && !isAwaitingAnyFlight
+        view.window != nil && transitionCoordinator == nil && !flight.isAwaitingAnyFlight
     }
 
     /// Mints the author item for the pill shown now and swaps it into the
@@ -2346,7 +2226,7 @@ final class SnapFeedViewController: UIViewController {
     private var authorPillAwaitsLandingInstall = false
 
     private func installAuthorPillAfterLanding() {
-        guard authorPillAwaitsLandingInstall, !isAwaitingAnyFlight else { return }
+        guard authorPillAwaitsLandingInstall, !flight.isAwaitingAnyFlight else { return }
         #if DEBUG
         if LaunchArgument.pillNoLandingInstall.isPassed() { return }
         #endif
@@ -2383,7 +2263,7 @@ final class SnapFeedViewController: UIViewController {
         // (`pendingAuthor`) is drawn when its pill swaps in.
         guard authorIdentityView.shownAuthor?.authorID == authorBadges.author(of: barAuthorBadge),
               authorIdentityView.followBadge != badge else { return }
-        if authorPillAwaitsLandingInstall, isAwaitingAnyFlight || transitionCoordinator != nil { return }
+        if authorPillAwaitsLandingInstall, flight.isAwaitingAnyFlight || transitionCoordinator != nil { return }
         authorIdentityView.setFollowBadge(badge, animated: canAnimateBarItems)
     }
 
@@ -2739,7 +2619,7 @@ final class SnapFeedViewController: UIViewController {
     /// `keyboardLayoutGuide`, because the question is asked at the moment a
     /// GESTURE begins: the guide's frame is animating then, and a guide
     /// halfway down answers neither yes nor no.
-    private var isKeyboardOnScreen = false
+    private(set) var isKeyboardOnScreen = false
 
     private func observeAppLifecycle() {
         let center = NotificationCenter.default
@@ -2756,12 +2636,12 @@ final class SnapFeedViewController: UIViewController {
         appObservers.add(center.addObserver(
             forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.setForeground(false) }
+            MainActor.assumeIsolated { self?.soundPlayback.setForeground(false) }
         })
         appObservers.add(center.addObserver(
             forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.setForeground(true) }
+            MainActor.assumeIsolated { self?.soundPlayback.setForeground(true) }
         })
         // ⚠️ THE FLOATING WINDOW IS CLOSED ONCE THE APP IS ACTIVE (#483). Asked
         // as the app only enters the foreground (the app's icon tapped), the
@@ -2781,134 +2661,13 @@ final class SnapFeedViewController: UIViewController {
         FeedSoundSession.shared.followVoiceFloor()
         for name in [FeedSoundSession.didTurnOn, FeedSoundSession.didTurnOff, FeedSoundSession.audibilityDidChange] {
             appObservers.add(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.refreshAudibleSurface() }
+                MainActor.assumeIsolated { self?.soundPlayback.refreshAudibleSurface() }
             })
         }
         // (A keyboard-session rail yield used to live here: the engaged
         // composer rose into the rail's column, so the rail conceded the
         // band while typing. The engagement fades the rail outright now, so
         // there is no overlap left to arbitrate.)
-    }
-
-    private func setForeground(_ foreground: Bool) {
-        if !foreground {
-            let keepsPlaying = continueInBackground()
-            isPlayingInBackground = keepsPlaying
-            let floats = awaitPictureInPicture()
-            // Nothing is paused or silenced: the page keeps its player, for the
-            // Lock Screen's controls, the floating window, or both.
-            if keepsPlaying || floats { return }
-        }
-        if foreground {
-            isAwaitingPictureInPicture = false
-            videoPlayback?.stopPictureInPicture()
-            if isPlayingInBackground {
-                isPlayingInBackground = false
-                videoPlayback?.endBackgroundPlayback()
-            }
-        }
-        isForeground = foreground
-        refreshVisibility()
-    }
-
-    /// Picture in Picture (#483): when this screen readied its clip, leaves it
-    /// playing for the window the system opens as the app resigns. A window
-    /// that does not come — or that the viewer closes while the app is away —
-    /// hands the page back to the usual pause.
-    private func awaitPictureInPicture() -> Bool {
-        guard let videoPlayback, ownPictureInPictureSurface != nil,
-              videoPlayback.isPictureInPictureArmed, MediaPlaybackPolicy.floatsInPictureInPicture
-        else { return false }
-        isAwaitingPictureInPicture = true
-        Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(1.5))
-            guard let self, isAwaitingPictureInPicture, !(self.videoPlayback?.isPictureInPictureActive ?? false) else { return }
-            pictureInPictureEnded()
-        }
-        return true
-    }
-
-    /// The window closed (or never opened) while the app is away: unless
-    /// Background Play keeps the clip going, the page pauses as it would have.
-    private func pictureInPictureEnded() {
-        guard isAwaitingPictureInPicture else { return }
-        isAwaitingPictureInPicture = false
-        // ⚠️ CLOSED INTO THE APP, NOT AWAY FROM IT. The window's "back to the
-        // app" closes it a moment before the app is in the foreground: read
-        // as "closed while away", the page paused, its picture went black and
-        // the clip came back from elsewhere (the owner's device, 2026-11-06).
-        // The page keeps playing; the foreground takes over.
-        if videoPlayback?.pictureInPictureClosedIntoApp == true { return }
-        guard !isPlayingInBackground, UIApplication.shared.applicationState == .background else { return }
-        isForeground = false
-        refreshVisibility()
-    }
-
-    /// Readies the page that owns the screen for the floating window — or lets
-    /// go of this screen's, when the setting is off or the screen is covered.
-    private func refreshPictureInPicture(ownerCell: SnapFeedCell? = nil) {
-        guard let videoPlayback, !isAwaitingPictureInPicture else { return }
-        var surface: VideoRenderView?
-        // A single clip floats, never a carousel's muted one (#1849); and only
-        // while the viewer hears the feed (#1931, #483): a readied window
-        // makes the session `.playback`, which a phone on silent would hear
-        // before any volume key. A ringing phone hears it already.
-        if MediaPlaybackPolicy.floatsInPictureInPicture, videoPlayback.feedSound.isHeard,
-           isOnScreen, isForeground, let owner = playbackOwner,
-           ownerModel.map(SnapSoundState.clipIsHeard(in:)) ?? true,
-           let cell = ownerCell ?? lifecycleCell(at: owner) as? SnapFeedCell {
-            surface = cell.audibleSurface
-        }
-        if surface == nil {
-            // Only lets go of what this screen readied: a feed pushed on top
-            // owns the window now.
-            guard ownPictureInPictureSurface != nil else { return }
-            ownPictureInPictureSurface = nil
-            videoPlayback.armPictureInPicture(for: nil)
-            return
-        }
-        guard videoPlayback.armPictureInPicture(for: surface) else { return }
-        ownPictureInPictureSurface = surface
-        videoPlayback.onPictureInPictureChange = { [weak self] active in
-            guard let self else { return }
-            if active {
-                isAwaitingPictureInPicture = true
-            } else {
-                pictureInPictureEnded()
-            }
-        }
-    }
-
-    /// Background Play (#483): keeps the clip this screen is being heard
-    /// through playing off screen — only when the viewer turned it on, the
-    /// feed is heard (the sound turned on, or a ringing phone: #1931, a phone
-    /// on silent never hears it through the background), and this screen (not
-    /// one under it) owns the sound.
-    private func continueInBackground() -> Bool {
-        guard MediaPlaybackPolicy.playsInBackground, isOnScreen, !isAudioYielded,
-              let videoPlayback, videoPlayback.feedSound.isHeard, let surface = ownAudibleSurface,
-              surface === videoPlayback.currentAudibleSurface
-        else { return false }
-        let model = playbackOwner.flatMap { $0 < orderedIDs.count ? modelsByID[orderedIDs[$0]] : nil }
-        guard videoPlayback.continueInBackground(surface, nowPlaying: Self.nowPlaying(for: model)) else { return false }
-        if let url = model?.thumbnailURL {
-            let pipeline = imagePipeline
-            Task { [weak videoPlayback] in
-                guard let image = try? await pipeline.image(for: url) else { return }
-                videoPlayback?.setNowPlayingArtwork(image)
-            }
-        }
-        return true
-    }
-
-    /// The Lock Screen's two lines: the caption's first line (or what the
-    /// clip is), and its author.
-    static func nowPlaying(for model: FeedItemDisplayModel?) -> NowPlayingInfo {
-        let caption = model?.caption?
-            .split(whereSeparator: \.isNewline).first
-            .map { $0.trimmingCharacters(in: .whitespaces) } ?? ""
-        let title = caption.isEmpty ? "Video" : String(caption.prefix(80))
-        return NowPlayingInfo(title: title, artist: model?.authorName ?? "")
     }
 
     // MARK: - Rendering
@@ -3059,7 +2818,7 @@ final class SnapFeedViewController: UIViewController {
         // A hero flight in progress whose post hydrated just now (cold tap):
         // fill in the flying card's chrome where it is. Its geometry is
         // data-independent, so only the text/avatar fade in.
-        if let flightChrome {
+        if let flightChrome = flight.flightChrome {
             UIView.transition(with: flightChrome, duration: 0.15, options: [.transitionCrossDissolve]) {
                 self.configureFlightChrome(flightChrome)
             }
@@ -3284,7 +3043,7 @@ final class SnapFeedViewController: UIViewController {
         // at `willDisplay`, every later one at configure.
         snapCell(for: id)?.setPostUnavailable(true)
         if activeModel?.id == id { applyToolbarPostActions(for: id) }
-        refreshAudibleSurface()
+        soundPlayback.refreshAudibleSurface()
     }
 
     /// The toolbar's post actions — save, repost, ⋯ — for the page in front:
@@ -3754,8 +3513,8 @@ final class SnapFeedViewController: UIViewController {
     /// tap-to-comments panel warmed into it — so the guard declined precisely
     /// when the next page needed building, and the black rectangle came back
     /// unchanged.
-    private func prewarmRestingComments(for id: PostID) {
-        guard !isAwaitingAnyFlight,
+    func prewarmRestingComments(for id: PostID) {
+        guard !flight.isAwaitingAnyFlight,
               !restingWarm.contains(id),
               isTextPage(id),
               let makeCommentsPanelContent else { return }
@@ -3790,7 +3549,7 @@ final class SnapFeedViewController: UIViewController {
     /// could not put them in that order could not see it.
     func debugPrewarmComments(for id: PostID) {
         guard collectionView.visibleCells.contains(where: { $0 is SnapFeedCell }),
-              !isAwaitingZoomPresentation else { return }
+              !flight.isAwaitingZoomPresentation else { return }
         // The whole warm at once: the turns the app spreads it over (#2136)
         // are `RunLoopTurn`'s, not this test seam's.
         prewarmCommentsSheet(for: id)
@@ -3832,12 +3591,12 @@ final class SnapFeedViewController: UIViewController {
     /// drives down (the previous post, #2058).
     func debugDrivePageSwipe(steps: Int = 12, distance: CGFloat = 520) {
         let velocity: CGFloat = distance >= 0 ? -900 : 900
-        drivePageSwipe(.began, translation: 0, velocity: 0)
+        pagerDrive.drivePageSwipe(.began, translation: 0, velocity: 0)
         for step in 1...max(1, steps) {
             let dy = -distance * CGFloat(step) / CGFloat(max(1, steps))
-            drivePageSwipe(.changed, translation: dy, velocity: velocity)
+            pagerDrive.drivePageSwipe(.changed, translation: dy, velocity: velocity)
         }
-        drivePageSwipe(.ended, translation: -distance, velocity: velocity)
+        pagerDrive.drivePageSwipe(.ended, translation: -distance, velocity: velocity)
     }
 
     /// The ceiling the pager actually clamps to — prepares, then answers.
@@ -4187,15 +3946,15 @@ final class SnapFeedViewController: UIViewController {
         // No close handler — a resting page is undismissable; the swipe
         // handler pages the feed (the only way off a text post).
         detail?.setEngagedPageSwipeHandler({ [weak self] phase, translation, velocity in
-            self?.drivePageSwipe(phase, translation: translation, velocity: velocity)
+            self?.pagerDrive.drivePageSwipe(phase, translation: translation, velocity: velocity)
         }, pagesBack: { [weak self] in self?.downwardDragOwner == .pager })
         // The pull past the stream's ends (#2298 § 2), and the page's
         // VoiceOver actions: the feed's own page change, from this page.
         detail?.setPostPull(PostDetailViewController.PostPull(
-            target: { [weak self] direction in self?.postPullTarget(direction, from: id) },
+            target: { [weak self] direction in self?.pagerDrive.postPullTarget(direction, from: id) },
             commit: { [weak self] direction, velocity, completion in
                 guard let self else { return completion() }
-                commitPostPull(direction, from: id, velocity: velocity, completion: completion)
+                pagerDrive.commitPostPull(direction, from: id, velocity: velocity, completion: completion)
             }
         ))
         observeCommentCount(of: detail)
@@ -4232,7 +3991,7 @@ final class SnapFeedViewController: UIViewController {
         // the warm exists to fix, moved to a worse place. Playback is deferred
         // across the flight for exactly this reason; so is this now, and
         // `zoomTransitionDidEnd` picks it up on landing.
-        guard !isAwaitingZoomPresentation else { return }
+        guard !flight.isAwaitingZoomPresentation else { return }
         // The sheet's panel waits beside the page, not in it (#2087), and is
         // built over the turns after this one (#2136).
         stageCommentsSheetWarm(for: id)
@@ -4279,8 +4038,8 @@ final class SnapFeedViewController: UIViewController {
     /// Nothing is moving that ~100 ms of layout could stall.
     private var isQuietForCommentsWarm: Bool {
         transitionCoordinator == nil
-            && !isAwaitingZoomPresentation
-            && !isEngagedDismissalActive
+            && !flight.isAwaitingZoomPresentation
+            && !flight.isEngagedDismissalActive
             && !collectionView.isTracking
             && !collectionView.isDragging
             && !collectionView.isDecelerating
@@ -4449,14 +4208,10 @@ final class SnapFeedViewController: UIViewController {
         // is known rather than inferred. Everywhere else — a finger, UIKit's
         // deceleration — the model IS where the pixels are.
         let live = collectionView.contentOffset.y
-        let lower = min(live, settleFromOffset ?? live)
-        let upper = max(live, settleFromOffset ?? live)
+        let lower = min(live, pagerDrive.settleFromOffset ?? live)
+        let upper = max(live, pagerDrive.settleFromOffset ?? live)
         return top < upper + page && top + page > lower
     }
-
-    /// Where a page-change animation started, for as long as it is running.
-    /// Nil at rest — see `isPostOnScreen`.
-    private var settleFromOffset: CGFloat?
 
     private func lockRestingEngagement() {
         guard commentsEngagementIsResting, !restingLockApplied,
@@ -4473,216 +4228,6 @@ final class SnapFeedViewController: UIViewController {
         commentsSheet?.close()
     }
 
-
-    /// The INTERACTIVE page-swipe drive (bar-owned pan → this). The finger
-    /// hand-moves the pager's `contentOffset` in real time, so the leaving
-    /// page — and the whole engaged layer riding inside its cell (docked
-    /// media card, comments, composer) — follows the drag exactly as if the
-    /// user were swiping the feed itself. The pager's OWN pan stays disabled
-    /// throughout (the dead-end lock is preserved: the comments list still
-    /// cannot chain), because programmatic `contentOffset` ignores
-    /// `isScrollEnabled`. On release the drive settles to the target page;
-    /// the page change tears the old engagement down via the resign leg.
-    private func drivePageSwipe(
-        _ phase: CommentsInputBar.PageSwipePhase, translation dy: CGFloat, velocity vy: CGFloat
-    ) {
-        #if DEBUG
-        // `-grab-log`: the ONLY gesture that pages a text post, and its ceiling.
-        //
-        // A text page disables the pager outright, so nothing else on that
-        // screen can move it. When it does not move, the question is whether
-        // this ran at all and what it was allowed to reach — two answers no
-        // other trace carries.
-        if LaunchArgument.grabLog.isPassed() {
-            print("[drive] \(phase) dy=\(Int(dy)) ceiling=\(reachableCeiling())"
-                + " settled=\(settledPageIndex) engaged=\(commentsEngagedID?.rawValue ?? "nil")")
-        }
-        #endif
-        switch phase {
-        case .began: beginPageDrive()
-        case .changed: updatePageDrive(translation: dy)
-        case .ended: endPageDrive(translation: dy, velocity: vy)
-        }
-    }
-
-    /// ⚠️ A PAGE DRIVE STANDS DOWN FOR THE CLOSE (#770): at the last post the
-    /// upward close claims the drive's own drags (`upwardCloseTerritory`), and
-    /// the two would otherwise move the page at once. The close's pop is
-    /// running from the moment it begins — THIS stack's pop, not a sheet
-    /// presented or dismissed over the feed (`isTransitioningItsStack`).
-    private var pageDriveYieldsToClose: Bool {
-        // A pop under way — or, on a native push, a pull, which starts no pop
-        // (#2045, #2046).
-        navigationController?.isTransitioningItsStack == true || pullBaseOffset != nil
-    }
-
-    private func beginPageDrive() {
-        guard commentsEngagedID != nil, !pageDriveYieldsToClose else { return }
-        // Interrupt any in-flight settle: seize the CURRENT on-screen offset
-        // (presentation layer) so a re-grab mid-settle doesn't jump.
-        let live = collectionView.layer.presentation()?.bounds.origin.y ?? collectionView.contentOffset.y
-        collectionView.layer.removeAllAnimations()
-        collectionView.contentOffset.y = live
-        pageDriveStartOffset = live
-    }
-
-    private func updatePageDrive(translation dy: CGFloat) {
-        guard let start = pageDriveStartOffset else { return }
-        if pageDriveYieldsToClose {
-            // The same drag is closing the screen: the page goes back where
-            // it was, and the release settles nothing.
-            collectionView.contentOffset.y = start
-            pageDriveStartOffset = nil
-            return
-        }
-        // Drag up (dy < 0) advances toward the next post (offset grows);
-        // drag down previews the PREVIOUS one (#2058), down to the first post,
-        // past which the drive rubber-bands (`SnapPageDrive.floorIndex`).
-        let page = collectionView.bounds.height
-        let origin = page > 0 ? Int((start / page).rounded()) : 0
-        let floor = CGFloat(SnapPageDrive.floorIndex(origin: origin)) * page
-        // The previous page made ready as the finger heads to it: the warm
-        // holds one panel, the next page's until now (`reachableCeiling`).
-        if dy > 0, origin > 0, !isPageReady(origin - 1) {
-            prewarmRestingComments(for: orderedIDs[origin - 1])
-        }
-        collectionView.contentOffset.y = rubberBandedOffset(start - dy, floor: floor)
-    }
-
-    /// - Parameters:
-    ///   - step: the step to settle, decided by the caller (a committed pull,
-    ///     #2298); nil for the drag's own (`SnapPageDrive.step`).
-    ///   - reducesMotion: the settle without its spring (a pull's commit
-    ///     under Reduce Motion).
-    ///   - completion: once the settle has ended, whatever it did.
-    private func endPageDrive(
-        translation dy: CGFloat, velocity vy: CGFloat, step decided: Int? = nil, reducesMotion: Bool = false,
-        completion: (() -> Void)? = nil
-    ) {
-        guard let start = pageDriveStartOffset else { completion?(); return }
-        pageDriveStartOffset = nil
-        let page = collectionView.bounds.height
-        guard page > 0 else { completion?(); return }
-        let startIndex = Int((start / page).rounded())
-        let step = decided ?? SnapPageDrive.step(translation: dy, velocity: vy, page: page)
-        let target = SnapPageDrive.target(origin: startIndex, step: step, ceiling: orderedIDs.count - 1)
-        let targetOffset = CGFloat(target) * page
-        // FOOTER MORPH, timed with the settle: if this drive commits to a
-        // page that will NOT re-engage into the sort toolbar — i.e. a media
-        // post (text posts auto-engage and keep the engaged items) — the
-        // engaged→default toolbar swap must animate HERE, concurrently with
-        // the page slide, exactly as `dismissComments` does. Otherwise the
-        // only teardown swap is `finishCommentsDisengagement`'s instant one,
-        // which snaps (visible only forward, Text→Media). Its identity-
-        // compare then no-ops once this animated swap has landed default.
-        let changesPage = step != 0 && target != startIndex
-        let targetReEngages = orderedIDs.indices.contains(target)
-            && isTextPage(orderedIDs[target])
-        if changesPage && !targetReEngages {
-            setEngagedChrome(false, hasMedia: true, animated: true)
-        }
-        #if DEBUG
-        // `-grab-log`: what the drive resolved to, and what the scroll view
-        // will actually accept. A committed step that never moves the page is
-        // either a target nobody applied or an offset something else is
-        // holding, and the two look identical from outside.
-        if LaunchArgument.grabLog.isPassed() {
-            print("[drive] commit start=\(Int(start)) step=\(step) target=\(target)"
-                + " targetY=\(Int(targetOffset)) offsetY=\(Int(collectionView.contentOffset.y))"
-                + " contentH=\(Int(collectionView.contentSize.height))"
-                + " pageH=\(Int(page)) scrollEnabled=\(collectionView.isScrollEnabled)")
-        }
-        #endif
-        // The page being left is on screen for the whole of this animation,
-        // whatever the model says — see `isPostOnScreen`.
-        settleFromOffset = collectionView.contentOffset.y
-        let distance = abs(collectionView.contentOffset.y - targetOffset)
-        let springVelocity = distance > 0 ? min(3, abs(vy) / distance) : 0
-        let settle = { self.collectionView.contentOffset.y = targetOffset }
-        let settled: (Bool) -> Void = { [weak self] finished in
-            #if DEBUG
-            if LaunchArgument.grabLog.isPassed(), let self {
-                print("[drive] settled finished=\(finished)"
-                    + " offsetY=\(Int(collectionView.contentOffset.y))")
-            }
-            #endif
-            self?.settleFromOffset = nil
-            defer { completion?() }
-            guard finished else { return }
-            // Now the target page is settled: recompute the active item,
-            // which fires the resign→teardown / activate legs (the landed
-            // page auto-engages if it's a text post; the old engagement is
-            // torn down as it resigns).
-            self?.updateActiveItem()
-        }
-        if reducesMotion {
-            UIView.animate(
-                withDuration: 0.25, delay: 0, options: [.curveEaseInOut, .allowUserInteraction],
-                animations: settle, completion: settled
-            )
-        } else {
-            UIView.animate(
-                withDuration: 0.4, delay: 0,
-                usingSpringWithDamping: 0.9, initialSpringVelocity: springVelocity,
-                options: [.curveEaseOut, .allowUserInteraction],
-                animations: settle, completion: settled
-            )
-        }
-    }
-
-    // MARK: - The pull to the next / previous post (#2298 § 2)
-
-    /// Where a text page's pull goes (#2298 § 2): the post that way, as its
-    /// pill shows it — nil when there is nowhere to go, so no pill. The page
-    /// must be the settled one, at rest, with no close under way:
-    /// - `.next`: the page after it, made ready as the pull begins (the
-    ///   ceiling prepares it); none on the feed's last post (its upward close,
-    ///   #628, stays as it is);
-    /// - `.previous`: the router's answer (`downwardDragOwner`), so the first
-    ///   post keeps its close (#2058) and shows no pill.
-    private func postPullTarget(_ direction: PostPullDirection, from id: PostID) -> PostPullTarget? {
-        guard commentsEngagedID == id, !pageDriveYieldsToClose, !isKeyboardOnScreen,
-              let index = orderedIDs.firstIndex(of: id), index == settledPageIndex else { return nil }
-        let target: Int
-        switch direction {
-        case .next:
-            guard reachableCeiling() > index else { return nil }
-            target = index + 1
-        case .previous:
-            guard index > 0, downwardDragOwner == .pager else { return nil }
-            target = index - 1
-        }
-        guard let model = modelsByID[orderedIDs[target]] else { return nil }
-        return PostPullTarget(
-            authorName: model.authorName, monogram: CommentsInputBar.monogram(model.authorName),
-            avatarURL: model.avatarURL
-        )
-    }
-
-    /// A committed pull (or the page's VoiceOver action): the feed's own page
-    /// change — the drive's settle, the composer's swipe's — from where the
-    /// page stands, one step that way at the finger's velocity. Under Reduce
-    /// Motion, the settle without its spring.
-    private func commitPostPull(
-        _ direction: PostPullDirection, from id: PostID, velocity vy: CGFloat, completion: @escaping () -> Void
-    ) {
-        guard postPullTarget(direction, from: id) != nil else { return completion() }
-        beginPageDrive()
-        guard pageDriveStartOffset != nil else { return completion() }
-        let step = direction == .next ? 1 : -1
-        // The finger's velocity, only where it heads the page's way: a
-        // release drifting back starts the settle from rest.
-        let heading = direction == .next ? min(0, vy) : max(0, vy)
-        let travel = CGFloat(-step) * collectionView.bounds.height
-        endPageDrive(
-            translation: travel, velocity: heading, step: step,
-            reducesMotion: MotionPreference.reducesMotion, completion: completion
-        )
-    }
-
-    /// UIScrollView-style rubber-band past `floor`/last page: the drive
-    /// resists beyond the ends so you cannot fling off the feed — `floor` is
-    /// the previous post (`SnapPageDrive.floorIndex`), the first one at most.
     /// The full-screen rule's loader (the owner, 2026-10-27) for a feed with no
     /// post yet: at the centre, after `SnapMediaWait.grace`, so a page the
     /// device already holds never flashes it.
@@ -4862,7 +4407,7 @@ final class SnapFeedViewController: UIViewController {
     /// What remains gated is the only thing a viewer can understand: a page
     /// whose data has not arrived. That is the end of the list, and the loader
     /// says so.
-    private func reachableCeiling() -> Int {
+    func reachableCeiling() -> Int {
         let last = max(0, orderedIDs.count - 1)
         let settled = min(settledPageIndex, last)
         guard settled < last, modelsByID[orderedIDs[settled + 1]] != nil else { return settled }
@@ -4875,23 +4420,6 @@ final class SnapFeedViewController: UIViewController {
         var ceiling = settled + 1
         while ceiling < last, modelsByID[orderedIDs[ceiling + 1]] != nil { ceiling += 1 }
         return ceiling
-    }
-
-    private func rubberBandedOffset(_ offset: CGFloat, floor: CGFloat) -> CGFloat {
-        let page = collectionView.bounds.height
-        guard page > 0 else { return offset }
-        let maxOffset = CGFloat(reachableCeiling()) * page
-        if offset < floor { return floor - Self.rubberBand(floor - offset, dimension: page) }
-        if offset > maxOffset { return maxOffset + Self.rubberBand(offset - maxOffset, dimension: page) }
-        return offset
-    }
-
-    /// The standard iOS rubber-band curve: `(1 − 1/(x·c/d + 1))·d`. It maps
-    /// [0, ∞) into [0, d) — monotonically increasing, always resisting (the
-    /// mapped excess is strictly less than the raw excess), zero at zero.
-    /// Internal for the pure-logic test.
-    static func rubberBand(_ x: CGFloat, dimension d: CGFloat) -> CGFloat {
-        (1 - 1 / (x * 0.55 / d + 1)) * d
     }
 
     private func engagedCell() -> SnapFeedCell? {
@@ -4952,10 +4480,11 @@ final class SnapFeedViewController: UIViewController {
 
     // MARK: - Active-item lifecycle
 
-    private func refreshVisibility() {
+    func refreshVisibility() {
         // A screen pushed over this one past half the viewport pauses it, and
         // its pop gives it back at half (#1914, `viewportShare`).
-        let isWatched = isOnScreen && isForeground && !isSetAside && ViewportShare.plays(at: viewportShare.share)
+        let isWatched = isOnScreen && soundPlayback.isForeground && !isSetAside
+            && ViewportShare.plays(at: soundPlayback.viewportShare.share)
         // Off screen, nothing is planned ahead: the warmed and kept players go
         // back and every head preload is cancelled. The next activation plans
         // again (`warmSettledWindow`).
@@ -4971,8 +4500,8 @@ final class SnapFeedViewController: UIViewController {
         }
         apply(lifecycle.setVisible(isWatched))
         lifecycleActiveID = lifecycle.activeIndex.flatMap { orderedIDs.indices.contains($0) ? orderedIDs[$0] : nil }
-        refreshAudibleSurface()
-        setCoverSpinWatch(isWatched)
+        soundPlayback.refreshAudibleSurface()
+        soundPlayback.setCoverSpinWatch(isWatched)
     }
 
     /// The page playback follows: the one covering most of the screen.
@@ -5003,7 +4532,8 @@ final class SnapFeedViewController: UIViewController {
         if let owner {
             (lifecycleCell(at: owner) as? SnapFeedCell)?.setOwnsViewport(true)
         }
-        refreshAudibleSurface()
+        // The sound changes hands in this same turn (#1791).
+        soundPlayback.refreshAudibleSurface()
         // The pill changes owner with the picture (#1791): one rule — the
         // page covering most of the screen — so the author and the clip
         // change hands on the same frame, in either direction. ⚠️ AND A TEXT
@@ -5016,7 +4546,7 @@ final class SnapFeedViewController: UIViewController {
         }
     }
 
-    private func updateActiveItem() {
+    func updateActiveItem() {
         guard !isReplacingItems else { return }
         let index = SnapActiveItemTracker.activeIndex(
             contentOffsetY: collectionView.contentOffset.y,
@@ -5095,13 +4625,13 @@ final class SnapFeedViewController: UIViewController {
             if let snapCell = collectionView.cellForItem(
                 at: IndexPath(item: activate, section: 0)
             ) as? SnapFeedCell {
-                snapCell.defersPlaybackForFlight = defersPlaybackForStagingFlight
+                snapCell.defersPlaybackForFlight = flight.defersPlaybackForStagingFlight
                 stampFlightMediaStart(on: snapCell)
                 // The chrome's hold takes the same net, for the same reason:
                 // stamped on `activeSnapCell` alone it reached nobody, and
                 // the ticker laid its train unheld, off-window, mid-flight
                 // (see `willDisplay`).
-                if isAwaitingZoomPresentation { snapCell.setChromeHeldForFlight(true) }
+                if flight.isAwaitingZoomPresentation { snapCell.setChromeHeldForFlight(true) }
             }
             lifecycleCell(at: activate)?.willBecomeActive()
             #if DEBUG
@@ -5237,187 +4767,6 @@ final class SnapFeedViewController: UIViewController {
         soundState.attribution(for: model)
     }
 
-    // MARK: - Sound
-
-    /// Hears the page that owns the screen — or nothing, when the feed is
-    /// muted, covered, or in the background.
-    ///
-    /// Asked on every change of any of those: the owner moving (a scroll), a
-    /// carousel turning its page, the screen appearing or leaving, the app
-    /// going to the background, and the viewer's toggle.
-    ///
-    /// - Parameter ownerCell: the owner's cell when the caller holds it — a
-    ///   cell being displayed is not yet one the collection view hands back.
-    private func refreshAudibleSurface(ownerCell: SnapFeedCell? = nil) {
-        refreshSong()
-        refreshPictureInPicture(ownerCell: ownerCell)
-        guard let videoPlayback else { return }
-        var surface: VideoRenderView?
-        // A carousel's clips are never heard: the post's track is its sound
-        // (#1849, `refreshSong`).
-        // A volume key turns the sound on while this screen owns it (#1931).
-        videoPlayback.feedSound.setWatching(
-            isOnScreen && isForeground && !isAudioYielded, by: self,
-            readsRinger: MediaPlaybackPolicy.playsInBackground || MediaPlaybackPolicy.floatsInPictureInPicture
-        )
-        if isOnScreen, isForeground, !isAudioYielded,
-           let owner = playbackOwner, ownerModel.map(SnapSoundState.clipIsHeard(in:)) ?? true,
-           let cell = ownerCell ?? lifecycleCell(at: owner) as? SnapFeedCell {
-            surface = cell.audibleSurface
-        }
-        // Only ever CLEARS what this screen set: another feed pushed on top
-        // owns the sound now, and this one leaving must not silence it.
-        if surface == nil, !Self.leavingClearsAudibleSurface(
-            videoPlayback.currentAudibleSurface, own: ownAudibleSurface, screen: viewIfLoaded
-        ) {
-            ownAudibleSurface = nil
-            return
-        }
-        ownAudibleSurface = surface
-        videoPlayback.setAudibleSurface(surface)
-    }
-
-    /// Whether a screen whose page no longer wants to be heard should silence
-    /// the surface the pool is hearing now.
-    ///
-    /// ⚠️ **THE SURFACE THIS SCREEN NAMED IS NOT ALWAYS THE ONE IT HEARS.** A
-    /// landing that hands the page the flight card's live view
-    /// (`SnapFeedCell.adoptLiveRenderView` → `VideoPlaybackController
-    /// .adoptSurface`) moves the pool's audible surface onto that view, and
-    /// the one this screen remembered is thrown away. Asked by identity alone,
-    /// the screen then took the adopted view for ANOTHER feed's and left it
-    /// talking: a map marker's feed closed onto the place page with its clip
-    /// still heard, because the Activity row the close lands on plays the very
-    /// same player (the post the viewer was on is that row).
-    ///
-    /// So a surface is this screen's when it is the one it named OR one of its
-    /// own views — the page's surface lives in this screen's hierarchy whatever
-    /// swapped it in. A surface nobody holds any more (nil) is cleared too: its
-    /// player may still be heard, and no screen is listening to it. Only a live
-    /// surface elsewhere — a feed pushed on top — is left alone.
-    static func leavingClearsAudibleSurface(
-        _ current: UIView?, own: UIView?, screen: UIView?
-    ) -> Bool {
-        guard let current else { return true }
-        if current === own { return true }
-        guard let screen else { return false }
-        return current.isDescendant(of: screen)
-    }
-
-    /// The sound of a page with no clip — a photograph, a collection of
-    /// them, a text post — played while that page owns the screen, under the
-    /// same rules as a clip's (see `FeedSongPlayer`), and nothing under Power
-    /// Saving (#580; `SnapSoundState.song`).
-    private func refreshSong() {
-        // A post's track starts from its start when the post becomes the page
-        // that owns the screen, and runs on through its pages (#1849): another
-        // post — the same song or not — starts it again.
-        if let owned = ownerModel?.id, owned != songPostID {
-            songPlayer.stop()
-            songPostID = owned
-            if songPausedFor != owned { songPausedFor = nil }
-            isSongHeld = false
-        }
-        var song: URL?
-        if let model = ownerModel, trackMayRun(model) {
-            song = soundState.song(for: model)
-        }
-        songPlayer.play(song)
-    }
-
-    /// Whether `model`'s track may run now, heard or muted: the post owns
-    /// the screen in the foreground, nothing took the audio, and the viewer
-    /// has neither paused nor held it. The song's rule, and the muted
-    /// record's (#1875).
-    private func trackMayRun(_ model: FeedItemDisplayModel) -> Bool {
-        isOnScreen && isForeground && !isAudioYielded && !isSongHeld
-            && model.id != songPausedFor && !unavailablePostIDs.contains(model.id)
-    }
-
-    /// Whether the post on screen PLAYS — what every record of its sound
-    /// turns for (#1148), on silent too (#1931).
-    private var postIsPlaying: Bool {
-        SnapSoundState.postPlays(
-            onScreen: isOnScreen,
-            clipAdvancing: activeSnapCell?.isClipAdvancing ?? false,
-            songPlaying: songPlayer.isPlaying
-        )
-    }
-
-    /// The post that owns the screen.
-    private var ownerModel: FeedItemDisplayModel? {
-        guard let owner = playbackOwner, orderedIDs.indices.contains(owner) else { return nil }
-        return modelsByID[orderedIDs[owner]]
-    }
-
-    /// A tap on a carousel's page (#1849): the post's track and the clip on
-    /// screen pause together, or resume together. On a picture page the
-    /// picture wears the stopped mark, as a clip's does.
-    private func togglePostTrack(on cell: SnapFeedCell, id: PostID) {
-        let pausing: Bool
-        if cell.canTogglePlayback, let paused = cell.togglePlayback() {
-            pausing = paused
-        } else {
-            pausing = songPausedFor != id
-            cell.setPausedMarkVisible(pausing)
-        }
-        songPausedFor = pausing ? id : nil
-        refreshSong()
-        refreshCoverSpin()
-    }
-
-    /// A hold on a carousel's page holds its track, as it holds its clip.
-    private func holdPostTrack(_ held: Bool) {
-        isSongHeld = held
-        refreshSong()
-        refreshCoverSpin()
-    }
-
-    /// Turns the records while the page's media plays — a clip running, or a
-    /// song — AND THE POST HAS A SOUND, and stops them when it does not: a
-    /// tap-to-pause, a hold, the sound sheet covering the page, the screen
-    /// leaving. The sound half is each record's own guard (#1871): a "No
-    /// audio" face never turns, so this keeps asking one question for all.
-    ///
-    /// ASKED rather than told: a clip pauses through half a dozen doors (the
-    /// viewer's tap, a hold, a sheet, a flight, a stall), and a quarter-second
-    /// look at the player is one rule where wiring every door would be six.
-    private func refreshCoverSpin() {
-        let playing = postIsPlaying
-        // The sound bubble's record turns while the post PLAYS — muted too
-        // (#1148, reversing #683's audible-only turn; the mute is the badge)
-        // — and so does the panel's slot, where a TEXT page's sound lives
-        // (#692), and the sound sheet's record.
-        activeSnapCell?.setSoundSpinning(playing)
-        // The footer's record too (#1999): the media page's sound lives there.
-        footerSoundButton.setSpinning(playing)
-        (commentsContentVC as? PostDetailViewController)?.setRailSoundSpinning(playing)
-        (previewRestingVC as? PostDetailViewController)?.setRailSoundSpinning(playing)
-        // Two tracks, never together (the owner, 2026-10-31): the post
-        // playing again — the viewer's tap on it — stops the sheet's own.
-        if playing, let soundSheet, soundSheet.isTrackEngaged {
-            soundSheet.releaseTrack()
-        }
-    }
-
-    private func setCoverSpinWatch(_ on: Bool) {
-        coverSpinTimer?.invalidate()
-        coverSpinTimer = nil
-        if on {
-            coverSpinTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
-                MainActor.assumeIsolated { self?.refreshCoverSpin() }
-            }
-        }
-        refreshCoverSpin()
-    }
-
-    /// Silences this screen's sound while something else is heard over it —
-    /// the sound sheet covering the page — and gives it back after.
-    func yieldAudio(_ yielded: Bool) {
-        isAudioYielded = yielded
-        refreshAudibleSurface()
-    }
-
     // MARK: - Sound sheet
 
     /// The attribution's tap: the sound the page is set to, in a sheet.
@@ -5463,14 +4812,14 @@ final class SnapFeedViewController: UIViewController {
         // The record is the sheet's own track (the owner, 2026-10-31): its
         // preview covers the page while it plays (`onCoverChanged`), and the
         // page playing again stops it (`refreshCoverSpin`).
-        soundSheet = sheet
+        soundPlayback.soundSheet = sheet
         sheet.onCoverChanged = { [weak self] covering in
             covered?.setCoveredBySheet(covering)
-            self?.yieldAudio(covering)
+            self?.soundPlayback.yieldAudio(covering)
         }
         sheet.onDismissed = { [weak self] in
             covered?.setCoveredBySheet(false)
-            self?.yieldAudio(false)
+            self?.soundPlayback.yieldAudio(false)
         }
         // The expanded sheet pauses the post, and its collapse or its going
         // plays it again: the sheet declares itself a cover (#1970), and
@@ -5935,7 +5284,7 @@ final class SnapFeedViewController: UIViewController {
         }
     }
 
-    private func lifecycleCell(at index: Int) -> SnapCellLifecycle? {
+    func lifecycleCell(at index: Int) -> SnapCellLifecycle? {
         guard orderedIDs.indices.contains(index) else { return nil }
         return collectionView.cellForItem(at: IndexPath(item: index, section: 0)) as? SnapCellLifecycle
     }
@@ -6045,7 +5394,7 @@ final class SnapFeedViewController: UIViewController {
     /// Decodes `display` under this stay's owner, made here on first
     /// visibility; off screen, the plan only waits for the next stay.
     private func applyImagePlan(_ display: [ImageRequest]) {
-        guard isOnScreen && isForeground else {
+        guard isOnScreen && soundPlayback.isForeground else {
             pendingImagePlan = display
             return
         }
@@ -6157,7 +5506,7 @@ extension SnapFeedViewController: UICollectionViewDelegate {
         // leg always takes THIS one, because the cell is realized by the very
         // layout pass the presentation triggers. Stamping only in `apply` left
         // the flag false exactly when it mattered.
-        (cell as? SnapFeedCell)?.defersPlaybackForFlight = defersPlaybackForStagingFlight
+        (cell as? SnapFeedCell)?.defersPlaybackForFlight = flight.defersPlaybackForStagingFlight
         if let snapCell = cell as? SnapFeedCell { stampFlightMediaStart(on: snapCell) }
         // The same net, for the picture: a page can be handed the screen while
         // it is still being realized, and the hand-over reaches nothing. The
@@ -6165,7 +5514,7 @@ extension SnapFeedViewController: UICollectionViewDelegate {
         // re-stated to every cell as it appears.
         (cell as? SnapFeedCell)?.setOwnsViewport(playbackOwner == indexPath.item)
         // And the sound follows the picture's owner, for the same reason.
-        if playbackOwner == indexPath.item { refreshAudibleSurface(ownerCell: cell as? SnapFeedCell) }
+        if playbackOwner == indexPath.item { soundPlayback.refreshAudibleSurface(ownerCell: cell as? SnapFeedCell) }
         if lifecycle.activeIndex == indexPath.item {
             // ⚠️ THE HOLD, TOO, IS STAMPED HERE — `zoomTransitionWillBegin`
             // held `activeSnapCell`, and on a finger's tap that cell does not
@@ -6176,7 +5525,7 @@ extension SnapFeedViewController: UICollectionViewDelegate {
             // bubbles arriving from the right and no fade. Only the page
             // that will be active is held: a neighbour realised during the
             // flight would never be released.
-            if isAwaitingZoomPresentation { (cell as? SnapFeedCell)?.setChromeHeldForFlight(true) }
+            if flight.isAwaitingZoomPresentation { (cell as? SnapFeedCell)?.setChromeHeldForFlight(true) }
             (cell as? SnapCellLifecycle)?.willBecomeActive()
         }
         // A text page's resting interface PRE-RENDERS on visibility (not
@@ -6206,7 +5555,7 @@ extension SnapFeedViewController: UICollectionViewDelegate {
             // chrome. `presentRestingComments` makes this decision properly:
             // engagement if the slot is free, preview if it is not.
             if let model = modelsByID[id], model.mediaURL == nil {
-                if Self.defersRestingCommentsForFlight, isAwaitingAnyFlight,
+                if Self.defersRestingCommentsForFlight, flight.isAwaitingAnyFlight,
                    commentsEngagedID == nil, commentsContentVC == nil {
                     installRestingPlaceholder(for: id, model: model, host: snapCell)
                 } else {
@@ -6566,7 +5915,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // exact insets even though it lives in the transition container.
         chrome.setFixedInsets(view.safeAreaInsets)
         configureFlightChrome(chrome)
-        flightChrome = chrome
+        flight.flightChrome = chrome
         return chrome
     }
 
@@ -6969,7 +6318,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     /// `reconcileRestingInterface` records. Those two paths restore the floors
     /// themselves, through here, once their flag is down.
     private func applyGrounds() {
-        guard !isEngagedDismissalActive else { return }
+        guard !flight.isEngagedDismissalActive else { return }
         let ground = resolvedGround()
         view.backgroundColor = ground
         collectionView.backgroundColor = ground
@@ -7065,16 +6414,16 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // landing — a cancelled push leaves these set, and a reused
         // controller would then start its next flight already believing it is
         // in one.
-        isAwaitingZoomPresentation = false
+        flight.isAwaitingZoomPresentation = false
         // A reused screen starts its next visit with no flight pending and
         // nothing hidden, whatever the last visit's flight left behind.
-        isAwaitingRevealPresentation = false
+        flight.isAwaitingRevealPresentation = false
         view.alpha = 1
         // And nothing the last visit's landing parked over it.
         ZoomLandingLeftovers.clear(over: view)
         donatedLiveView = nil
-        flightChrome = nil
-        pageDriveStartOffset = nil
+        flight.flightChrome = nil
+        pagerDrive.dropPageDrive()
 
         // The tapped post is always the head of the window, so the pager goes
         // back to the top. Done BEFORE the new items land, so the first
@@ -7150,7 +6499,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // won, which is "the thread disappears the instant I grab" exactly.
         // Declining here is what makes the visibility hold for the length of
         // the gesture.
-        guard !isEngagedDismissalActive else {
+        guard !flight.isEngagedDismissalActive else {
             return view.alpha = 1
         }
         view.alpha = hidden ? 0 : 1
@@ -7179,7 +6528,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     /// the grab has begun — and the engagement itself is not what is under
     /// test. This flips the flag and nothing else.
     func debugArmEngagedDismissal() {
-        isEngagedDismissalActive = true
+        flight.isEngagedDismissalActive = true
     }
     #endif
 
@@ -7192,8 +6541,8 @@ extension SnapFeedViewController: ZoomTransitionDestination {
 
     public func setZoomDismissState(_ state: ZoomDismissState) {
         guard let cell = activeSnapCell else { return }
-        if !isEngagedDismissalActive {
-            isEngagedDismissalActive = true
+        if !flight.isEngagedDismissalActive {
+            flight.isEngagedDismissalActive = true
             view.alpha = 1
             // The floors between the page and the card go transparent — the
             // page itself stays whole, so what shows around it as it shrinks is
@@ -7203,7 +6552,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
             cell.beginLiveGrab()
             // The card's replica of the interface would draw it a second
             // time under the live page: the page is the one copy.
-            flightChrome?.isHidden = true
+            flight.flightChrome?.isHidden = true
         }
         // Re-asserted every event, not just at arming: anything that hides the
         // page mid-grab is undone on the next frame the finger produces, so a
@@ -7224,8 +6573,8 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     /// Puts the page back together after a grab, committed or abandoned. Safe
     /// to call when no grab ran: the flag is the whole guard.
     private func endEngagedDismissalIfNeeded() {
-        guard isEngagedDismissalActive else { return }
-        isEngagedDismissalActive = false
+        guard flight.isEngagedDismissalActive else { return }
+        flight.isEngagedDismissalActive = false
         activeSnapCell?.endEngagedDismissal()
         // Through the resolver: this used to hand back a literal black, which
         // re-blacked a TEXT page even with its data present.
@@ -7244,12 +6593,12 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     /// player anywhere yet — and deferring only bought the viewer a beat of
     /// poster-then-black at the landing. The source says which flight this is.
     public func zoomTransitionWillBegin(flyingLivePlayer: Bool) {
-        isAwaitingZoomPresentation = true
+        flight.isAwaitingZoomPresentation = true
         // A start position belongs to ONE flight: this one tells its own, after
         // this, or none (#625).
-        flightMediaStart = nil
-        flightCarriesActivePlayer = flyingLivePlayer
-        activeSnapCell?.defersPlaybackForFlight = defersPlaybackForStagingFlight
+        flight.flightMediaStart = nil
+        flight.flightCarriesActivePlayer = flyingLivePlayer
+        activeSnapCell?.defersPlaybackForFlight = flight.defersPlaybackForStagingFlight
         // Reaches a cell only when this screen is being re-presented over a
         // page it already holds; the first present stamps both flags on the
         // cell as it is realised (`apply` / `willDisplay`).
@@ -7260,7 +6609,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
             // BETWEEN these two lines is the page decoding during the flight.
             print(String(format: "[zoom-live] %.3f willBegin flyingPlayer=%@ defers=%@",
                          CACurrentMediaTime(), flyingLivePlayer ? "Y" : "N",
-                         defersPlaybackForStagingFlight ? "Y" : "N"))
+                         flight.defersPlaybackForStagingFlight ? "Y" : "N"))
         }
         #endif
     }
@@ -7275,19 +6624,19 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     /// is late (#633). It is kept for the entry page instead: the first page
     /// `activePostID` names once it can, by the same fallback rule.
     public func zoomTransitionWillStartMedia(at seconds: TimeInterval) {
-        flightMediaStart = (activePostID, seconds)
+        flight.flightMediaStart = (activePostID, seconds)
         if let cell = activeSnapCell { stampFlightMediaStart(on: cell) }
     }
 
     /// Gives the entry page its start position — once, and only to the page
     /// showing the post the flight carried.
     private func stampFlightMediaStart(on cell: SnapFeedCell) {
-        guard let start = flightMediaStart,
+        guard let start = flight.flightMediaStart,
               let shown = cell.representedPostID,
               Self.isFlightEntryPage(shown, carried: start.postID, entry: activePostID)
         else { return }
         cell.flightMediaStartTime = start.seconds
-        flightMediaStart = nil
+        flight.flightMediaStart = nil
     }
 
     /// Whether the page showing `shown` is the one a flight's start position is
@@ -7325,7 +6674,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     /// at. Measured: `source attach surface -> false` (the card correctly
     /// declined) followed by a card reporting `frames=2`.
     public func zoomDonateLiveMediaView() -> UIView? {
-        guard !isAwaitingZoomPresentation else { return nil }
+        guard !flight.isAwaitingZoomPresentation else { return nil }
         guard let donated = activeSnapCell?.donateLiveRenderView() else { return nil }
         donatedLiveView = donated
         return donated
@@ -7352,7 +6701,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     }
 
     public func zoomTransitionWillDepart() {
-        isDepartingWithFlight = true
+        flight.isDepartingWithFlight = true
     }
 
     public func zoomTransitionDidEnd() {
@@ -7372,7 +6721,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // window space, at the instant one fades into the other. A delta here
         // is the "small jump at the end of the hero" a device shows.
         if LaunchArgument.landingProbe.isPassed(),
-           let window = view.window, let replica = flightChrome,
+           let window = view.window, let replica = flight.flightChrome,
            let page = activeSnapCell?.debugChrome {
             let a = replica.debugCaptionFrame(in: window), b = page.debugCaptionFrame(in: window)
             print(String(format: "[landing-probe] replica caption y=%.1f h=%.1f w=%.1f | page caption y=%.1f h=%.1f w=%.1f",
@@ -7390,12 +6739,12 @@ extension SnapFeedViewController: ZoomTransitionDestination {
             }
         }
         #endif
-        flightChrome = nil
-        isAwaitingZoomPresentation = false
+        flight.flightChrome = nil
+        flight.isAwaitingZoomPresentation = false
         installAuthorPillAfterLanding()
         // Back to the conservative reading for whatever presents next: this
         // controller outlives the flight that set it.
-        flightCarriesActivePlayer = true
+        flight.flightCarriesActivePlayer = true
         // The replica is gone; the page's own chrome comes in rather than
         // simply stopping being covered.
         activeSnapCell?.setChromeHeldForFlight(false)
@@ -7409,8 +6758,8 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // hidden page right after the landing tile adopted it, and the
         // deferred start below played a clip on a screen being removed. A
         // departing page only lets go, so the next visit starts clean.
-        let departing = isDepartingWithFlight
-        isDepartingWithFlight = false
+        let departing = flight.isDepartingWithFlight
+        flight.isDepartingWithFlight = false
         if departing {
             activeSnapCell?.releasePlaybackForDeparture()
             // ⚠️ AND THE SHARED BARS' STYLE (hero audit 2.16). `viewWillAppear`
@@ -7464,7 +6813,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         return mirrored
     }
 
-    private var activeSnapCell: SnapFeedCell? {
+    var activeSnapCell: SnapFeedCell? {
         guard let index = lifecycle.activeIndex else { return nil }
         return collectionView.cellForItem(at: IndexPath(item: index, section: 0)) as? SnapFeedCell
     }
@@ -7511,7 +6860,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     /// Visibility is the right gate for PLAYBACK — nothing off screen should
     /// hold a player — and the wrong one for identity. The snapped page is a
     /// fact about the scroll position, and it survives the screen going away.
-    private var settledPageIndex: Int { lifecycle.pageIndex ?? 0 }
+    var settledPageIndex: Int { lifecycle.pageIndex ?? 0 }
 
     /// Configures the replica from the page the card flies to/from: the active
     /// page if one is settled, else the first post (a map tap's feed opens on
@@ -7908,7 +7257,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
             videoPlayback.rescope(card, to: id.rawValue)
             videoPlayback.setPeakBitRate(MediaPlaybackPolicy.peakBitRate, in: card)
             card.revealOnFirstFrame()
-            refreshAudibleSurface()
+            soundPlayback.refreshAudibleSurface()
             sideList?.listView.reconcileNow()
         } else if let handoff, videoPlayback.hasPlayer(in: card) {
             videoPlayback.seek(toSeconds: handoff.seconds, in: card, toleranceSeconds: 0)
@@ -8350,11 +7699,11 @@ extension SnapFeedViewController: ArrivalInvariantReporting {
     /// raised by a close) were all one of these left up.
     public func arrivalFacts() -> [(name: String, holds: Bool)] {
         [
-            ("feed.awaitingZoom", !isAwaitingZoomPresentation),
-            ("feed.awaitingReveal", !isAwaitingRevealPresentation),
-            ("feed.engagedDismissal", !isEngagedDismissalActive),
-            ("feed.flightChrome", flightChrome == nil),
-            ("feed.departing", !isDepartingWithFlight),
+            ("feed.awaitingZoom", !flight.isAwaitingZoomPresentation),
+            ("feed.awaitingReveal", !flight.isAwaitingRevealPresentation),
+            ("feed.engagedDismissal", !flight.isEngagedDismissalActive),
+            ("feed.flightChrome", flight.flightChrome == nil),
+            ("feed.departing", !flight.isDepartingWithFlight),
         ]
     }
 }
@@ -8415,6 +7764,21 @@ private final class BarAuthorBadge: AuthorBadgeDrawing {
     var drawsAuthorBadgeOnScreen: Bool { owner?.view.window != nil }
 }
 
+// MARK: - The sound's host (#2387)
+
+extension SnapFeedViewController: SnapSoundPlaybackHost {
+    var viewportShareHost: UIView { view }
+
+    func displayModel(for id: PostID) -> FeedItemDisplayModel? { modelsByID[id] }
+
+    func drawSoundSpinning(_ playing: Bool) {
+        activeSnapCell?.setSoundSpinning(playing)
+        footerSoundButton.setSpinning(playing)
+        (commentsContentVC as? PostDetailViewController)?.setRailSoundSpinning(playing)
+        (previewRestingVC as? PostDetailViewController)?.setRailSoundSpinning(playing)
+    }
+}
+
 // MARK: - How it is left (#1144)
 
 extension SnapFeedViewController: StackScreen {
@@ -8425,115 +7789,28 @@ extension SnapFeedViewController: StackScreen {
 // MARK: - The pull to go back (#2045, #2046)
 
 /// On a feed that came in with the native push, a vertical close is a pull:
-/// on a MEDIA page only the page's content moves — with the end of the list's
-/// own rubber band — under a navigation bar that stays, over the feed's own
-/// ground. No map, no dim, no parallax. The indicator rides in the gap: at the
-/// bottom for a page pulled up, under the bar for one pulled down. (In the
-/// back chevron instead was tried on the owner's device, 2026-11-05, and set
-/// aside: the native item stays.)
-///
-/// ⚠️ A TEXT page lifts NOTHING (#2187, the owner): its text and comments
-/// are a reading surface, and a lift past the end read as a scroll gone too
-/// far. The page, its comments and its composer stay still; the indicator
-/// alone answers the finger, pinned where it sits at zero lift (over the
-/// composer, under the bar). The effort is the same: the progress is still
-/// the rubber-banded travel, it just drives no offset.
+/// the page drive's other half (`SnapPagerDrive.pullToClose`).
 extension SnapFeedViewController: VerticalPullClosing {
     @discardableResult
     func pullToClose(travel: CGFloat, along axis: ZoomDismissAxis) -> CGFloat {
-        let base: CGFloat
-        if let pullBaseOffset {
-            base = pullBaseOffset
-        } else {
-            // Where the page rested: a page drive that began on the same drag
-            // has already moved it a little.
-            base = pageDriveStartOffset ?? collectionView.contentOffset.y
-            pullBaseOffset = base
-            pullLiftsPage = !isTextPage(activePostID)
-            let indicator = PullToGoBackIndicator(direction: axis == .upward ? .up : .down)
-            indicator.prepare()
-            view.addSubview(indicator)
-            pullIndicator = indicator
-        }
-        let lift = Self.rubberBand(travel, dimension: max(1, view.bounds.height))
-        if pullLiftsPage {
-            collectionView.contentOffset.y = axis == .upward ? base + lift : base - lift
-        } else if collectionView.contentOffset.y != base {
-            // A page drive that began on the same drag may have nudged it:
-            // a text page rests exactly where it was.
-            collectionView.contentOffset.y = base
-        }
-        placePullIndicator(lift: pullLiftsPage ? lift : 0, axis: axis)
-        pullIndicator?.setPull(lift)
-        return lift
+        pagerDrive.pullToClose(travel: travel, along: axis)
     }
 
     func endPullToClose(commit: Bool) {
-        guard let base = pullBaseOffset else { return }
-        pullBaseOffset = nil
-        let indicator = pullIndicator
-        pullIndicator = nil
-        // Past the threshold the page leaves AS IT IS, lifted, with its
-        // indicator — no drop back first, no diagonal.
-        guard !commit else {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { indicator?.removeFromSuperview() }
-            return
-        }
-        UIView.animate(
-            withDuration: 0.4, delay: 0, usingSpringWithDamping: 0.9, initialSpringVelocity: 0,
-            options: [.allowUserInteraction, .beginFromCurrentState]
-        ) {
-            self.collectionView.contentOffset.y = base
-            indicator?.alpha = 0
-        } completion: { _ in indicator?.removeFromSuperview() }
-    }
-
-    /// Pinned to the chrome, in the gap: over the toolbar for a page lifted
-    /// from the bottom, under the bar for a page pulled down — it never rides
-    /// the lift behind either (the owner's recording, 2026-11-05).
-    ///
-    /// A still text page (#2187) opens no gap: pulled up, the indicator floats
-    /// over the comments just above the page's own composer — over the toolbar
-    /// it sat ON the field, its label cut, on the simulator.
-    private func placePullIndicator(lift: CGFloat, axis: ZoomDismissAxis) {
-        guard let indicator = pullIndicator else { return }
-        let width = view.bounds.width - 2 * Spacing.lg
-        let size = indicator.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
-        let centreY: CGFloat
-        if axis == .upward {
-            let pageBottom = view.bounds.maxY - lift
-            var toolbarTop = pullChromeEdge(bottom: true) ?? view.bounds.maxY - view.safeAreaInsets.bottom
-            if !pullLiftsPage, let composerTop = pullComposerTop() {
-                toolbarTop = min(toolbarTop, composerTop)
-            }
-            centreY = min(toolbarTop - size.height / 2 - Spacing.sm, (pageBottom + toolbarTop) / 2)
-        } else {
-            let barBottom = pullChromeEdge(bottom: false) ?? view.safeAreaInsets.top
-            centreY = max(barBottom + size.height / 2 + Spacing.sm, lift / 2 + barBottom / 2)
-        }
-        indicator.bounds = CGRect(origin: .zero, size: CGSize(width: width, height: size.height))
-        indicator.center = CGPoint(x: view.bounds.midX, y: centreY)
-    }
-
-    /// The top of the shown page's comment composer, in the page's space.
-    private func pullComposerTop() -> CGFloat? {
-        guard let bar = (commentsContentVC as? PostDetailViewController)?.composeBar,
-              bar.window != nil, !bar.isHidden, bar.alpha > 0.01, bar.bounds.height > 0 else { return nil }
-        return bar.convert(bar.bounds, to: view).minY
-    }
-
-    /// The navigation bar's bottom, or the shown toolbar's top, in the
-    /// page's space.
-    private func pullChromeEdge(bottom: Bool) -> CGFloat? {
-        guard let nav = navigationController else { return nil }
-        if bottom {
-            guard !nav.isToolbarHidden, nav.toolbar.window != nil, nav.toolbar.bounds.height > 0 else { return nil }
-            return nav.toolbar.convert(nav.toolbar.bounds, to: view).minY
-        }
-        return nav.navigationBar.convert(nav.navigationBar.bounds, to: view).maxY
+        pagerDrive.endPullToClose(commit: commit)
     }
 
     #if DEBUG
-    var debugPullIndicator: PullToGoBackIndicator? { pullIndicator }
+    var debugPullIndicator: PullToGoBackIndicator? { pagerDrive.pullIndicator }
     #endif
+}
+
+// MARK: - The page drive's host (#2387)
+
+extension SnapFeedViewController: SnapPagerDriveHost {
+    var pager: UIScrollView { collectionView }
+
+    var pagerHostView: UIView { view }
+
+    var pullComposerBar: UIView? { (commentsContentVC as? PostDetailViewController)?.composeBar }
 }
