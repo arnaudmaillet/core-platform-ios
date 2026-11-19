@@ -1,3 +1,4 @@
+import AuthInterface
 import DesignSystem
 import LaunchArguments
 import UIKit
@@ -372,3 +373,6 @@ public final class ContentFittingNavigationController: UINavigationController, U
         onFittedHeightChange?()
     }
 }
+
+/// The shell sizes the sign-in sheet through the interface (#2375).
+extension ContentFittingNavigationController: SheetContentFitting {}

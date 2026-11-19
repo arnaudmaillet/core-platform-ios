@@ -406,6 +406,9 @@ public actor SessionManager {
 
 extension SessionManager: AuthTokenProviding {}
 
+/// The one-time notices the shell reads after a session lands (#2375).
+extension SessionManager: AuthSessionNotices {}
+
 extension SessionManager: AuthSessionProviding {
     public func currentState() -> AuthState {
         currentAuthState()

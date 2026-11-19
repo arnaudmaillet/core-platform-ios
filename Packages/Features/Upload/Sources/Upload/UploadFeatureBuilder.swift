@@ -3,6 +3,7 @@ import FeedInterface
 import LaunchArguments
 import MediaPlayback
 import UIKit
+import UploadInterface
 
 /// The screens behind the tab bar's "+" menu that belong to this package:
 /// Camera, Upload Media and Text Post.
@@ -31,7 +32,7 @@ import UIKit
 /// alone and say so on it (`dev/BACKEND_GAPS.md` §21, §22). Read that screen's
 /// own comment before wiring anything there to a field that does not exist.
 @MainActor
-public struct UploadFeatureBuilder {
+public struct UploadFeatureBuilder: UploadFeatureBuilding {
     private let composer: any PostComposing
     /// A closure rather than a value: the composition root builds the feed
     /// builder lazily, and the feed builder reaches the router, which reaches

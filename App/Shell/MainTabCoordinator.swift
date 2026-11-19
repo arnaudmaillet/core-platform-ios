@@ -11,7 +11,7 @@ import PostGrid
 import ProfileInterface
 import UIKit
 import DesignSystem
-import Upload
+import UploadInterface
 
 /// The app shell: a `UITabBarController` composed of one child
 /// `TabCoordinator` per tab. It exists for guests and members alike (guest
@@ -743,7 +743,7 @@ extension MainTabCoordinator {
         // under one, so this only ever turns away the debug hook.
         guard tabBarController.presentedViewController == nil else { return }
         let screen: UIViewController? = switch destination {
-        case .camera: container.uploadFeature.makeCameraViewController()
+        case .camera: container.uploadFeature.makeCameraViewController(soundtrack: nil)
         case .upload: container.uploadFeature.makeMediaUploadViewController()
         case .text: container.uploadFeature.makeTextPostViewController()
         // The channel's creation sheet (#2230): Create lands in Messages,

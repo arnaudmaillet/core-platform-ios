@@ -3,7 +3,6 @@ import ProfileInterface
 import DesignSystem
 import SettingsInterface
 import UIKit
-import Wallet
 
 /// Owns the Profile tab: the signed-in viewer's own profile as a root
 /// destination, on its own navigation stack.
@@ -144,18 +143,14 @@ final class ProfileTabCoordinator: TabCoordinator {
         // header was asked to carry it everywhere. A pushed profile has no
         // coordinator, so its installer hangs on the screen itself; see
         // `RouteResolver`'s `.profile` case and `WalletBadgeInstaller.attach`.
-        walletBadge = WalletBadgeInstaller(
-            wallet: container.walletStore,
-            presenter: navigationController,
-            makeSheet: { [unowned container] in container.makeWalletSheet() }
-        ) { [weak profile] item in
+        walletBadge = container.makeWalletBadge(presenter: navigationController) { [weak profile] item in
             (profile as? (any HeaderAccessoryHosting))?.setTrailingAccessoryItem(item)
         }
     }
 
     /// The header's balance badge. Held for the coordinator's life, which is
     /// the process's.
-    private var walletBadge: WalletBadgeInstaller?
+    private var walletBadge: AnyObject?
 
     /// Shows the viewer's own avatar as the tab's icon, falling back to the
     /// glyph when there isn't one.

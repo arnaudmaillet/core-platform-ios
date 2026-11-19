@@ -1,5 +1,4 @@
 import AppPreferences
-import Auth
 import AuthInterface
 import CoreModels
 import FeedInterface
@@ -16,11 +15,9 @@ import SettingsInterface
 import UIKit
 import VoiceKit
 import VoiceKitUI
-import Wallet
 #if DEBUG
 import CoreNetworkingMocks
 #endif
-import Upload
 #if DEBUG
 import ChatInterface
 import DebugTools
@@ -45,7 +42,7 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
     private let container: AppContainer
     private var stateObservation: Task<Void, Never>?
     private var mainTabCoordinator: MainTabCoordinator?
-    private var stakeRefunds: StakeRefundNotifier?
+    private var stakeRefunds: AnyObject?
     /// A link that arrived before the shell existed (a cold launch from a
     /// link), opened once it does.
     private var pendingDeepLink: AppRoute?
@@ -152,7 +149,7 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
         // see `StatusBarBlurView`. Root swaps replace the root's view only.
         StatusBarBlurView.install(in: window)
         // A stake the server did not spend is told, on whatever is in front (#1775).
-        stakeRefunds = StakeRefundNotifier(wallet: container.walletStore, window: window)
+        stakeRefunds = container.makeStakeRefundNotices(in: window)
         #if DEBUG
         FirstLayoutTrace.selfTestIfRequested(in: window)
         // `-animation-audit`: every running animation, every 5 s (#580).
@@ -179,7 +176,8 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
         // fixture account by itself: the guest → member transition, with no
         // typing (the simulator drops keystrokes while the keyboard rises).
         if LaunchArgument.guest.isPassed() {
-            let sessionManager = container.sessionManager
+            let container = self.container
+            let sessionManager = container.authSession
             let arguments = ProcessInfo.processInfo.arguments
             let signInAfter = LaunchArgument.guestSignInAfter.doubleValue(in: arguments)
             // `-guest-sign-out-after <seconds>`: and then out again, that many
@@ -191,7 +189,7 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
                 self?.observeAuthState()
                 guard let signInAfter else { return }
                 try? await Task.sleep(for: .seconds(signInAfter))
-                await Self.signInWithCode(sessionManager, email: MockAuthService.demoEmail, code: MockAuthService.verificationCode)
+                await container.signInWithCode(email: MockAuthService.demoEmail, code: MockAuthService.verificationCode)
                 guard let signOutAfter else { return }
                 try? await Task.sleep(for: .seconds(signOutAfter))
                 await sessionManager.logout()
@@ -215,7 +213,7 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
         stateObservation = Task { [weak self] in
             guard let container = self?.container else { return }
             let realtimeClient = container.realtimeClient
-            for await state in await container.sessionManager.stateUpdates() {
+            for await state in await container.authSession.stateUpdates() {
                 LaunchTimeline.mark("auth.firstState")
                 self?.render(state)
                 // Realtime lifecycle is driven here, in auth-state order, rather
@@ -227,25 +225,6 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
                 case .unauthenticated: await realtimeClient.stop()
                 }
             }
-        }
-    }
-
-    /// Signs in the way a member does since passwords went (#840): a code to
-    /// `email`, then `code`. Two-step on (`-mock-two-step`): the same code
-    /// finishes it — the mock answers every code with one. An address with
-    /// no account does nothing.
-    private static func signInWithCode(_ sessionManager: SessionManager, email: String, code: String) async {
-        guard let challenge = try? await sessionManager.startVerification(.email, to: email),
-              let outcome = try? await sessionManager.signIn(challengeID: challenge.id, code: code) else { return }
-        switch outcome {
-        case .existing(let account):
-            await sessionManager.completeSignIn(account)
-        case .needsSecondStep(let step):
-            if let account = try? await sessionManager.completeSecondStep(step, code: code) {
-                await sessionManager.completeSignIn(account)
-            }
-        case .needsSignUp:
-            break
         }
     }
 
@@ -267,25 +246,23 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
     /// missed by arriving late, and the launch screen stays up for the round
     /// trip instead of flashing the login form on the way past.
     private func startWithMockAutoLogin() {
-        let sessionManager = container.sessionManager
+        let container = self.container
+        let sessionManager = container.authSession
         let autoLogin = container.environment.autoLoginCode
         let composeDemo = LaunchArgument.mockComposeDemo.isPassed()
         let composeVideoDemo = LaunchArgument.mockComposeVideoDemo.isPassed()
-        let composer = container.postComposer
+        let composer = container.composeDemo
         Task { [weak self] in
             await sessionManager.logout()
             if let autoLogin {
-                await Self.signInWithCode(sessionManager, email: autoLogin.email, code: autoLogin.code)
+                await container.signInWithCode(email: autoLogin.email, code: autoLogin.code)
             }
             self?.observeAuthState()
             // Exercises the real upload+create+publish flow so the compose
             // wiring is verifiable without driving the picker UI.
             if composeDemo {
                 try? await Task.sleep(for: .seconds(2))
-                _ = try? await composer.publish(
-                    media: .image(PickedImage(Self.demoImage())),
-                    caption: "Shipped M4: photo upload + compose 🚀"
-                )
+                await composer.publish(image: Self.demoImage(), caption: "Shipped M4: photo upload + compose 🚀")
             }
             // Same, for the video path: synthesize a source clip and run it
             // through export → upload → publish → optimistic local playback.
@@ -293,10 +270,7 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
                 try? await Task.sleep(for: .seconds(2))
                 if let source = try? await PlaceholderVideoFetcher()
                     .playableURL(for: URL(string: "mock://video/demo?w=720&h=1280")!) {
-                    _ = try? await composer.publish(
-                        media: .video(PickedVideo(sourceURL: source)),
-                        caption: "My first video post 🎬"
-                    )
+                    await composer.publish(videoAt: source, caption: "My first video post 🎬")
                 }
             }
         }
@@ -363,7 +337,7 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
 
     /// Builds the shell once, for whoever the first auth state says is here.
     private func showShell(isMember: Bool) {
-        let sessionManager = container.sessionManager
+        let sessionManager = container.authSession
         let tabCoordinator = MainTabCoordinator(
             container: container,
             isMember: isMember,
@@ -465,7 +439,7 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
         // full height (#1811). The flow owns the detents and the swipe's
         // confirmation (`ContentFittingNavigationController.fit`).
         if let sheet = signIn.sheetPresentationController {
-            if let fitting = flow as? ContentFittingNavigationController {
+            if let fitting = flow as? any SheetContentFitting {
                 fitting.fit(sheet, fallback: Self.signUpFallbackHeight)
             } else {
                 sheet.detents = [.large()]
@@ -492,7 +466,7 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
     /// says so once: the profiles are visible again.
     private func welcomeBackIfReactivated() {
         Task { @MainActor [weak self] in
-            guard let self, await container.sessionManager.consumeReactivationNotice() else {
+            guard let self, await container.authSession.consumeReactivationNotice() else {
                 // A login that didn't reactivate anything: a deletion recorded
                 // here is no longer pending (or was cancelled elsewhere).
                 PendingDeletionNotice.clear()
@@ -518,7 +492,7 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
     private func offerPasskeyThenAskForNotifications() {
         Task { @MainActor [weak self] in
             guard let self else { return }
-            let sessionManager = container.sessionManager
+            let sessionManager = container.authSession
             let afterSignUp = await sessionManager.consumeSignUpNotice()
             let offer = await sessionManager.consumePasskeyOffer()
             try? await Task.sleep(for: .milliseconds(600))

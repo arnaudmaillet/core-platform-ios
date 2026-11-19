@@ -1,5 +1,4 @@
 import DesignSystem
-import Feed
 import UIKit
 
 /// Likes the server did not take (#1775): a refused batch, an expired one, a
@@ -9,13 +8,13 @@ import UIKit
 extension MainTabCoordinator {
     func observeLikesGivenBack() {
         NotificationCenter.default.addObserver(
-            self, selector: #selector(likesGivenBack(_:)), name: LikeOutboxSender.likesGivenBack, object: nil
+            self, selector: #selector(likesGivenBack(_:)), name: AppContainer.likesGivenBack, object: nil
         )
     }
 
     @objc private func likesGivenBack(_ notification: Notification) {
-        guard let back = notification.userInfo?[LikeOutboxSender.givenBackKey] as? LikesGivenBack,
+        guard let message = AppContainer.likesGivenBackMessage(in: notification),
               let screen = activeNavigationController?.topViewController else { return }
-        Feedback.failure(back.message, from: screen)
+        Feedback.failure(message, from: screen)
     }
 }

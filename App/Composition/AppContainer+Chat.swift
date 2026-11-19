@@ -58,7 +58,7 @@ extension AppContainer {
     /// in its send mode, its picks spelled as Chat sends them.
     private var chatMediaPicker: ChatMediaPickerFactory {
         { [unowned self] source, completion in
-            self.uploadFeature.makeSendMediaPicker(source == .camera ? .camera : .library) { picked in
+            self.uploadBuilder.makeSendMediaPicker(source == .camera ? .camera : .library) { picked in
                 completion(picked.map(Self.chatUpload))
             }
         }

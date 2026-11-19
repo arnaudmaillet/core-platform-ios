@@ -101,6 +101,36 @@ extension AppContainer {
         )
     }
 
+    /// Says a stake the server did not spend (#1775), on whatever is in front
+    /// in `window`, for as long as the caller holds what this returns.
+    func makeStakeRefundNotices(in window: UIWindow) -> AnyObject {
+        StakeRefundNotifier(wallet: walletStore, window: window)
+    }
+
+    /// The balance badge on a root screen's header: `apply` installs each bar
+    /// item it hands over, and the badge lasts as long as the caller holds
+    /// what this returns. Its tap presents `makeWalletSheet()` from
+    /// `presenter`.
+    func makeWalletBadge(
+        presenter: UIViewController?, apply: @escaping (UIBarButtonItem) -> Void
+    ) -> AnyObject {
+        WalletBadgeInstaller(
+            wallet: walletStore,
+            presenter: presenter,
+            makeSheet: { [unowned self] in self.makeWalletSheet() },
+            apply: apply
+        )
+    }
+
+    /// Likes the server did not take (#1775), announced by Feed's outbox
+    /// sender: the name the shell observes, and the viewer's words the
+    /// notification carries — read here, so the shell names no Feed type.
+    static var likesGivenBack: Notification.Name { LikeOutboxSender.likesGivenBack }
+
+    static func likesGivenBackMessage(in notification: Notification) -> String? {
+        (notification.userInfo?[LikeOutboxSender.givenBackKey] as? LikesGivenBack)?.message
+    }
+
     func makeLikeStaking() -> WalletLikeStaking {
         WalletLikeStaking(
             walletClient: Wallet_V1_WalletServiceClient(client: authenticatedRPCClient),

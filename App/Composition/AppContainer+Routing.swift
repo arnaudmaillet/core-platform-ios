@@ -10,7 +10,7 @@ import ProfileInterface
 import SearchInterface
 import SettingsInterface
 import UIKit
-import Upload
+import UploadInterface
 import Wallet
 
 // Routing (#2375): the route resolver. Its properties are declared in

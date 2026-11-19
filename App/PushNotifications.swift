@@ -1,7 +1,7 @@
 import CoreModels
 import CoreNavigation
 import LaunchArguments
-import Notifications
+import NotificationsInterface
 import UIKit
 import UserNotifications
 

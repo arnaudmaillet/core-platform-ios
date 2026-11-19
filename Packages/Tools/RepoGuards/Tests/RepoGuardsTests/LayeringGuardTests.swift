@@ -13,7 +13,9 @@ import Testing
 ///   tool depends on nothing, and any package (its tests, in practice) may
 ///   depend on a tool.
 ///
-/// The app (`App/`) is the composition root and may see everything.
+/// The app (`App/`) may depend on every package; outside its composition
+/// root (`App/Composition/`) it imports feature interfaces only
+/// (`CompositionRootGuardTests`, #2375).
 ///
 /// ⚠️ A FAILURE HERE IS EITHER A NEW EDGE THAT BREAKS THE LAYERS — go through
 /// an interface, or move the shared code down a layer — OR AN ALLOWED EDGE

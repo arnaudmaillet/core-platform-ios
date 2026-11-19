@@ -53,6 +53,32 @@ extension AppContainer {
         }
     }
 
+    /// The session as the shell reads it: its states, its sign-out and the
+    /// notices it gives once after a sign-in (#2375). The shell names no
+    /// type of the auth feature's.
+    var authSession: any AuthSessionProviding & AuthSessionNotices { sessionManager }
+
+    /// Signs in the way a member does since passwords went (#840): a code to
+    /// `email`, then `code`. Two-step on (`-mock-two-step`): the same code
+    /// finishes it — the mock answers every code with one. An address with
+    /// no account does nothing. The app coordinator's QA sign-ins
+    /// (`-mock-auto-login`, `-guest-sign-in-after`).
+    func signInWithCode(email: String, code: String) async {
+        let sessionManager = sessionManager
+        guard let challenge = try? await sessionManager.startVerification(.email, to: email),
+              let outcome = try? await sessionManager.signIn(challengeID: challenge.id, code: code) else { return }
+        switch outcome {
+        case .existing(let account):
+            await sessionManager.completeSignIn(account)
+        case .needsSecondStep(let step):
+            if let account = try? await sessionManager.completeSecondStep(step, code: code) {
+                await sessionManager.completeSignIn(account)
+            }
+        case .needsSignUp:
+            break
+        }
+    }
+
     /// Sign in with Apple's sheet (#507); `-mock-apple-sign-in <email>` skips
     /// it in DEBUG.
     private func federatedSignIn() -> any FederatedSignInProviding {

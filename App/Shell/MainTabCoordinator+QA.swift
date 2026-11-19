@@ -10,7 +10,6 @@ import NotificationsInterface
 import ProfileInterface
 import UIKit
 import DesignSystem
-import Upload
 import LaunchArguments
 
 // MARK: - QA hooks: launch arguments

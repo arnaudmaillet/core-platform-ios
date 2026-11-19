@@ -43,6 +43,7 @@
 		5F0000000000000000238202 /* ProfileData in Frameworks */ = {isa = PBXBuildFile; productRef = 5F0000000000000000238203 /* ProfileData */; };
 		5F0000000000000000238205 /* Settings in Frameworks */ = {isa = PBXBuildFile; productRef = 5F0000000000000000238206 /* Settings */; };
 		5F0000000000000000238208 /* SettingsInterface in Frameworks */ = {isa = PBXBuildFile; productRef = 5F0000000000000000238209 /* SettingsInterface */; };
+		5F0000000000000000237502 /* UploadInterface in Frameworks */ = {isa = PBXBuildFile; productRef = 5F0000000000000000237503 /* UploadInterface */; };
 		5F00000000000000000D7002 /* DebugTools in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000D7003 /* DebugTools */; };
 		5F00000000000000000D7202 /* AppPreferences in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000D7203 /* AppPreferences */; };
 		5F00000000000000000D7402 /* PlaceInterface in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000D7403 /* PlaceInterface */; };
@@ -137,6 +138,7 @@
 				5F0000000000000000238202 /* ProfileData in Frameworks */,
 				5F0000000000000000238205 /* Settings in Frameworks */,
 				5F0000000000000000238208 /* SettingsInterface in Frameworks */,
+				5F0000000000000000237502 /* UploadInterface in Frameworks */,
 				5F00000000000000000D7002 /* DebugTools in Frameworks */,
 				5F00000000000000000D7202 /* AppPreferences in Frameworks */,
 				5F00000000000000000D7402 /* PlaceInterface in Frameworks */,
@@ -226,6 +228,7 @@
 				5F0000000000000000238203 /* ProfileData */,
 				5F0000000000000000238206 /* Settings */,
 				5F0000000000000000238209 /* SettingsInterface */,
+				5F0000000000000000237503 /* UploadInterface */,
 				5F00000000000000000D7003 /* DebugTools */,
 				5F00000000000000000D7203 /* AppPreferences */,
 				5F00000000000000000D7403 /* PlaceInterface */,
@@ -321,6 +324,7 @@
 				5F0000000000000000238201 /* XCLocalSwiftPackageReference "Packages/FeatureInterfaces/ProfileData" */,
 				5F0000000000000000238204 /* XCLocalSwiftPackageReference "Packages/Features/Settings" */,
 				5F0000000000000000238207 /* XCLocalSwiftPackageReference "Packages/FeatureInterfaces/SettingsInterface" */,
+				5F0000000000000000237501 /* XCLocalSwiftPackageReference "Packages/FeatureInterfaces/UploadInterface" */,
 				5F00000000000000000D7001 /* XCLocalSwiftPackageReference "Packages/Core/DebugTools" */,
 				5F00000000000000000D7201 /* XCLocalSwiftPackageReference "Packages/Core/AppPreferences" */,
 				5F00000000000000000D7401 /* XCLocalSwiftPackageReference "Packages/FeatureInterfaces/PlaceInterface" */,
@@ -796,6 +800,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/FeatureInterfaces/SettingsInterface;
 		};
+		5F0000000000000000237501 /* XCLocalSwiftPackageReference "Packages/FeatureInterfaces/UploadInterface" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/FeatureInterfaces/UploadInterface;
+		};
 		5F00000000000000000040A1 /* XCLocalSwiftPackageReference "Packages/Core/CacheKit" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/Core/CacheKit;
@@ -978,6 +986,10 @@
 		5F0000000000000000238209 /* SettingsInterface */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = SettingsInterface;
+		};
+		5F0000000000000000237503 /* UploadInterface */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = UploadInterface;
 		};
 		5F00000000000000000040C1 /* CacheKit */ = {
 			isa = XCSwiftPackageProductDependency;

@@ -11,6 +11,7 @@ import Foundation
 import MediaCore
 import UIKit
 import Upload
+import UploadInterface
 
 // Compose and upload (#2375): the upload feature, the post composer and the
 // media transport. Its properties are declared in `AppContainer.swift`, since
@@ -32,7 +33,11 @@ extension AppContainer {
     /// Built on demand: its only state is what it is handed. The Text Post
     /// screen is Feed's, reached through a closure for the same lazy-cycle
     /// reason Chat's thread screens are (`chatFeature`).
-    var uploadFeature: UploadFeatureBuilder {
+    var uploadFeature: any UploadFeatureBuilding { uploadBuilder }
+
+    /// The builder itself: Chat's send picker (`chatMediaPicker`) takes its
+    /// picks, which the interface does not carry.
+    var uploadBuilder: UploadFeatureBuilder {
         UploadFeatureBuilder(composer: postComposer, textPostScreens: { [unowned self] in self.feedFeature })
     }
 
@@ -76,4 +81,27 @@ extension AppContainer {
         }
         set { cachedPostComposer = newValue }
     }
+
+    #if DEBUG
+    /// The publisher of `-mock-compose-demo` and `-mock-compose-video-demo`,
+    /// over the composer — built when this is read.
+    var composeDemo: ComposeDemo { ComposeDemo(composer: postComposer) }
+    #endif
 }
+
+#if DEBUG
+/// Exercises the real upload + create + publish flow, so the compose wiring
+/// is verifiable without driving the picker (the app coordinator's
+/// `-mock-compose-demo` and `-mock-compose-video-demo`).
+struct ComposeDemo: Sendable {
+    let composer: PostComposer
+
+    func publish(image: UIImage, caption: String) async {
+        _ = try? await composer.publish(media: .image(PickedImage(image)), caption: caption)
+    }
+
+    func publish(videoAt source: URL, caption: String) async {
+        _ = try? await composer.publish(media: .video(PickedVideo(sourceURL: source)), caption: caption)
+    }
+}
+#endif
