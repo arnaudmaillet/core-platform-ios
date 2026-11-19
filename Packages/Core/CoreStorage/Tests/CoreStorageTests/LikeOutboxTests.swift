@@ -190,14 +190,10 @@ struct WalletLikeOutboxTests {
         let (wallet, _) = make()
         final class Heard: @unchecked Sendable { var items: [(Int, String)] = [] }
         let box = Heard()
-        let token = NotificationCenter.default.addObserver(
-            forName: WalletStore.stakeRefundedNotification, object: wallet, queue: nil
-        ) { note in
-            let amount = note.userInfo?[WalletStore.stakeRefundAmountKey] as? Int ?? -1
-            let target = note.userInfo?[WalletStore.stakeRefundTargetKey] as? String ?? ""
-            box.items.append((amount, target))
+        let observation = wallet.stakeRefunds.observe { refund in
+            box.items.append((refund.amount, refund.targetID))
         }
-        defer { NotificationCenter.default.removeObserver(token) }
+        defer { observation.cancel() }
         wallet.stake(.likes(5), on: "p1")
         wallet.settleCommittedStake(targetID: "p1", asked: 5, spent: 5)
         #expect(box.items.isEmpty, "a stake spent in full was announced")

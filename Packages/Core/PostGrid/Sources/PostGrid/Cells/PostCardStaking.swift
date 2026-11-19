@@ -21,7 +21,7 @@ import CoreNavigation
 ///
 /// The card reads the store's answer back rather than counting for itself,
 /// so a stake placed in the feed shows on the card that opened it the moment
-/// the store says so (`didChangeNotification`).
+/// the store says so (its `changes`).
 ///
 /// The COUNT too, from the app's `EntityStore` (#896): every bound card draws
 /// its post's live count — a stake from any surface (`WalletStakeLikes`), a
@@ -53,7 +53,7 @@ public final class PostCardStaking {
     /// The stake toast up for one of those bursts (#957), and its post.
     private weak var stakeToast: ToastView?
     private var stakeToastKey: String?
-    private var observer: NSObjectProtocol?
+    private var walletObservation: StoreObservation?
 
     /// Each card keeps the count its post was configured with.
     public convenience init(wallet: any WalletStaking, saves: PostBookmarkStore) {
@@ -73,10 +73,8 @@ public final class PostCardStaking {
         self.wallet = wallet
         self.entities = entities
         self.saves = saves
-        observer = NotificationCenter.default.addObserver(
-            forName: WalletStore.didChangeNotification, object: wallet, queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.refreshBoundCells() }
+        walletObservation = wallet.changes.observeOnMain { [weak self] in
+            self?.refreshBoundCells()
         }
         entityObservation = entities?.observePosts { [weak self] change in
             self?.refreshCounts(change)

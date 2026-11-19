@@ -33,6 +33,9 @@ extension AppContainer {
             viewer: viewerSession
         )
         let sender = LikeOutboxSender(outbox: likeOutbox, wallet: store, staking: likeStaking)
+        // A final failure is told (#1775): the shell says it over the screen
+        // in front.
+        sender.onLikesGivenBack = { [likesGivenBack] back in likesGivenBack.send(back.message) }
         sender.start()
         likeOutboxSender = sender
         // Mock mode has no settlement service, so the claim sheet's stake
@@ -122,15 +125,6 @@ extension AppContainer {
             makeSheet: { [unowned self] in self.makeWalletSheet() },
             apply: apply
         )
-    }
-
-    /// Likes the server did not take (#1775), announced by Feed's outbox
-    /// sender: the name the shell observes, and the viewer's words the
-    /// notification carries — read here, so the shell names no Feed type.
-    static var likesGivenBack: Notification.Name { LikeOutboxSender.likesGivenBack }
-
-    static func likesGivenBackMessage(in notification: Notification) -> String? {
-        (notification.userInfo?[LikeOutboxSender.givenBackKey] as? LikesGivenBack)?.message
     }
 
     func makeLikeStaking() -> WalletLikeStaking {

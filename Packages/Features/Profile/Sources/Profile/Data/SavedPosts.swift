@@ -177,6 +177,8 @@ public final class SavedPostsSync: PostSaveSyncing {
     private var editsDuringRead: [(profile: String, postID: String, isSaved: Bool)] = []
     /// Removed with the sync (the bag's deinit, not a main-actor one).
     private let observers = NotificationTokens()
+    /// The scope's changes, heard from `start()` for this object's lifetime.
+    private var scopeObservation: StoreObservation?
     /// Whose recoveries flush the outbox; read by `start()`. Tests hand in
     /// their own — ⚠️ never flip `.shared`, other suites listen to it.
     var connectivity: ConnectivityMonitor = .shared
@@ -230,11 +232,11 @@ public final class SavedPostsSync: PostSaveSyncing {
             center.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.sendSoon() }
             },
-            // An account back after a sign-out finds its queued saves.
-            center.addObserver(forName: StorageScope.didChangeNotification, object: scope, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.sendSoon() }
-            }
         ])
+        // An account back after a sign-out finds its queued saves.
+        scopeObservation = scope.ownerChanges.observeOnMain { [weak self] in
+            self?.sendSoon()
+        }
         sendSoon()
     }
 

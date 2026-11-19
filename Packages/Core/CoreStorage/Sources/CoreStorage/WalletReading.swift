@@ -8,10 +8,11 @@ import Foundation
 /// a screen a fake instead of the real store, with its storage, server and
 /// launch arguments.
 ///
-/// It is a class protocol: observers filter `WalletStore.didChangeNotification`
-/// on the instance (`object: wallet`), and a fake that posts it must post
-/// itself as the object.
+/// Observers follow the instance's own `changes` (#2376), so a fake sends
+/// its changes there.
 public protocol WalletReading: AnyObject, Sendable {
+    /// Sent after every balance-affecting change, on whatever thread made it.
+    var changes: StoreChanges<Void> { get }
     /// The likes the viewer can spend.
     var balance: Int { get }
     /// What a stake control judges affordability against: the balance, and

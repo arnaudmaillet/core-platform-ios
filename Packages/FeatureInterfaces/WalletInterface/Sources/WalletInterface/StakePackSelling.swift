@@ -1,3 +1,4 @@
+import CoreStorage
 import Foundation
 
 /// The ×100 cartridge pack as the Shop sells it, at one instant.
@@ -52,14 +53,13 @@ public protocol StakePackSelling: AnyObject {
     /// while one is loaded, none can be bought.
     var offers: [StakePackOffer] { get }
     func buyPack(_ offer: StakePackOffer) async -> StakePackPurchase
+    /// Calls `handler` on the main actor whenever the pack or the gems
+    /// changed, for as long as the caller keeps the observation (#2376: was
+    /// the `stakePack.didChange` notification, heard from any seller).
+    func observeChanges(_ handler: @escaping @MainActor @Sendable () -> Void) -> StoreObservation
 }
 
 public extension StakePackSelling {
     var offers: [StakePackOffer] { [offer] }
     func buyPack(_ offer: StakePackOffer) async -> StakePackPurchase { await buyPack() }
-}
-
-public extension Notification.Name {
-    /// Posted by a `StakePackSelling` when the pack or the gems changed.
-    static let stakePackDidChange = Notification.Name("stakePack.didChange")
 }

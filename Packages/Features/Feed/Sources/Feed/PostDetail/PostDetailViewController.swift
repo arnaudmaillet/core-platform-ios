@@ -396,9 +396,9 @@ final class PostDetailViewController: UIViewController {
     private let wallet: (any WalletStaking)?
     /// Keeps the compose bar's receipt honest when the SAME post is boosted
     /// through another surface (a text page shows this bar and the snap
-    /// screen's spend path at once). Token bag, not deinit — the house
-    /// escape hatch for main-actor state a nonisolated deinit can't touch.
-    private let walletObservers = NotificationTokens()
+    /// screen's spend path at once). It stops observing when it goes, with
+    /// this controller: a nonisolated deinit has nothing to undo.
+    private var walletObservation: StoreObservation?
     /// The session's undoable spend through THIS bar. Its window is this
     /// controller's lifetime, which IS the product rule: the embedded
     /// comments panel is torn down when the page changes, so moving on
@@ -978,13 +978,9 @@ final class PostDetailViewController: UIViewController {
         // it honest against spends made through any other surface.
         if let wallet {
             refreshBoostTotal()
-            walletObservers.replace(with: [
-                NotificationCenter.default.addObserver(
-                    forName: WalletStore.didChangeNotification, object: wallet, queue: .main
-                ) { [weak self] _ in
-                    MainActor.assumeIsolated { self?.refreshBoostTotal() }
-                },
-            ])
+            walletObservation = wallet.changes.observeOnMain { [weak self] in
+                self?.refreshBoostTotal()
+            }
         }
         // The engaged footer band (hidden outside the engagement): below
         // the bar, above the stream.

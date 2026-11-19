@@ -3,6 +3,7 @@ import MapsInterface
 import UIKit
 import CoreModels
 import CoreNavigation
+import CoreStorage
 import WalletInterface
 
 /// Every country, and unlocking them: the Shop behind the Rewards sheet's
@@ -101,6 +102,9 @@ public final class CountryShopViewController: UIViewController {
     private let access: any CountryAccess
     /// What Boosts sells; nil shows no Boosts section.
     private let stakePacks: (any StakePackSelling)?
+    /// The seller's changes, heard for as long as this screen lives: it
+    /// replaces a selector registration, which went with the screen (#2376).
+    private var stakePackObservation: StoreObservation?
     private let atlas: CountryAtlas
     private(set) lazy var collectionView = UICollectionView(frame: .zero, collectionViewLayout: makeLayout())
     private(set) var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
@@ -205,9 +209,10 @@ public final class CountryShopViewController: UIViewController {
         dataSource.supplementaryViewProvider = { view, kind, path in
             view.dequeueConfiguredReusableSupplementary(using: headerRegistration, for: path)
         }
-        for name in [Notification.Name.countryAccessDidChange, .stakePackDidChange] {
-            NotificationCenter.default.addObserver(self, selector: #selector(accessChanged), name: name, object: nil)
-        }
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(accessChanged), name: .countryAccessDidChange, object: nil
+        )
+        stakePackObservation = stakePacks?.observeChanges { [weak self] in self?.accessChanged() }
         installBalance()
         apply(animated: false)
     }

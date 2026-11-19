@@ -1,6 +1,7 @@
 import ChatInterface
 import CoreModels
 import CoreNavigation
+import CoreStorage
 import Transitions
 import FeedInterface
 import LaunchArguments
@@ -45,6 +46,9 @@ final class MainTabCoordinator: NSObject, Coordinator {
 
     /// Internal (not private) only for the +QA hooks.
     let container: AppContainer
+    /// `container.likesGivenBack`, heard for as long as this coordinator
+    /// lives (`observeLikesGivenBack`; a selector registration before #2376).
+    var likesGivenBackObservation: StoreObservation?
     private let onLogout: () -> Void
     /// Presents the sign-in flow over the shell — what a guest's "Log in or
     /// sign up" calls. The app coordinator dismisses it when the session lands.

@@ -10,7 +10,9 @@ import LaunchArguments
 /// whoever asks (`CountryAccess`), not stored here — it is a rule, not a
 /// purchase.
 public final class CountryUnlockStore: @unchecked Sendable {
-    public static let didChangeNotification = Notification.Name("countries.unlocks.didChange")
+    /// Sent after the unlocks change, on the thread that changed them
+    /// (#2376: was the `countries.unlocks.didChange` notification).
+    public let changes = StoreChanges<Void>()
 
     private let defaults: UserDefaults
     private let lock = NSLock()
@@ -46,7 +48,7 @@ public final class CountryUnlockStore: @unchecked Sendable {
             if inserted { defaults.set(codes.sorted(), forKey: Self.key(accountID)) }
             return inserted
         }
-        if inserted { NotificationCenter.default.post(name: Self.didChangeNotification, object: self) }
+        if inserted { changes.send() }
         return inserted
     }
 
@@ -61,7 +63,7 @@ public final class CountryUnlockStore: @unchecked Sendable {
             defaults.set(codes.sorted(), forKey: Self.key(accountID))
             return true
         }
-        if removed { NotificationCenter.default.post(name: Self.didChangeNotification, object: self) }
+        if removed { changes.send() }
         return removed
     }
 
@@ -87,7 +89,7 @@ public final class CountryUnlockStore: @unchecked Sendable {
             defaults.set(seeded.union(fresh).sorted(), forKey: Self.seedKey(accountID))
             return granted
         }
-        if !granted.isEmpty { NotificationCenter.default.post(name: Self.didChangeNotification, object: self) }
+        if !granted.isEmpty { changes.send() }
         return granted
     }
 

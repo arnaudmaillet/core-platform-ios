@@ -17,9 +17,8 @@ import Foundation
 ///
 /// ⚠️ ONE INSTANCE IN THE APP (#2376), built by the composition root
 /// (`AppContainer.storageScope`) and handed to every store: the stores
-/// observe `didChangeNotification` with THEIR scope as the object, so a store
-/// built over another scope would never follow the viewer, and nothing would
-/// visibly fail. `RepoGuards/ViewerStoreGuardTests` keeps `StorageScope(` to
+/// observe THEIR scope's `ownerChanges`, so a store built over another scope
+/// would never follow the viewer, and nothing would visibly fail. `RepoGuards/ViewerStoreGuardTests` keeps `StorageScope(` to
 /// that one place.
 ///
 /// ⚠️ NOTHING IS WIPED on sign-out: with no server holding these lists yet,
@@ -40,10 +39,11 @@ public final class StorageScope: @unchecked Sendable {
         case member(account: String, profile: String?)
     }
 
-    /// Posted after `owner` changes, with the scope as the object: stores that
-    /// hold a copy in memory (`PostDraftStore`) re-read, and the wallet seeds
-    /// a member's first wallet.
-    public static let didChangeNotification = Notification.Name("storageScope.didChange")
+    /// Sent after `owner` changes, on the thread that changed it: stores that
+    /// hold a copy in memory (`PostDraftStore`) re-read `owner`, and the
+    /// wallet seeds a member's first wallet (#2376: was the
+    /// `storageScope.didChange` notification).
+    public let ownerChanges = StoreChanges<Void>()
 
     private let lock = NSLock()
     private var _owner: Owner
@@ -60,7 +60,7 @@ public final class StorageScope: @unchecked Sendable {
                 _owner = newValue
                 return true
             }
-            if changed { NotificationCenter.default.post(name: Self.didChangeNotification, object: self) }
+            if changed { ownerChanges.send() }
         }
     }
 

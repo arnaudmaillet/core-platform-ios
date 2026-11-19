@@ -25,6 +25,11 @@ struct ShopProfileItemsTests {
         let access: Access
         var owned: Set<ProfileItem> = []
         init(access: Access) { self.access = access }
+
+        let changes = StoreChanges<Void>()
+        func observeChanges(_ handler: @escaping @MainActor @Sendable () -> Void) -> StoreObservation {
+            changes.observeOnMain { handler() }
+        }
         var items: [ProfileItem] { [.videoBanner] }
         func owns(_ item: ProfileItem) -> Bool { owned.contains(item) }
         func buy(_ item: ProfileItem) async -> ProfileItemPurchase {
