@@ -69,7 +69,7 @@ struct SnapDismissalKindTests {
         _ models: [FeedItemDisplayModel], panels: PanelBuilds? = nil
     ) -> SnapFeedViewController {
         let controller = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: MuteFeedProvider(), unavailablePosts: UnavailablePosts()),
+            viewModel: FeedViewModel(repository: MuteFeedProvider(), unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents())),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             makeCommentsPanelContent: panels.map { builds in { id in builds.make(id) } },
             bookmarks: PostBookmarkStore(scope: StorageScope()),

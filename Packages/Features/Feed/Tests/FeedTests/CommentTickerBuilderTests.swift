@@ -179,7 +179,7 @@ struct FeedViewModelStreamsTests {
     @Test func activationLoadsBuildsAndCachesTheStreams() async {
         let provider = FakeCommentsProvider(comments: shortEntries(8))
         let viewModel = FeedViewModel(repository: StubFeedProvider(), commentsProvider: provider,
-        unavailablePosts: UnavailablePosts())
+        unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents()))
         let id = PostID("post-0042")
 
         let (emittedID, streams) = await awaitStreamsEmission(viewModel, activating: id)
@@ -201,7 +201,7 @@ struct FeedViewModelStreamsTests {
         let semantic = (0..<3).map { entry("sem\($0)", "This is a longer thought number \($0) worth reading.") }
         let provider = FakeCommentsProvider(comments: shortEntries(6) + semantic)
         let viewModel = FeedViewModel(repository: StubFeedProvider(), commentsProvider: provider,
-        unavailablePosts: UnavailablePosts())
+        unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents()))
 
         let (_, streams) = await awaitStreamsEmission(viewModel, activating: PostID("post-0042"))
         #expect(streams.reactions.count == 6)
@@ -220,7 +220,7 @@ struct FeedViewModelStreamsTests {
     @Test func aPostBelowTheBandsGateHandsEveryCommentToTheZone() async {
         let provider = FakeCommentsProvider(comments: shortEntries(3))
         let viewModel = FeedViewModel(repository: StubFeedProvider(), commentsProvider: provider,
-        unavailablePosts: UnavailablePosts())
+        unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents()))
 
         let (_, streams) = await awaitStreamsEmission(viewModel, activating: PostID("post-0001"))
         #expect(streams.reactions.isEmpty)
@@ -235,7 +235,7 @@ struct FeedViewModelStreamsTests {
     @Test func oneCommentStillFillsTheZone() async {
         let provider = FakeCommentsProvider(comments: [entry("only", "Where was this taken?")])
         let viewModel = FeedViewModel(repository: StubFeedProvider(), commentsProvider: provider,
-        unavailablePosts: UnavailablePosts())
+        unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents()))
 
         let (_, streams) = await awaitStreamsEmission(viewModel, activating: PostID("post-0001"))
         #expect(streams.reactions.isEmpty)
@@ -251,7 +251,7 @@ struct FeedViewModelStreamsTests {
     @Test func zeroCommentPostLoadsAsKnownZero() async {
         let provider = FakeCommentsProvider(comments: [])
         let viewModel = FeedViewModel(repository: StubFeedProvider(), commentsProvider: provider,
-        unavailablePosts: UnavailablePosts())
+        unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents()))
         let id = PostID("post-0009")
 
         #expect(FeedViewModel.CommentStreams.empty.isLoaded == false)

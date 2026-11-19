@@ -106,7 +106,7 @@ struct PlacePostsTests {
             loadMore: { try await pages.load($0) },
             presence: SectionPresenceStore(scope: StorageScope()),
             bookmarks: PostBookmarkStore(scope: StorageScope()),
-            withheldPosts: UnavailablePosts(),
+            withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents()),
             openPost: { _, origin, _ in opened?(origin) }
         )
     }
@@ -270,7 +270,7 @@ struct PlacePostsTests {
             loadPosts: { pins },
             presence: SectionPresenceStore(scope: StorageScope()),
             bookmarks: PostBookmarkStore(scope: StorageScope()),
-            withheldPosts: UnavailablePosts(), openPost: { _, opened, _ in origin = opened }
+            withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents()), openPost: { _, opened, _ in origin = opened }
         )
         profile.beginLoading()
         #expect(await settle { profile.renderedActivity.count == 1 })

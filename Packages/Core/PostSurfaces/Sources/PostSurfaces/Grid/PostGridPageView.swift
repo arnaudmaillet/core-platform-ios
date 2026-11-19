@@ -231,8 +231,17 @@ final public class PostGridPageView: UIView {
     var hostedState: PostGridPageState?
     /// The record those posts are read from: the app's one (#2376); a test's
     /// own.
-    var withheldPosts: UnavailablePosts
-    let withheldObservation = NotificationTokens()
+    var withheldPosts: UnavailablePosts {
+        // Another record (a test's): the page hears that one from now on.
+        didSet {
+            guard withheldObservation != nil else { return }
+            withheldObservation = nil
+            observeWithheldPosts()
+        }
+    }
+    /// What the page hears of `withheldPosts` once a host has shown
+    /// something: it ends with the page.
+    var withheldObservation: ViewerEventSubscription?
     /// The order the view model handed over, kept so an append can be
     /// recognised as one before arrangement permutes it.
     private var rawPosts: [GalleryPost] = []

@@ -788,7 +788,7 @@ struct SnapActionColumnLayoutTests {
     /// it, so it is what truncates first.
     @Test func theThreadsDayRidesTheBarLeftOfTheLikes() throws {
         let controller = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: ColumnSilentProvider(), unavailablePosts: UnavailablePosts()),
+            viewModel: FeedViewModel(repository: ColumnSilentProvider(), unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents())),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             reporting: nil,
             bookmarks: PostBookmarkStore(scope: StorageScope()),
@@ -829,7 +829,7 @@ struct SnapActionColumnLayoutTests {
     /// with nowhere to file a report, no Report.
     @Test func theShareSheetHoldsWhatTheMenuDid() {
         let controller = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: ColumnSilentProvider(), unavailablePosts: UnavailablePosts()),
+            viewModel: FeedViewModel(repository: ColumnSilentProvider(), unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents())),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             reporting: nil,
             bookmarks: PostBookmarkStore(scope: StorageScope()),

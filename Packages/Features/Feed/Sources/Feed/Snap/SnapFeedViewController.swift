@@ -591,14 +591,10 @@ final class SnapFeedViewController: UIViewController {
         viewModel.onStateChange = { [weak self] state in self?.render(state) }
         // A post learnt unavailable on ANOTHER surface leaves this feed's
         // pages too (#2048) — at once, but for the page on show.
-        unavailableObservation.add(NotificationCenter.default.addObserver(
-            forName: UnavailablePosts.didChange, object: viewModel.unavailablePosts, queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                self.viewModel.dropUnavailable(except: self.activePostID)
-            }
-        })
+        unavailableObservation = viewModel.unavailablePosts.onChange { [weak self] _ in
+            guard let self else { return }
+            self.viewModel.dropUnavailable(except: self.activePostID)
+        }
         // The like pill's count is the post's live one (#896): a like placed
         // on a card, in the comments bar or on this rail, a realtime tick —
         // whoever moved it, the page showing the post re-draws it.
@@ -3019,7 +3015,7 @@ final class SnapFeedViewController: UIViewController {
     /// The last state rendered — rendered again when the kept page goes.
     private var lastRenderState: FeedViewModel.RenderState?
     /// Hears posts learnt unavailable on other surfaces (#2048).
-    private let unavailableObservation = NotificationTokens()
+    private var unavailableObservation: ViewerEventSubscription?
     #if DEBUG
     /// "This post isn't available" toasts shown (#2048).
     private(set) var debugUnavailableToastsShown = 0

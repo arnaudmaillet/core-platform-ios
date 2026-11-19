@@ -357,9 +357,9 @@ public final class CacheCoordinator: Sendable {
         })
     }
 
-    /// Starts listening to `sources` (in the app: `SystemCacheSignals` plus a
-    /// `NotificationCacheSignals` for session changes). Replaces any previous
-    /// sources.
+    /// Starts listening to `sources` (in the app, `AppCacheSignals.sources`:
+    /// `SystemCacheSignals`, and the viewer's changes through a
+    /// `ManualCacheSignals`). Replaces any previous sources.
     public func startObserving(_ sources: [any CacheSignalSource]) {
         stopObserving()
         state.withLock { $0.sources = sources }

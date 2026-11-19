@@ -25,7 +25,7 @@ struct PlaceViewportShareTests {
             loadPosts: { [post] },
             presence: SectionPresenceStore(scope: StorageScope()),
             bookmarks: PostBookmarkStore(scope: StorageScope()),
-            withheldPosts: UnavailablePosts(), openPost: { _, _, _ in }
+            withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents()), openPost: { _, _, _ in }
         )
         screen.loadViewIfNeeded()
         return screen

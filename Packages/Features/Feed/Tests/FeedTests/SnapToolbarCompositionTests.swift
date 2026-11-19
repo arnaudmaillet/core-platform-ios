@@ -32,7 +32,7 @@ import UIKit
 struct SnapToolbarCompositionTests {
     private func feed(reporting: (any ContentReporting)? = StubReporter()) -> SnapFeedViewController {
         let controller = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: EmptyProvider(), unavailablePosts: UnavailablePosts()),
+            viewModel: FeedViewModel(repository: EmptyProvider(), unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents())),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             reporting: reporting,
             bookmarks: PostBookmarkStore(scope: StorageScope()),

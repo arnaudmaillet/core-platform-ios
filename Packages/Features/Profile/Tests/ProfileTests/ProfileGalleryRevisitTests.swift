@@ -196,12 +196,12 @@ struct ProfileGalleryRevisitTests {
     }
 
     @Test func aViewerChangeForgetsTheGallery() async throws {
-        let center = NotificationCenter()
-        let cache = ProfileCache(center: center)
+        let viewerEvents = ViewerEvents()
+        let cache = ProfileCache(viewerEvents: viewerEvents)
         try await firstVisit(twoPages(), cache: cache)
         #expect(cache.gallery(for: id) != nil)
 
-        center.post(name: .viewerDidChange, object: nil)
+        viewerEvents.publishViewerChange()
 
         #expect(cache.gallery(for: id) == nil, "the previous viewer's gallery survived")
     }

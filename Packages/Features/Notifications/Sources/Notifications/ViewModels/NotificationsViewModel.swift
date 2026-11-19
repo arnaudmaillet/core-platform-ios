@@ -97,12 +97,14 @@ public final class NotificationsViewModel {
     /// The rows `didSee` already resolved since the rows last changed: it
     /// runs at every scroll frame, and a row looked at again costs nothing.
     private var lookedAtRowIDs: Set<String> = []
-    /// Where viewer changes are heard — the default center; a test hands its
-    /// own, since posting on the shared one reaches every suite at once.
+    /// Where the read rows are announced — the default center; a test hands
+    /// its own, since posting on the shared one reaches every suite at once.
     var notificationCenter: NotificationCenter = .default
-    /// Removes its block observer when the model goes (#978): a `deinit` of
-    /// a main-actor model cannot reach the token itself.
-    private var viewerObserver: NotificationTokens?
+    /// Where viewer changes are heard: the app's channel (#2376), set by the
+    /// builder; a test's own. Nil: none is heard.
+    var viewerEvents: ViewerEvents?
+    /// Ends when the model goes (#978).
+    private var viewerObserver: ViewerEventSubscription?
     /// The drawer's last 100 rows on the device (#897): the list opens on
     /// them, offline included, and every page the network answers is written
     /// back. Nil keeps them in memory.
@@ -163,19 +165,13 @@ public final class NotificationsViewModel {
     /// viewer's first page.
     private func observeViewer() {
         guard viewerObserver == nil else { return }
-        let center = notificationCenter
-        let token = center.addObserver(
-            forName: .viewerDidChange, object: nil, queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.viewerDidChange() }
+        viewerObserver = viewerEvents?.onViewerChange { [weak self] in
+            self?.viewerDidChange()
         }
-        let viewerTokens = NotificationTokens(center: center)
-        viewerTokens.add(token)
-        viewerObserver = viewerTokens
     }
 
-    /// The viewer observer's holder, for tests: it goes with the model, and
-    /// unregisters as it goes.
+    /// The viewer subscription, for tests: it goes with the model, and ends
+    /// as it goes.
     var viewerObservation: AnyObject? { viewerObserver }
 
     private func viewerDidChange() {

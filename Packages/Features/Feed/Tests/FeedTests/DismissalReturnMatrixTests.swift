@@ -59,7 +59,7 @@ struct DismissalReturnMatrixTests {
         let page = PostGridPageView(
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: style,
             bookmarks: PostBookmarkStore(scope: StorageScope()),
-            withheldPosts: UnavailablePosts()
+            withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents())
         )
         page.frame = CGRect(x: 0, y: 0, width: 393, height: height)
         page.render(.content(corpus(count)))
@@ -166,7 +166,7 @@ struct DismissalReturnMatrixTests {
         let page = PostGridPageView(
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .list,
             bookmarks: PostBookmarkStore(scope: StorageScope()),
-            withheldPosts: UnavailablePosts()
+            withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents())
         )
         page.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
         page.layoutIfNeeded()

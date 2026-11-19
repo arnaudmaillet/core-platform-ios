@@ -37,7 +37,7 @@ struct PlaceHeaderHairlineTests {
     private func page(_ posts: [GalleryPost], style: PostGridPageView.Style = .discover) -> PostGridPageView {
         let page = PostGridPageView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: style,
         bookmarks: PostBookmarkStore(scope: StorageScope()),
-        withheldPosts: UnavailablePosts())
+        withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents()))
         page.frame = CGRect(x: 0, y: 0, width: 393, height: 3000)
         page.setCorpusComplete(true)
         page.render(.content(posts))
@@ -58,7 +58,7 @@ struct PlaceHeaderHairlineTests {
             loadPosts: { [] },
             presence: SectionPresenceStore(scope: StorageScope()),
             bookmarks: PostBookmarkStore(scope: StorageScope()),
-            withheldPosts: UnavailablePosts(),
+            withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents()),
             openPost: { _, _, _ in }
         )
         #expect(place.debugHeader.drawsFootHairline)

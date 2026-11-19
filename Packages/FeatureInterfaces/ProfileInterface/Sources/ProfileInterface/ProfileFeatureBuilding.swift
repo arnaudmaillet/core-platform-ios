@@ -203,24 +203,3 @@ public extension ProfileSwitcherPresenting {
     /// unread notification: the Profile tab's dot (#2034).
     var hasUnreadNotifications: Bool { unreadCounts.values.contains { $0 > 0 } }
 }
-
-public extension Notification.Name {
-    /// Posted after the viewer switches the active profile, so identity surfaces
-    /// (the Profile tab's icon, an open profile screen) can refresh to it.
-    ///
-    /// `userInfo[ActiveProfileChange.profileIDKey]` carries the id switched TO.
-    /// Observers that can render a known profile immediately (see the profile
-    /// cache) need it on the same runloop turn — asking the repository would
-    /// cost an actor hop and give up the instant frame.
-    static let activeProfileDidChange = Notification.Name("cn.wynn.core-platform-ios.activeProfileDidChange")
-}
-
-/// Payload accessors for `.activeProfileDidChange`.
-public enum ActiveProfileChange {
-    public static let profileIDKey = "profileID"
-
-    /// The profile switched to, when the poster knew it.
-    public static func profileID(from notification: Notification) -> ProfileID? {
-        notification.userInfo?[profileIDKey] as? ProfileID
-    }
-}

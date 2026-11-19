@@ -597,7 +597,7 @@ struct PostShelfRowsTests {
     @Test func theListsCardsOfferNoRepostWithoutAHandler() {
         let page = PostGridPageView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .discover,
         bookmarks: PostBookmarkStore(scope: StorageScope()),
-        withheldPosts: UnavailablePosts())
+        withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents()))
         let post = Self.post("p0", kind: .photo)
         #expect(page.repostHandler(for: post) == nil)
         page.onRepostRequested = { _ in }
@@ -627,7 +627,7 @@ struct PostShelfRowsTests {
             lead.shelf.onCardRepostRequested = onRepost
             page = PostGridPageView(imagePipeline: pipeline, style: .discover, videoPlayback: nil,
             bookmarks: PostBookmarkStore(scope: StorageScope()),
-            withheldPosts: UnavailablePosts())
+            withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents()))
             lead.render(following: cards)
             window.rootViewController = host
             window.isHidden = false

@@ -73,10 +73,7 @@ extension AppContainer {
         // composer's cached face the moment a switch is announced, without
         // waiting for the viewer's transition to reach the repository. The
         // Text Post page reads that face synchronously when it is built.
-        activeViewerObserver = NotificationCenter.default.addObserver(
-            forName: .activeProfileDidChange, object: nil, queue: .main
-        ) { [repository] notification in
-            guard let id = ActiveProfileChange.profileID(from: notification) else { return }
+        activeViewerObserver = viewerEvents.onActiveProfileChange { [repository] id in
             Task { await repository.setActiveViewer(id) }
         }
         return repository

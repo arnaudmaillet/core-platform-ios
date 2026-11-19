@@ -67,7 +67,7 @@ public final class FollowGraphEvents: @unchecked Sendable {
     private let currentViewer: (@Sendable () -> ProfileID?)?
 
     /// - Parameter currentViewer: the active profile, asked on every delivery
-    ///   from any thread (the app maps `StorageScope.shared.owner`). Must be
+    ///   from any thread (the app maps its one `StorageScope`'s owner). Must be
     ///   cheap. Nil (tests): every change is delivered.
     public init(currentViewer: (@Sendable () -> ProfileID?)? = nil) {
         self.currentViewer = currentViewer

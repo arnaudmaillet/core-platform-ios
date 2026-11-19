@@ -1513,6 +1513,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         let makeProfileSwitcher = makeProfileSwitcher
         let wallet = wallet
         let makeWalletSheet = makeWalletSheet
+        let viewerEvents = unavailablePosts.viewerEvents
         let makePanel: (PostID, Bool) -> UIViewController = { postID, threadChrome in
             Self.makeCommentsPanel(
                 viewModel: PostDetailViewModel(
@@ -1526,7 +1527,8 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                 threadChrome: threadChrome,
                 imagePipeline: imagePipeline,
                 makeProfileSwitcher: makeProfileSwitcher,
-                wallet: wallet
+                wallet: wallet,
+                viewerEvents: viewerEvents
             )
         }
         let feed = SnapFeedViewController(
@@ -1595,13 +1597,17 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         threadChrome: Bool,
         imagePipeline: ImagePipeline,
         makeProfileSwitcher: @MainActor () -> (any ProfileSwitcherPresenting)?,
-        wallet: (any WalletStaking)?
+        wallet: (any WalletStaking)?,
+        viewerEvents: ViewerEvents
     ) -> PostDetailViewController {
         PostDetailViewController(
             viewModel: viewModel,
             imagePipeline: imagePipeline,
             profileSwitcher: makeProfileSwitcher(),
             wallet: wallet,
+            // The app's viewer channel, which the record of withheld posts
+            // already hears (#2376): the composer's face follows a switch.
+            viewerEvents: viewerEvents,
             threadChrome: threadChrome,
             // Every snap page's comments group by day under Recent (#757).
             groupsByDay: true
@@ -1685,7 +1691,8 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             threadChrome: true,
             imagePipeline: imagePipeline,
             makeProfileSwitcher: makeProfileSwitcher,
-            wallet: wallet
+            wallet: wallet,
+            viewerEvents: unavailablePosts.viewerEvents
         )
         let composer = TextPostComposerViewController(
             panel: panel,

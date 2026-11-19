@@ -37,7 +37,7 @@ struct GridPagingFooterTests {
     private func page() -> PostGridPageView {
         let page = PostGridPageView(imagePipeline: pipeline(), style: .grid,
         bookmarks: PostBookmarkStore(scope: StorageScope()),
-        withheldPosts: UnavailablePosts())
+        withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents()))
         page.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
         page.additionalBottomInset = 88
         page.render(.content(posts(40)))
@@ -117,7 +117,7 @@ struct GridPagingFooterTests {
     @Test func aTimelineReservesTheFooterBandToo() {
         let list = PostGridPageView(imagePipeline: pipeline(), style: .list,
         bookmarks: PostBookmarkStore(scope: StorageScope()),
-        withheldPosts: UnavailablePosts())
+        withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents()))
         list.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
         list.additionalBottomInset = 88
         list.layoutIfNeeded()

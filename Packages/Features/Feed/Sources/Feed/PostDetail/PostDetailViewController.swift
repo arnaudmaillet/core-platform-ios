@@ -34,9 +34,14 @@ final class PostDetailViewController: UIViewController {
     /// Builds the composer avatar's profile switcher menu. Nil wherever the
     /// app wires none — the face is then a plain, inert identity.
     private let profileSwitcher: (any ProfileSwitcherPresenting)?
-    /// Watches for profile switches made ANYWHERE — this composer's menu, or
-    /// the profile header while the comments sit open underneath.
-    private let activeProfileObservers = NotificationTokens()
+    /// The app's viewer channel (#2376), for profile switches made ANYWHERE —
+    /// this composer's menu, or the profile header while the comments sit
+    /// open underneath — and for a change of viewer. Nil (tests): neither is
+    /// heard.
+    private let viewerEvents: ViewerEvents?
+    /// The two subscriptions to `viewerEvents`, for this controller's
+    /// lifetime: they end with it.
+    private var viewerSubscriptions: [ViewerEventSubscription] = []
 
     // MARK: - The two streams (#2007)
 
@@ -412,9 +417,11 @@ final class PostDetailViewController: UIViewController {
         imagePipeline: ImagePipeline,
         profileSwitcher: (any ProfileSwitcherPresenting)? = nil,
         wallet: (any WalletStaking)? = nil,
+        viewerEvents: ViewerEvents? = nil,
         threadChrome: Bool = false,
         groupsByDay: Bool = false
     ) {
+        self.viewerEvents = viewerEvents
         self.viewModel = viewModel
         self.imagePipeline = imagePipeline
         self.threadChrome = threadChrome
@@ -632,25 +639,18 @@ final class PostDetailViewController: UIViewController {
     ///    menu's own callback is what keeps the composer's face and the
     ///    identity that posts the comment from drifting apart.
     private func configureProfileSwitcher() {
-        activeProfileObservers.replace(with: [
-            NotificationCenter.default.addObserver(
-                forName: .activeProfileDidChange, object: nil, queue: .main
-            ) { [weak self] notification in
-                guard let id = ActiveProfileChange.profileID(from: notification) else { return }
-                MainActor.assumeIsolated { self?.viewModel.adoptActiveViewer(id) }
+        viewerSubscriptions = [
+            viewerEvents?.onActiveProfileChange { [weak self] id in
+                self?.viewModel.adoptActiveViewer(id)
             },
             // Someone else is here now — most often a guest who just signed
             // up from this composer's button: the face and the name re-read,
             // and so does the menu of profiles to switch between.
-            NotificationCenter.default.addObserver(
-                forName: .viewerDidChange, object: nil, queue: .main
-            ) { [weak self] _ in
-                MainActor.assumeIsolated {
-                    self?.viewModel.reloadViewerIdentity()
-                    self?.refreshProfileMenu()
-                }
+            viewerEvents?.onViewerChange { [weak self] in
+                self?.viewModel.reloadViewerIdentity()
+                self?.refreshProfileMenu()
             },
-        ])
+        ].compactMap { $0 }
 
         refreshProfileMenu()
     }
@@ -667,7 +667,7 @@ final class PostDetailViewController: UIViewController {
                 guard let self else { return }
                 profileSwitcher.present(
                     from: .view(source), over: self, includesAddProfile: false,
-                    // The switch itself lands through the notification above;
+                    // The switch itself lands through the subscription above;
                     // the reload here re-marks the active row for next time.
                     onSwitch: { [weak self] in self?.refreshProfileMenu() },
                     onAddProfile: {}

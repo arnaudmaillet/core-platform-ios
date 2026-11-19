@@ -16,28 +16,46 @@ import Foundation
 /// session.
 @MainActor
 public final class UnavailablePosts {
-    /// Posted with the posts just learnt under `idsKey`.
-    public static let didChange = Notification.Name("UnavailablePostsDidChange")
-    static let idsKey = "ids"
+    /// The app's viewer channel, whose viewer changes empty this record. The
+    /// feed's comments panels follow a profile switch through it too, so the
+    /// feed builder needs no channel of its own (#2376).
+    public let viewerEvents: ViewerEvents
 
     private(set) var ids: Set<PostID> = []
-    private let viewerObservation = NotificationTokens()
+    /// The surfaces holding posts, told of the ones just learnt, in the order
+    /// they subscribed.
+    private let changes = OrderedHandlers<Set<PostID>>()
+    private var viewerSubscription: ViewerEventSubscription?
 
-    public init() {
-        viewerObservation.add(NotificationCenter.default.addObserver(forName: .viewerDidChange, object: nil, queue: .main) {
-            [weak self] _ in
-            MainActor.assumeIsolated { self?.ids.removeAll() }
-        })
+    /// `viewerEvents`: the app's one (#2376); a test's own, which it
+    /// publishes on to change the viewer.
+    public init(viewerEvents: ViewerEvents) {
+        self.viewerEvents = viewerEvents
+        viewerSubscription = viewerEvents.onViewerChange { [weak self] in
+            self?.ids.removeAll()
+        }
     }
+
+    #if DEBUG
+    /// How many surfaces hear this record's changes.
+    var debugObservationCount: Int { changes.debugObservationCount }
+    #endif
 
     public func contains(_ id: PostID) -> Bool { ids.contains(id) }
 
-    /// Records `new`, and tells the surfaces holding any of them.
+    /// Records `new`, and tells the surfaces holding any of them,
+    /// synchronously, before it returns.
     public func insert(_ new: some Sequence<PostID>) {
         let added = Set(new).subtracting(ids)
         guard !added.isEmpty else { return }
         ids.formUnion(added)
-        NotificationCenter.default.post(name: Self.didChange, object: self, userInfo: [Self.idsKey: added])
+        changes.send(added)
+    }
+
+    /// Calls `handler` with the posts each later `insert` learnt, until the
+    /// subscription is cancelled or freed: keep it on the surface.
+    public func onChange(_ handler: @escaping @MainActor (Set<PostID>) -> Void) -> ViewerEventSubscription {
+        changes.subscribe(handler)
     }
 }
 

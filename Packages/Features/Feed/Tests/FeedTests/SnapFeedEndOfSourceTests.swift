@@ -77,7 +77,7 @@ struct SnapFeedEndOfSourceTests {
     @Test func aCompleteSetIsExhaustedOnceLoaded() async throws {
         let viewModel = FeedViewModel(
             repository: FixedPostsFeedProvider(base: Photos(), ids: ids("a", "b"), isCompleteSet: true),
-            unavailablePosts: UnavailablePosts()
+            unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents())
         )
         viewModel.viewDidLoad()
         try #require(await settle { viewModel.isSourceExhausted })
@@ -91,7 +91,7 @@ struct SnapFeedEndOfSourceTests {
             asked += 1
             return []
         }
-        let viewModel = FeedViewModel(repository: provider, unavailablePosts: UnavailablePosts())
+        let viewModel = FeedViewModel(repository: provider, unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents()))
         viewModel.viewDidLoad()
         await settle(looks: 200) { false }
         viewModel.willDisplayItem(at: 1)
@@ -104,7 +104,7 @@ struct SnapFeedEndOfSourceTests {
 
     private func feed(_ provider: FixedPostsFeedProvider) async throws -> SnapFeedViewController {
         let controller = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: provider, unavailablePosts: UnavailablePosts()),
+            viewModel: FeedViewModel(repository: provider, unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents())),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             bookmarks: PostBookmarkStore(scope: StorageScope()),
             savedSounds: SavedSoundStore(scope: StorageScope()),
@@ -257,7 +257,7 @@ struct SnapFeedEndOfSourceTests {
             asked += 1
             return []
         }
-        let viewModel = FeedViewModel(repository: provider, unavailablePosts: UnavailablePosts())
+        let viewModel = FeedViewModel(repository: provider, unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents()))
         viewModel.willDisplayItem(at: 1)
         viewModel.viewDidLoad()
         #expect(await settle { asked >= 1 }, "the late cursor never paged from the displayed tile")
@@ -296,7 +296,7 @@ struct SnapFeedEndOfSourceTests {
             postDrafts: PostDraftStore(scope: StorageScope()),
             bookmarks: PostBookmarkStore(scope: StorageScope()),
             viewHistory: PostViewHistoryStore(scope: StorageScope()),
-            unavailablePosts: UnavailablePosts(),
+            unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents()),
             savedSounds: SavedSoundStore(scope: StorageScope()),
             viewerProfile: { nil }
         ))

@@ -6,11 +6,13 @@ import Testing
 import UIKit
 
 /// The app's cache coordinator hears the release signals from the REAL
-/// sources (`AppCacheSignals`: UIKit's notifications and the viewer
-/// session's `.viewerDidChange`), each posted on a private
-/// `NotificationCenter`: nothing process-wide is posted or flipped.
+/// sources (`AppCacheSignals`: UIKit's notifications, posted on a private
+/// `NotificationCenter`, and the viewer's changes, published on a private
+/// `ViewerEvents`): nothing process-wide is posted or flipped.
+@MainActor
 final class AppCacheSignalsTests {
     private let center = NotificationCenter()
+    private let viewerEvents = ViewerEvents()
     private let folder: URL
 
     init() throws {
@@ -28,7 +30,9 @@ final class AppCacheSignalsTests {
             device: CacheDevice(physicalMemory: { 4 << 30 }, availableDiskCapacity: { 100 * Int64(CacheBytes.gigabyte) }),
             storageLimit: .automatic
         )
-        coordinator.startObserving(AppCacheSignals.sources(center: center, observesSystemMonitors: false))
+        coordinator.startObserving(
+            AppCacheSignals.sources(center: center, viewerEvents: viewerEvents, observesSystemMonitors: false)
+        )
         return coordinator
     }
 
@@ -97,11 +101,44 @@ final class AppCacheSignalsTests {
         try signedBytes.write(Data([1]), for: "k")
         entities.insert("v", for: "k", cost: 1)
 
-        center.post(name: .viewerDidChange, object: nil)
+        viewerEvents.publishViewerChange()
 
         #expect(publicBytes.contains("k"))
         #expect(!signedBytes.contains("k"))
         #expect(!entities.contains("k"))
+    }
+
+    /// ⚠️ THE WIPE COMES FIRST (#2376). A screen that re-reads on a viewer
+    /// change — even one that subscribed before the coordinator started —
+    /// finds the previous viewer's facts already gone, on the same turn, and
+    /// a fact it writes for the new viewer is not wiped after it.
+    @Test func theViewerWipeRunsBeforeEveryObserverWhenEverItSubscribed() throws {
+        let entities = memory("entities", scope: .viewer)
+        let seen = Seen()
+        let early = viewerEvents.onViewerChange {
+            seen.early.append(entities.contains("k"))
+            // The new viewer's first fact, written as it re-reads.
+            entities.insert("new", for: "fresh", cost: 1)
+        }
+        let coordinator = makeCoordinator()
+        defer { coordinator.stopObserving() }
+        coordinator.register(entities)
+        entities.insert("v", for: "k", cost: 1)
+        let late = viewerEvents.onViewerChange { seen.late.append(entities.contains("k")) }
+
+        viewerEvents.publishViewerChange()
+
+        #expect(seen.early == [false], "an observer read the previous viewer's fact")
+        #expect(seen.late == [false])
+        #expect(entities.contains("fresh"), "the new viewer's first fact was wiped after it was written")
+        withExtendedLifetime((early, late)) {}
+    }
+
+    /// What each observer saw of the previous viewer's fact.
+    @MainActor
+    private final class Seen {
+        var early: [Bool] = []
+        var late: [Bool] = []
     }
 
     @Test func nothingIsHeardAfterStopObserving() {
@@ -112,7 +149,7 @@ final class AppCacheSignalsTests {
         images.insert("s", for: "s", cost: 1, tier: .speculative)
 
         center.post(name: UIApplication.didReceiveMemoryWarningNotification, object: nil)
-        center.post(name: .viewerDidChange, object: nil)
+        viewerEvents.publishViewerChange()
 
         #expect(images.contains("s"))
     }

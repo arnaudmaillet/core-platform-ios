@@ -181,7 +181,7 @@ extension MainTabCoordinator {
         }
         // `-switch-profile-after <seconds> <profileID>` switches the active
         // profile that long after launch, the way the switcher commits one
-        // (the session first, then `.activeProfileDidChange`): the viewer
+        // (the session first, then the switch on `viewerEvents`): the viewer
         // transition #892 resets the caches on, with no long-press menu to
         // drive. With `-open-search`, the search screen opens again after the
         // switch, as the viewer would reopen it.
@@ -193,10 +193,7 @@ extension MainTabCoordinator {
                 try? await Task.sleep(for: .seconds(delay))
                 guard let self else { return }
                 await self.container.viewerSession.setActiveProfile(target)
-                NotificationCenter.default.post(
-                    name: .activeProfileDidChange, object: nil,
-                    userInfo: [ActiveProfileChange.profileIDKey: target]
-                )
+                self.container.viewerEvents.publishActiveProfileChange(target)
                 if reopensSearch {
                     try? await Task.sleep(for: .seconds(1))
                     self.container.router.route(to: .search)

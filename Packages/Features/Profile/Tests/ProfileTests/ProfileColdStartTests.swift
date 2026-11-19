@@ -162,7 +162,7 @@ private actor ColdProfiles: ProfileProviding {
 final class ProfileColdStartTests {
     private let folder = StoreFolder()
     private let viewer = ViewerBox()
-    private let center = NotificationCenter()
+    private let viewerEvents = ViewerEvents()
 
     @MainActor
     private final class Shown {
@@ -182,7 +182,7 @@ final class ProfileColdStartTests {
         let box = viewer
         let launchedAt = epoch.addingTimeInterval(later)
         return ProfileCache(
-            center: center, store: try LocalStore(directory: folder.url, viewer: { box.viewer }),
+            viewerEvents: viewerEvents, store: try LocalStore(directory: folder.url, viewer: { box.viewer }),
             now: { launchedAt }
         )
     }
@@ -457,7 +457,7 @@ final class ProfileColdStartTests {
 
     @Test func aProfileSeenSecondsAgoIsNotRefetchedOnARevisit() async throws {
         let clock = Clock()
-        let cache = ProfileCache(center: center, now: { clock.now })
+        let cache = ProfileCache(viewerEvents: viewerEvents, now: { clock.now })
         let profiles = ColdProfiles()
         let pages = gallery()
         let first = try await firstVisit(cache: cache, profiles: profiles, gallery: pages)
@@ -495,7 +495,7 @@ final class ProfileColdStartTests {
 
     @Test func aRevisitPastTheWindowRevalidates() async throws {
         let clock = Clock()
-        let cache = ProfileCache(center: center, now: { clock.now })
+        let cache = ProfileCache(viewerEvents: viewerEvents, now: { clock.now })
         let profiles = ColdProfiles()
         let pages = gallery()
         let first = try await firstVisit(cache: cache, profiles: profiles, gallery: pages)
@@ -521,7 +521,7 @@ final class ProfileColdStartTests {
     /// found no grid load in flight and started a second one.
     @Test func aStaleRevisitWhoseGridAnswersFirstFetchesTheGridOnce() async throws {
         let clock = Clock()
-        let cache = ProfileCache(center: center, now: { clock.now })
+        let cache = ProfileCache(viewerEvents: viewerEvents, now: { clock.now })
         let profiles = ColdProfiles()
         let pages = gallery()
         let first = try await firstVisit(cache: cache, profiles: profiles, gallery: pages)
@@ -547,7 +547,7 @@ final class ProfileColdStartTests {
     /// revalidation is still out, and rides it.
     @Test func aStaleRevisitWhoseHeaderAnswersFirstFetchesTheGridOnce() async throws {
         let clock = Clock()
-        let cache = ProfileCache(center: center, now: { clock.now })
+        let cache = ProfileCache(viewerEvents: viewerEvents, now: { clock.now })
         let profiles = ColdProfiles()
         let pages = gallery()
         let first = try await firstVisit(cache: cache, profiles: profiles, gallery: pages)
@@ -573,7 +573,7 @@ final class ProfileColdStartTests {
     /// answered.
     @Test func aStaleRevisitRetriesAGridRevalidationThatFailed() async throws {
         let clock = Clock()
-        let cache = ProfileCache(center: center, now: { clock.now })
+        let cache = ProfileCache(viewerEvents: viewerEvents, now: { clock.now })
         let profiles = ColdProfiles()
         let pages = gallery()
         let first = try await firstVisit(cache: cache, profiles: profiles, gallery: pages)
@@ -595,7 +595,7 @@ final class ProfileColdStartTests {
 
     @Test func pullToRefreshRefetchesInsideTheWindow() async throws {
         let clock = Clock()
-        let cache = ProfileCache(center: center, now: { clock.now })
+        let cache = ProfileCache(viewerEvents: viewerEvents, now: { clock.now })
         let profiles = ColdProfiles()
         let pages = gallery()
         let first = try await firstVisit(cache: cache, profiles: profiles, gallery: pages)
@@ -626,7 +626,7 @@ final class ProfileColdStartTests {
     }
 
     @Test func aRevisitMissingACorpusRevalidates() async throws {
-        let cache = ProfileCache(center: center)
+        let cache = ProfileCache(viewerEvents: viewerEvents)
         let id = ProfileID("prof-1")
         cache.store(person("prof-1"))
         // Only the authored posts are known: the tagged ones never loaded.

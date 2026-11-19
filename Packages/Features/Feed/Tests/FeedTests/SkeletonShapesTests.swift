@@ -18,7 +18,7 @@ struct SkeletonShapesTests {
         let time = ManualLoadingClock()
         let page = PostGridPageView(imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()), style: .discover,
         bookmarks: PostBookmarkStore(scope: StorageScope()),
-        withheldPosts: UnavailablePosts())
+        withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents()))
         page.skeletonClock = time.clock
         page.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
         page.layoutIfNeeded()
@@ -50,7 +50,7 @@ struct SkeletonShapesTests {
         let surface = PostSetSurfaceViewController(
             style: .discover,
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
-            videoPlayback: nil, bookmarks: PostBookmarkStore(scope: StorageScope()), withheldPosts: UnavailablePosts(),
+            videoPlayback: nil, bookmarks: PostBookmarkStore(scope: StorageScope()), withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents()),
             // Posts that never hydrate in the test's time.
             hydrate: { _ in
                 try? await Task.sleep(for: .seconds(3600))

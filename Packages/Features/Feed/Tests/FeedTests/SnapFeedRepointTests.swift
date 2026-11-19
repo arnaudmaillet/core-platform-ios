@@ -59,7 +59,7 @@ struct SnapFeedRepointTests {
 
     fileprivate static func detachedFeed() -> SnapFeedViewController {
         SnapFeedViewController(
-            viewModel: FeedViewModel(repository: SilentFeedProvider(), unavailablePosts: UnavailablePosts()),
+            viewModel: FeedViewModel(repository: SilentFeedProvider(), unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents())),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             bookmarks: PostBookmarkStore(scope: StorageScope()),
             savedSounds: SavedSoundStore(scope: StorageScope()),

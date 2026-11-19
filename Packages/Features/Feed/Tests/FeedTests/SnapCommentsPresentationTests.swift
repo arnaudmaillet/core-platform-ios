@@ -656,7 +656,7 @@ struct SnapCommentsPresentationTests {
     /// can go back from (so the back item exists to be displaced).
     private static func chromeHost() -> (nav: UINavigationController, feed: SnapFeedViewController) {
         let feed = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: EmptyFeedProvider(), unavailablePosts: UnavailablePosts()),
+            viewModel: FeedViewModel(repository: EmptyFeedProvider(), unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents())),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             bookmarks: PostBookmarkStore(scope: StorageScope()),
             savedSounds: SavedSoundStore(scope: StorageScope()),
@@ -828,7 +828,7 @@ struct SnapCommentsPresentationTests {
         let defaults = try #require(UserDefaults(suiteName: suite))
         defaults.removePersistentDomain(forName: suite)
         let feed = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: EmptyFeedProvider(), unavailablePosts: UnavailablePosts()),
+            viewModel: FeedViewModel(repository: EmptyFeedProvider(), unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents())),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             wallet: WalletStore(defaults: defaults,
             scope: StorageScope()),

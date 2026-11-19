@@ -1,3 +1,4 @@
+import CoreModels
 import CoreStorage
 import MediaCore
 import Testing
@@ -20,7 +21,7 @@ struct ClearHeaderEdgeTests {
     func aForYouPageHidesTheEffectUnderTheHeader(style: PostGridPageView.Style) throws {
         let page = PostGridPageView(imagePipeline: pipeline(), style: style,
         bookmarks: PostBookmarkStore(scope: StorageScope()),
-        withheldPosts: UnavailablePosts())
+        withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents()))
         let list = try #require(page.subviews.compactMap { $0 as? UICollectionView }.first)
         #expect(list.topEdgeEffect.isHidden)
     }

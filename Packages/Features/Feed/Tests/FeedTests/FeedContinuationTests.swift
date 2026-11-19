@@ -179,7 +179,7 @@ struct FeedContinuationTests {
         let surface = PostSetSurfaceViewController(
             style: .gallery,
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
-            videoPlayback: nil, bookmarks: PostBookmarkStore(scope: StorageScope()), withheldPosts: UnavailablePosts(),
+            videoPlayback: nil, bookmarks: PostBookmarkStore(scope: StorageScope()), withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents()),
             hydrate: { _ in [] }
         )
         surface.show(.posts(shown))

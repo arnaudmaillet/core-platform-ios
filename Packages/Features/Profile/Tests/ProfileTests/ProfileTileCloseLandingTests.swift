@@ -89,7 +89,7 @@ struct ProfileTileCloseLandingTests {
     private func page(_ style: PostGridPageView.Style, posts: [GalleryPost]) -> PostGridPageView {
         let page = PostGridPageView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: style,
         bookmarks: PostBookmarkStore(scope: StorageScope()),
-        withheldPosts: UnavailablePosts())
+        withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents()))
         page.showsTileInfo = true
         page.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
         page.layoutIfNeeded()

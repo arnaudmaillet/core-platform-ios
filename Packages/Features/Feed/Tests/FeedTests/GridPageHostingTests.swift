@@ -40,7 +40,7 @@ struct GridPageHostingTests {
         let page = PostGridPageView(
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: style,
             bookmarks: bookmarks,
-            withheldPosts: UnavailablePosts()
+            withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents())
         )
         page.frame = CGRect(x: 0, y: 0, width: 402, height: height)
         page.setCorpusComplete(true)

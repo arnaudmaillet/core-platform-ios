@@ -32,7 +32,7 @@ struct CommentPreferencesStreamTests {
         let store = MediaCommentPreferencesStore(defaults: defaults)
         store.update(mutate)
         return (FeedViewModel(repository: StillFeedProvider(), commentPreferences: store,
-        unavailablePosts: UnavailablePosts()), store)
+        unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents())), store)
     }
 
     @Test func byDefaultBothSurfacesRender() {

@@ -46,6 +46,9 @@ public final class CountryAccessService: CountryAccess {
     /// The wallet's and the unlocks' changes, heard for the service's
     /// lifetime — the injected instances', the app's ones (#2376).
     private var storeObservations: [StoreObservation] = []
+    /// The viewer's changes, on the app's channel (#2376), for the service's
+    /// lifetime.
+    private var viewerSubscription: ViewerEventSubscription?
     /// geo_discovery.v1, for a member whose wallet is the server's (#1475).
     private let geo: (any GeoDiscovery_V1_GeoDiscoveryServiceClientInterface)?
     /// The countries the server last listed for the account, home included.
@@ -54,6 +57,7 @@ public final class CountryAccessService: CountryAccess {
     public init(
         accountID: String, homeCountry: String, wallet: WalletStore, unlocks: CountryUnlockStore,
         teen: TeenProtections,
+        viewerEvents: ViewerEvents,
         activity: [String: (likes: Int64, posts: Int)],
         isMember: @escaping @MainActor () -> Bool = { true },
         locator: (any CurrentCountryLocating)? = nil,
@@ -82,18 +86,17 @@ public final class CountryAccessService: CountryAccess {
                 NotificationCenter.default.post(name: .countryAccessDidChange, object: nil)
             }
         }
-        for name in [Notification.Name.currentCountryDidChange, .viewerDidChange] {
-            observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { _ in
-                NotificationCenter.default.post(name: .countryAccessDidChange, object: nil)
-            })
-        }
-        // The server's list (#1475): read now, and again for each viewer.
-        observers.append(NotificationCenter.default.addObserver(forName: .viewerDidChange, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated {
-                self?.serverUnlocks = nil
-                self?.refreshUnlocks()
-            }
+        observers.append(NotificationCenter.default.addObserver(
+            forName: .currentCountryDidChange, object: nil, queue: .main
+        ) { _ in
+            NotificationCenter.default.post(name: .countryAccessDidChange, object: nil)
         })
+        viewerSubscription = viewerEvents.onViewerChange { [weak self] in
+            NotificationCenter.default.post(name: .countryAccessDidChange, object: nil)
+            // The server's list (#1475): read now, and again for each viewer.
+            self?.serverUnlocks = nil
+            self?.refreshUnlocks()
+        }
         refreshUnlocks()
     }
 

@@ -49,6 +49,9 @@ final class MainTabCoordinator: NSObject, Coordinator {
     /// `container.likesGivenBack`, heard for as long as this coordinator
     /// lives (`observeLikesGivenBack`; a selector registration before #2376).
     var likesGivenBackObservation: StoreObservation?
+    /// Profile switches, on the app's viewer channel (#2376), for as long as
+    /// the shell lives.
+    private var activeProfileSubscription: ViewerEventSubscription?
     private let onLogout: () -> Void
     /// Presents the sign-in flow over the shell — what a guest's "Log in or
     /// sign up" calls. The app coordinator dismisses it when the session lands.
@@ -251,10 +254,9 @@ final class MainTabCoordinator: NSObject, Coordinator {
         container.onUseSound = { [weak self] sound in self?.openCamera(with: sound) }
         // A switch broadcasts this; reload the avatar so the Profile tab's icon
         // reflects whoever is now active.
-        NotificationCenter.default.addObserver(
-            self, selector: #selector(activeProfileChanged),
-            name: .activeProfileDidChange, object: nil
-        )
+        activeProfileSubscription = container.viewerEvents.onActiveProfileChange { [weak self] _ in
+            self?.activeProfileChanged()
+        }
         // ⚠️ Opening the drawer reads nothing (#1572): a row is read once
         // SEEN, and the list says so after the server has it — the bells
         // follow then, not when the drawer opens.
@@ -400,7 +402,7 @@ final class MainTabCoordinator: NSObject, Coordinator {
         refreshUnreadBadge()
     }
 
-    @objc private func activeProfileChanged() {
+    private func activeProfileChanged() {
         loadAvatar()
         // ⚠️ A SWITCH IS ANOTHER VIEWER (#892). A sign-out rebuilds what holds
         // the viewer's own graph (`viewerDidChange(isMember:)`); a switch

@@ -1516,7 +1516,7 @@ public final class ProfileViewModel {
     /// ⚠️ LIKED IS KEPT WITH THE GRID (#1776), cache first like Posts: it used
     /// to be kept nowhere, so that a viewer change could not show it to the
     /// next viewer. The device copy is the viewer's own (the LocalStore's
-    /// viewer scope; `ProfileCache` drops its memory on `.viewerDidChange`),
+    /// viewer scope; `ProfileCache` drops its memory on a viewer change),
     /// so that rule holds without a cold tab at every visit. Someone else's
     /// Saved stays out of it.
     private func loadEngagementTabs(for profile: UserProfile) {

@@ -48,7 +48,7 @@ struct GalleryTileInfoTests {
     private func page(style: PostGridPageView.Style, showsInfo: Bool) -> PostGridPageView {
         let page = PostGridPageView(imagePipeline: pipeline(), style: style,
         bookmarks: PostBookmarkStore(scope: StorageScope()),
-        withheldPosts: UnavailablePosts())
+        withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents()))
         page.showsTileInfo = showsInfo
         page.frame = CGRect(x: 0, y: 0, width: 393, height: 6000)
         page.setCorpusComplete(true)
@@ -76,7 +76,7 @@ struct GalleryTileInfoTests {
         let gallery = DiscoverGalleryViewController(
             imagePipeline: pipeline(), videoPlayback: nil,
             bookmarks: PostBookmarkStore(scope: StorageScope()),
-            withheldPosts: UnavailablePosts(),
+            withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents()),
             header: PushedScreenHeader(wallet: nil, makeWalletSheet: nil, router: nil),
             openPost: nil
         )
@@ -208,7 +208,7 @@ struct GalleryTileInfoTests {
         let gallery = DiscoverGalleryViewController(
             imagePipeline: pipeline(), videoPlayback: nil,
             bookmarks: PostBookmarkStore(scope: StorageScope()),
-            withheldPosts: UnavailablePosts(),
+            withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents()),
             header: PushedScreenHeader(wallet: nil, makeWalletSheet: nil, router: nil),
             openPost: { _, origin, _ in opened = origin }
         )

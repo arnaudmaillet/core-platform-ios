@@ -184,7 +184,7 @@ struct UnavailableProfilePlainPageTests {
     /// card over the unavailable block. And a banner picture landing late
     /// cannot bring it back.
     @Test func aCachedRevisitThatTurnsUnavailableSwitchesWithoutABannerFlash() async throws {
-        let cache = ProfileCache(center: NotificationCenter())
+        let cache = ProfileCache(viewerEvents: ViewerEvents())
         cache.store(person())
         let chip = walletChip()
         let (navigation, screen) = pushedProfile(Profiles(person(), gone: true), cache: cache, chip: chip)

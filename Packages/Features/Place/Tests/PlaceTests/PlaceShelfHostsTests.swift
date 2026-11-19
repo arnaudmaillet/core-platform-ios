@@ -73,7 +73,7 @@ struct PlaceShelfHostsTests {
             following: nil,
             wallet: nil,
             loadPosts: { posts },
-            presence: store, bookmarks: PostBookmarkStore(scope: StorageScope()), withheldPosts: UnavailablePosts(),
+            presence: store, bookmarks: PostBookmarkStore(scope: StorageScope()), withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents()),
             openPost: { _, _, _ in }
         )
     }

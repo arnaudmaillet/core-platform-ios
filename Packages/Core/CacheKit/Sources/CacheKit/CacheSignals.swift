@@ -156,9 +156,11 @@ public final class ManualCacheSignals: CacheSignalSource {
     }
 }
 
-/// Maps notifications of one `NotificationCenter` to signals. The app wires
-/// session changes through it (e.g. `StorageScope.didChangeNotification` →
-/// `.viewerChanged`), so CacheKit depends on no feature or storage package.
+/// Maps notifications of one `NotificationCenter` to signals: UIKit's and
+/// `ProcessInfo`'s, for `SystemCacheSignals`. A viewer change is not one of
+/// them any more (#2376): the app's `ViewerEvents` drives a
+/// `ManualCacheSignals` (`AppCacheSignals`, AuthInterface), so CacheKit
+/// depends on no feature or storage package.
 public final class NotificationCacheSignals: CacheSignalSource {
     public typealias Mapping = @Sendable (Notification) -> CacheSignal?
 

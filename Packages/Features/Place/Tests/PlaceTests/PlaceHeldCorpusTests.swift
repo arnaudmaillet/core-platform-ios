@@ -39,7 +39,7 @@ struct PlaceHeldCorpusTests {
             },
             presence: SectionPresenceStore(scope: StorageScope()),
             bookmarks: PostBookmarkStore(scope: StorageScope()),
-            withheldPosts: UnavailablePosts(),
+            withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents()),
             openPost: { _, _, _ in }
         )
     }

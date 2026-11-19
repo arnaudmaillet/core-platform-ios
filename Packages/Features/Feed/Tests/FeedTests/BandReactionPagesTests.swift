@@ -88,7 +88,7 @@ struct BandReactionPagesTests {
         let provider = ThreePages()
         let clock = Clock()
         let viewModel = FeedViewModel(repository: NoFeed(), commentsProvider: provider,
-        unavailablePosts: UnavailablePosts(), now: { clock.now })
+        unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents()), now: { clock.now })
         await activate(viewModel)
         #expect(viewModel.commentStreams(for: id).reactions.count == 10)
 
@@ -102,7 +102,7 @@ struct BandReactionPagesTests {
         let provider = ThreePages()
         let clock = Clock()
         let viewModel = FeedViewModel(repository: NoFeed(), commentsProvider: provider,
-        unavailablePosts: UnavailablePosts(), now: { clock.now })
+        unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents()), now: { clock.now })
         await activate(viewModel)
 
         viewModel.bandRanLow(for: id)
@@ -118,7 +118,7 @@ struct BandReactionPagesTests {
         let provider = ThreePages()
         let clock = Clock()
         let viewModel = FeedViewModel(repository: NoFeed(), commentsProvider: provider,
-        unavailablePosts: UnavailablePosts(), now: { clock.now })
+        unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents()), now: { clock.now })
         await activate(viewModel)
         _ = await ranLow(viewModel)
 
@@ -136,7 +136,7 @@ struct BandReactionPagesTests {
         let provider = ThreePages()
         let clock = Clock()
         let viewModel = FeedViewModel(repository: NoFeed(), commentsProvider: provider,
-        unavailablePosts: UnavailablePosts(), now: { clock.now })
+        unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents()), now: { clock.now })
         await activate(viewModel)
         for _ in 0..<FeedViewModel.maxExtraReactionPages {
             clock.advance(FeedViewModel.reactionPageInterval)
@@ -153,7 +153,7 @@ struct BandReactionPagesTests {
     @Test func noNextPageAsksNothing() async {
         let provider = FakeOnePage()
         let viewModel = FeedViewModel(repository: NoFeed(), commentsProvider: provider,
-        unavailablePosts: UnavailablePosts())
+        unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents()))
         await activate(viewModel)
         viewModel.bandRanLow(for: id)
         #expect(!viewModel.debugReactionPages(for: id).inFlight)

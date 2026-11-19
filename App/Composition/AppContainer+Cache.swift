@@ -20,10 +20,15 @@ extension AppContainer {
     /// pressure, background and foreground, Low Power, thermal, the network
     /// path, and the viewer's transitions (`AppCacheSignals`). Called once at
     /// launch, before any cache is filled.
+    ///
+    /// ⚠️ THE VIEWER'S CACHE WIPE SUBSCRIBES HERE, FIRST (#2376): in
+    /// `viewerEvents`' `.caches` phase, which runs before every observer, so
+    /// the EntityStore's facts and the device store's viewer rows are gone
+    /// before any screen re-reads for the new viewer.
     func startCacheCoordinator() {
         guard !cacheSignalsStarted else { return }
         cacheSignalsStarted = true
-        cacheCoordinator.startObserving(AppCacheSignals.sources())
+        cacheCoordinator.startObserving(AppCacheSignals.sources(viewerEvents: viewerEvents))
         // UI assets (#971): the emote sheets, sticker strips, animated icons
         // and flag palette the kits announced, now and later, join the
         // coordinator as its longest-kept class.

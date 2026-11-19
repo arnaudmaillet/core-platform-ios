@@ -41,7 +41,7 @@ struct SnapAuthorPillHandOffTests {
             base: AuthoredPhotos(), ids: ["a", "b", "c"].map { PostID($0) }, isCompleteSet: true
         )
         let controller = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: provider, unavailablePosts: UnavailablePosts()),
+            viewModel: FeedViewModel(repository: provider, unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents())),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             bookmarks: PostBookmarkStore(scope: StorageScope()),
             savedSounds: SavedSoundStore(scope: StorageScope()),

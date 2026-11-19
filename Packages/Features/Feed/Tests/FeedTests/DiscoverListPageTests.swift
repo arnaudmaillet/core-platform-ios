@@ -40,7 +40,7 @@ struct DiscoverListPageTests {
     private func page(_ posts: [GalleryPost], complete: Bool = true) -> PostGridPageView {
         let page = PostGridPageView(imagePipeline: pipeline(), style: .discover,
         bookmarks: PostBookmarkStore(scope: StorageScope()),
-        withheldPosts: UnavailablePosts())
+        withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents()))
         // TALL, so the first run of cards AND the first chunk are realized:
         // three media cards alone can outgrow a phone's height, and the hero
         // questions below read realized cells.
@@ -301,7 +301,7 @@ struct DiscoverListPageTests {
     private func pairedPage(_ posts: [GalleryPost]) -> PostGridPageView {
         let page = PostGridPageView(imagePipeline: pipeline(), style: .discover,
         bookmarks: PostBookmarkStore(scope: StorageScope()),
-        withheldPosts: UnavailablePosts())
+        withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents()))
         page.frame = CGRect(x: 0, y: 0, width: 393, height: 6000)
         page.setCorpusComplete(true)
         page.render(.content(posts))
@@ -396,7 +396,7 @@ struct DiscoverListPageTests {
         let posts = verticalCorpus(90)
         let page = PostGridPageView(imagePipeline: pipeline(), style: .discover,
         bookmarks: PostBookmarkStore(scope: StorageScope()),
-        withheldPosts: UnavailablePosts())
+        withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents()))
         page.frame = CGRect(x: 0, y: 0, width: 393, height: 3000)
         page.setCorpusComplete(false)
         page.render(.content(Array(posts[..<25])))
@@ -454,7 +454,7 @@ struct DiscoverGalleryTests {
     ) -> DiscoverGalleryViewController {
         DiscoverGalleryViewController(
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
-            videoPlayback: nil, bookmarks: PostBookmarkStore(scope: StorageScope()), withheldPosts: UnavailablePosts(),
+            videoPlayback: nil, bookmarks: PostBookmarkStore(scope: StorageScope()), withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents()),
             header: PushedScreenHeader(wallet: wallet, makeWalletSheet: nil, router: nil),
             openPost: openPost
         )

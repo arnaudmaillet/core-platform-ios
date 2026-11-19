@@ -36,7 +36,7 @@ struct ShelfPushedListTests {
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
             videoPlayback: nil,
             bookmarks: PostBookmarkStore(scope: StorageScope()),
-            withheldPosts: UnavailablePosts(), staking: nil,
+            withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents()), staking: nil,
             header: PushedScreenHeader(wallet: nil, makeWalletSheet: nil, router: nil),
             openPost: nil
         )

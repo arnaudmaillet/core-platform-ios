@@ -27,7 +27,7 @@ struct DiscoverPostSetSurfaceTests {
         return PostSetSurfaceViewController(
             style: style,
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
-            videoPlayback: nil, bookmarks: PostBookmarkStore(scope: StorageScope()), withheldPosts: UnavailablePosts(),
+            videoPlayback: nil, bookmarks: PostBookmarkStore(scope: StorageScope()), withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents()),
             // Answers in its own order, as a timeline does.
             hydrate: { ids in ids.reversed().compactMap { byID[$0] } }
         )

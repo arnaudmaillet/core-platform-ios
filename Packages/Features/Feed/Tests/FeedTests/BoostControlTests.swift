@@ -486,7 +486,7 @@ struct BoostControlTests {
     /// toolbar's.
     @Test func feedTrailingRunIsEmptyWithoutAWallet() {
         let feed = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: InertFeedProvider(), unavailablePosts: UnavailablePosts()),
+            viewModel: FeedViewModel(repository: InertFeedProvider(), unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents())),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             bookmarks: PostBookmarkStore(scope: StorageScope()),
             savedSounds: SavedSoundStore(scope: StorageScope()),
@@ -528,7 +528,7 @@ struct BoostControlTests {
         defaults.removePersistentDomain(forName: suite)
         let wallet = WalletStore(defaults: defaults, scope: StorageScope())
         let feed = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: InertFeedProvider(), unavailablePosts: UnavailablePosts()),
+            viewModel: FeedViewModel(repository: InertFeedProvider(), unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents())),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             wallet: wallet,
             showsBalance: showsBalance,

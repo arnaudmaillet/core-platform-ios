@@ -25,7 +25,7 @@ struct KnownFirstSetsTests {
         PostSetSurfaceViewController(
             style: style,
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
-            videoPlayback: nil, bookmarks: PostBookmarkStore(scope: StorageScope()), withheldPosts: UnavailablePosts(),
+            videoPlayback: nil, bookmarks: PostBookmarkStore(scope: StorageScope()), withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents()),
             held: { id in held.contains(id.rawValue) ? Self.post(id.rawValue) : nil },
             hydrate: hydrate
         )
@@ -69,7 +69,7 @@ struct KnownFirstSetsTests {
             postDrafts: PostDraftStore(scope: StorageScope()), entities: store,
             bookmarks: PostBookmarkStore(scope: StorageScope()),
             viewHistory: PostViewHistoryStore(scope: StorageScope()),
-            unavailablePosts: UnavailablePosts(),
+            unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents()),
             savedSounds: SavedSoundStore(scope: StorageScope()),
             viewerProfile: { nil }
         ))
@@ -93,7 +93,7 @@ struct KnownFirstSetsTests {
             postDrafts: PostDraftStore(scope: StorageScope()),
             bookmarks: PostBookmarkStore(scope: StorageScope()),
             viewHistory: PostViewHistoryStore(scope: StorageScope()),
-            unavailablePosts: UnavailablePosts(),
+            unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents()),
             savedSounds: SavedSoundStore(scope: StorageScope()),
             viewerProfile: { nil }
         ))

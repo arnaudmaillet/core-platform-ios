@@ -96,7 +96,8 @@ extension AppContainer {
             localStore: localStore,
             // The person rows hear a follow made on any screen (#896).
             followEvents: followGraphEvents,
-            presence: sectionPresence
+            presence: sectionPresence,
+            viewerEvents: viewerEvents
         )
     }
 }

@@ -144,7 +144,7 @@ struct GridPageDisplayTests {
     @Test func aCellAboutToDisplayNamesItsPost() {
         let page = PostGridPageView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .grid,
         bookmarks: PostBookmarkStore(scope: StorageScope()),
-        withheldPosts: UnavailablePosts())
+        withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents()))
         page.frame = CGRect(x: 0, y: 0, width: 393, height: 1200)
         let posts = (0..<6).map { index in
             GalleryPost(
