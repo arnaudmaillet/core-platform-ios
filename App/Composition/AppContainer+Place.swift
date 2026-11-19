@@ -32,7 +32,8 @@ extension AppContainer {
             entities: entityStore,
             router: routeResolver,
             authorMarks: feedBuilder.authorMarks,
-            postOpenWarm: feedBuilder.postOpenWarm
+            postOpenWarm: feedBuilder.postOpenWarm,
+            presence: sectionPresence
         )
     }
 }

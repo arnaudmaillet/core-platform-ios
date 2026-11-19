@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import Foundation
 import MediaCore
 import PostGrid
@@ -34,7 +35,7 @@ struct PlaceShelfDismissalTests {
         let place = PlaceProfileViewController(
             postIDs: posts.map(\.id), placeName: "Paris", rank: nil,
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()), videoPlayback: nil,
-            following: nil, wallet: nil, loadPosts: { posts }, openPost: { _, _, _ in }
+            following: nil, wallet: nil, loadPosts: { posts }, presence: SectionPresenceStore(scope: StorageScope()), openPost: { _, _, _ in }
         )
         // Pushed, as the map pushes it: a root screen has nothing to close to.
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))

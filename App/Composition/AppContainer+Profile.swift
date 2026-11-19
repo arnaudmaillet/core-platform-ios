@@ -138,7 +138,8 @@ extension AppContainer {
             switching: profileRepository,
             settings: settingsFeature,
             profileItems: profileItems,
-            localStore: localStore
+            localStore: localStore,
+            presence: sectionPresence
         )
         // The one place that can see both features, which is the whole reason
         // this is injected rather than reached for: Profile describes where a

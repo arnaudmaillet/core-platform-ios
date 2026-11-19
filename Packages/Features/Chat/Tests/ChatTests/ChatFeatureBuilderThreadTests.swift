@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import Foundation
 import Testing
 import UIKit
@@ -22,14 +23,14 @@ struct ChatFeatureBuilderThreadTests {
     /// The thread's footer has no emote strip any more (#680): the peer pill
     /// leads it, and the composer's emote button is the way to emotes.
     @Test func anExistingThreadIsTheTextPostsScreen() throws {
-        let builder = ChatFeatureBuilder(repository: Stub())
+        let builder = ChatFeatureBuilder(repository: Stub(), presence: SectionPresenceStore(scope: StorageScope()), voicePlayed: VoicePlayedStore())
         let built = builder.makeConversationViewController(for: ConversationID("c1"))
         let screen = try #require(built as? ConversationThreadViewController)
         #expect(screen.mode == .full)
     }
 
     @Test func aSharedLinkReachesTheScreenAsItsDraft() throws {
-        let builder = ChatFeatureBuilder(repository: Stub())
+        let builder = ChatFeatureBuilder(repository: Stub(), presence: SectionPresenceStore(scope: StorageScope()), voicePlayed: VoicePlayedStore())
         let built = builder.makeDraftConversationViewController(
             with: ProfileID("them"), displayName: "Ava", prefill: "https://example.test/p/1"
         )

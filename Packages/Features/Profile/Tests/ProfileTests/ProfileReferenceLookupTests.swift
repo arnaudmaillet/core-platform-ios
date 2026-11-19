@@ -1,6 +1,7 @@
 import CoreModels
 import CoreNavigation
 import CoreNetworking
+import CoreStorage
 import Foundation
 import MediaCore
 import ProfileInterface
@@ -196,7 +197,7 @@ struct ProfileReferenceLookupTests {
                 source: .lookup(.handle("ada")), lookup: { await lookup($0) }
             ),
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
-            makeGridPage: TestGridPages.factory(),
+            makeGridPage: TestGridPages.factory(), presence: SectionPresenceStore(scope: StorageScope()),
             onLogout: nil
         )
     }

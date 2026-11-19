@@ -1,5 +1,6 @@
 import CoreModels
 import CoreNavigation
+import CoreStorage
 import FeedInterface
 import Foundation
 import MediaCore
@@ -111,7 +112,7 @@ struct ProfileTileCloseLandingTests {
         let screen = ProfileViewController(
             viewModel: ProfileViewModel(repository: NoProfiles(), gallery: NoGallery(), source: .currentUser),
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
-            makeGridPage: TestGridPages.factory(),
+            makeGridPage: TestGridPages.factory(), presence: SectionPresenceStore(scope: StorageScope()),
             onLogout: nil
         )
         var handed: SnapFeedHeroOrigin?

@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import MediaCore
 import Testing
 import UIKit
@@ -69,7 +70,7 @@ struct ConversationThreadPublicGroupTests {
     private func makeScreen(_ group: ConversationThreadGroup?) -> (ConversationThreadViewController, GroupDriver, UIWindow) {
         let driver = GroupDriver(group: group)
         let screen = ConversationThreadViewController(
-            driver: driver, mode: .full, prefill: "", imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+            driver: driver, mode: .full, prefill: "", imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()), presence: SectionPresenceStore(scope: StorageScope()), voicePlayed: VoicePlayedStore()
         )
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         window.rootViewController = UINavigationController(rootViewController: screen)

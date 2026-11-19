@@ -120,13 +120,13 @@ struct ConversationThreadViewControllerTests {
         let accessory = FakeAccessory()
         let screen = ConversationThreadViewController(
             driver: driver, mode: mode, prefill: prefill,
-            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            presence: presence ?? SectionPresenceStore(scope: StorageScope()), voicePlayed: VoicePlayedStore()
         )
         // One "now" for the seed and the titles: a run crossing midnight
         // read the clock on either side of it.
         if let now { screen.dayClock = { now } }
         if let skeletonClock { screen.skeletonClock = skeletonClock }
-        if let presence { screen.presence = presence }
         screen.anchorsShortStream = anchorsShortStream
         let navigation = UINavigationController(rootViewController: screen)
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))

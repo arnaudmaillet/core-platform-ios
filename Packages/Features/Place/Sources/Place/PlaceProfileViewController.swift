@@ -680,7 +680,7 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab>,
         heldMembers: [GalleryPost] = [],
         loadPosts: @escaping () async throws -> [GalleryPost],
         loadMore: ((String?) async throws -> PlacePostsPage)? = nil,
-        presence: SectionPresenceStore = .shared,
+        presence: SectionPresenceStore,
         openPost: @escaping (UIViewController, SnapFeedHeroOrigin, [PostID]) -> Void
     ) {
         self.presence = presence

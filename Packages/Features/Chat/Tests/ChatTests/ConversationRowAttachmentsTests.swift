@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import DesignSystem
 import MediaCore
 import Testing
@@ -80,7 +81,7 @@ struct ConversationRowAttachmentsTests {
         _ driver: Driver = Driver(), mode: ConversationThreadMode = .full
     ) -> (ConversationThreadViewController, UIWindow) {
         let screen = ConversationThreadViewController(
-            driver: driver, mode: mode, prefill: "", imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+            driver: driver, mode: mode, prefill: "", imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()), presence: SectionPresenceStore(scope: StorageScope()), voicePlayed: VoicePlayedStore()
         )
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         window.rootViewController = UINavigationController(rootViewController: screen)

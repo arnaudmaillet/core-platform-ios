@@ -2,6 +2,7 @@ import CoreContracts
 import CoreModels
 import CoreNetworking
 import CoreNetworkingMocks
+import CoreStorage
 import PlaceInterface
 import Foundation
 import MediaCore
@@ -101,7 +102,7 @@ struct PlacePostsTests {
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             videoPlayback: nil,
             loadPosts: { pages.pins },
-            loadMore: { try await pages.load($0) },
+            loadMore: { try await pages.load($0) }, presence: SectionPresenceStore(scope: StorageScope()),
             openPost: { _, origin, _ in opened?(origin) }
         )
     }
@@ -262,7 +263,7 @@ struct PlacePostsTests {
         let profile = PlaceProfileViewController(
             postIDs: pins.map(\.id), placeName: "Paris",
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()), videoPlayback: nil,
-            loadPosts: { pins }, openPost: { _, opened, _ in origin = opened }
+            loadPosts: { pins }, presence: SectionPresenceStore(scope: StorageScope()), openPost: { _, opened, _ in origin = opened }
         )
         profile.beginLoading()
         #expect(await settle { profile.renderedActivity.count == 1 })

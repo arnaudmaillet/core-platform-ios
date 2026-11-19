@@ -36,7 +36,7 @@ struct ProfileGalleryScrubTests {
 
     /// A pager with real bounds, so offsets and page widths are meaningful.
     private func makePager(width: CGFloat = 400) -> ProfileGalleryPagerView {
-        let pager = ProfileGalleryPagerView(tabs: ProfileTab.postTabsForTests, makePage: TestGridPages.pageMaker())
+        let pager = ProfileGalleryPagerView(tabs: ProfileTab.postTabsForTests, presence: SectionPresenceStore(scope: StorageScope()), makePage: TestGridPages.pageMaker())
         pager.frame = CGRect(x: 0, y: 0, width: width, height: 600)
         pager.layoutIfNeeded()
         return pager
@@ -198,7 +198,7 @@ struct ProfileGalleryOffsetSyncTests {
     }
 
     private func makePager() -> ProfileGalleryPagerView {
-        let pager = ProfileGalleryPagerView(tabs: ProfileTab.postTabsForTests, makePage: TestGridPages.pageMaker())
+        let pager = ProfileGalleryPagerView(tabs: ProfileTab.postTabsForTests, presence: SectionPresenceStore(scope: StorageScope()), makePage: TestGridPages.pageMaker())
         pager.frame = CGRect(x: 0, y: 0, width: 400, height: 600)
         pager.layoutIfNeeded()
         return pager
@@ -368,7 +368,7 @@ struct ProfileGalleryOffsetSyncTests {
 @MainActor
 struct ProfileGalleryPullTests {
     @Test func theActivePagesPullReachesTheScreen() throws {
-        let pager = ProfileGalleryPagerView(tabs: ProfileTab.postTabsForTests, makePage: TestGridPages.pageMaker())
+        let pager = ProfileGalleryPagerView(tabs: ProfileTab.postTabsForTests, presence: SectionPresenceStore(scope: StorageScope()), makePage: TestGridPages.pageMaker())
         pager.frame = CGRect(x: 0, y: 0, width: 400, height: 600)
         pager.layoutIfNeeded()
         var offsets: [CGFloat] = []
@@ -393,7 +393,7 @@ struct ProfileTabPresenceTests {
 
     @Test func theAnswerIsRemembered() throws {
         let defaults = try #require(UserDefaults(suiteName: "presence-\(UUID().uuidString)"))
-        let pager = ProfileGalleryPagerView(tabs: ProfileTab.postTabsForTests, makePage: TestGridPages.pageMaker())
+        let pager = ProfileGalleryPagerView(tabs: ProfileTab.postTabsForTests, presence: SectionPresenceStore(scope: StorageScope()), makePage: TestGridPages.pageMaker())
         pager.presence = SectionPresenceStore(defaults: defaults)
         pager.presenceScreen = { "profile.ada" }
         var snapshot = ProfileViewModel.GallerySnapshot(activity: .empty(message: ""), media: .empty(message: ""))
@@ -436,7 +436,7 @@ struct ProfileGalleryLatePagesTests {
     @Test func aTabsPageIsBuiltWhenShownOnWhatTheGalleryAlreadySaid() throws {
         var built = 0
         let make = TestGridPages.pageMaker()
-        let pager = ProfileGalleryPagerView(tabs: ProfileTab.ownTabs, shown: [.format(.activity)]) { style in
+        let pager = ProfileGalleryPagerView(tabs: ProfileTab.ownTabs, shown: [.format(.activity)], presence: SectionPresenceStore(scope: StorageScope())) { style in
             built += 1
             return make(style)
         }

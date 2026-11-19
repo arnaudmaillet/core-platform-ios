@@ -1,5 +1,6 @@
 import CoreModels
 import CoreNavigation
+import CoreStorage
 import MediaCore
 import PostGrid
 import Testing
@@ -27,7 +28,7 @@ struct PlacePushedBackSwipeTests {
         let place = PlaceProfileViewController(
             postIDs: [post.id], placeName: "Paris • City Cluster",
             imagePipeline: pipeline, videoPlayback: nil,
-            loadPosts: { [post] }, openPost: { _, _, _ in }
+            loadPosts: { [post] }, presence: SectionPresenceStore(scope: StorageScope()), openPost: { _, _, _ in }
         )
         let header = { PushedScreenHeader(wallet: nil, makeWalletSheet: nil, router: nil) }
         place.makePostList = {

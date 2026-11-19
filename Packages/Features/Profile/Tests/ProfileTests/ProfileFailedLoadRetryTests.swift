@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import DesignSystem
 import FeedInterface
 import Foundation
@@ -79,7 +80,7 @@ struct ProfileFailedLoadRetryTests {
         let profiles = FlakyProfiles()
         let viewModel = ProfileViewModel(repository: profiles, source: .profile(ProfileID("prof-kenji")))
         let screen = ProfileViewController(
-            viewModel: viewModel, imagePipeline: ImagePipeline(fetcher: SilentFetcher()), makeGridPage: TestGridPages.factory(), onLogout: nil
+            viewModel: viewModel, imagePipeline: ImagePipeline(fetcher: SilentFetcher()), makeGridPage: TestGridPages.factory(), presence: SectionPresenceStore(scope: StorageScope()), onLogout: nil
         )
         // A visible window for this test alone (`visible-window-suite-release-crash`).
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 393, height: 852))

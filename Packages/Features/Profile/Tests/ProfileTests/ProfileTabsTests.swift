@@ -106,7 +106,7 @@ struct ProfileTabsTests {
     // MARK: - The pager follows the tab list
 
     private func pager(_ tabs: [ProfileTab]) -> ProfileGalleryPagerView {
-        let pager = ProfileGalleryPagerView(tabs: tabs, makePage: TestGridPages.pageMaker())
+        let pager = ProfileGalleryPagerView(tabs: tabs, presence: SectionPresenceStore(scope: StorageScope()), makePage: TestGridPages.pageMaker())
         pager.frame = CGRect(x: 0, y: 0, width: 400, height: 600)
         pager.layoutIfNeeded()
         return pager
@@ -367,7 +367,7 @@ struct ProfileHistoryDaysTests {
     /// page does. No row swipes (the owner, 2026-11-07).
     @Test func onlyHistorysRowsOfferRemoval() throws {
         let pager = ProfileGalleryPagerView(
-            tabs: [.format(.activity), .saved, .history], makePage: TestGridPages.pageMaker()
+            tabs: [.format(.activity), .saved, .history], presence: SectionPresenceStore(scope: StorageScope()), makePage: TestGridPages.pageMaker()
         )
         var removed: [PostID] = []
         pager.onRemoveFromHistory = { removed.append($0.id) }
@@ -383,7 +383,7 @@ struct ProfileHistoryDaysTests {
     /// does not.
     @Test func openingFromHistoryHoldsIt() throws {
         let pager = ProfileGalleryPagerView(
-            tabs: [.format(.activity), .history], makePage: TestGridPages.pageMaker()
+            tabs: [.format(.activity), .history], presence: SectionPresenceStore(scope: StorageScope()), makePage: TestGridPages.pageMaker()
         )
         var holds = 0
         pager.onHistoryPostOpening = { holds += 1 }
@@ -497,7 +497,7 @@ struct ProfileHistoryDaysTests {
         viewModel.now = { now }
         let screen = ProfileViewController(
             viewModel: viewModel, imagePipeline: ImagePipeline(fetcher: NoImages()),
-            makeGridPage: TestGridPages.factory(), onLogout: {}, trayPlacement: .aboveBottomSafeArea
+            makeGridPage: TestGridPages.factory(), presence: SectionPresenceStore(scope: StorageScope()), onLogout: {}, trayPlacement: .aboveBottomSafeArea
         )
         screen.loadViewIfNeeded()
         let balance = UIBarButtonItem(title: "250")

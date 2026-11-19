@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import MediaCore
 import Testing
 import UIKit
@@ -64,7 +65,7 @@ struct ConversationThreadMediaTests {
         let driver = MediaDriver(sendsMedia: sendsMedia, messages: messages)
         let screen = ConversationThreadViewController(
             driver: driver, mode: .full, prefill: "",
-            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()), presence: SectionPresenceStore(scope: StorageScope()), voicePlayed: VoicePlayedStore()
         )
         let navigation = UINavigationController(rootViewController: screen)
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))

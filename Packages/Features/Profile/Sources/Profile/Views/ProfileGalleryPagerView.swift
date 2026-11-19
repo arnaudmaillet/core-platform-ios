@@ -66,8 +66,10 @@ final class ProfileGalleryPagerView: HeroPagePager<ProfileTab> {
         tabs: [ProfileTab] = ProfileTab.publicTabs,
         shown: [ProfileTab]? = nil,
         makeChannelsPage: (() -> any PostGridPage)? = nil,
+        presence: SectionPresenceStore,
         makePage: @escaping (PostGridPageStyle) -> any PostGridPage
     ) {
+        self.presence = presence
         super.init(tabs: tabs, shown: shown) { tab in
             if tab == .channels, let makeChannelsPage { return makeChannelsPage() }
             let page = makePage(ProfileGalleryPagerView.style(for: tab))
@@ -136,7 +138,8 @@ final class ProfileGalleryPagerView: HeroPagePager<ProfileTab> {
     /// The profile's presence key (`ProfileViewModel.presenceScreen`), asked
     /// at each render: nil leaves every tab its bones.
     var presenceScreen: () -> String? = { nil }
-    var presence: SectionPresenceStore = .shared
+    /// Which tabs had posts last time (#1773): the app's one store (#2376).
+    var presence: SectionPresenceStore
     /// What the pages were last shown, for a page built after it.
     private var lastSnapshot: ProfileViewModel.GallerySnapshot?
 

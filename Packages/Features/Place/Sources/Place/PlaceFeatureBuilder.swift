@@ -33,6 +33,7 @@ public final class PlaceFeatureBuilder: PlaceFeatureBuilding {
     private let router: (any Router)?
     private let authorMarks: PostAuthorMarks?
     private let postOpenWarm: PostOpenWarm?
+    private let presence: SectionPresenceStore
     /// The balance the pushed screens' header wears: only where likes move
     /// (#2336).
     private var balanceWallet: (any WalletStaking)? { showsBalance() ? wallet : nil }
@@ -56,8 +57,11 @@ public final class PlaceFeatureBuilder: PlaceFeatureBuilding {
         /// The cards' relation marks (#2300) and the tiles' comment warm-up
         /// (#2002): the feed's own, so a place's cards match every other.
         authorMarks: PostAuthorMarks?,
-        postOpenWarm: PostOpenWarm?
+        postOpenWarm: PostOpenWarm?,
+        /// The app's one memory of each screen's sections (#1774, #2376).
+        presence: SectionPresenceStore
     ) {
+        self.presence = presence
         self.feed = feed
         self.hydrate = hydrate
         self.placePosts = placePosts
@@ -143,6 +147,7 @@ public final class PlaceFeatureBuilder: PlaceFeatureBuilding {
                     }
                 }
             },
+            presence: presence,
             openPost: { [feed] presenter, origin, ids in
                 feed.presentSnapFeedHero(postIDs: ids, from: presenter, origin: origin)
             }

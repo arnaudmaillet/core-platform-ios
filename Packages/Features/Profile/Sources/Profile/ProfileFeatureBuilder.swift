@@ -36,6 +36,9 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
     /// saved fact (#896), so a save made in a feed is on the gallery's cards.
     /// See `PostBookmarkStore`.
     private let bookmarks = PostBookmarkStore.shared
+    /// Which tabs each profile had last time (#1773): the app's one store
+    /// (#2376).
+    private let presence: SectionPresenceStore
     /// Last-known profiles, shared by every profile screen so a switch to one
     /// already seen renders instantly. One per app, like the preferences;
     /// backed by the device store when the app hands one in (#893).
@@ -67,8 +70,10 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
         /// The device store (#893): the viewer's own profile and the profiles
         /// they visited open on their last content at a cold start. Nil keeps
         /// the profile cache in memory.
-        localStore: LocalStore? = nil
+        localStore: LocalStore? = nil,
+        presence: SectionPresenceStore
     ) {
+        self.presence = presence
         self.cache = ProfileCache(store: localStore)
         self.relationshipsCache = localStore.map(ProfileRelationshipsLocalCache.init(store:))
         self.repository = repository
@@ -146,6 +151,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
             imagePipeline: imagePipeline,
             videoPlayback: videoPlayback,
             makeGridPage: gridPageFactory,
+            presence: presence,
             shareTargeting: shareTargeting,
             onLogout: onLogout,
             makeEditViewController: { [imagePipeline, gallery, profileItems, settings] profile, onSaved in
@@ -307,6 +313,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
             imagePipeline: imagePipeline,
             videoPlayback: videoPlayback,
             makeGridPage: gridPageFactory,
+            presence: presence,
             shareTargeting: shareTargeting,
             onLogout: nil,
             makeRelationshipsViewController: makeRelationshipsFactory(),

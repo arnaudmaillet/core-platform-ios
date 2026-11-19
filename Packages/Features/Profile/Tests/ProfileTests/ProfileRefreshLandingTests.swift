@@ -105,7 +105,7 @@ struct ProfileRefreshLandingTests {
             repository: profiles, gallery: gallery, source: .profile(ProfileID("prof-kenji"))
         )
         let screen = ProfileViewController(
-            viewModel: viewModel, imagePipeline: ImagePipeline(fetcher: SilentFetcher()), makeGridPage: TestGridPages.factory(), onLogout: nil
+            viewModel: viewModel, imagePipeline: ImagePipeline(fetcher: SilentFetcher()), makeGridPage: TestGridPages.factory(), presence: SectionPresenceStore(scope: StorageScope()), onLogout: nil
         )
         // ⚠️ A PRESENCE OF ITS OWN (#1773). The shared store is the test
         // host's defaults, which the suites with an empty Kenji write into

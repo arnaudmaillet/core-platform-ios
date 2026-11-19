@@ -95,7 +95,8 @@ extension AppContainer {
             // The trending people, so a cold start opens Search on them (#893).
             localStore: localStore,
             // The person rows hear a follow made on any screen (#896).
-            followEvents: followGraphEvents
+            followEvents: followGraphEvents,
+            presence: sectionPresence
         )
     }
 }

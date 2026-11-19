@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import MediaCore
 import Testing
 import UIKit
@@ -73,7 +74,7 @@ struct ProfileChildChromeTests {
         let screen = ProfileViewController(
             viewModel: ProfileViewModel(repository: StubProfiles()),
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
-            makeGridPage: TestGridPages.factory(),
+            makeGridPage: TestGridPages.factory(), presence: SectionPresenceStore(scope: StorageScope()),
             onLogout: nil,
             trayPlacement: .navigationToolbar
         )
@@ -88,7 +89,7 @@ struct ProfileChildChromeTests {
         let screen = ProfileViewController(
             viewModel: ProfileViewModel(repository: StubProfiles()),
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
-            makeGridPage: TestGridPages.factory(),
+            makeGridPage: TestGridPages.factory(), presence: SectionPresenceStore(scope: StorageScope()),
             onLogout: nil,
             trayPlacement: .aboveBottomSafeArea
         )

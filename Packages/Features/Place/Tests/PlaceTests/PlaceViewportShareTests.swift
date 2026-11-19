@@ -1,5 +1,6 @@
 import CoreModels
 import CoreNavigation
+import CoreStorage
 import Foundation
 import MediaCore
 import PostGrid
@@ -20,7 +21,7 @@ struct PlaceViewportShareTests {
         let screen = PlaceProfileViewController(
             postIDs: [post.id], placeName: "Paris • City Cluster",
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()), videoPlayback: nil,
-            loadPosts: { [post] }, openPost: { _, _, _ in }
+            loadPosts: { [post] }, presence: SectionPresenceStore(scope: StorageScope()), openPost: { _, _, _ in }
         )
         screen.loadViewIfNeeded()
         return screen

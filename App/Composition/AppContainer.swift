@@ -442,6 +442,17 @@ final class AppContainer {
     /// it did before.
     private(set) lazy var localStore: LocalStore? = makeLocalStore()
 
+    // MARK: - Viewer storage (#2376)
+
+    /// Which sections each screen showed last time (#1774): the skeleton's
+    /// memory, ONE store for every screen that draws one — the thread, the
+    /// place page, the profile's gallery, Search.
+    private(set) lazy var sectionPresence = SectionPresenceStore()
+
+    /// The received voice messages the viewer played (#2104): every
+    /// conversation reads the same memory.
+    private(set) lazy var voicePlayed = VoicePlayedStore()
+
     // MARK: - Media
 
     /// Mock mode serves the corpus's bundled photos for `mock://photo/…` URLs

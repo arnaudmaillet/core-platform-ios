@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import DesignSystem
 import Foundation
 import MediaCore
@@ -82,7 +83,7 @@ struct UnavailableProfilePlainPageTests {
         let screen = ProfileViewController(
             viewModel: ProfileViewModel(repository: profiles, source: .profile(id), cache: cache),
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
-            makeGridPage: TestGridPages.factory(),
+            makeGridPage: TestGridPages.factory(), presence: SectionPresenceStore(scope: StorageScope()),
             onLogout: nil,
             trayPlacement: .aboveBottomSafeArea
         )
@@ -136,7 +137,7 @@ struct UnavailableProfilePlainPageTests {
         let screen = ProfileViewController(
             viewModel: ProfileViewModel(repository: Profiles(person(), gone: true)),
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
-            makeGridPage: TestGridPages.factory(),
+            makeGridPage: TestGridPages.factory(), presence: SectionPresenceStore(scope: StorageScope()),
             onLogout: {},
             trayPlacement: .aboveBottomSafeArea
         )

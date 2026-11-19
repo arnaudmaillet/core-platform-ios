@@ -42,7 +42,7 @@ struct SearchSuggestedGateTests {
             localCache: nil
         )
         let screen = SearchViewController(
-            viewModel: model, imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+            viewModel: model, imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()), presence: SectionPresenceStore(scope: StorageScope())
         )
         // Never seen: the fold's bones once they are due.
         screen.presence = SectionPresenceStore(defaults: UserDefaults(suiteName: UUID().uuidString)!)

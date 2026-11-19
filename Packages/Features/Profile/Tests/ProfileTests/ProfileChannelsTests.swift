@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import DesignSystem
 import FeedInterface
 import Foundation
@@ -418,7 +419,7 @@ struct ProfileChannelsTests {
         ProfileViewController(
             viewModel: ProfileViewModel(repository: Profiles()),
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
-            makeGridPage: TestGridPages.factory(),
+            makeGridPage: TestGridPages.factory(), presence: SectionPresenceStore(scope: StorageScope()),
             onLogout: {},
             trayPlacement: .aboveBottomSafeArea,
             channels: channels

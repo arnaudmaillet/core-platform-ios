@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import DesignSystem
 import PlaceInterface
 import Foundation
@@ -52,7 +53,7 @@ struct PlaceHeaderHairlineTests {
             placeName: "Paris • City Cluster",
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
             videoPlayback: nil,
-            loadPosts: { [] },
+            loadPosts: { [] }, presence: SectionPresenceStore(scope: StorageScope()),
             openPost: { _, _, _ in }
         )
         #expect(place.debugHeader.drawsFootHairline)

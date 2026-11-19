@@ -71,7 +71,7 @@ struct ProfileTakingLongerTests {
                 let page = make(style, saves)
                 (page as? PostGridPageView)?.skeletonClock = time.clock
                 return page
-            },
+            }, presence: SectionPresenceStore(scope: StorageScope()),
             onLogout: nil
         )
         // Never seen: the pages show their bones while they load.

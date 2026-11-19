@@ -1,5 +1,6 @@
 import CoreContracts
 import CoreModels
+import CoreStorage
 import Foundation
 import HeroPage
 import MediaCore
@@ -120,7 +121,7 @@ struct ProfileVideoBannerTests {
             viewModel: ProfileViewModel(repository: BannerProfiles(), source: .currentUser),
             imagePipeline: ImagePipeline(fetcher: NoFetch()),
             videoPlayback: pool,
-            makeGridPage: TestGridPages.factory(),
+            makeGridPage: TestGridPages.factory(), presence: SectionPresenceStore(scope: StorageScope()),
             onLogout: nil
         )
         let navigation = UINavigationController(rootViewController: screen)

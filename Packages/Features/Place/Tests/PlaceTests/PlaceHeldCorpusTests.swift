@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import Foundation
 import MediaCore
 import PostGrid
@@ -34,7 +35,7 @@ struct PlaceHeldCorpusTests {
             loadPosts: {
                 while !gate.isOpen { try? await Task.sleep(for: .milliseconds(2)) }
                 return loaded
-            },
+            }, presence: SectionPresenceStore(scope: StorageScope()),
             openPost: { _, _, _ in }
         )
     }

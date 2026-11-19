@@ -3,20 +3,22 @@ import Foundation
 /// Which received voice messages the viewer has played (#2104) — the
 /// unplayed dot's memory, kept on the device until the backend models a
 /// listened state (backend#993). The most recent `capacity` ids.
+///
+/// ONE instance, built by the app and handed to the chat builder (#2376):
+/// every conversation reads and writes the same memory.
 @MainActor
-final class VoicePlayedStore {
-    static let shared = VoicePlayedStore()
+public final class VoicePlayedStore {
     static let key = "voice.playedMessageIDs"
     static let capacity = 2_000
 
     private let defaults: UserDefaults
-    private var ids: [String]
-    private var lookup: Set<String>
+    /// Read on first use, not at init: the app builds the store with the chat
+    /// feature, at launch, and the list is only needed in a conversation.
+    private lazy var ids: [String] = defaults.stringArray(forKey: Self.key) ?? []
+    private lazy var lookup: Set<String> = Set(ids)
 
-    init(defaults: UserDefaults = .standard) {
+    public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        ids = defaults.stringArray(forKey: Self.key) ?? []
-        lookup = Set(ids)
     }
 
     func isPlayed(_ messageID: String) -> Bool { lookup.contains(messageID) }

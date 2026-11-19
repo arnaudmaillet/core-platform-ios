@@ -105,12 +105,14 @@ final class SearchViewController: UIViewController {
     init(
         viewModel: SearchViewModel,
         imagePipeline: ImagePipeline,
+        presence: SectionPresenceStore,
         postSurfaces: (any SearchPostSurfaceProviding)? = nil,
         wallet: (any WalletReading)? = nil,
         makeWalletSheet: (@MainActor () -> UIViewController)? = nil,
         showsBalance: @escaping @MainActor () -> Bool = { true },
         mode: Mode = .origin
     ) {
+        self.presence = presence
         self.viewModel = viewModel
         self.imagePipeline = imagePipeline
         self.postSurfaces = postSurfaces
@@ -615,11 +617,12 @@ final class SearchViewController: UIViewController {
         // the stack replacement below). A refine screen is built on demand,
         // shares this screen's view model so the filters and the history carry
         // over, and pops itself when it is done.
-        results.onEditQuery = { [weak results, viewModel, imagePipeline, postSurfaces] in
+        results.onEditQuery = { [weak results, viewModel, imagePipeline, presence, postSurfaces] in
             guard let results else { return }
             let refine = SearchViewController(
                 viewModel: viewModel,
                 imagePipeline: imagePipeline,
+                presence: presence,
                 postSurfaces: postSurfaces,
                 mode: .refine
             )
@@ -1022,8 +1025,9 @@ final class SearchViewController: UIViewController {
         return snapshot
     }
 
-    /// Where the Suggested section remembers whether it had rows (#1773).
-    var presence: SectionPresenceStore = .shared
+    /// Where the Suggested section remembers whether it had rows (#1773):
+    /// the app's one store (#2376).
+    var presence: SectionPresenceStore
     private static let presenceScreen = "search.explore"
 
     private var rememberedSuggested: Int? {
