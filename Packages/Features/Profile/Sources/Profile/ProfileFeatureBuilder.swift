@@ -1,19 +1,16 @@
-import MediaCore
 import CoreModels
 import CoreNavigation
+import CoreStorage
+import DesignSystem
 import FeedInterface
 import LocalStore
 import MapsInterface
+import MediaCore
 import MediaPlayback
-import CoreStorage
-import DesignSystem
 import PostGrid
+import ProfileData
 import ProfileInterface
-// Settings, Account and the profile's data live in their own target (#2382,
-// stage 1). Re-exported so the app's `import Profile` reaches what it always
-// did (the account repository, `PasskeyOffer`, `SettingsLinks`…); stage 3
-// gives Settings an interface of its own and this goes.
-@_exported import ProfileSettings
+import SettingsInterface
 import UIKit
 
 /// The profile feature's entry point, resolved by the composition root and
@@ -49,9 +46,9 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
     private let router: (any Router)?
     /// Multi-profile switching for the account (lists profiles, switches active).
     private let switching: (any ProfileSwitching)?
-    /// Settings and Account (#2382): the own profile's gear, and Edit
-    /// Profile's Account Type and list privacy rows.
-    private let settings: SettingsAssembly
+    /// Settings and Account (#2382), through its interface: the own
+    /// profile's gear, and Edit Profile's Account Type and list privacy rows.
+    private let settings: any SettingsFeatureBuilding
     /// The gem-shop items a profile wears (#944): Edit Profile's Video
     /// Banner row. Nil hides the row.
     private let profileItems: (any ProfileItemAccess)?
@@ -65,7 +62,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
         imagePipeline: ImagePipeline,
         router: (any Router)? = nil,
         switching: (any ProfileSwitching)? = nil,
-        settings: SettingsAssembly,
+        settings: any SettingsFeatureBuilding,
         profileItems: (any ProfileItemAccess)? = nil,
         /// The device store (#893): the viewer's own profile and the profiles
         /// they visited open on their last content at a cold start. Nil keeps
@@ -111,18 +108,6 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                 imagePipeline: imagePipeline
             )
         }
-    }
-
-    public func makeFamilyAndTeensViewController(openingSupervisionWith otherAccountID: String?) -> UIViewController? {
-        settings.makeFamilyAndTeensViewController(openingSupervisionWith: otherAccountID)
-    }
-
-    public func makeSupervisionAcceptViewController(code: String) -> UIViewController? {
-        settings.makeSupervisionAcceptViewController(code: code)
-    }
-
-    public func makeGuestSettingsViewController(onSignIn: @escaping () -> Void) -> UIViewController {
-        settings.makeGuestSettingsViewController(onSignIn: onSignIn)
     }
 
     public func makeProfileSwitcher() -> ProfileSwitcherPresenting? {

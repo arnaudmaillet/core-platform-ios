@@ -1,14 +1,14 @@
 import CoreModels
 import CoreStorage
 import DesignSystem
-import MediaCore
 import Foundation
+import MediaCore
 import PostGrid
+import ProfileInterface
 import Testing
 import UIKit
-import ProfileInterface
 @testable import Profile
-@testable import ProfileSettings
+@testable import ProfileData
 
 /// Edit Profile → Video Banner (#944): the shop item at 500 gems until the
 /// account owns it, then the loop of one of the viewer's own video posts.

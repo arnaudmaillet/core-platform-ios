@@ -3,7 +3,7 @@ import PostGrid
 import Testing
 import UIKit
 @testable import Profile
-@testable import ProfileSettings
+@testable import ProfileData
 
 // The profile's menus from plain inputs (#846): no view controller.
 

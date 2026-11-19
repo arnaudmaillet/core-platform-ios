@@ -3,7 +3,7 @@ import DesignSystem
 import MediaCore
 import MediaUI
 import PostGrid
-import ProfileSettings
+import ProfileData
 import UIKit
 
 /// Edit Profile → Video banner (#944): the viewer's own video posts, three

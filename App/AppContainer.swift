@@ -35,9 +35,12 @@ import Place
 import PlaceInterface
 import PostGrid
 import Profile
+import ProfileData
 import ProfileInterface
 import Search
 import SearchInterface
+import Settings
+import SettingsInterface
 import Upload
 import Wallet
 import WalletInterface
@@ -1492,10 +1495,7 @@ final class AppContainer {
 
     /// "Where you're logged in": `auth.v1` ListSessions / Logout / LogoutAllSessions
     /// on the AUTHENTICATED client — they act on the calling principal's account.
-    /// The account's credentials and sessions, for the shell's passkey offer
-    /// after a sign-in (#840).
-    var accountSessions: AccountSessionsRepository { accountSessionsRepository }
-
+    /// Also the shell's passkey offer after a sign-in (#840), through Settings.
     private lazy var accountSessionsRepository = AccountSessionsRepository(
         authClient: Auth_V1_AuthServiceClient(client: authenticatedRPCClient),
         // A step-up's fresh access token replaces the session's, so the
@@ -1582,7 +1582,7 @@ final class AppContainer {
 
     /// Settings and Account (#2382): every screen's dependency typed, so a
     /// missing one fails to compile rather than leaving its row "Coming Soon".
-    private lazy var settingsAssembly = SettingsAssembly(dependencies: .init(
+    private(set) lazy var settingsFeature: any SettingsFeatureBuilding = SettingsAssembly(dependencies: .init(
         profile: profileRepository,
         account: accountRepository,
         security: accountSessionsRepository,
@@ -1629,7 +1629,7 @@ final class AppContainer {
             imagePipeline: imagePipeline,
             router: routeResolver,
             switching: profileRepository,
-            settings: settingsAssembly,
+            settings: settingsFeature,
             profileItems: profileItems,
             localStore: localStore
         )
@@ -1977,6 +1977,7 @@ final class AppContainer {
     private(set) lazy var routeResolver = RouteResolver(
         searchFeature: { [unowned self] in self.searchFeature },
         profileFeature: { [unowned self] in self.profileFeature },
+        settingsFeature: { [unowned self] in self.settingsFeature },
         feedFeature: { [unowned self] in self.feedFeature },
         chatFeature: { [unowned self] in self.chatFeature },
         // The pushed profile's balance: the same store and the same sheet as

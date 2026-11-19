@@ -1,7 +1,7 @@
 import CoreStorage
 import DesignSystem
 import LaunchArguments
-import Profile
+import ProfileData
 import UIKit
 
 /// Counts time in the app and raises the daily-limit and break reminders

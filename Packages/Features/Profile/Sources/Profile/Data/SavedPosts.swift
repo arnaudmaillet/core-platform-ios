@@ -4,7 +4,7 @@ import CoreNetworking
 import CoreStorage
 import Foundation
 import LaunchArguments
-import ProfileSettings
+import ProfileData
 import UIKit
 
 // MARK: - The wire

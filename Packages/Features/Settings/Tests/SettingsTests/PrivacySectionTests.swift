@@ -1,0 +1,296 @@
+import Testing
+@testable import ProfileData
+@testable import Settings
+
+/// Settings → Privacy → Private Account (#388): the switch shows what the
+/// server holds, never what was merely asked for.
+@MainActor
+struct PrivacySectionTests {
+    @Test func loadsTheServersValue() async {
+        let model = PrivacySectionViewModel(visibility: StubVisibility(isPrivate: true))
+        await model.load()
+        #expect(model.phase == .loaded(isPrivate: true))
+    }
+
+    @Test func goingPrivateWritesThenShows() async throws {
+        let stub = StubVisibility(isPrivate: false)
+        let model = PrivacySectionViewModel(visibility: stub)
+        await model.load()
+        try await model.setPrivate(true)
+        #expect(await stub.writes == [true])
+        #expect(model.phase == .loaded(isPrivate: true))
+        #expect(!model.isSaving)
+    }
+
+    /// A failed write leaves the phase on the old value, so the switch snaps
+    /// back to the truth.
+    @Test func aFailedWriteKeepsTheOldValue() async {
+        let model = PrivacySectionViewModel(visibility: StubVisibility(isPrivate: false, failsWrite: true))
+        await model.load()
+        await #expect(throws: (any Error).self) { try await model.setPrivate(true) }
+        #expect(model.phase == .loaded(isPrivate: false))
+        #expect(!model.isSaving)
+    }
+
+    @Test func settingTheSameValueSendsNothing() async throws {
+        let stub = StubVisibility(isPrivate: true)
+        let model = PrivacySectionViewModel(visibility: stub)
+        await model.load()
+        try await model.setPrivate(true)
+        #expect(await stub.writes.isEmpty)
+    }
+
+    @Test func aFailedLoadCanBeRetried() async {
+        let stub = StubVisibility(isPrivate: false, failsRead: true)
+        let model = PrivacySectionViewModel(visibility: stub)
+        await model.load()
+        #expect(model.phase == .failed)
+        await stub.recover()
+        await model.load()
+        #expect(model.phase == .loaded(isPrivate: false))
+    }
+
+    // MARK: - Side settings (#799)
+
+    private func makeSideModel(_ sides: StubSides) -> PrivacySectionViewModel {
+        PrivacySectionViewModel(
+            visibility: StubVisibility(isPrivate: false),
+            windows: sides, comments: sides, sharing: sides, audiences: sides, tabs: sides
+        )
+    }
+
+    /// They used to be read with `try?` and their rows simply vanished.
+    @Test func failedSideSettingsAreMarkedFailedNotLeftBlank() async {
+        let model = makeSideModel(StubSides(fails: true))
+        await model.load()
+        #expect(model.failedSides == Set(PrivacySectionViewModel.SideSetting.allCases))
+        #expect(model.postWindow == nil)
+        #expect(model.commentAudience == nil)
+        #expect(model.mentionAudience == nil)
+        #expect(model.postSharing == nil)
+        #expect(model.phase == .loaded(isPrivate: false))
+    }
+
+    @Test func retryingOneSideSettingLoadsOnlyThatOne() async {
+        let sides = StubSides(fails: true)
+        let model = makeSideModel(sides)
+        await model.load()
+        await sides.setFails(false)
+        #expect(await model.reload(.commentAudience))
+        #expect(model.commentAudience == .followers)
+        #expect(model.failedSides == [.postWindow, .interactionAudiences, .postSharing, .tabVisibility])
+        #expect(model.postWindow == nil)
+        #expect(await sides.commentReads == 2)
+        #expect(await sides.windowReads == 1)
+    }
+
+    @Test func retryingTheAudiencesLoadsBothRows() async {
+        let sides = StubSides(fails: true)
+        let model = makeSideModel(sides)
+        await model.load()
+        await sides.setFails(false)
+        #expect(await model.reload(.interactionAudiences))
+        #expect(model.mentionAudience == .followers)
+        #expect(model.messageAudience == .followers)
+        #expect(!model.failedSides.contains(.interactionAudiences))
+    }
+
+    @Test func aSideRetryThatFailsAgainStaysFailedAndReportsIt() async {
+        let model = makeSideModel(StubSides(fails: true))
+        await model.load()
+        #expect(await model.reload(.postSharing) == false)
+        #expect(model.failedSides.contains(.postSharing))
+    }
+
+    @Test func aFailedRefreshKeepsTheSideValuesAlreadyShown() async {
+        let sides = StubSides()
+        let model = makeSideModel(sides)
+        await model.load()
+        #expect(model.failedSides.isEmpty)
+        await sides.setFails(true)
+        await model.load()
+        #expect(model.failedSides.isEmpty)
+        #expect(model.postWindow == .sixMonths)
+        #expect(model.commentAudience == .followers)
+        #expect(model.postSharing == PostSharing(allowsDownloads: true))
+    }
+
+    /// A double tap on a failed row: one read, so offline one toast.
+    @Test(.timeLimit(.minutes(10))) func aSecondRetryWhileOneIsInFlightSendsNoSecondRead() async {
+        let gate = ReadGate()
+        let sharing = GatedSharing(gate: gate)
+        let model = PrivacySectionViewModel(visibility: StubVisibility(isPrivate: false), sharing: sharing)
+        let first = Task { await model.reload(.postSharing) }
+        await gate.waitUntilEntered()
+        #expect(model.reading == [.postSharing])
+        #expect(await model.reload(.postSharing), "the duplicate has nothing to report")
+        await gate.release()
+        #expect(await first.value == false)
+        #expect(await sharing.reads == 1)
+        #expect(model.reading.isEmpty)
+        #expect(model.failedSides == [.postSharing])
+    }
+
+    /// A side the screen can't set is neither shown nor failed.
+    @Test func aSideWithoutASourceIsNeverFailed() async {
+        let model = PrivacySectionViewModel(visibility: StubVisibility(isPrivate: true))
+        await model.load()
+        #expect(model.failedSides.isEmpty)
+        #expect(await model.reload(.postWindow))
+    }
+}
+
+/// Offline, and parked at the gate until the test releases it.
+private actor GatedSharing: PostSharingManaging {
+    private let gate: ReadGate
+    private(set) var reads = 0
+
+    init(gate: ReadGate) { self.gate = gate }
+
+    func postSharing() async throws -> PostSharing {
+        reads += 1
+        await gate.pass()
+        throw ProfileError.notAuthenticated
+    }
+
+    func setPostSharing(_ sharing: PostSharing) async throws {}
+}
+
+// MARK: - Profile tabs (#411)
+
+@MainActor
+struct ProfileTabSwitchesTests {
+    private func model(_ sides: StubSides) -> PrivacySectionViewModel {
+        PrivacySectionViewModel(visibility: StubVisibility(isPrivate: false), tabs: sides)
+    }
+
+    /// The switches show the server's flags.
+    @Test func theSwitchesReadTheServersFlags() async {
+        let model = model(StubSides())
+        await model.load()
+        #expect(model.tabVisibility == ProfileTabVisibility(likes: true, saved: false, reposts: true))
+    }
+
+    /// A switch writes its own flag only, and shows it once the server has it.
+    @Test func aSwitchWritesItsFlagThenShowsIt() async throws {
+        let sides = StubSides()
+        let model = model(sides)
+        await model.load()
+
+        try await model.setTab(.saved, visible: true)
+
+        #expect(await sides.tabWrites.map(\.0) == [.saved])
+        #expect(await sides.tabWrites.map(\.1) == [true])
+        #expect(model.tabVisibility?.saved == true)
+        #expect(model.tabVisibility?.likes == true)
+    }
+
+    /// Not optimistic: a failed write leaves the switch on the server's value.
+    @Test func aFailedWriteKeepsTheServersValue() async {
+        let sides = StubSides()
+        await sides.setFailsTabWrites(true)
+        let model = model(sides)
+        await model.load()
+
+        await #expect(throws: (any Error).self) { try await model.setTab(.reposts, visible: false) }
+
+        #expect(model.tabVisibility?.reposts == true)
+    }
+
+    /// The same value again sends nothing.
+    @Test func theSameValueSendsNothing() async throws {
+        let sides = StubSides()
+        let model = model(sides)
+        await model.load()
+
+        try await model.setTab(.likes, visible: true)
+
+        #expect(await sides.tabWrites.isEmpty)
+    }
+}
+
+private actor StubSides:PostWindowManaging, CommentAudienceManaging, PostSharingManaging, InteractionAudienceManaging,
+    ProfileTabVisibilityManaging {
+    private var fails: Bool
+    private var tabs = ProfileTabVisibility(likes: true, saved: false, reposts: true)
+    private(set) var tabWrites: [(ProfileTabVisibility.Tab, Bool)] = []
+    var failsTabWrites = false
+    func setFailsTabWrites(_ fails: Bool) { failsTabWrites = fails }
+    private(set) var commentReads = 0
+    private(set) var windowReads = 0
+
+    init(fails: Bool = false) { self.fails = fails }
+
+    func setFails(_ fails: Bool) { self.fails = fails }
+
+    private func check() throws {
+        if fails { throw ProfileError.notAuthenticated }
+    }
+
+    func postWindow() async throws -> PostWindow {
+        windowReads += 1
+        try check()
+        return .sixMonths
+    }
+
+    func setPostWindow(_ window: PostWindow) async throws {}
+
+    func commentAudience() async throws -> CommentAudience {
+        commentReads += 1
+        try check()
+        return .followers
+    }
+
+    func setCommentAudience(_ audience: CommentAudience) async throws {}
+
+    func postSharing() async throws -> PostSharing {
+        try check()
+        return PostSharing(allowsDownloads: true)
+    }
+
+    func setPostSharing(_ sharing: PostSharing) async throws {}
+
+    func audience(for kind: InteractionKind) async throws -> InteractionAudience {
+        try check()
+        return .followers
+    }
+
+    func setAudience(_ audience: InteractionAudience, for kind: InteractionKind) async throws {}
+
+    func tabVisibility() async throws -> ProfileTabVisibility {
+        try check()
+        return tabs
+    }
+
+    func setTab(_ tab: ProfileTabVisibility.Tab, visible: Bool) async throws {
+        if failsTabWrites { throw ProfileError.notAuthenticated }
+        tabWrites.append((tab, visible))
+        tabs[tab] = visible
+    }
+}
+
+private actor StubVisibility: ProfileVisibilityManaging {
+    private var isPrivate: Bool
+    private var failsRead: Bool
+    private let failsWrite: Bool
+    private(set) var writes: [Bool] = []
+
+    init(isPrivate: Bool, failsRead: Bool = false, failsWrite: Bool = false) {
+        self.isPrivate = isPrivate
+        self.failsRead = failsRead
+        self.failsWrite = failsWrite
+    }
+
+    func recover() { failsRead = false }
+
+    func activeProfileIsPrivate() async throws -> Bool {
+        if failsRead { throw ProfileError.notAuthenticated }
+        return isPrivate
+    }
+
+    func setActiveProfilePrivate(_ isPrivate: Bool) async throws {
+        if failsWrite { throw ProfileError.notAuthenticated }
+        writes.append(isPrivate)
+        self.isPrivate = isPrivate
+    }
+}

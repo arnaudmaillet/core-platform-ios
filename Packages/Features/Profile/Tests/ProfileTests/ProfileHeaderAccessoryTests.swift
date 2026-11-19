@@ -4,7 +4,7 @@ import MediaCore
 import Testing
 import UIKit
 @testable import Profile
-@testable import ProfileSettings
+@testable import ProfileData
 
 /// **The header's injected trailing item — the wallet balance, from the shell.**
 ///

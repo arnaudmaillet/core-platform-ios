@@ -1,0 +1,161 @@
+import CoreContracts
+import CoreModels
+import CoreNetworking
+import CoreNetworkingMocks
+import Foundation
+import Testing
+import UserNotifications
+@testable import ProfileData
+@testable import Settings
+
+/// Settings → Notifications (#392, backend #725), over the mock.
+@MainActor
+struct NotificationPreferencesTests {
+    private struct Viewer: ProfileViewerResolving {
+        func viewerProfileID() async -> ProfileID? { ProfileID(MockSocialDataset.viewerProfileID) }
+    }
+
+    private func makeRepository() -> NotificationPreferencesRepository {
+        let bff = MockBFF()
+        MockNotificationService(dataset: MockSocialDataset()).register(on: bff)
+        let client = ConnectClientFactory.makeUnauthenticated(host: "https://mock.bff.local", httpClient: bff)
+        return NotificationPreferencesRepository(
+            notificationClient: Notification_V1_NotificationServiceClient(client: client),
+            viewer: Viewer()
+        )
+    }
+
+    // MARK: - Layout (no jumps, charter P8)
+
+    /// The permission row's slot is in the first snapshot, before iOS has
+    /// answered, and stays one row whatever the answer: reading the
+    /// permission never inserts a row above the list or takes one away.
+    @Test func thePermissionSlotIsThereFromTheFirstFrame() {
+        let first = NotificationSettingsViewController.layout(permission: nil, phase: .loading)
+        #expect(first.first?.0 == .system)
+        #expect(first.first?.1 == [.permissionPending])
+
+        let answers: [(UNAuthorizationStatus, NotificationSettingsViewController.Item)] = [
+            (.notDetermined, .allow), (.provisional, .allow), (.denied, .turnOnInSettings), (.authorized, .allowed), (.ephemeral, .allowed)
+        ]
+        for (status, row) in answers {
+            let layout = NotificationSettingsViewController.layout(permission: status, phase: .loading)
+            #expect(layout.map(\.0) == first.map(\.0), "\(status.rawValue)")
+            #expect(layout.first?.1 == [row], "\(status.rawValue)")
+        }
+    }
+
+    /// The section's footer pitches notifications only while there is
+    /// something to ask for.
+    @Test func theFooterPitchesOnlyWhileThereIsSomethingToAsk() {
+        let pitch = NotificationSettingsViewController.systemFooter(permission: .notDetermined)
+        #expect(pitch.hasPrefix("Get a notification"))
+        #expect(NotificationSettingsViewController.systemFooter(permission: .provisional) == pitch)
+        #expect(NotificationSettingsViewController.systemFooter(permission: .authorized) != pitch)
+        #expect(NotificationSettingsViewController.systemFooter(permission: .denied).contains("turned off"))
+    }
+
+    /// While the preferences load, Pause All and every push category are
+    /// bones in their own places — no "Loading…" text row.
+    @Test func thePreferencesOpenOnBonesInTheirPlaces() {
+        let loading = NotificationSettingsViewController.layout(permission: .authorized, phase: .loading)
+        let loaded = NotificationSettingsViewController.layout(permission: .authorized, phase: .loaded(NotificationPreferences()))
+        #expect(loading.map(\.0) == [.system, .pause, .push])
+        #expect(Array(loaded.map(\.0).prefix(3)) == [.system, .pause, .push])
+        for index in 1..<3 {
+            #expect(loading[index].1.count == loaded[index].1.count, "bones stand in for rows one for one")
+            #expect(loading[index].1.allSatisfy { if case .skeleton = $0 { true } else { false } })
+        }
+    }
+
+    /// Every push on by default; one category off touches only it.
+    @Test func aCategoryTurnsOffAlone() async throws {
+        let repository = makeRepository()
+        #expect(try await repository.notificationPreferences() == NotificationPreferences())
+
+        let next = try await repository.updateNotificationPreferences(.push(.likes, false))
+        #expect(next.mutedCategories == [.likes])
+        #expect(try await repository.notificationPreferences().mutedCategories == [.likes])
+
+        _ = try await repository.updateNotificationPreferences(.push(.likes, true))
+        #expect(try await repository.notificationPreferences().mutedCategories.isEmpty)
+    }
+
+    /// Email per category (#392): off by default; a switch sets only it,
+    /// and the push of that category keeps its value — the server sets both
+    /// channels of a category it is sent.
+    @Test func anEmailSwitchLeavesItsPushAlone() async throws {
+        let repository = makeRepository()
+        #expect(try await repository.notificationPreferences().emailCategories.isEmpty)
+
+        _ = try await repository.updateNotificationPreferences(.push(.comments, false))
+        let next = try await repository.updateNotificationPreferences(.email(.comments, true))
+
+        #expect(next.emailCategories == [.comments])
+        #expect(next.mutedCategories == [.comments], "the email switch turned the push back on")
+        let reread = try await repository.notificationPreferences()
+        #expect(reread.emailCategories == [.comments])
+        #expect(reread.mutedCategories == [.comments])
+    }
+
+    /// The other way: a push switch keeps the category's email.
+    @Test func aPushSwitchLeavesItsEmailAlone() async throws {
+        let repository = makeRepository()
+        _ = try await repository.updateNotificationPreferences(.email(.mentions, true))
+
+        let next = try await repository.updateNotificationPreferences(.push(.mentions, false))
+
+        #expect(next.emailCategories == [.mentions], "the push switch turned the email off")
+        #expect(next.mutedCategories == [.mentions])
+    }
+
+    /// The screen draws an email switch per category once loaded.
+    @Test func theScreenHasAnEmailSwitchPerCategory() {
+        let loaded = NotificationSettingsViewController.layout(permission: .authorized, phase: .loaded(NotificationPreferences()))
+        let email = loaded.first { $0.0 == .email }?.1 ?? []
+        #expect(email == NotificationCategory.allCases.map { .emailCategory($0) })
+        #expect(!loaded.contains { $0.0 == .comingSoon }, "nothing is planned any more")
+    }
+
+    /// A pause runs until it ends or is resumed; more than 8 h is refused.
+    /// The Notifications toolbar's longer pauses (#1575) read here too.
+    @Test func theFooterReadsAnyPause() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        let footer = { (until: Date?) in NotificationSettingsViewController.pauseFooter(until: until, now: now, calendar: calendar) }
+        #expect(footer(nil).hasPrefix("Stops every push"))
+        #expect(footer(Date(timeIntervalSince1970: 253_402_300_799)) == "Paused until you turn it back on.")
+        let tomorrow = now.addingTimeInterval(24 * 3_600)
+        #expect(footer(tomorrow).hasPrefix("Paused until ") && footer(tomorrow) != footer(now.addingTimeInterval(60)))
+    }
+
+    @Test func aPauseHoldsUntilResumed() async throws {
+        let repository = makeRepository()
+        let until = Date().addingTimeInterval(3_600)
+        let paused = try await repository.updateNotificationPreferences(.pause(until: until))
+        #expect(abs((paused.pausedUntil ?? .distantPast).timeIntervalSince(until)) < 1)
+
+        // The mock is ahead of the fleet here (#1575, backend #971): a pause
+        // past 8 h holds — the Notifications toolbar's 24 h and week.
+        let longer = Date().addingTimeInterval(24 * 3_600)
+        let held = try await repository.updateNotificationPreferences(.pause(until: longer))
+        #expect(abs((held.pausedUntil ?? .distantPast).timeIntervalSince(longer)) < 1)
+
+        #expect(try await repository.updateNotificationPreferences(.pause(until: nil)).pausedUntil == nil)
+    }
+
+    /// Quiet hours, wrapping midnight, on and off.
+    @Test func quietHoursRoundTrip() async throws {
+        let repository = makeRepository()
+        let hours = QuietHours(startMinute: 23 * 60, endMinute: 6 * 60 + 30)
+        #expect(try await repository.updateNotificationPreferences(.quietHours(hours)).quietHours == hours)
+        #expect(try await repository.updateNotificationPreferences(.quietHours(nil)).quietHours == nil)
+    }
+
+    @Test func theScreenReadsPlainly() {
+        #expect(NotificationSettingsViewController.pauseChoices.last?.minutes == 480)
+        #expect(NotificationCategory.allCases.count == 9)
+        #expect(!NotificationSettingsViewController.timeText(minutes: 22 * 60).isEmpty)
+    }
+}

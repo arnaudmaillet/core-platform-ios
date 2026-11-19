@@ -4,7 +4,7 @@ import MediaCore
 import Testing
 import UIKit
 @testable import Profile
-@testable import ProfileSettings
+@testable import ProfileData
 
 /// The profile's counter row (#687): the identity column's whole width in
 /// three equal cells (the owner, 2026-10-15; a fourth stood empty),

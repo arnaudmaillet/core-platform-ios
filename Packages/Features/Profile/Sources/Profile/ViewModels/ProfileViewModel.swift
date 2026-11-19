@@ -7,8 +7,8 @@ import LaunchArguments
 import MapsInterface
 import OSLog
 import PostGrid
+import ProfileData
 import ProfileInterface
-import ProfileSettings
 import ShareSheet
 
 @MainActor

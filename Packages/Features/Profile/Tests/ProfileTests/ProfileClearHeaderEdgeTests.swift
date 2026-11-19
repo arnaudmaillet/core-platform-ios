@@ -1,9 +1,9 @@
 import MediaCore
 import Testing
 import UIKit
-@testable import Profile
-@testable import ProfileSettings
 @testable import PostSurfaces
+@testable import Profile
+@testable import ProfileData
 
 /// The profile's gallery pages, and the pager over them, hide the system's top
 /// edge effect under the header.

@@ -3,7 +3,7 @@ import Foundation
 import MapsInterface
 import Testing
 @testable import Profile
-@testable import ProfileSettings
+@testable import ProfileData
 
 /// THE PIN BUTTON'S TWO RULES.
 ///

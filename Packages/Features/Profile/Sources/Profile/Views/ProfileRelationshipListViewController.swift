@@ -1,9 +1,9 @@
 import CoreModels
+import CoreNavigation
 import DesignSystem
 import MediaCore
-import ProfileSettings
+import ProfileData
 import UIKit
-import CoreNavigation
 
 /// One relationship list — Followers, or Following, or Friends — as a page in
 /// the pager `ProfileRelationshipsViewController` hosts.

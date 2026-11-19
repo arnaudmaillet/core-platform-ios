@@ -40,6 +40,9 @@
 		5F00000000000000000030B1 /* EmoteKit in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000030C1 /* EmoteKit */; };
 		5F0000000000000000238502 /* Wallet in Frameworks */ = {isa = PBXBuildFile; productRef = 5F0000000000000000238503 /* Wallet */; };
 		5F0000000000000000238505 /* WalletInterface in Frameworks */ = {isa = PBXBuildFile; productRef = 5F0000000000000000238506 /* WalletInterface */; };
+		5F0000000000000000238202 /* ProfileData in Frameworks */ = {isa = PBXBuildFile; productRef = 5F0000000000000000238203 /* ProfileData */; };
+		5F0000000000000000238205 /* Settings in Frameworks */ = {isa = PBXBuildFile; productRef = 5F0000000000000000238206 /* Settings */; };
+		5F0000000000000000238208 /* SettingsInterface in Frameworks */ = {isa = PBXBuildFile; productRef = 5F0000000000000000238209 /* SettingsInterface */; };
 		5F00000000000000000D7002 /* DebugTools in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000D7003 /* DebugTools */; };
 		5F00000000000000000D7202 /* AppPreferences in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000D7203 /* AppPreferences */; };
 		5F00000000000000000D7402 /* PlaceInterface in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000D7403 /* PlaceInterface */; };
@@ -131,6 +134,9 @@
 				5F00000000000000000030B1 /* EmoteKit in Frameworks */,
 				5F0000000000000000238502 /* Wallet in Frameworks */,
 				5F0000000000000000238505 /* WalletInterface in Frameworks */,
+				5F0000000000000000238202 /* ProfileData in Frameworks */,
+				5F0000000000000000238205 /* Settings in Frameworks */,
+				5F0000000000000000238208 /* SettingsInterface in Frameworks */,
 				5F00000000000000000D7002 /* DebugTools in Frameworks */,
 				5F00000000000000000D7202 /* AppPreferences in Frameworks */,
 				5F00000000000000000D7402 /* PlaceInterface in Frameworks */,
@@ -217,6 +223,9 @@
 				5F00000000000000000030C1 /* EmoteKit */,
 				5F0000000000000000238503 /* Wallet */,
 				5F0000000000000000238506 /* WalletInterface */,
+				5F0000000000000000238203 /* ProfileData */,
+				5F0000000000000000238206 /* Settings */,
+				5F0000000000000000238209 /* SettingsInterface */,
 				5F00000000000000000D7003 /* DebugTools */,
 				5F00000000000000000D7203 /* AppPreferences */,
 				5F00000000000000000D7403 /* PlaceInterface */,
@@ -309,6 +318,9 @@
 				5F00000000000000000030A1 /* XCLocalSwiftPackageReference "Packages/Core/EmoteKit" */,
 				5F0000000000000000238501 /* XCLocalSwiftPackageReference "Packages/Features/Wallet" */,
 				5F0000000000000000238504 /* XCLocalSwiftPackageReference "Packages/FeatureInterfaces/WalletInterface" */,
+				5F0000000000000000238201 /* XCLocalSwiftPackageReference "Packages/FeatureInterfaces/ProfileData" */,
+				5F0000000000000000238204 /* XCLocalSwiftPackageReference "Packages/Features/Settings" */,
+				5F0000000000000000238207 /* XCLocalSwiftPackageReference "Packages/FeatureInterfaces/SettingsInterface" */,
 				5F00000000000000000D7001 /* XCLocalSwiftPackageReference "Packages/Core/DebugTools" */,
 				5F00000000000000000D7201 /* XCLocalSwiftPackageReference "Packages/Core/AppPreferences" */,
 				5F00000000000000000D7401 /* XCLocalSwiftPackageReference "Packages/FeatureInterfaces/PlaceInterface" */,
@@ -772,6 +784,18 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/FeatureInterfaces/WalletInterface;
 		};
+		5F0000000000000000238201 /* XCLocalSwiftPackageReference "Packages/FeatureInterfaces/ProfileData" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/FeatureInterfaces/ProfileData;
+		};
+		5F0000000000000000238204 /* XCLocalSwiftPackageReference "Packages/Features/Settings" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/Features/Settings;
+		};
+		5F0000000000000000238207 /* XCLocalSwiftPackageReference "Packages/FeatureInterfaces/SettingsInterface" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/FeatureInterfaces/SettingsInterface;
+		};
 		5F00000000000000000040A1 /* XCLocalSwiftPackageReference "Packages/Core/CacheKit" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/Core/CacheKit;
@@ -942,6 +966,18 @@
 		5F0000000000000000238506 /* WalletInterface */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = WalletInterface;
+		};
+		5F0000000000000000238203 /* ProfileData */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ProfileData;
+		};
+		5F0000000000000000238206 /* Settings */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = Settings;
+		};
+		5F0000000000000000238209 /* SettingsInterface */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = SettingsInterface;
 		};
 		5F00000000000000000040C1 /* CacheKit */ = {
 			isa = XCSwiftPackageProductDependency;

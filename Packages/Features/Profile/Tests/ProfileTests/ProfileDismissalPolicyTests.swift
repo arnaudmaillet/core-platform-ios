@@ -1,6 +1,6 @@
 import Testing
 @testable import Profile
-@testable import ProfileSettings
+@testable import ProfileData
 
 /// TWO GESTURES WANT THE SAME DRAG.
 ///

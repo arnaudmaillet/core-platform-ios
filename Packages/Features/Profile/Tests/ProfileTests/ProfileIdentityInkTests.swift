@@ -4,7 +4,7 @@ import MediaCore
 import Testing
 import UIKit
 @testable import Profile
-@testable import ProfileSettings
+@testable import ProfileData
 
 /// The type over a banner's picture — the name and the handle, and on a
 /// poster the counters and the bio — in the picture's ink (white on a dark

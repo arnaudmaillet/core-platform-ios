@@ -1,6 +1,6 @@
 import DesignSystem
 import Foundation
-import ProfileSettings
+import ProfileData
 
 /// WHICH GESTURE OWNS A HORIZONTAL DRAG ON A PUSHED PROFILE.
 ///

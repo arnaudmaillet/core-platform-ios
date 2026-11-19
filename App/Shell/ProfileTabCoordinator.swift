@@ -1,6 +1,7 @@
 import CoreNavigation
 import ProfileInterface
 import DesignSystem
+import SettingsInterface
 import UIKit
 import Wallet
 
@@ -98,7 +99,7 @@ final class ProfileTabCoordinator: TabCoordinator {
             // Said outright — see `CreateTabItem.showSignIn`.
             tab.accessibilityLabel = "Settings"
             tab.setFaces(outline: Self.guestSettingsFaces?.outline, fill: Self.guestSettingsFaces?.fill)
-            let settings = container.profileFeature.makeGuestSettingsViewController(onSignIn: onSignIn)
+            let settings = container.settingsFeature.makeGuestSettingsViewController(onSignIn: onSignIn)
             // ⚠️ THE BAR STAYS. The screen asks to hide it when PUSHED ("not a
             // fifth tab"), and here it is a tab's root: the bar is how a guest
             // leaves it. Its sub-pages push on this stack as before.

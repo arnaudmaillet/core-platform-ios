@@ -7,9 +7,9 @@ import MediaCore
 import PostGrid
 import Testing
 import UIKit
-@testable import Profile
-@testable import ProfileSettings
 @testable import PostSurfaces
+@testable import Profile
+@testable import ProfileData
 
 /// A profile whose posts never come (#1770): after 10 s the gallery says
 /// "Taking longer than usual" in place of its bones, and Try Again asks for

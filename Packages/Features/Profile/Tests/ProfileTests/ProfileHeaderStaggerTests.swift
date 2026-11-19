@@ -3,7 +3,7 @@ import MediaCore
 import Testing
 import UIKit
 @testable import Profile
-@testable import ProfileSettings
+@testable import ProfileData
 
 /// A staggered switch never lands after a newer render.
 ///

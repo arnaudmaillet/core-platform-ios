@@ -5,9 +5,9 @@ import MediaCore
 import PostGrid
 import Testing
 import UIKit
-@testable import Profile
-@testable import ProfileSettings
 @testable import PostSurfaces
+@testable import Profile
+@testable import ProfileData
 
 /// Where a scrub lands when the finger lets go.
 ///

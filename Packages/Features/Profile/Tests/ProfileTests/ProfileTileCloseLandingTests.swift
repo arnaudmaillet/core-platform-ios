@@ -6,9 +6,9 @@ import MediaCore
 import PostGrid
 import Testing
 import UIKit
-@testable import Profile
-@testable import ProfileSettings
 @testable import PostSurfaces
+@testable import Profile
+@testable import ProfileData
 
 /// **A card-shaped close onto a TILE lands as that tile (#888).**
 ///

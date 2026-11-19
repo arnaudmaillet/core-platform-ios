@@ -5,7 +5,7 @@ import LocalStore
 import PostGrid
 import Testing
 @testable import Profile
-@testable import ProfileSettings
+@testable import ProfileData
 
 // A revisited profile opens its posts at frame 0 (#887).
 
@@ -407,30 +407,14 @@ struct ProfileGalleryRevisitTests {
         #expect(await settle { told == [PostID("a")] })
     }
 
-    /// Restored from Recently Deleted: the app lets the post back in (#896).
-    @Test func aRestoredPostIsToldToTheApp() async throws {
-        var told: [PostID] = []
-        let viewModel = RecentlyDeletedViewModel(
-            trash: twoPages(), viewer: RestoreViewer(id: ProfileID("prof-1")),
-            onPostRestored: { told.append($0) }
-        )
-        try await viewModel.restore(DeletedPost(post: post("a", at: 1), deletedAt: Date()))
-        #expect(told == [PostID("a")])
-    }
-
+    /// Restored from Recently Deleted (Settings): the app tells the profile
+    /// (`ProfileFeatureBuilder.invalidateGallery(of:)`), which drops the
+    /// author's kept pages, so a revisit doesn't open on pages without it
+    /// (#887). That the restore is told is Settings' `RecentlyDeletedTests`.
     @Test func aRestoredPostDropsTheAuthorsGallery() async throws {
         let cache = cacheHolding(person(), .me)
         let restored = ProfileID("prof-1")
-        let viewModel = RecentlyDeletedViewModel(
-            trash: twoPages(), viewer: RestoreViewer(id: restored),
-            onRestored: { cache.removeGallery(for: $0) }
-        )
-        try await viewModel.restore(DeletedPost(post: post("a", at: 1), deletedAt: Date()))
+        cache.removeGallery(for: restored)
         #expect(cache.gallery(for: restored) == nil)
     }
-}
-
-private struct RestoreViewer: ProfileViewerResolving {
-    let id: ProfileID
-    func viewerProfileID() async -> ProfileID? { id }
 }

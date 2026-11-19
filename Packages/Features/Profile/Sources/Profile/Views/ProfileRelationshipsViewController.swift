@@ -3,7 +3,7 @@ import CoreNavigation
 import DesignSystem
 import LaunchArguments
 import MediaCore
-import ProfileSettings
+import ProfileData
 import UIKit
 
 /// The followers / following / friends screen, pushed from the profile

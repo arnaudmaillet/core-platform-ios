@@ -3,16 +3,16 @@ import MediaCore
 import Testing
 import UIKit
 @testable import Profile
-@testable import ProfileSettings
+@testable import ProfileData
 
 /// The chrome the profile's child screens ask for.
 ///
-/// Both of these are somewhere you GO — a form you fill in, a settings list you
-/// come back from — rather than a place the app keeps four doors open onto. The
-/// flag says so, and it is a single line that a refactor drops without anything
-/// failing to compile and without any screenshot of the screen itself looking
-/// wrong: the tab bar is simply still there, at the bottom, offering four ways
-/// to abandon a half-finished form.
+/// The profile editor is somewhere you GO — a form you fill in — rather than a
+/// place the app keeps four doors open onto. The flag says so, and it is a
+/// single line that a refactor drops without anything failing to compile and
+/// without any screenshot of the screen itself looking wrong: the tab bar is
+/// simply still there, at the bottom, offering four ways to abandon a
+/// half-finished form. (Settings' screens: `SettingsChildChromeTests`.)
 ///
 /// It is stated in each screen's own init rather than at the push site so that
 /// it holds wherever the screen is pushed from, which is the property these
@@ -21,18 +21,6 @@ import UIKit
 struct ProfileChildChromeTests {
     private struct SilentFetcher: ImageFetching {
         func fetchImageData(for url: URL) async throws -> Data { Data() }
-    }
-
-    private actor StubAccount: AccountProviding {
-        func currentAccount() async throws -> AccountDetails {
-            AccountDetails(
-                email: "ada@example.com",
-                emailVerified: true,
-                phone: "",
-                phoneVerified: false,
-                country: "FR"
-            )
-        }
     }
 
     private struct StubProfiles: ProfileProviding {
@@ -58,17 +46,6 @@ struct ProfileChildChromeTests {
         #expect(editor.hidesBottomBarWhenPushed)
     }
 
-    @Test func accountSettingsHidesTheTabBar() {
-        let settings = AccountSettingsViewController(account: StubAccount())
-        #expect(settings.hidesBottomBarWhenPushed)
-    }
-
-    @Test func settingsAndItsComingSoonPagesHideTheTabBar() {
-        let settings = SettingsViewController(switching: nil, switcher: nil, makeDestination: { _ in nil }, onLogout: {})
-        #expect(settings.hidesBottomBarWhenPushed)
-        #expect(SettingsComingSoonViewController(section: .wallet).hidesBottomBarWhenPushed)
-    }
-
     /// The profile editor is titled: since #1591 its list wears the soft blur
     /// over the bar — see `applyTopEdge(for:)`.
     @Test func theTitledProfileEditorWearsTheSoftBlur() throws {
@@ -79,24 +56,6 @@ struct ProfileChildChromeTests {
         editor.loadViewIfNeeded()
         let list = try #require(editor.view.subviews.compactMap { $0 as? UICollectionView }.first)
         // Titled "Edit Profile" (#1591): the soft blur covers its bar.
-        #expect(!list.topEdgeEffect.isHidden)
-        #expect(list.topEdgeEffect.style == .soft)
-    }
-
-    /// Settings screens are the exception (2026-10-04): UIKit's SOFT top
-    /// edge under the bar — see `prefersSoftTopEdge`.
-    @Test func accountSettingsWearsTheSoftTopEdge() throws {
-        let settings = AccountSettingsViewController(account: StubAccount())
-        settings.loadViewIfNeeded()
-        let list = try #require(settings.view.subviews.compactMap { $0 as? UICollectionView }.first)
-        #expect(!list.topEdgeEffect.isHidden)
-        #expect(list.topEdgeEffect.style == .soft)
-    }
-
-    @Test func settingsWearsTheSoftTopEdge() throws {
-        let settings = SettingsViewController(switching: nil, switcher: nil, makeDestination: { _ in nil }, onLogout: {})
-        settings.loadViewIfNeeded()
-        let list = try #require(settings.view.subviews.compactMap { $0 as? UICollectionView }.first)
         #expect(!list.topEdgeEffect.isHidden)
         #expect(list.topEdgeEffect.style == .soft)
     }
