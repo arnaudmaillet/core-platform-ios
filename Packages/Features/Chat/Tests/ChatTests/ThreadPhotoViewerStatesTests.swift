@@ -2,7 +2,7 @@ import MediaCore
 import Synchronization
 import Testing
 import UIKit
-@testable import Feed
+@testable import Chat
 
 /// The thread's full-screen photo in the charter's states (#831): the
 /// cache's picture on the first layout, the centred loader while it loads

@@ -1,9 +1,8 @@
 import CoreModels
-import FeedInterface
 import MediaCore
 import Testing
 import UIKit
-@testable import Feed
+@testable import Chat
 
 /// A public group's thread (#2217): an outsider reads with Join and Follow
 /// in the composer's place, a follower with Join alone — their Unfollow is

@@ -1,9 +1,8 @@
 import CoreModels
-import FeedInterface
 import MediaCore
 import Testing
 import UIKit
-@testable import Feed
+@testable import Chat
 
 /// A group's thread (#2214): each row signed by its own sender — never
 /// "Member" for someone the group lists — the header the group's, a tap on

@@ -1,12 +1,11 @@
 import CoreModels
 import DesignSystem
 import EntityStore
-import FeedInterface
 import Foundation
 import MediaCore
 import Testing
 import UIKit
-@testable import Feed
+@testable import Chat
 @testable import ThreadKit
 @testable import PostSurfaces
 

@@ -1,10 +1,9 @@
 import CoreModels
 import DesignSystem
-import FeedInterface
 import Testing
 import UIKit
 import VoiceKitUI
-@testable import Feed
+@testable import Chat
 @testable import ThreadKit
 
 /// The voice message's bubble (#2104) — the neutral panel since #2241.

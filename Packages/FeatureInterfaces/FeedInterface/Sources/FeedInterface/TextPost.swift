@@ -1,12 +1,11 @@
 import CoreModels
-import ThreadKit
 import UIKit
 
 /// Publishes the post the "+" menu's Text Post screen writes.
 ///
 /// Feed draws that screen and Upload owns the pipeline that publishes
 /// (`PostComposer`), and neither may import the other — so the screen is handed
-/// this instead, the way Chat hands Feed a `ConversationThreadDriving`.
+/// this instead.
 public protocol TextPostPublishing: Sendable {
     /// Creates and publishes a text-only post whose caption is `text`, authored
     /// by `author` — the profile the screen showed as the post's author, so the

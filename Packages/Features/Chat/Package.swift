@@ -30,10 +30,12 @@ let package = Package(
         .package(path: "../../Core/EntityStore"),
         // Voice messages (#2103): a sent take is kept as its message's audio.
         .package(path: "../../Core/VoiceKit"),
-        // The conversation is drawn by Feed's text-post screen. The INTERFACE
-        // only — features never import each other — the same edge Maps and
-        // Profile already have.
-        .package(path: "../../FeatureInterfaces/FeedInterface"),
+        // The conversation is drawn as a text post's screen (#2380): the
+        // comment rows, the composer, the frost and the footer toolbar.
+        .package(path: "../../Core/ThreadKit"),
+        // The conversation's peer pill is the post's author pill
+        // (`SnapAuthorIdentityView`, `FollowBadge`).
+        .package(path: "../../Core/PostSurfaces"),
         // A group's and a channel's info screens are the profile's and the
         // place's page (#2237): the hero header, the lists behind its
         // counters, the page under it — a Core package, no feature.
@@ -59,13 +61,16 @@ let package = Package(
                 "LocalStore",
                 "DesignSystem",
                 "EmoteKit",
-                "FeedInterface",
                 "MediaCore",
                 .product(name: "MediaUI", package: "MediaCore"),
                 "EntityStore",
                 "VoiceKit",
+                // The conversation's voice messages (#2104).
+                .product(name: "VoiceKitUI", package: "VoiceKit"),
                 "HeroPage",
-                "PostGrid"
+                "PostGrid",
+                "ThreadKit",
+                "PostSurfaces"
             ]
         ),
         .testTarget(
@@ -73,9 +78,16 @@ let package = Package(
             dependencies: [
                 "Chat",
                 "TestSupport",
+                "CoreModels",
                 "CoreNavigation",
                 "CoreNetworking",
-                "FeedInterface",
+                "CoreStorage",
+                "DesignSystem",
+                // The conversation's screen tests (#2380): its rows, its
+                // composer, its voice bubble and its peer pill.
+                "ThreadKit",
+                "PostSurfaces",
+                .product(name: "VoiceKitUI", package: "VoiceKit"),
                 // `InboxRelationMarkTests` (#2049); `InboxRelationsSeamTests`
                 // fakes its protocols (#2377).
                 "EntityStore",

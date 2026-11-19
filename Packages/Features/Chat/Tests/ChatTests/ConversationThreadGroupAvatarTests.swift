@@ -1,10 +1,9 @@
 import CoreModels
-import FeedInterface
 import MediaCore
 import MediaUI
 import Testing
 import UIKit
-@testable import Feed
+@testable import Chat
 
 /// The thread's header pill draws the GROUP (#2233): its members' faces —
 /// the inbox row's own picture — never the initials of a name made of its

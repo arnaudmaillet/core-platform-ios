@@ -3,7 +3,6 @@ import CoreNavigation
 import CoreStorage
 import DesignSystem
 import EntityStore
-import FeedInterface
 import MediaCore
 import MediaUI
 import PostSurfaces
@@ -53,8 +52,8 @@ final class ConversationThreadViewController: UIViewController {
     }
 
     private let driver: any ConversationThreadDriving
-    private let mode: ConversationThreadMode
-    private let prefill: String
+    let mode: ConversationThreadMode
+    let prefill: String
     private let imagePipeline: ImagePipeline
 
     private let headerPolicy = HeaderPolicy()
@@ -2479,7 +2478,7 @@ final class ConversationThreadViewController: UIViewController {
 
     /// What an empty conversation says: one copy for the row and for its
     /// measurement.
-    private static let emptyPageCopy = PostDetailViewController.EmptyPageCopy(
+    private static let emptyPageCopy = CommentsEmptyPageCopy(
         symbol: "bubble.left.and.bubble.right",
         title: "No messages yet",
         subtitle: "Say hi 👋"

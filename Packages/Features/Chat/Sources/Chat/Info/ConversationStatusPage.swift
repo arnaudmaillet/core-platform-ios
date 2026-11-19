@@ -1,6 +1,5 @@
 import CoreModels
 import DesignSystem
-import FeedInterface
 import PostGrid
 import UIKit
 

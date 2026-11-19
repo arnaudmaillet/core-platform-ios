@@ -1,11 +1,10 @@
 import CoreModels
-import FeedInterface
 import Foundation
 import TestSupport
 import Testing
 @testable import Chat
 
-/// The driver is a pass-through: Feed's screen must see exactly what the old
+/// The driver is a pass-through: the thread's screen must see exactly what the old
 /// screen saw, spelled in its own values. These pin the spelling — messages
 /// and quotes, who the viewer is signed as, the peer — and that every action
 /// still reaches the view model that owns it.

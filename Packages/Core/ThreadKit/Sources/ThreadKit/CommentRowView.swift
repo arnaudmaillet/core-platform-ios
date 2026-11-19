@@ -1601,6 +1601,25 @@ public final class CommentSkeletonRowView: UIView {
     public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 }
 
+/// The empty stream's words, the row `CommentsEmptyPageCell` draws: an
+/// invitation to comment on a post, to write a draft, to say hi in a
+/// conversation, or the failed stream's reason with Try Again. Moved from
+/// the post page (#2380) so the conversation, now Chat's, words its own.
+public struct CommentsEmptyPageCopy: Equatable {
+    public let symbol: String
+    public let title: String
+    public let subtitle: String
+    /// The block's button — only the failed stream's Try Again (#798).
+    public var actionTitle: String?
+
+    public init(symbol: String, title: String, subtitle: String, actionTitle: String? = nil) {
+        self.symbol = symbol
+        self.title = title
+        self.subtitle = subtitle
+        self.actionTitle = actionTitle
+    }
+}
+
 /// The comments-only stream's empty page: the app's shared `EmptyStateView`
 /// as a list row, at a height it is TOLD rather than one it works out.
 ///

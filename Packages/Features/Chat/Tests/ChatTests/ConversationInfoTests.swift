@@ -5,7 +5,6 @@ import CoreNavigation
 import CoreNetworking
 import CoreNetworkingMocks
 import DesignSystem
-import FeedInterface
 import Foundation
 import HeroPage
 import TestSupport

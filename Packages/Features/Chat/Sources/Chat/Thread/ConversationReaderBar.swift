@@ -1,5 +1,4 @@
 import DesignSystem
-import FeedInterface
 import UIKit
 
 /// What a viewer who doesn't post is offered IN, in the composer's place:
