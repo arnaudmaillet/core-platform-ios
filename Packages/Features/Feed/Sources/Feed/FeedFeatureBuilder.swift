@@ -64,8 +64,6 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         public var socialGraph: (any SocialGraphWriting)?
         /// Whether the viewer follows an author. Nil (a test): no "+".
         public var followRelations: (any SocialGraphReading)?
-        /// A post menu's Mute and Block (#1498 §3). Nil (a test): neither.
-        public var moderation: (any SocialGraphModerating)?
         /// The app's one follow-change channel, so the pill's "+" agrees with
         /// a follow made on any other surface.
         public var followEvents: FollowGraphEvents
@@ -117,7 +115,6 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             reporting: (any ContentReporting)?,
             socialGraph: (any SocialGraphWriting)?,
             followRelations: (any SocialGraphReading)?,
-            moderation: (any SocialGraphModerating)?,
             followEvents: FollowGraphEvents,
             postCounters: (any PostCounterReading)?,
             postDrafts: PostDraftStore,
@@ -148,7 +145,6 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             self.reporting = reporting
             self.socialGraph = socialGraph
             self.followRelations = followRelations
-            self.moderation = moderation
             self.followEvents = followEvents
             self.postCounters = postCounters
             self.postDrafts = postDrafts
@@ -218,8 +214,6 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     /// pill offers its "+" only to someone the viewer does not follow yet, and
     /// follows them through `socialGraph`. Nil (or a nil `socialGraph`): no "+".
     private let followRelations: (any SocialGraphReading)?
-    /// A post menu's Mute and Block (#1498 §3). Nil: neither row is offered.
-    private let moderation: (any SocialGraphModerating)?
     /// The app's one follow-change channel, so the pill's "+" agrees with a
     /// follow or unfollow made on any other surface.
     private let followEvents: FollowGraphEvents
@@ -284,7 +278,6 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         reporting = dependencies.reporting
         socialGraph = dependencies.socialGraph
         followRelations = dependencies.followRelations
-        moderation = dependencies.moderation
         followEvents = dependencies.followEvents
         authorMarks = PostAuthorMarks(
             writer: dependencies.socialGraph, reader: dependencies.followRelations, entities: dependencies.entities,
