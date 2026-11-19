@@ -31,7 +31,7 @@ struct CardLikesTests {
         let name = "foryou-card-likes-tests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: name)!
         defaults.removePersistentDomain(forName: name)
-        return WalletStore(defaults: defaults)
+        return WalletStore(defaults: defaults, scope: StorageScope())
     }
 
     /// The feed's mix with every other media post vertical (9:16): blocks of
@@ -56,8 +56,10 @@ struct CardLikesTests {
     private func page(
         style: PostGridPageView.Style = .discover, wallet: WalletStore
     ) -> PostGridPageView {
-        let page = PostGridPageView(imagePipeline: pipeline(), style: style)
-        page.staking = PostCardStaking(wallet: wallet)
+        let page = PostGridPageView(imagePipeline: pipeline(), style: style,
+        bookmarks: PostBookmarkStore(scope: StorageScope()),
+        withheldPosts: UnavailablePosts())
+        page.staking = PostCardStaking(wallet: wallet, saves: PostBookmarkStore(scope: StorageScope()))
         page.frame = CGRect(x: 0, y: 0, width: 393, height: 6000)
         page.setCorpusComplete(true)
         page.render(.content(corpus(60)))
@@ -205,7 +207,7 @@ struct CardLikesTests {
     private func lead(wallet: WalletStore) -> ShelfLeadFixture {
         let lead = ShelfLeadFixture(pipeline: pipeline(), videoPlayback: nil)
         lead.stack.frame = CGRect(x: 0, y: 0, width: 393, height: 600)
-        lead.shelf.staking = PostCardStaking(wallet: wallet)
+        lead.shelf.staking = PostCardStaking(wallet: wallet, saves: PostBookmarkStore(scope: StorageScope()))
         let following = [
             GalleryPost(
                 id: PostID("words"), kind: .text, isRepost: false, thumbnailURL: nil,

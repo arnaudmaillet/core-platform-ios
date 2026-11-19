@@ -13,7 +13,7 @@ public final class WalletServerSync {
     private var observers: [NSObjectProtocol] = []
     private var wake: Timer?
 
-    public init(wallet: WalletStore, scope: StorageScope = .shared) {
+    public init(wallet: WalletStore, scope: StorageScope) {
         self.wallet = wallet
         self.scope = scope
     }

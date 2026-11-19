@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import MediaCore
 import MediaPlayback
 import Testing
@@ -56,9 +57,12 @@ struct SnapPageRenderSpecTests {
     private func feed(_ models: [FeedItemDisplayModel]) -> (SnapFeedViewController, UIWindow) {
         let panels = Panels()
         let controller = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: QuietProvider()),
+            viewModel: FeedViewModel(repository: QuietProvider(), unavailablePosts: UnavailablePosts()),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
-            makeCommentsPanelContent: { id in panels.make(id) }
+            makeCommentsPanelContent: { id in panels.make(id) },
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            savedSounds: SavedSoundStore(scope: StorageScope()),
+            viewer: { nil }
         )
         // ⚠️ IN A WINDOW, and pinned to light. A detached view has no trait to
         // resolve `.systemBackground` against, and the screen under test reads
@@ -294,8 +298,11 @@ struct SnapPageRenderSpecTests {
     /// toolbar item actually RESOLVES with, wherever UIKit put it.
     @Test func aMediaPagesToolbarItemsResolveDarkOnALightDevice() throws {
         let controller = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: QuietProvider()),
-            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+            viewModel: FeedViewModel(repository: QuietProvider(), unavailablePosts: UnavailablePosts()),
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            savedSounds: SavedSoundStore(scope: StorageScope()),
+            viewer: { nil }
         )
         let nav = UINavigationController(rootViewController: controller)
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))

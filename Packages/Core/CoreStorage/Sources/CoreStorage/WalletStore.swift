@@ -610,7 +610,7 @@ public final class WalletStore: @unchecked Sendable {
     public init(
         defaults: UserDefaults = .standard,
         now: @escaping @Sendable () -> Date = { Date() },
-        scope: StorageScope = .shared,
+        scope: StorageScope,
         /// The QA launch arguments (DEBUG only) — the process's own; a test
         /// hands its own.
         launchArguments: [String] = ProcessInfo.processInfo.arguments

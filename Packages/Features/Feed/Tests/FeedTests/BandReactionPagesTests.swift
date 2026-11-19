@@ -4,6 +4,7 @@ import CoreModels
 import CoreNetworking
 import CoreNetworkingMocks
 import Foundation
+import PostSurfaces
 import Testing
 @testable import Feed
 @testable import ThreadKit
@@ -86,7 +87,8 @@ struct BandReactionPagesTests {
     @Test func aLaterPageJoinsThePool() async {
         let provider = ThreePages()
         let clock = Clock()
-        let viewModel = FeedViewModel(repository: NoFeed(), commentsProvider: provider, now: { clock.now })
+        let viewModel = FeedViewModel(repository: NoFeed(), commentsProvider: provider,
+        unavailablePosts: UnavailablePosts(), now: { clock.now })
         await activate(viewModel)
         #expect(viewModel.commentStreams(for: id).reactions.count == 10)
 
@@ -99,7 +101,8 @@ struct BandReactionPagesTests {
     @Test func oneInFlightPerPost() async {
         let provider = ThreePages()
         let clock = Clock()
-        let viewModel = FeedViewModel(repository: NoFeed(), commentsProvider: provider, now: { clock.now })
+        let viewModel = FeedViewModel(repository: NoFeed(), commentsProvider: provider,
+        unavailablePosts: UnavailablePosts(), now: { clock.now })
         await activate(viewModel)
 
         viewModel.bandRanLow(for: id)
@@ -114,7 +117,8 @@ struct BandReactionPagesTests {
     @Test func theIntervalHoldsTheNextPage() async {
         let provider = ThreePages()
         let clock = Clock()
-        let viewModel = FeedViewModel(repository: NoFeed(), commentsProvider: provider, now: { clock.now })
+        let viewModel = FeedViewModel(repository: NoFeed(), commentsProvider: provider,
+        unavailablePosts: UnavailablePosts(), now: { clock.now })
         await activate(viewModel)
         _ = await ranLow(viewModel)
 
@@ -131,7 +135,8 @@ struct BandReactionPagesTests {
     @Test func theBandStopsAtTheCap() async {
         let provider = ThreePages()
         let clock = Clock()
-        let viewModel = FeedViewModel(repository: NoFeed(), commentsProvider: provider, now: { clock.now })
+        let viewModel = FeedViewModel(repository: NoFeed(), commentsProvider: provider,
+        unavailablePosts: UnavailablePosts(), now: { clock.now })
         await activate(viewModel)
         for _ in 0..<FeedViewModel.maxExtraReactionPages {
             clock.advance(FeedViewModel.reactionPageInterval)
@@ -147,7 +152,8 @@ struct BandReactionPagesTests {
     /// A post with no next page asks nothing.
     @Test func noNextPageAsksNothing() async {
         let provider = FakeOnePage()
-        let viewModel = FeedViewModel(repository: NoFeed(), commentsProvider: provider)
+        let viewModel = FeedViewModel(repository: NoFeed(), commentsProvider: provider,
+        unavailablePosts: UnavailablePosts())
         await activate(viewModel)
         viewModel.bandRanLow(for: id)
         #expect(!viewModel.debugReactionPages(for: id).inFlight)

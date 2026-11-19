@@ -3,6 +3,7 @@ import CoreContracts
 import CoreModels
 import CoreNetworking
 import CoreNetworkingMocks
+import CoreStorage
 import Foundation
 import Testing
 @testable import ProfileData
@@ -37,7 +38,8 @@ struct PasskeysTests {
         // fresh proof.
         lifecycle.forgetRecentProofs()
         let client = ConnectClientFactory.makeAuthenticated(host: host, tokenProvider: session, httpClient: bff)
-        let account = AccountRepository(accountClient: Account_V1_AccountServiceClient(client: client), authSession: session)
+        let account = AccountRepository(accountClient: Account_V1_AccountServiceClient(client: client), authSession: session,
+        teenProtections: TeenProtections())
         return AccountSessionsRepository(
             authClient: Auth_V1_AuthServiceClient(client: client), tokenInstaller: session,
             account: account, reauthenticator: CodeReauthenticator(anonymous: anonymous, session: session)

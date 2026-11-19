@@ -74,7 +74,7 @@ struct SnapTextFooterLikeTests {
         let suite = "snap-unavailable-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defaults.removePersistentDomain(forName: suite)
-        let wallet = WalletStore(defaults: defaults)
+        let wallet = WalletStore(defaults: defaults, scope: StorageScope())
         wallet.credit(100)
         return wallet
     }
@@ -83,14 +83,14 @@ struct SnapTextFooterLikeTests {
         _ models: [FeedItemDisplayModel], panels: Panels, wallet: WalletStore? = nil
     ) -> SnapFeedViewController {
         let controller = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: panels.posts),
+            viewModel: FeedViewModel(repository: panels.posts, unavailablePosts: UnavailablePosts()),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             makeCommentsPanelContent: { id in panels.make(id) },
             wallet: wallet,
             bookmarks: PostBookmarkStore(
                 defaults: UserDefaults(suiteName: "snap-unavailable-bookmarks-\(UUID().uuidString)")!,
                 scope: StorageScope(owner: .member(account: "acc-1", profile: "prof-1"))
-            )
+            ), savedSounds: SavedSoundStore(scope: StorageScope()), viewer: { nil }
         )
         controller.loadViewIfNeeded()
         controller.view.frame = CGRect(x: 0, y: 0, width: 390, height: 844)

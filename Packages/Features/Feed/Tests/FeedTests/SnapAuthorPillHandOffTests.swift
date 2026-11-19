@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import FeedInterface
 import Foundation
 import MediaCore
@@ -40,8 +41,11 @@ struct SnapAuthorPillHandOffTests {
             base: AuthoredPhotos(), ids: ["a", "b", "c"].map { PostID($0) }, isCompleteSet: true
         )
         let controller = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: provider),
-            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+            viewModel: FeedViewModel(repository: provider, unavailablePosts: UnavailablePosts()),
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            savedSounds: SavedSoundStore(scope: StorageScope()),
+            viewer: { nil }
         )
         controller.loadViewIfNeeded()
         controller.view.frame = CGRect(x: 0, y: 0, width: 390, height: 844)

@@ -125,6 +125,7 @@ struct PostPublishReplayTests {
             uploadTransport: MockMediaUploadTransport(store: blobs),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             composedChannel: ComposedPostChannel(),
+            publishedVideos: PublishedVideoFiles(root: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)),
             // No wall clock: the waits are there, and take no time.
             inFlightRetryDelays: Array(repeating: .zero, count: waits)
         )

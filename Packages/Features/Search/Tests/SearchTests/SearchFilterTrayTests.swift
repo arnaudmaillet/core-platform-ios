@@ -73,7 +73,8 @@ struct SearchFilterTrayTests {
             )
             screen = SearchViewController(
                 viewModel: viewModel,
-                imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+                imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+                presence: SectionPresenceStore(scope: StorageScope())
             )
             // ⚠️ HELD DIRECTLY, not reached through the screen. Submitting
             // REPLACES the search screen in the stack — that is the point of it
@@ -425,6 +426,7 @@ struct SearchFilterTrayTests {
         let refine = SearchViewController(
             viewModel: host.viewModel,
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            presence: SectionPresenceStore(scope: StorageScope()),
             mode: .refine
         )
         refine.loadViewIfNeeded()
@@ -441,6 +443,7 @@ struct SearchFilterTrayTests {
         let refine = SearchViewController(
             viewModel: host.viewModel,
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            presence: SectionPresenceStore(scope: StorageScope()),
             mode: .refine
         )
         refine.loadViewIfNeeded()
@@ -476,6 +479,7 @@ struct SearchFilterTrayTests {
         let refine = SearchViewController(
             viewModel: host.viewModel,
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            presence: SectionPresenceStore(scope: StorageScope()),
             mode: .refine
         )
         refine.loadViewIfNeeded()
@@ -537,6 +541,7 @@ struct SearchFilterTrayTests {
         let refine = SearchViewController(
             viewModel: host.viewModel,
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            presence: SectionPresenceStore(scope: StorageScope()),
             mode: .refine
         )
         refine.loadViewIfNeeded()

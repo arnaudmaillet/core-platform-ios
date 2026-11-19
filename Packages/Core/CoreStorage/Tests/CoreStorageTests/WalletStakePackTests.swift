@@ -30,13 +30,13 @@ struct WalletStakePackTests {
     }
 
     @Test func aFreshWalletHasNoPack() {
-        let store = WalletStore(defaults: Self.defaults())
+        let store = WalletStore(defaults: Self.defaults(), scope: StorageScope())
         #expect(store.stakeShots == 0)
         #expect(store.snapshot().stakeShots == 0)
     }
 
     @Test func buyingDeductsTheGemsAndLoadsTheShots() {
-        let store = WalletStore(defaults: Self.defaults())
+        let store = WalletStore(defaults: Self.defaults(), scope: StorageScope())
         let gems = store.snapshot().gems
 
         #expect(store.buyStakePack() == .bought(shots: Pack.shots, remainingGems: gems - Pack.price))
@@ -52,7 +52,7 @@ struct WalletStakePackTests {
         let defaults = Self.defaults()
         defaults.set(true, forKey: "wallet.seeded")
         defaults.set(2 * Pack.shots * Pack.likesPerShot, forKey: "wallet.balance")
-        let store = WalletStore(defaults: defaults)
+        let store = WalletStore(defaults: defaults, scope: StorageScope())
         store.buyStakePack()
         for _ in 0..<(Pack.shots - 1) {
             store.stake(.shot, on: "post-\(UUID().uuidString)")
@@ -72,7 +72,7 @@ struct WalletStakePackTests {
 
     @Test func aPackTheGemsCannotCoverChangesNothing() {
         let defaults = Self.defaults()
-        let store = WalletStore(defaults: defaults)
+        let store = WalletStore(defaults: defaults, scope: StorageScope())
         let gems = store.snapshot().gems
         // Spend down to one gem short of the price.
         _ = store.spendGems(gems - (Pack.price - 1))
@@ -84,7 +84,7 @@ struct WalletStakePackTests {
 
     /// One shot: `likesPerShot` likes on the target, one shot off the pack.
     @Test func aShotStakesItsPointsAndUsesOneShot() {
-        let store = WalletStore(defaults: Self.defaults())
+        let store = WalletStore(defaults: Self.defaults(), scope: StorageScope())
         store.buyStakePack()
         let balance = store.balance
 
@@ -102,7 +102,7 @@ struct WalletStakePackTests {
         let defaults = Self.defaults()
         defaults.set(true, forKey: "wallet.seeded")
         defaults.set(Pack.likesPerShot - 1, forKey: "wallet.balance")
-        let store = WalletStore(defaults: defaults)
+        let store = WalletStore(defaults: defaults, scope: StorageScope())
         store.buyStakePack()
 
         #expect(store.stake(.shot, on: "post-1") == .insufficientBalance(balance: Pack.likesPerShot - 1))
@@ -112,7 +112,7 @@ struct WalletStakePackTests {
 
     /// A full post refuses the shot too — and keeps it.
     @Test func aShotOnAFullPostIsNotConsumed() {
-        let store = WalletStore(defaults: Self.defaults())
+        let store = WalletStore(defaults: Self.defaults(), scope: StorageScope())
         store.buyStakePack()
         store.boost(targetID: "post-1", amount: WalletStore.Policy.perTargetBoostCap)
 
@@ -127,7 +127,7 @@ struct WalletStakePackTests {
         let defaults = Self.defaults()
         defaults.set(true, forKey: "wallet.seeded")
         defaults.set(1_000, forKey: "wallet.balance")
-        let store = WalletStore(defaults: defaults)
+        let store = WalletStore(defaults: defaults, scope: StorageScope())
         store.buyStakePack()
         store.stake(.shot, on: "post-1")
         store.stake(.shot, on: "post-1")
@@ -158,7 +158,7 @@ struct WalletStakePackTests {
         let defaults = Self.defaults()
         defaults.set(true, forKey: "wallet.seeded")
         defaults.set(WalletStore.Policy.perTargetBoostCap - Pack.likesPerShot + 1 + 10, forKey: "wallet.balance")
-        let store = WalletStore(defaults: defaults)
+        let store = WalletStore(defaults: defaults, scope: StorageScope())
         store.buyStakePack()
         store.boost(targetID: "post-1", amount: WalletStore.Policy.perTargetBoostCap - Pack.likesPerShot + 1)
         // 10 points left, room for 99: the room is what refuses it.
@@ -166,7 +166,7 @@ struct WalletStakePackTests {
     }
 
     @Test func aShotWithoutAPackChangesNothing() {
-        let store = WalletStore(defaults: Self.defaults())
+        let store = WalletStore(defaults: Self.defaults(), scope: StorageScope())
         let balance = store.balance
         #expect(store.stake(.shot, on: "post-1") == .noShotsLeft)
         #expect(store.balance == balance)
@@ -175,7 +175,7 @@ struct WalletStakePackTests {
 
     /// A plain stake never touches the pack.
     @Test func aPlainStakeLeavesThePackAlone() {
-        let store = WalletStore(defaults: Self.defaults())
+        let store = WalletStore(defaults: Self.defaults(), scope: StorageScope())
         store.buyStakePack()
         store.stake(.likes(WalletStore.Policy.defaultStakeAmount), on: "post-1")
         #expect(store.stakeShots == Pack.shots)
@@ -185,20 +185,20 @@ struct WalletStakePackTests {
     /// gems and the balance do.
     @Test func theShotsLeftSurviveRelaunch() {
         let defaults = Self.defaults()
-        let first = WalletStore(defaults: defaults)
+        let first = WalletStore(defaults: defaults, scope: StorageScope())
         first.buyStakePack()
         first.stake(.shot, on: "post-1")
         first.stake(.shot, on: "post-2")
         let gems = first.snapshot().gems
 
-        let relaunched = WalletStore(defaults: defaults)
+        let relaunched = WalletStore(defaults: defaults, scope: StorageScope())
         #expect(relaunched.stakeShots == Pack.shots - 2)
         #expect(relaunched.snapshot().gems == gems)
         #expect(relaunched.buyStakePack() == .packStillActive(shotsLeft: Pack.shots - 2))
     }
 
     @Test func buyingAndShootingPostScopedChangeNotifications() async {
-        let store = WalletStore(defaults: Self.defaults())
+        let store = WalletStore(defaults: Self.defaults(), scope: StorageScope())
         let center = NotificationCenter.default
         let counter = Counter()
         let token = center.addObserver(forName: WalletStore.didChangeNotification, object: store, queue: nil) { _ in
@@ -227,8 +227,8 @@ extension WalletStakePackTests {
     @Test func aBiggerPackLoadsItsShotsAndIsRemembered() throws {
         let defaults = Self.defaults()
         // Gems granted up front: the seeded 100 buy only the smallest pack.
-        defaults.set(1_000, forKey: StorageScope.shared.accountKey("wallet.gemsGranted"))
-        let store = WalletStore(defaults: defaults)
+        defaults.set(1_000, forKey: StorageScope().accountKey("wallet.gemsGranted"))
+        let store = WalletStore(defaults: defaults, scope: StorageScope())
         let tier = try #require(Pack.tiers.first { $0.shots == 10 })
         let gems = store.snapshot().gems
         #expect(gems >= tier.price, "precondition: the seed affords the 10-shot pack")

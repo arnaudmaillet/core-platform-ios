@@ -46,7 +46,7 @@ public final class MapFavoritesStore: @unchecked Sendable {
         scope.profileKey(Self.baseKey(for: category), adoptingLegacyIn: defaults)
     }
 
-    public init(defaults: UserDefaults = .standard, scope: StorageScope = .shared) {
+    public init(defaults: UserDefaults = .standard, scope: StorageScope) {
         self.defaults = defaults
         self.scope = scope
         #if DEBUG

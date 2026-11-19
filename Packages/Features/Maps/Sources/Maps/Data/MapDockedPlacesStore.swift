@@ -31,7 +31,7 @@ public final class MapDockedPlacesStore: @unchecked Sendable {
 
     private var scopeObserver: NSObjectProtocol?
 
-    public init(defaults: UserDefaults = .standard, scope: StorageScope = .shared) {
+    public init(defaults: UserDefaults = .standard, scope: StorageScope) {
         self.defaults = defaults
         self.scope = scope
         // ⚠️ THE LIST IS THE PROFILE'S, AND THE PROFILE ARRIVES LATE: the map

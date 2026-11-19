@@ -268,6 +268,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         imagePipeline: ImagePipeline,
         videoPlayback: VideoPlaybackController? = nil,
         makeGridPage: @escaping ProfileGridPageFactory,
+        presence: SectionPresenceStore,
         shareTargeting: (any ProfileShareTargeting)? = nil,
         onLogout: (() -> Void)?,
         makeEditViewController: ((UserProfile?, @escaping () -> Void) -> UIViewController)? = nil,
@@ -323,7 +324,9 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
                 return page
             }
         }
-        let pager = ProfileGalleryPagerView(tabs: allTabs, shown: shown, makeChannelsPage: makeChannelsPage) { style in
+        let pager = ProfileGalleryPagerView(
+            tabs: allTabs, shown: shown, makeChannelsPage: makeChannelsPage, presence: presence
+        ) { style in
             makeGridPage(style, savesPosts)
         }
         pager.presenceScreen = { [weak viewModel] in viewModel?.presenceScreen }

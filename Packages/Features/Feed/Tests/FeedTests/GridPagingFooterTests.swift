@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import Foundation
 import MediaCore
 import PostGrid
@@ -34,7 +35,9 @@ struct GridPagingFooterTests {
     /// so every `contentOffset` written to it clamps straight back to zero and
     /// the assertions below would pass without testing anything.
     private func page() -> PostGridPageView {
-        let page = PostGridPageView(imagePipeline: pipeline(), style: .grid)
+        let page = PostGridPageView(imagePipeline: pipeline(), style: .grid,
+        bookmarks: PostBookmarkStore(scope: StorageScope()),
+        withheldPosts: UnavailablePosts())
         page.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
         page.additionalBottomInset = 88
         page.render(.content(posts(40)))
@@ -112,7 +115,9 @@ struct GridPagingFooterTests {
     /// coming, indistinguishable from the end of the feed. A grid hid the same
     /// wait behind three columns of tiles.
     @Test func aTimelineReservesTheFooterBandToo() {
-        let list = PostGridPageView(imagePipeline: pipeline(), style: .list)
+        let list = PostGridPageView(imagePipeline: pipeline(), style: .list,
+        bookmarks: PostBookmarkStore(scope: StorageScope()),
+        withheldPosts: UnavailablePosts())
         list.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
         list.additionalBottomInset = 88
         list.layoutIfNeeded()

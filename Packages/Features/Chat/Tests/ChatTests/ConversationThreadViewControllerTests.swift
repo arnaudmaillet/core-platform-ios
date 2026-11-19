@@ -120,13 +120,14 @@ struct ConversationThreadViewControllerTests {
         let accessory = FakeAccessory()
         let screen = ConversationThreadViewController(
             driver: driver, mode: mode, prefill: prefill,
-            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            presence: presence ?? SectionPresenceStore(scope: StorageScope()),
+            voicePlayed: VoicePlayedStore(scope: StorageScope())
         )
         // One "now" for the seed and the titles: a run crossing midnight
         // read the clock on either side of it.
         if let now { screen.dayClock = { now } }
         if let skeletonClock { screen.skeletonClock = skeletonClock }
-        if let presence { screen.presence = presence }
         screen.anchorsShortStream = anchorsShortStream
         let navigation = UINavigationController(rootViewController: screen)
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
@@ -234,7 +235,8 @@ struct ConversationThreadViewControllerTests {
     /// them, a picture's bone where it had pictures — and nothing at all for
     /// a thread that was empty.
     @Test func theSkeletonIsTheThreadsLastKnownShape() throws {
-        let presence = SectionPresenceStore(defaults: try #require(UserDefaults(suiteName: "thread-\(UUID().uuidString)")))
+        let presence = SectionPresenceStore(defaults: try #require(UserDefaults(suiteName: "thread-\(UUID().uuidString)")),
+        scope: StorageScope())
         presence.remember(2, screen: "thread.c1", section: "messages")
         presence.remember(1, screen: "thread.c1", section: "media")
         let time = ManualLoadingClock()

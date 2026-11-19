@@ -1,7 +1,9 @@
 import CoreModels
+import CoreStorage
 import EntityStore
 import Foundation
 import MediaCore
+import PostSurfaces
 import Testing
 @testable import Feed
 
@@ -40,7 +42,13 @@ struct HeldPostTests {
 
     private func builder(_ repository: any FeedProviding, entities: EntityStore) -> FeedFeatureBuilder {
         FeedFeatureBuilder(
-            repository: repository, imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()), entities: entities
+            repository: repository, imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            postDrafts: PostDraftStore(scope: StorageScope()), entities: entities,
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            viewHistory: PostViewHistoryStore(scope: StorageScope()),
+            unavailablePosts: UnavailablePosts(),
+            savedSounds: SavedSoundStore(scope: StorageScope()),
+            viewerProfile: { nil }
         )
     }
 

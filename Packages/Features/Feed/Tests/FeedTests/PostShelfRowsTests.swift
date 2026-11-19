@@ -247,7 +247,8 @@ struct PostShelfRowsTests {
     @Test func aTextCardsLikeStakes() throws {
         let wallet = Self.wallet()
         let before = wallet.balance
-        let fixture = Fixture(cards: Self.mixed, staking: PostCardStaking(wallet: wallet))
+        let fixture = Fixture(cards: Self.mixed, staking: PostCardStaking(wallet: wallet,
+        saves: PostBookmarkStore(scope: StorageScope())))
         let index = try #require(Self.mixed.firstIndex { $0.kind == .text })
         let cell = try #require(fixture.lead.shelf.debugTextCardCell(at: index))
         let id = Self.mixed[index].id
@@ -566,7 +567,7 @@ struct PostShelfRowsTests {
         let name = "foryou-rows-tests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: name)!
         defaults.removePersistentDomain(forName: name)
-        return WalletStore(defaults: defaults)
+        return WalletStore(defaults: defaults, scope: StorageScope())
     }
 
     // MARK: - Repost follows its handler (#801)
@@ -594,7 +595,9 @@ struct PostShelfRowsTests {
     /// The list's cards and the profile's follow the same rule: no handler,
     /// no repost.
     @Test func theListsCardsOfferNoRepostWithoutAHandler() {
-        let page = PostGridPageView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .discover)
+        let page = PostGridPageView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .discover,
+        bookmarks: PostBookmarkStore(scope: StorageScope()),
+        withheldPosts: UnavailablePosts())
         let post = Self.post("p0", kind: .photo)
         #expect(page.repostHandler(for: post) == nil)
         page.onRepostRequested = { _ in }
@@ -622,7 +625,9 @@ struct PostShelfRowsTests {
             lead = ShelfLeadFixture(pipeline: pipeline, videoPlayback: nil)
             lead.shelf.staking = staking
             lead.shelf.onCardRepostRequested = onRepost
-            page = PostGridPageView(imagePipeline: pipeline, style: .discover, videoPlayback: nil)
+            page = PostGridPageView(imagePipeline: pipeline, style: .discover, videoPlayback: nil,
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            withheldPosts: UnavailablePosts())
             lead.render(following: cards)
             window.rootViewController = host
             window.isHidden = false

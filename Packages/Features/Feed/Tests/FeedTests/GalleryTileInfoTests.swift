@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import DesignSystem
 import FeedInterface
 import Foundation
@@ -45,7 +46,9 @@ struct GalleryTileInfoTests {
     }
 
     private func page(style: PostGridPageView.Style, showsInfo: Bool) -> PostGridPageView {
-        let page = PostGridPageView(imagePipeline: pipeline(), style: style)
+        let page = PostGridPageView(imagePipeline: pipeline(), style: style,
+        bookmarks: PostBookmarkStore(scope: StorageScope()),
+        withheldPosts: UnavailablePosts())
         page.showsTileInfo = showsInfo
         page.frame = CGRect(x: 0, y: 0, width: 393, height: 6000)
         page.setCorpusComplete(true)
@@ -72,6 +75,8 @@ struct GalleryTileInfoTests {
     @Test func theGalleryWearsTheWordsByDefault() {
         let gallery = DiscoverGalleryViewController(
             imagePipeline: pipeline(), videoPlayback: nil,
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            withheldPosts: UnavailablePosts(),
             header: PushedScreenHeader(wallet: nil, makeWalletSheet: nil, router: nil),
             openPost: nil
         )
@@ -202,6 +207,8 @@ struct GalleryTileInfoTests {
         var opened: SnapFeedHeroOrigin?
         let gallery = DiscoverGalleryViewController(
             imagePipeline: pipeline(), videoPlayback: nil,
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            withheldPosts: UnavailablePosts(),
             header: PushedScreenHeader(wallet: nil, makeWalletSheet: nil, router: nil),
             openPost: { _, origin, _ in opened = origin }
         )

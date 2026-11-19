@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import DesignSystem
 import EntityStore
 import Foundation
@@ -97,7 +98,9 @@ struct ConversationThreadSendAndMuteTests {
         let driver = Driver(initial: phase, muted: muted)
         let screen = ConversationThreadViewController(
             driver: driver, mode: .full, prefill: "",
-            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            presence: SectionPresenceStore(scope: StorageScope()),
+            voicePlayed: VoicePlayedStore(scope: StorageScope())
         )
         screen.sendingLoaderDelay = loaderDelay
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
@@ -716,6 +719,8 @@ struct ConversationThreadSendAndMuteTests {
         let screen = ConversationThreadViewController(
             driver: driver, mode: .full, prefill: "",
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            presence: SectionPresenceStore(scope: StorageScope()),
+            voicePlayed: VoicePlayedStore(scope: StorageScope()),
             socialGraph: graph, followRelations: graph, entities: entities
         )
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))

@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import FeedInterface
 import Foundation
 import MediaCore
@@ -66,7 +67,9 @@ struct ProfileReturnPlaybackTests {
     /// The page the profile draws its media on (#1273): For You's, with the
     /// app's pool.
     private func forYouGallery(pool: VideoPlaybackController? = nil) -> (PostGridPageView, [GalleryPost]) {
-        let page = PostGridPageView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .grid, videoPlayback: pool)
+        let page = PostGridPageView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .grid, videoPlayback: pool,
+        bookmarks: PostBookmarkStore(scope: StorageScope()),
+        withheldPosts: UnavailablePosts())
         page.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
         page.setCorpusComplete(true)
         let posts = videos()
@@ -88,7 +91,7 @@ struct ProfileReturnPlaybackTests {
         let screen = ProfileViewController(
             viewModel: ProfileViewModel(repository: NoProfiles(), gallery: NoGallery(), source: .currentUser),
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
-            makeGridPage: TestGridPages.factory(),
+            makeGridPage: TestGridPages.factory(), presence: SectionPresenceStore(scope: StorageScope()),
             onLogout: nil
         )
         let navigation = UINavigationController(rootViewController: screen)
@@ -110,7 +113,7 @@ struct ProfileReturnPlaybackTests {
         let screen = ProfileViewController(
             viewModel: ProfileViewModel(repository: NoProfiles(), gallery: NoGallery(), source: .currentUser),
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
-            makeGridPage: TestGridPages.factory(),
+            makeGridPage: TestGridPages.factory(), presence: SectionPresenceStore(scope: StorageScope()),
             onLogout: nil
         )
         var handed: SnapFeedHeroOrigin?

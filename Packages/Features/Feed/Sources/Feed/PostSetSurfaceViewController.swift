@@ -1,5 +1,6 @@
 import CoreContracts
 import CoreModels
+import CoreStorage
 import DesignSystem
 import FeedInterface
 import LaunchArguments
@@ -138,6 +139,8 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
         style: PostSetSurfaceStyle,
         imagePipeline: ImagePipeline,
         videoPlayback: VideoPlaybackController?,
+        bookmarks: PostBookmarkStore,
+        withheldPosts: UnavailablePosts,
         held: @escaping @MainActor (PostID) -> GalleryPost? = { _ in nil },
         hydrate: @escaping ([PostID]) async -> [GalleryPost]
     ) {
@@ -145,12 +148,14 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
         page = PostGridPageView(
             imagePipeline: imagePipeline,
             style: Self.pageStyle(for: style),
-            videoPlayback: videoPlayback
+            videoPlayback: videoPlayback,
+            bookmarks: bookmarks,
+            withheldPosts: withheldPosts
         )
         self.style = style
         self.hydrate = hydrate
         if style == .discover {
-            let shelf = PostShelfSection(imagePipeline: imagePipeline, videoPlayback: videoPlayback)
+            let shelf = PostShelfSection(imagePipeline: imagePipeline, videoPlayback: videoPlayback, bookmarks: bookmarks)
             // The room is the skeleton's from the start, the bones only after
             // the gate's delay (#1773, #1770).
             shelf.bonesVisible = false

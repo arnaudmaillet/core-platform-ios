@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import FeedInterface
 import Foundation
 import MediaCore
@@ -92,7 +93,9 @@ struct ReturnPlayersEverywhereTests {
     ) async throws -> (page: PostGridPageView, tapped: PostID, window: UIWindow) {
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
         let page = PostGridPageView(
-            imagePipeline: ImagePipeline(fetcher: fetcher), style: style, videoPlayback: pool
+            imagePipeline: ImagePipeline(fetcher: fetcher), style: style, videoPlayback: pool,
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            withheldPosts: UnavailablePosts()
         )
         page.frame = window.bounds
         window.addSubview(page)
@@ -241,7 +244,8 @@ struct ReturnPlayersEverywhereTests {
         let pool = Self.makePool()
         let posts = Self.videos(4, prefix: "s")
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
-        let shelf = PostShelfSection(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), videoPlayback: pool)
+        let shelf = PostShelfSection(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), videoPlayback: pool,
+        bookmarks: PostBookmarkStore(scope: StorageScope()))
         shelf.frame = CGRect(x: 0, y: 100, width: 402, height: 400)
         window.addSubview(shelf)
         window.isHidden = false
@@ -259,7 +263,9 @@ struct ReturnPlayersEverywhereTests {
         let id = posts[0].id
         shelf.beginPlaybackHandoff(of: id)
         await Self.settle { pool.returnPlaybackCount == 1 }
-        let page = PostGridPageView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .discover)
+        let page = PostGridPageView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .discover,
+        bookmarks: PostBookmarkStore(scope: StorageScope()),
+        withheldPosts: UnavailablePosts())
         let reveal = PostShelfOrigins.cardReveal(for: posts[0], cover: Self.picture(), shelf: shelf, page: page)
         let standIn = try #require(reveal.makeDismissStandIn(nil))
         #expect(Self.firstVideoSurface(in: standIn) != nil, "the card's window carried a still")
@@ -298,7 +304,7 @@ struct ReturnPlayersEverywhereTests {
         var opened: SnapFeedHeroOrigin?
         let gallery = DiscoverGalleryViewController(
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
-            videoPlayback: pool,
+            videoPlayback: pool, bookmarks: PostBookmarkStore(scope: StorageScope()), withheldPosts: UnavailablePosts(),
             header: PushedScreenHeader(wallet: nil, makeWalletSheet: nil, router: nil),
             openPost: { _, origin, _ in opened = origin }
         )
@@ -316,6 +322,8 @@ struct ReturnPlayersEverywhereTests {
             kind: .following,
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
             videoPlayback: Self.makePool(),
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            withheldPosts: UnavailablePosts(),
             staking: nil,
             header: PushedScreenHeader(wallet: nil, makeWalletSheet: nil, router: nil),
             openPost: { _, origin, _ in opened = origin }
@@ -338,6 +346,8 @@ struct ReturnPlayersEverywhereTests {
             style: .discover,
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
             videoPlayback: Self.makePool(),
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            withheldPosts: UnavailablePosts(),
             hydrate: { ids in ids.compactMap { byID[$0] } }
         )
         var opened: SnapFeedHeroOrigin?

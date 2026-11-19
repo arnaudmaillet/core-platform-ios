@@ -28,6 +28,7 @@ import MapsInterface
 import Notifications
 import NotificationsInterface
 import PlaceInterface
+import PostSurfaces
 import Profile
 import ProfileData
 import ProfileInterface
@@ -104,7 +105,7 @@ final class AppContainer {
         )
         backend.bff.faults = mockNetworkFaults
         #if DEBUG
-        Self.seedViewHistoryIfAsked(from: backend.dataset)
+        seedViewHistoryIfAsked(from: backend.dataset)
         #endif
         return backend
     }()
@@ -116,7 +117,7 @@ final class AppContainer {
     /// viewed from minutes to months ago, so its rows and day groups can be
     /// looked at without viewing each post first. Replaces the pile on every
     /// launch that asks.
-    private static func seedViewHistoryIfAsked(from dataset: MockSocialDataset) {
+    private func seedViewHistoryIfAsked(from dataset: MockSocialDataset) {
         guard LaunchArgument.mockViewHistory.isPassed() else { return }
         let posts = dataset.posts.filter { $0.parentID.isEmpty }
         let isVideo: (MockSocialDataset.PostRecord) -> Bool = {
@@ -147,7 +148,7 @@ final class AppContainer {
         let hours: [Double] = [0.1, 0.5, 2, 5, 9, 26, 30, 50, 75, 100]
         let days: [Double] = [8, 9, 12, 20, 26, 40, 45, 70, 75, 100, 130, 160]
         let ages: [TimeInterval] = hours.map { $0 * 3600 } + days.map { $0 * 86_400 }
-        PostViewHistoryStore.shared.debugPendingSeed = zip(picked, ages).map { (id: $0, age: $1) }
+        viewHistory.debugPendingSeed = zip(picked, ages).map { (id: $0, age: $1) }
     }
     #endif
 
@@ -213,15 +214,24 @@ final class AppContainer {
         return server
     }()
 
+    /// Whose identity the device-local stores hold (#2376): THE APP'S ONE
+    /// SCOPE, handed to every store that keys by profile or account. Not lazy:
+    /// it exists before `AppCoordinator.render` first calls
+    /// `enterStorageScope`. A store built over any other scope would never
+    /// follow the viewer (`RepoGuards/ViewerStoreGuardTests` keeps this the
+    /// only `StorageScope(` in the app).
+    let storageScope = StorageScope()
+
     /// Bridge from the compose feature to the feed's optimistic insert.
     let composedPostChannel = ComposedPostChannel()
     /// The viewer's accepted follows and unfollows, announced by every
     /// repository that writes them and heard by every surface that shows one
     /// — see `FollowGraphEvents`. One instance, like the channel above. A
     /// change made as a profile that is no longer the active one is dropped
-    /// (#978): the active profile is the one `StorageScope` holds.
-    let followGraphEvents = FollowGraphEvents(currentViewer: {
-        guard case .member(_, let profile?) = StorageScope.shared.owner else { return nil }
+    /// (#978): the active profile is the one `storageScope` holds. Lazy, so
+    /// that it can read `storageScope`.
+    private(set) lazy var followGraphEvents = FollowGraphEvents(currentViewer: { [storageScope] in
+        guard case .member(_, let profile?) = storageScope.owner else { return nil }
         return ProfileID(profile)
     })
 
@@ -314,15 +324,12 @@ final class AppContainer {
     /// (`observeStorageScope`), and the profile's keys use the account's
     /// until then.
     func enterStorageScope(for state: AuthState) {
-        let scope = StorageScope.shared
         switch state {
         case .unauthenticated:
-            scope.owner = .guest
-            TeenProtections.shared.clear()
+            viewerStorageBinding.enter(account: nil)
         case .authenticated(let account):
             // The same account keeps the profile it already resolved.
-            if case .member(account.rawValue, _) = scope.owner { return }
-            scope.owner = .member(account: account.rawValue, profile: nil)
+            guard viewerStorageBinding.enter(account: account.rawValue) else { return }
             // Teen protections (#401): reading the account records its age
             // bracket on this device (`AccountRepository.currentAccount`).
             Task { [weak self] in _ = try? await self?.accountRepository.currentAccount() }
@@ -349,11 +356,11 @@ final class AppContainer {
     private func observeStorageScope() {
         guard storageScopeTask == nil else { return }
         let viewer = viewerSession
+        let binding = viewerStorageBinding
         storageScopeTask = Task { @MainActor in
             for await state in await viewer.updates() {
-                guard case .member(let account, let profile?) = state,
-                      case .member(account.rawValue, _) = StorageScope.shared.owner else { continue }
-                StorageScope.shared.owner = .member(account: account.rawValue, profile: profile.rawValue)
+                guard case .member(let account, let profile?) = state else { continue }
+                binding.profileResolved(account: account.rawValue, profile: profile.rawValue)
             }
         }
     }
@@ -441,6 +448,46 @@ final class AppContainer {
     /// cannot be opened even after a reset: the app then runs without it, as
     /// it did before.
     private(set) lazy var localStore: LocalStore? = makeLocalStore()
+
+    // MARK: - Viewer storage (#2376)
+
+    /// Which sections each screen showed last time (#1774): the skeleton's
+    /// memory, ONE store for every screen that draws one — the thread, the
+    /// place page, the profile's gallery, Search.
+    private(set) lazy var sectionPresence = SectionPresenceStore(scope: storageScope)
+
+    /// The received voice messages the viewer played (#2104): every
+    /// conversation reads the same memory, per profile.
+    private(set) lazy var voicePlayed = VoicePlayedStore(scope: storageScope)
+
+    /// The viewer's saved pile (#837): every surface reads and writes it, so
+    /// the facts it writes (`entityStore`) are the ones every screen observes,
+    /// and `savedPostsSync` sends its changes.
+    private(set) lazy var postBookmarks = PostBookmarkStore(scope: storageScope)
+
+    /// The posts the viewer viewed (#1344): the feeds record, the profile's
+    /// History tab reads.
+    private(set) lazy var viewHistory = PostViewHistoryStore(scope: storageScope)
+
+    /// The sounds the viewer saved, behind the sound sheet's star.
+    private(set) lazy var savedSounds = SavedSoundStore(scope: storageScope)
+
+    /// The posts the server withholds from this viewer (#2048), learnt on any
+    /// feed and dropped from every grid page.
+    private(set) lazy var unavailablePosts = UnavailablePosts()
+
+    /// Teen protections (#401): the account's age bracket on this device.
+    private(set) lazy var teenProtections = TeenProtections()
+
+    /// The author's just-published clips (#898), a Videos namespace of
+    /// `cacheCoordinator`.
+    private(set) lazy var publishedVideos = PublishedVideoFiles()
+
+    /// Points `storageScope` (and the teen flag) at whoever is here, for
+    /// `enterStorageScope` and `observeStorageScope`.
+    private(set) lazy var viewerStorageBinding = ViewerStorageBinding(
+        scope: storageScope, teenProtections: teenProtections
+    )
 
     // MARK: - Media
 
@@ -536,7 +583,7 @@ final class AppContainer {
     // MARK: - Likes (#676)
 
     /// The likes waiting to be committed, persisted across launches.
-    private(set) lazy var likeOutbox = LikeOutbox()
+    private(set) lazy var likeOutbox = LikeOutbox(scope: storageScope)
     /// `wallet.Stake`, as the signed-in account.
     private(set) lazy var likeStaking: WalletLikeStaking = makeLikeStaking()
     /// Commits `likeOutbox`; started with `walletStore`.
@@ -556,7 +603,7 @@ final class AppContainer {
     // MARK: - Saves (#837)
 
     /// Sends every save to engagement (queued offline, replayed) and reads
-    /// the Saved tab's list from it, through `PostBookmarkStore.shared`.
+    /// the Saved tab's list from it, through `postBookmarks`.
     var savedPostsSync: SavedPostsSync?
 
     // MARK: - Feed
@@ -574,7 +621,7 @@ final class AppContainer {
     /// presented the composer — a synchronous disk read in the turn that
     /// presents a sheet (charter P4). The drafts list inside the composer
     /// shares the same instance, so the two can never disagree.
-    private(set) lazy var postDraftStore = PostDraftStore()
+    private(set) lazy var postDraftStore = PostDraftStore(scope: storageScope)
 
     private(set) lazy var feedRepository: FeedRepository = makeFeedRepository()
 

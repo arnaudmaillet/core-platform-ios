@@ -1,5 +1,6 @@
 import CoreModels
 import CoreNavigation
+import CoreStorage
 import MediaCore
 import PostGrid
 import Testing
@@ -27,17 +28,24 @@ struct PlacePushedBackSwipeTests {
         let place = PlaceProfileViewController(
             postIDs: [post.id], placeName: "Paris • City Cluster",
             imagePipeline: pipeline, videoPlayback: nil,
-            loadPosts: { [post] }, openPost: { _, _, _ in }
+            loadPosts: { [post] },
+            presence: SectionPresenceStore(scope: StorageScope()),
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            withheldPosts: UnavailablePosts(), openPost: { _, _, _ in }
         )
         let header = { PushedScreenHeader(wallet: nil, makeWalletSheet: nil, router: nil) }
         place.makePostList = {
             PushedPostListViewController(
-                kind: .popular, imagePipeline: pipeline, videoPlayback: nil, staking: nil,
+                kind: .popular, imagePipeline: pipeline, videoPlayback: nil,
+                bookmarks: PostBookmarkStore(scope: StorageScope()),
+                withheldPosts: UnavailablePosts(), staking: nil,
                 header: header(), openPost: nil
             )
         }
         place.makeGallery = {
-            DiscoverGalleryViewController(imagePipeline: pipeline, videoPlayback: nil, header: header(), openPost: nil)
+            DiscoverGalleryViewController(imagePipeline: pipeline, videoPlayback: nil,
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            withheldPosts: UnavailablePosts(), header: header(), openPost: nil)
         }
         // The map's window close, as the map hands it over.
         place.markerClose = { (_: UIViewController) -> RevealGeometry? in nil }

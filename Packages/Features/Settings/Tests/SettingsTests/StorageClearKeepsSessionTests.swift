@@ -128,7 +128,6 @@ final class StorageClearKeepsSessionTests {
     func aClearKeepsTheSessionTheScopeAndThePreferences(_ category: CacheCategory?) async throws {
         let scope = StorageScope(owner: .member(account: "acc-1", profile: "prof-1"))
         let device = try await self.device(scope: scope)
-        let sharedOwner = StorageScope.shared.owner
 
         // The session, in the keychain as the app keeps it when the host allows
         // it (a bare simulator test runner has no keychain entitlement: the
@@ -166,7 +165,6 @@ final class StorageClearKeepsSessionTests {
         }
         #expect(try memorySession.load() == Self.session())
         #expect(scope.owner == .member(account: "acc-1", profile: "prof-1"), "the clear changed whose stores these are")
-        #expect(StorageScope.shared.owner == sharedOwner)
         #expect(device.reasons == [.clear(category)], "the clear was announced as \(device.reasons)")
         #expect(!device.reasons.contains(.viewerChanged), "a clear must never read as a viewer change")
 

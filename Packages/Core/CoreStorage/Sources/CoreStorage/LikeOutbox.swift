@@ -87,7 +87,7 @@ public final class LikeOutbox: @unchecked Sendable {
     public init(
         defaults: UserDefaults = .standard,
         key: String = "likes.outbox.v1",
-        scope: StorageScope = .shared,
+        scope: StorageScope,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.defaults = defaults

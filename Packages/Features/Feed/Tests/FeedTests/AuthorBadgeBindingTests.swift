@@ -28,7 +28,7 @@ struct AuthorBadgeBindingTests {
     /// included.
     @Test func anUnknownRelationDrawsTheSkeletonIsAskedOnceAndItsAnswerLands() async {
         let graph = AnsweringGraph(answers: [ava: .notFollowing])
-        let store = SnapAuthorFollowStore(writer: graph, reader: graph)
+        let store = SnapAuthorFollowStore(writer: graph, reader: graph, viewer: { nil })
         let binding = AuthorBadgeBinding(store: store)
         store.onRelationChange = { binding.relationDidChange(for: $0) }
         let pill = Pill()
@@ -46,7 +46,8 @@ struct AuthorBadgeBindingTests {
 
     /// A pill rebound to another author stops hearing the first.
     @Test func aRebindStopsTheOldAuthorsUpdates() {
-        let store = SnapAuthorFollowStore(writer: AnsweringGraph(answers: [:]), reader: AnsweringGraph(answers: [:]))
+        let store = SnapAuthorFollowStore(writer: AnsweringGraph(answers: [:]), reader: AnsweringGraph(answers: [:]),
+        viewer: { nil })
         let binding = AuthorBadgeBinding(store: store)
         store.onRelationChange = { binding.relationDidChange(for: $0) }
         let pill = Pill()
@@ -67,7 +68,7 @@ struct AuthorBadgeBindingTests {
     @Test func aViewerChangeClearsAndAsksAgain() async {
         let entities = EntityStore()
         let graph = AnsweringGraph(answers: [ava: .following])
-        let store = SnapAuthorFollowStore(writer: graph, reader: graph, entities: entities)
+        let store = SnapAuthorFollowStore(writer: graph, reader: graph, entities: entities, viewer: { nil })
         let binding = AuthorBadgeBinding(store: store)
         store.onRelationChange = { binding.relationDidChange(for: $0) }
         store.onEveryRelationChange = { binding.viewerDidChange() }
@@ -85,7 +86,8 @@ struct AuthorBadgeBindingTests {
 
     /// The belt: a pill scrolling in is drawn with what is known now.
     @Test func reapplyDrawsWhatIsKnownNow() {
-        let store = SnapAuthorFollowStore(writer: AnsweringGraph(answers: [:]), reader: AnsweringGraph(answers: [:]))
+        let store = SnapAuthorFollowStore(writer: AnsweringGraph(answers: [:]), reader: AnsweringGraph(answers: [:]),
+        viewer: { nil })
         let binding = AuthorBadgeBinding(store: store)
         let pill = Pill()
         binding.bind(pill, to: ava)

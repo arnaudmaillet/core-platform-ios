@@ -134,6 +134,8 @@ extension AppContainer {
     func makeChatFeature() -> any ChatFeatureBuilding {
         ChatFeatureBuilder(
             repository: chatRepository,
+            presence: sectionPresence,
+            voicePlayed: voicePlayed,
             connections: socialConnectionsRepository,
             people: peopleDirectoryRepository,
             imagePipeline: imagePipeline,

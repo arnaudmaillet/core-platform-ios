@@ -30,7 +30,7 @@ public final class WalletStakeLikes: @unchecked Sendable {
     private var owner: StorageScope.Owner
     private var observer: NSObjectProtocol?
 
-    public init(wallet: any WalletReading, entities: EntityStore, scope: StorageScope = .shared) {
+    public init(wallet: any WalletReading, entities: EntityStore, scope: StorageScope) {
         self.wallet = wallet
         self.entities = entities
         self.scope = scope

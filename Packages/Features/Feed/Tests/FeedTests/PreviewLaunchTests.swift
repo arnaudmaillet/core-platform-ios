@@ -1,5 +1,6 @@
 import CoreModels
 import CoreNavigation
+import CoreStorage
 import Foundation
 import MediaCore
 import PostGrid
@@ -216,7 +217,8 @@ struct PreviewLaunchTests {
     /// leaves the lift in place — and the card only without one.
     @Test(arguments: [true, false])
     func theShelfsCommitUsesTheCaptureWhenThereIsOne(drawn: Bool) async throws {
-        let shelf = PostShelfSection(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), videoPlayback: nil)
+        let shelf = PostShelfSection(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), videoPlayback: nil,
+        bookmarks: PostBookmarkStore(scope: StorageScope()))
         shelf.frame = CGRect(x: 0, y: 0, width: 393, height: 800)
         _ = shelf.render([post("p", kind: .photo)])
         var tapped: [Int] = []

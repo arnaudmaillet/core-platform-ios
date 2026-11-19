@@ -12,9 +12,10 @@ import Foundation
 /// The age comes from `account.v1`'s age bracket, recorded whenever the app
 /// reads the account; a guest, or an account with no date of birth, is not
 /// treated as a teen.
+///
+/// ONE instance in the app (`AppContainer.teenProtections`, #2376), cleared on
+/// sign-out by `ViewerStorageBinding`.
 public final class TeenProtections: @unchecked Sendable {
-    public static let shared = TeenProtections()
-
     /// The daily limit a teen account starts with on a device, in minutes.
     public static let defaultDailyLimitMinutes = 60
 

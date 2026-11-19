@@ -1,5 +1,6 @@
 import CoreModels
 import CoreNavigation
+import CoreStorage
 import DesignSystem
 import MediaCore
 import MediaPlayback
@@ -153,12 +154,17 @@ final public class PushedPostListViewController: UIViewController {
         kind: Kind,
         imagePipeline: ImagePipeline,
         videoPlayback: VideoPlaybackController?,
+        bookmarks: PostBookmarkStore?,
+        withheldPosts: UnavailablePosts,
         staking: PostCardStaking?,
         header: PushedScreenHeader,
         openPost: ((UIViewController, SnapFeedHeroOrigin, [PostID]) -> Void)?
     ) {
         self.kind = kind
-        page = PostGridPageView(imagePipeline: imagePipeline, style: .list, videoPlayback: videoPlayback)
+        page = PostGridPageView(
+            imagePipeline: imagePipeline, style: .list, videoPlayback: videoPlayback,
+            bookmarks: bookmarks, withheldPosts: withheldPosts
+        )
         self.header = header
         self.openPost = openPost
         super.init(nibName: nil, bundle: nil)

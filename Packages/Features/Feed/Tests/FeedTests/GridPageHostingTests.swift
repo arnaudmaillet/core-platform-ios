@@ -35,10 +35,12 @@ struct GridPageHostingTests {
 
     private func page(
         style: PostGridPageView.Style, posts: [GalleryPost], height: CGFloat = 874,
-        bookmarks: PostBookmarkStore? = .shared
+        bookmarks: PostBookmarkStore? = PostBookmarkStore(scope: StorageScope())
     ) -> PostGridPageView {
         let page = PostGridPageView(
-            imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: style, bookmarks: bookmarks
+            imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: style,
+            bookmarks: bookmarks,
+            withheldPosts: UnavailablePosts()
         )
         page.frame = CGRect(x: 0, y: 0, width: 402, height: height)
         page.setCorpusComplete(true)

@@ -64,12 +64,18 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
     /// Feed's own grid page, the factory the profile and the place use,
     /// handed by the app. Nil (a test) draws the page's status alone.
     private let postsPage: (() -> any PostGridPage)?
+    /// The app's one memory of each screen's sections (#1774) and of the
+    /// voice messages played (#2104), handed by the app (#2376).
+    private let presence: SectionPresenceStore
+    private let voicePlayed: VoicePlayedStore
 
     /// `localStore`: the inbox opens on its last rows and a conversation on
     /// its last 200 messages, offline and at a cold start (#897). Nil keeps
     /// them in memory.
     public init(
         repository: any ChatProviding,
+        presence: SectionPresenceStore,
+        voicePlayed: VoicePlayedStore,
         connections: (any SuggestionsProviding)? = nil,
         people: (any PeopleDirectoryProviding)? = nil,
         imagePipeline: ImagePipeline? = nil,
@@ -85,6 +91,8 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         followRelations: (any SocialGraphReading)? = nil,
         entities: (any ProfileEntityReading & ProfileEntityWriting)? = nil
     ) {
+        self.presence = presence
+        self.voicePlayed = voicePlayed
         self.postsPage = postsPage
         groups = showsGroups ? repository as? any GroupChatServicing : nil
         channels = showsChannels ? repository as? any GroupChatServicing : nil
@@ -559,6 +567,8 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
             prefill: prefill,
             // The app always hands one; a test without it draws placeholders.
             imagePipeline: imagePipeline ?? ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            presence: presence,
+            voicePlayed: voicePlayed,
             socialGraph: socialGraph,
             followRelations: followRelations,
             entities: entities

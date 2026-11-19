@@ -47,7 +47,8 @@ struct ShowcasePostPublishTests {
             authSession: Session(),
             uploadTransport: MockMediaUploadTransport(store: blobStore),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
-            composedChannel: ComposedPostChannel()
+            composedChannel: ComposedPostChannel(),
+            publishedVideos: PublishedVideoFiles(root: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true))
         )
         return Rig(bff: bff, client: client, composer: composer)
     }

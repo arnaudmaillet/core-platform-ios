@@ -4,6 +4,7 @@ import CoreModels
 import CoreNavigation
 import CoreNetworking
 import CoreNetworkingMocks
+import CoreStorage
 import Foundation
 import TestSupport
 import Testing
@@ -713,10 +714,14 @@ struct ChannelsTests {
     /// longer parses, and the callers' fallback is Chats.
     @Test func messagesHasThreePagesAndNoChannelsCategory() throws {
         let off = ChatFeatureBuilder(
-            repository: make(channels: false), showsGroups: false, showsChannels: false
+            repository: make(channels: false),
+            presence: SectionPresenceStore(scope: StorageScope()),
+            voicePlayed: VoicePlayedStore(scope: StorageScope()), showsGroups: false, showsChannels: false
         )
         #expect(try categories(off) == [.all, .requests, .suggestions])
-        let on = ChatFeatureBuilder(repository: make(), showsGroups: true, showsChannels: true)
+        let on = ChatFeatureBuilder(repository: make(),
+        presence: SectionPresenceStore(scope: StorageScope()),
+        voicePlayed: VoicePlayedStore(scope: StorageScope()), showsGroups: true, showsChannels: true)
         #expect(try categories(on) == [.all, .requests, .suggestions])
         #expect(MessagesCategory.allCases == [.all, .requests, .suggestions])
         #expect(MessagesCategory(rawValue: "channels") == nil, "`-open-messages channels`")
@@ -727,13 +732,19 @@ struct ChannelsTests {
     /// The "+" menu's "New Channel" exists only with the channels: the
     /// builder makes the sheet, or nothing (the menu then has no entry).
     @Test func theCreationSheetExistsOnlyWithTheChannels() throws {
-        let on = ChatFeatureBuilder(repository: make(), showsChannels: true)
+        let on = ChatFeatureBuilder(repository: make(),
+        presence: SectionPresenceStore(scope: StorageScope()),
+        voicePlayed: VoicePlayedStore(scope: StorageScope()), showsChannels: true)
         let sheet = try #require(on.makeChannelCreationViewController() as? UINavigationController)
         #expect(sheet.viewControllers.first is ChannelCreationViewController)
-        let off = ChatFeatureBuilder(repository: make(channels: false), showsChannels: false)
+        let off = ChatFeatureBuilder(repository: make(channels: false),
+        presence: SectionPresenceStore(scope: StorageScope()),
+        voicePlayed: VoicePlayedStore(scope: StorageScope()), showsChannels: false)
         #expect(off.makeChannelCreationViewController() == nil)
         // A repository with no channels makes none, whatever the flag.
-        let none = ChatFeatureBuilder(repository: Stub(), showsChannels: true)
+        let none = ChatFeatureBuilder(repository: Stub(),
+        presence: SectionPresenceStore(scope: StorageScope()),
+        voicePlayed: VoicePlayedStore(scope: StorageScope()), showsChannels: true)
         #expect(none.makeChannelCreationViewController() == nil)
     }
 

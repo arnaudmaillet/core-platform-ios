@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import DesignSystem
 import FeedInterface
 import Foundation
@@ -15,7 +16,8 @@ import UIKit
 @MainActor
 struct PostShelfSectionTests {
     private static func shelf() -> PostShelfSection {
-        let shelf = PostShelfSection(imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()), videoPlayback: nil)
+        let shelf = PostShelfSection(imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()), videoPlayback: nil,
+        bookmarks: PostBookmarkStore(scope: StorageScope()))
         shelf.frame = CGRect(x: 0, y: 0, width: 402, height: 800)
         return shelf
     }

@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import DesignSystem
 import FeedInterface
 import HeroPage
@@ -43,7 +44,7 @@ struct ProfileListRowsTests {
         let screen = ProfileViewController(
             viewModel: ProfileViewModel(repository: NoProfiles()),
             imagePipeline: pipeline,
-            makeGridPage: TestGridPages.factory(),
+            makeGridPage: TestGridPages.factory(), presence: SectionPresenceStore(scope: StorageScope()),
             onLogout: nil
         )
         screen.loadViewIfNeeded()

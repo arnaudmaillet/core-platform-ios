@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import Foundation
 import MediaCore
 import PostGrid
@@ -56,7 +57,9 @@ struct DismissalReturnMatrixTests {
         style: PostGridPageView.Style, count: Int = 30, height: CGFloat = 852
     ) -> PostGridPageView {
         let page = PostGridPageView(
-            imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: style
+            imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: style,
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            withheldPosts: UnavailablePosts()
         )
         page.frame = CGRect(x: 0, y: 0, width: 393, height: height)
         page.render(.content(corpus(count)))
@@ -161,7 +164,9 @@ struct DismissalReturnMatrixTests {
     /// first page in — and nothing breaks.
     @Test func anEmptyFeedRefusesQuietly() {
         let page = PostGridPageView(
-            imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .list
+            imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .list,
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            withheldPosts: UnavailablePosts()
         )
         page.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
         page.layoutIfNeeded()

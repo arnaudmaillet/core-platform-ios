@@ -95,7 +95,8 @@ struct FixedPostsFeedProviderTests {
         let asks = Asks()
         let base = StubBase(entries: [:], failing: ["a", "b", "c"], asks: asks)
         let viewModel = FeedViewModel(
-            repository: FixedPostsFeedProvider(base: base, ids: [PostID("a"), PostID("b"), PostID("c")])
+            repository: FixedPostsFeedProvider(base: base, ids: [PostID("a"), PostID("b"), PostID("c")]),
+            unavailablePosts: UnavailablePosts()
         )
         var shown: [String] = []
         viewModel.onStateChange = { shown = $0.items.map(\.id.rawValue) }

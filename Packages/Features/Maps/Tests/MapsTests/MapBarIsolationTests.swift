@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import Foundation
 import MapsInterface
 import Testing
@@ -23,7 +24,7 @@ struct MapBarIsolationTests {
         let suite = "maps-isolation-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defaults.removePersistentDomain(forName: suite)
-        return MapFavoritesStore(defaults: defaults)
+        return MapFavoritesStore(defaults: defaults, scope: StorageScope())
     }
 
     // MARK: - A change names its rail

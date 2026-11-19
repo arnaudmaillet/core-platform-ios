@@ -1,8 +1,10 @@
 import CoreModels
 import CoreNavigation
+import CoreStorage
 import FeedInterface
 import MediaCore
 import PostGrid
+import PostSurfaces
 import Testing
 import Transitions
 import UIKit
@@ -244,7 +246,13 @@ struct HeroPushHardeningFeedTests {
     private static func feed() -> SnapFeedViewController {
         let builder = FeedFeatureBuilder(
             repository: SilentProvider(),
-            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            postDrafts: PostDraftStore(scope: StorageScope()),
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            viewHistory: PostViewHistoryStore(scope: StorageScope()),
+            unavailablePosts: UnavailablePosts(),
+            savedSounds: SavedSoundStore(scope: StorageScope()),
+            viewerProfile: { nil }
         )
         return builder.makeSnapFeedViewController(postIDs: [PostID("m1")]) as! SnapFeedViewController
     }
@@ -281,7 +289,13 @@ struct HeroPushHardeningFeedTests {
         let tabs = UITabBarController()
         let builder = FeedFeatureBuilder(
             repository: SilentProvider(),
-            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            postDrafts: PostDraftStore(scope: StorageScope()),
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            viewHistory: PostViewHistoryStore(scope: StorageScope()),
+            unavailablePosts: UnavailablePosts(),
+            savedSounds: SavedSoundStore(scope: StorageScope()),
+            viewerProfile: { nil }
         )
 
         init() {

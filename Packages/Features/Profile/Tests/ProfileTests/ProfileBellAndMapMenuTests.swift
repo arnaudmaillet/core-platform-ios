@@ -1,5 +1,6 @@
 import CoreModels
 import CoreNavigation
+import CoreStorage
 import DesignSystem
 import FeedInterface
 import Foundation
@@ -44,7 +45,7 @@ struct ProfileBellAndMapMenuTests {
         let screen = ProfileViewController(
             viewModel: viewModel,
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
-            makeGridPage: TestGridPages.factory(),
+            makeGridPage: TestGridPages.factory(), presence: SectionPresenceStore(scope: StorageScope()),
             onLogout: own ? {} : nil,
             trayPlacement: .aboveBottomSafeArea
         )

@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import FeedInterface
 import Foundation
 import MediaCore
@@ -178,7 +179,7 @@ struct FeedContinuationTests {
         let surface = PostSetSurfaceViewController(
             style: .gallery,
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
-            videoPlayback: nil,
+            videoPlayback: nil, bookmarks: PostBookmarkStore(scope: StorageScope()), withheldPosts: UnavailablePosts(),
             hydrate: { _ in [] }
         )
         surface.show(.posts(shown))

@@ -680,7 +680,9 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab>,
         heldMembers: [GalleryPost] = [],
         loadPosts: @escaping () async throws -> [GalleryPost],
         loadMore: ((String?) async throws -> PlacePostsPage)? = nil,
-        presence: SectionPresenceStore = .shared,
+        presence: SectionPresenceStore,
+        bookmarks: PostBookmarkStore,
+        withheldPosts: UnavailablePosts,
         openPost: @escaping (UIViewController, SnapFeedHeroOrigin, [PostID]) -> Void
     ) {
         self.presence = presence
@@ -713,9 +715,12 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab>,
         self.loadPosts = loadPosts
         self.openPost = openPost
         self.anchorID = postIDs.first ?? PostID("")
-        let page = PostGridPageView(imagePipeline: imagePipeline, style: .discover, videoPlayback: videoPlayback)
+        let page = PostGridPageView(
+            imagePipeline: imagePipeline, style: .discover, videoPlayback: videoPlayback,
+            bookmarks: bookmarks, withheldPosts: withheldPosts
+        )
         self.activityPage = page
-        let shelf = PostShelfSection(imagePipeline: imagePipeline, videoPlayback: videoPlayback)
+        let shelf = PostShelfSection(imagePipeline: imagePipeline, videoPlayback: videoPlayback, bookmarks: bookmarks)
         self.shelf = shelf
         self.lead = GridLeadStack(sections: [shelf])
         // The profile's header with the place's identity (#1656): the flag in
@@ -746,7 +751,7 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab>,
         lead.listTitle = "Recent"
         // The list and the row draw the same cards For You does, and their
         // like chips stake the same way.
-        let staking = wallet.map { PostCardStaking(wallet: $0, entities: entities) }
+        let staking = wallet.map { PostCardStaking(wallet: $0, entities: entities, saves: bookmarks) }
         activityPage.staking = staking
         shelf.staking = staking
     }

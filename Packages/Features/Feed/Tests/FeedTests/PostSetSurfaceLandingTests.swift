@@ -1,8 +1,10 @@
 import CoreModels
+import CoreStorage
 import FeedInterface
 import Foundation
 import MediaCore
 import PostGrid
+import PostSurfaces
 import Testing
 import UIKit
 @testable import Feed
@@ -45,6 +47,8 @@ struct PostSetSurfaceLandingTests {
                 style: style,
                 imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
                 videoPlayback: nil,
+                bookmarks: PostBookmarkStore(scope: StorageScope()),
+                withheldPosts: UnavailablePosts(),
                 hydrate: { ids in ids.compactMap { byID[$0] } }
             )
             screen.addChild(surface)

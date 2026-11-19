@@ -1,5 +1,6 @@
 import CoreModels
 import CoreNavigation
+import CoreStorage
 import Foundation
 import MediaCore
 import Testing
@@ -35,8 +36,11 @@ struct TextPullStillTests {
 
     private func makeFeed(_ models: [FeedItemDisplayModel]) -> SnapFeedViewController {
         let feed = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: Posts()),
-            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+            viewModel: FeedViewModel(repository: Posts(), unavailablePosts: UnavailablePosts()),
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            savedSounds: SavedSoundStore(scope: StorageScope()),
+            viewer: { nil }
         )
         feed.loadViewIfNeeded()
         feed.view.frame = CGRect(x: 0, y: 0, width: 390, height: 844)

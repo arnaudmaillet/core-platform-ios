@@ -1,5 +1,6 @@
 import CoreModels
 import CoreNavigation
+import CoreStorage
 import DesignSystem
 import MediaCore
 import MediaPlayback
@@ -103,11 +104,16 @@ final public class DiscoverGalleryViewController: UIViewController {
     public init(
         imagePipeline: ImagePipeline,
         videoPlayback: VideoPlaybackController?,
+        bookmarks: PostBookmarkStore?,
+        withheldPosts: UnavailablePosts,
         header: PushedScreenHeader,
         staking: PostCardStaking? = nil,
         openPost: ((UIViewController, SnapFeedHeroOrigin, [PostID]) -> Void)?
     ) {
-        page = PostGridPageView(imagePipeline: imagePipeline, style: .grid, videoPlayback: videoPlayback)
+        page = PostGridPageView(
+            imagePipeline: imagePipeline, style: .grid, videoPlayback: videoPlayback,
+            bookmarks: bookmarks, withheldPosts: withheldPosts
+        )
         page.staking = staking
         // The large tiles wear their author and caption start (`PostTileInfo`),
         // as Discover's chunks do.

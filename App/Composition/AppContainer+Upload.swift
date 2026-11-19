@@ -74,7 +74,9 @@ extension AppContainer {
                 viewer: viewerSession,
                 uploadTransport: uploadTransport,
                 imagePipeline: imagePipeline,
-                composedChannel: composedPostChannel
+                composedChannel: composedPostChannel,
+                // The author's just-published clips (#898): the app's one.
+                publishedVideos: publishedVideos
             )
             cachedPostComposer = composer
             return composer

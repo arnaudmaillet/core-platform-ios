@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import DesignSystem
 import MediaCore
 import Testing
@@ -207,8 +208,11 @@ struct SnapSharedColumnTests {
     /// above it, keeps its own.
     @Test func theFeedsPanelsReserveTheColumn() throws {
         let feed = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: SharedColumnSilentProvider()),
-            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+            viewModel: FeedViewModel(repository: SharedColumnSilentProvider(), unavailablePosts: UnavailablePosts()),
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            savedSounds: SavedSoundStore(scope: StorageScope()),
+            viewer: { nil }
         )
         feed.loadViewIfNeeded()
         feed.seedProjection([Self.media()])

@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import DesignSystem
 import Foundation
 import MediaCore
@@ -21,7 +22,9 @@ struct GridPullToRefreshTests {
     }
 
     private func page() throws -> (PostGridPageView, AppRefreshControl) {
-        let page = PostGridPageView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .discover)
+        let page = PostGridPageView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .discover,
+        bookmarks: PostBookmarkStore(scope: StorageScope()),
+        withheldPosts: UnavailablePosts())
         page.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
         page.layoutIfNeeded()
         let list = try #require(page.subviews.compactMap { $0 as? UICollectionView }.first)

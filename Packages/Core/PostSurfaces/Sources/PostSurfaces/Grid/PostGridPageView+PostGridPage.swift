@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import MediaCore
 import MediaPlayback
 import PostGrid
@@ -112,15 +113,18 @@ extension PostGridPageView: PostGridPageDebugging {}
 /// composition root's (`FeedFeatureBuilder.makePostGridPage`) and the
 /// profile's tests, which draw the profile on the real page (#1273).
 public enum PostGridPages {
+    /// - Parameter bookmarks: the app's one saved pile, for a page that
+    ///   offers saving; nil offers none.
     @MainActor
     public static func make(
         style: PostGridPageStyle, imagePipeline: ImagePipeline,
-        videoPlayback: VideoPlaybackController?, savesPosts: Bool,
+        videoPlayback: VideoPlaybackController?, bookmarks: PostBookmarkStore?,
+        withheldPosts: UnavailablePosts,
         postOpenWarm: PostOpenWarm? = nil
     ) -> any PostGridPage {
         let page = PostGridPageView(
             imagePipeline: imagePipeline, style: PostGridPageView.Style(style),
-            videoPlayback: videoPlayback, bookmarks: savesPosts ? .shared : nil
+            videoPlayback: videoPlayback, bookmarks: bookmarks, withheldPosts: withheldPosts
         )
         // A profile's tiles warm their posts' first comments (#2002).
         page.postOpenWarm = postOpenWarm

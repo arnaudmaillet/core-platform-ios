@@ -1,5 +1,6 @@
 import CoreModels
 import CoreNavigation
+import CoreStorage
 import FeedInterface
 import Foundation
 import MediaCore
@@ -216,7 +217,9 @@ struct ReturnToOriginTileTests {
 
     private func listPage(pool: VideoPlaybackController) -> PostGridPageView {
         let page = PostGridPageView(
-            imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .list, videoPlayback: pool
+            imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .list, videoPlayback: pool,
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            withheldPosts: UnavailablePosts()
         )
         page.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
         page.render(.content((0..<6).map { Self.post("row\($0)") }))

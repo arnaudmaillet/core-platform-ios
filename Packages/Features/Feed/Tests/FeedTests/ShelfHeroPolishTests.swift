@@ -1,5 +1,6 @@
 import CoreModels
 import CoreNavigation
+import CoreStorage
 import FeedInterface
 import Foundation
 import MediaCore
@@ -422,7 +423,9 @@ struct ShelfHeroPolishTests {
         init(cards: [GalleryPost]) {
             let pipeline = ImagePipeline(fetcher: SilentFetcher())
             lead = ShelfLeadFixture(pipeline: pipeline, videoPlayback: nil)
-            page = PostGridPageView(imagePipeline: pipeline, style: .discover, videoPlayback: nil)
+            page = PostGridPageView(imagePipeline: pipeline, style: .discover, videoPlayback: nil,
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            withheldPosts: UnavailablePosts())
             lead.render(following: cards)
             window.rootViewController = host
             window.isHidden = false

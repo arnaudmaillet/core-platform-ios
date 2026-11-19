@@ -31,7 +31,7 @@ private func makeStore(
     defaults: UserDefaults = makeDefaults(),
     clock: Clock = Clock(epoch)
 ) -> WalletStore {
-    WalletStore(defaults: defaults, now: { clock.now })
+    WalletStore(defaults: defaults, now: { clock.now }, scope: StorageScope())
 }
 
 struct WalletStoreTests {

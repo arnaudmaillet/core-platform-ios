@@ -48,7 +48,8 @@ struct SearchFirstFrameTests {
 
         hosting { window in
             let refine = SearchViewController(
-                viewModel: model, imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()), mode: .refine
+                viewModel: model, imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+                presence: SectionPresenceStore(scope: StorageScope()), mode: .refine
             )
             window.rootViewController = UINavigationController(rootViewController: refine)
             refine.loadViewIfNeeded()

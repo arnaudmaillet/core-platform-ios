@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import DesignSystem
 import MediaCore
 import Testing
@@ -56,8 +57,11 @@ struct SnapDeviceRound2Tests {
     /// the page instead of appearing at the landing.
     @Test func theFlightReplicaWearsTheSoundBubble() throws {
         let feed = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: RoundTwoSilentProvider()),
-            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+            viewModel: FeedViewModel(repository: RoundTwoSilentProvider(), unavailablePosts: UnavailablePosts()),
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            savedSounds: SavedSoundStore(scope: StorageScope()),
+            viewer: { nil }
         )
         feed.loadViewIfNeeded()
         feed.view.frame = Layout.screen
@@ -75,8 +79,11 @@ struct SnapDeviceRound2Tests {
     /// built at rest (#2126) — and is configured all the same.
     @Test func theFlightReplicaTakesASpare() throws {
         let feed = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: RoundTwoSilentProvider()),
-            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+            viewModel: FeedViewModel(repository: RoundTwoSilentProvider(), unavailablePosts: UnavailablePosts()),
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            savedSounds: SavedSoundStore(scope: StorageScope()),
+            viewer: { nil }
         )
         feed.loadViewIfNeeded()
         feed.view.frame = Layout.screen

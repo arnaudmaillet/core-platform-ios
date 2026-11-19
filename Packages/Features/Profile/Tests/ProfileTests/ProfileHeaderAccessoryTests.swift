@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import Foundation
 import MediaCore
 import Testing
@@ -30,7 +31,7 @@ struct ProfileHeaderAccessoryTests {
         ProfileViewController(
             viewModel: ProfileViewModel(repository: StubAccessoryProfiles()),
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
-            makeGridPage: TestGridPages.factory(),
+            makeGridPage: TestGridPages.factory(), presence: SectionPresenceStore(scope: StorageScope()),
             onLogout: {},
             trayPlacement: .aboveBottomSafeArea
         )
@@ -114,7 +115,7 @@ struct ProfileHeaderAccessoryTests {
         let screen = ProfileViewController(
             viewModel: ProfileViewModel(repository: StubAccessoryProfiles()),
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
-            makeGridPage: TestGridPages.factory(),
+            makeGridPage: TestGridPages.factory(), presence: SectionPresenceStore(scope: StorageScope()),
             onLogout: {},
             switcherFactory: ProfileSwitcherMenuFactory(
                 switching: StubSwitching(), imagePipeline: ImagePipeline(fetcher: SilentFetcher())
@@ -141,7 +142,7 @@ struct ProfileHeaderAccessoryTests {
         let screen = ProfileViewController(
             viewModel: ProfileViewModel(repository: StubAccessoryProfiles()),
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
-            makeGridPage: TestGridPages.factory(),
+            makeGridPage: TestGridPages.factory(), presence: SectionPresenceStore(scope: StorageScope()),
             onLogout: nil
         )
         screen.loadViewIfNeeded()
@@ -154,7 +155,7 @@ struct ProfileHeaderAccessoryTests {
         let screen = ProfileViewController(
             viewModel: ProfileViewModel(repository: StubAccessoryProfiles()),
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
-            makeGridPage: TestGridPages.factory(),
+            makeGridPage: TestGridPages.factory(), presence: SectionPresenceStore(scope: StorageScope()),
             onLogout: nil
         )
         screen.loadViewIfNeeded()

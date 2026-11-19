@@ -62,7 +62,9 @@ struct PostComposerTests {
         authSession: any AuthSessionProviding = ViewerSessionStub(),
         viewer: (any ViewerProviding)? = nil,
         videoExporter: VideoExporter = VideoExporter(),
-        publishedVideos: PublishedVideoFiles = .shared
+        publishedVideos: PublishedVideoFiles = PublishedVideoFiles(
+            root: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        )
     ) -> Harness {
         let bff = MockBFF()
         let blobStore = MockBlobStore()

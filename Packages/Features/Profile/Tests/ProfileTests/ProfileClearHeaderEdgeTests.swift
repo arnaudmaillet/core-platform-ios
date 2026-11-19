@@ -1,3 +1,4 @@
+import CoreStorage
 import MediaCore
 import Testing
 import UIKit
@@ -20,7 +21,9 @@ struct ProfileClearHeaderEdgeTests {
     }
 
     @Test func aGalleryPageHidesTheEffectUnderTheHeader() throws {
-        let page = PostGridPageView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .grid)
+        let page = PostGridPageView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .grid,
+        bookmarks: PostBookmarkStore(scope: StorageScope()),
+        withheldPosts: UnavailablePosts())
         let list = try #require(page.subviews.compactMap { $0 as? UICollectionView }.first)
         #expect(list.topEdgeEffect.isHidden)
     }
@@ -28,7 +31,7 @@ struct ProfileClearHeaderEdgeTests {
     /// ⚠️ THE PAGER TOO: its scroll view spans the header and draws its own
     /// effect, so pages alone leave the system's band in place.
     @Test func theGalleryPagerHidesItsEffectToo() throws {
-        let pager = ProfileGalleryPagerView(makePage: TestGridPages.pageMaker())
+        let pager = ProfileGalleryPagerView(presence: SectionPresenceStore(scope: StorageScope()), makePage: TestGridPages.pageMaker())
         let paging = try #require(pager.subviews.compactMap { $0 as? UIScrollView }.first)
         #expect(paging.topEdgeEffect.isHidden)
     }

@@ -50,7 +50,7 @@ struct ProfileLiveCountTests {
         let name = "profile-live-count-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: name)!
         defaults.removePersistentDomain(forName: name)
-        return WalletStore(defaults: defaults)
+        return WalletStore(defaults: defaults, scope: StorageScope())
     }
 
     private func post(_ index: Int) -> GalleryPost {
@@ -63,7 +63,9 @@ struct ProfileLiveCountTests {
 
     /// The media mosaic: every post a bare tile.
     private func mosaic(staking: PostCardStaking) -> PostGridPageView {
-        let page = PostGridPageView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .grid)
+        let page = PostGridPageView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .grid,
+        bookmarks: PostBookmarkStore(scope: StorageScope()),
+        withheldPosts: UnavailablePosts())
         page.staking = staking
         page.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
         page.layoutIfNeeded()
@@ -83,7 +85,8 @@ struct ProfileLiveCountTests {
 
     @Test func aBareTileDrawsTheLiveCount() throws {
         let entities = EntityStore()
-        let page = mosaic(staking: PostCardStaking(wallet: Self.wallet(), entities: entities))
+        let page = mosaic(staking: PostCardStaking(wallet: Self.wallet(), entities: entities,
+        saves: PostBookmarkStore(scope: StorageScope())))
         let cell = try tile(PostID("p0"), on: page)
         #expect(cell.debugCounterText == "40")
         #expect(entities.post(PostID("p0"))?.likeCount == 40, "the tile told the store its count")
@@ -99,10 +102,13 @@ struct ProfileLiveCountTests {
     /// too: the number does not change in the landing frame.
     @Test func theGalleryFlightAndItsStandInCarryTheLiveCount() throws {
         let entities = EntityStore()
-        let staking = PostCardStaking(wallet: Self.wallet(), entities: entities)
+        let staking = PostCardStaking(wallet: Self.wallet(), entities: entities,
+        saves: PostBookmarkStore(scope: StorageScope()))
         // The profile's pages are For You's (#1273): the open is measured on
         // the page the profile now draws its media on.
-        let page = PostGridPageView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .grid)
+        let page = PostGridPageView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .grid,
+        bookmarks: PostBookmarkStore(scope: StorageScope()),
+        withheldPosts: UnavailablePosts())
         page.staking = staking
         page.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
         page.setCorpusComplete(true)
@@ -115,7 +121,7 @@ struct ProfileLiveCountTests {
         let screen = ProfileViewController(
             viewModel: ProfileViewModel(repository: NoProfiles(), gallery: NoGallery(), source: .currentUser),
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
-            makeGridPage: TestGridPages.factory(),
+            makeGridPage: TestGridPages.factory(), presence: SectionPresenceStore(scope: StorageScope()),
             onLogout: nil
         )
         screen.staking = staking

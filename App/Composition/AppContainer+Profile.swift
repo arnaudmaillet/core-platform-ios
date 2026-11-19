@@ -49,7 +49,8 @@ extension AppContainer {
     func makeAccountRepository() -> AccountRepository {
         AccountRepository(
             accountClient: Account_V1_AccountServiceClient(client: authenticatedRPCClient),
-            authSession: sessionManager
+            authSession: sessionManager,
+            teenProtections: teenProtections
         )
     }
 
@@ -59,7 +60,7 @@ extension AppContainer {
             reporter: accountRepository,
             defaults: .standard,
             accountID: { await Self.signedInAccount(session) },
-            isMinor: { TeenProtections.shared.isMinor },
+            isMinor: { [teenProtections] in teenProtections.isMinor },
             calendar: { Calendar.current },
             now: { Date() }
         )
@@ -138,7 +139,10 @@ extension AppContainer {
             switching: profileRepository,
             settings: settingsFeature,
             profileItems: profileItems,
-            localStore: localStore
+            localStore: localStore,
+            presence: sectionPresence,
+            bookmarks: postBookmarks,
+            viewHistory: viewHistory
         )
         // The one place that can see both features, which is the whole reason
         // this is injected rather than reached for: Profile describes where a
@@ -160,7 +164,7 @@ extension AppContainer {
             self.entityStore.knownIdentity(of: id, stub: stub)
         }
         builder.makeCardStaking = { [unowned self] in
-            PostCardStaking(wallet: self.walletStore, entities: self.entityStore)
+            PostCardStaking(wallet: self.walletStore, entities: self.entityStore, saves: self.postBookmarks)
         }
         // A post the viewer deleted leaves every feed and For You (#896).
         builder.onPostDeleted = { [unowned self] id in self.entityStore.deletePost(id) }

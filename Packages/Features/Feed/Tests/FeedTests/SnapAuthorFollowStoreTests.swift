@@ -20,7 +20,7 @@ struct SnapAuthorFollowStoreTests {
     private let bo = ProfileID("bo")
 
     private static func store(_ graph: GatedGraph?) -> SnapAuthorFollowStore {
-        SnapAuthorFollowStore(writer: graph, reader: graph)
+        SnapAuthorFollowStore(writer: graph, reader: graph, viewer: { nil })
     }
 
     /// Lets the store's tasks and the graph's gates move — bounded, and
@@ -57,7 +57,8 @@ struct SnapAuthorFollowStoreTests {
         let entities = EntityStore()
         let events = FollowGraphEvents()
         let subscription = entities.follow(events)
-        let store = SnapAuthorFollowStore(writer: GatedGraph(), reader: GatedGraph(), entities: entities)
+        let store = SnapAuthorFollowStore(writer: GatedGraph(), reader: GatedGraph(), entities: entities,
+        viewer: { nil })
         store.setRelation(.notFollowing, for: ava)
         #expect(store.offersFollow(to: ava))
 
@@ -76,7 +77,8 @@ struct SnapAuthorFollowStoreTests {
         let entities = EntityStore()
         let events = FollowGraphEvents()
         let subscription = entities.follow(events)
-        let store = SnapAuthorFollowStore(writer: GatedGraph(), reader: GatedGraph(), entities: entities)
+        let store = SnapAuthorFollowStore(writer: GatedGraph(), reader: GatedGraph(), entities: entities,
+        viewer: { nil })
         store.setRelation(.notFollowing, for: ava)
 
         events.publish(FollowRequestChange(profileID: ava, isPending: true))
@@ -99,12 +101,12 @@ struct SnapAuthorFollowStoreTests {
         #expect(!store.offersFollow(to: ava))
         #expect(store.badge(for: nil) == .none)
         #expect(store.badge(for: ProfileID("prof-viewer")) == .none, "the viewer's own post wore a mark")
-        let blind = SnapAuthorFollowStore(writer: graph, reader: nil)
+        let blind = SnapAuthorFollowStore(writer: graph, reader: nil, viewer: { nil })
         #expect(blind.badge(for: ava) == .none, "a bone no read will ever resolve")
     }
 
     @Test func withoutAFollowSeamNothingIsOfferedOrAsked() {
-        let store = SnapAuthorFollowStore(writer: nil, reader: GatedGraph())
+        let store = SnapAuthorFollowStore(writer: nil, reader: GatedGraph(), viewer: { nil })
         store.setRelation(.notFollowing, for: ava)
         #expect(store.badge(for: ava) == .none)
         let sent = store.follow(ava, onRefused: {})
@@ -315,8 +317,8 @@ struct SnapAuthorFollowStoreTests {
     @Test func aFollowOnOneFeedIsTheBadgeOfAnother() async {
         let entities = EntityStore()
         let graph = GatedGraph()
-        let forYou = SnapAuthorFollowStore(writer: graph, reader: graph, entities: entities)
-        let following = SnapAuthorFollowStore(writer: graph, reader: graph, entities: entities)
+        let forYou = SnapAuthorFollowStore(writer: graph, reader: graph, entities: entities, viewer: { nil })
+        let following = SnapAuthorFollowStore(writer: graph, reader: graph, entities: entities, viewer: { nil })
         forYou.setRelation(.followedBy, for: ava)
         #expect(following.badge(for: ava) == .follow, "one answer, asked once")
         var heard: [ProfileID] = []
@@ -337,7 +339,8 @@ struct SnapAuthorFollowStoreTests {
     /// change of answer: the badge is not re-drawn.
     @Test func aProfileWriteThatKeepsTheAnswerIsNotReported() {
         let entities = EntityStore()
-        let store = SnapAuthorFollowStore(writer: GatedGraph(), reader: GatedGraph(), entities: entities)
+        let store = SnapAuthorFollowStore(writer: GatedGraph(), reader: GatedGraph(), entities: entities,
+        viewer: { nil })
         store.setRelation(.following, for: ava)
         var changes = 0
         store.onRelationChange = { _ in changes += 1 }
@@ -351,7 +354,7 @@ struct SnapAuthorFollowStoreTests {
     @Test func aViewerChangeForgetsEveryAnswer() async {
         let entities = EntityStore()
         let graph = GatedGraph()
-        let store = SnapAuthorFollowStore(writer: graph, reader: graph, entities: entities)
+        let store = SnapAuthorFollowStore(writer: graph, reader: graph, entities: entities, viewer: { nil })
         store.setRelation(.following, for: ava)
         store.setRelation(.notFollowing, for: bo)
         var changed: Set<ProfileID> = []

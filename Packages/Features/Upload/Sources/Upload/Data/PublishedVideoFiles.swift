@@ -22,10 +22,10 @@ import Synchronization
 ///
 /// The store opens on the first clip kept, on the composer's thread (never
 /// the main one), and joins the coordinator the app attached, then or later.
+///
+/// ONE instance in the app (`AppContainer.publishedVideos`, #2376), handed to
+/// its `PostComposer`.
 public final class PublishedVideoFiles: Sendable {
-    /// The app's: the default of every `PostComposer`.
-    public static let shared = PublishedVideoFiles()
-
     public static let namespace = CacheNamespace("video.published", category: .videos, scope: .viewer, priorityClass: .standard)
     public static let reservedBytes = 100 * CacheBytes.megabyte
     public static let diskBudget = DiskBudget.reserved(reservedBytes, in: .video)
@@ -41,7 +41,7 @@ public final class PublishedVideoFiles: Sendable {
 
     /// - Parameter root: where the namespace's folder goes; the app's
     ///   `Caches` by default. Open ONE instance per folder per process
-    ///   (`DiskStore`): the app uses `shared`, a test its own folder.
+    ///   (`DiskStore`): the app builds one, a test uses its own folder.
     public init(root: URL? = nil) {
         self.root = root
     }

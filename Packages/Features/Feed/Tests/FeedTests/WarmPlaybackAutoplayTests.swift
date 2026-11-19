@@ -3,6 +3,7 @@ import CoreStorage
 import Foundation
 import MediaCore
 import MediaPlayback
+import PostSurfaces
 import Testing
 @testable import Feed
 
@@ -49,7 +50,13 @@ struct WarmPlaybackAutoplayTests {
         let builder = FeedFeatureBuilder(
             repository: ClipProvider(),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
-            videoPlayback: VideoPlaybackController(source: StubSource(), poolSize: 2, capacity: 2)
+            videoPlayback: VideoPlaybackController(source: StubSource(), poolSize: 2, capacity: 2),
+            postDrafts: PostDraftStore(scope: StorageScope()),
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            viewHistory: PostViewHistoryStore(scope: StorageScope()),
+            unavailablePosts: UnavailablePosts(),
+            savedSounds: SavedSoundStore(scope: StorageScope()),
+            viewerProfile: { nil }
         )
         let warm = builder.warmPlayback(of: PostID("clip-post"), at: nil)
         #expect(warm != nil, "the warm into a full-screen post refused on Autoplay Never")

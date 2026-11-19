@@ -10,10 +10,17 @@ import Foundation
 /// scoped and stay with the device.
 ///
 /// Stores ask for their keys at the moment they read or write
-/// (`profileKey(_:)`, `accountKey(_:)`), so every instance — however many a
-/// screen made with `init()` — follows the viewer without being rebuilt. The
-/// app sets `owner` as the viewer changes (`AppCoordinator.render`, and
-/// `AppContainer` once the active profile resolves).
+/// (`profileKey(_:)`, `accountKey(_:)`), so every store follows the viewer
+/// without being rebuilt. The app sets `owner` as the viewer changes
+/// (`ViewerStorageBinding`, driven by `AppCoordinator.render` and by the
+/// active profile as it resolves).
+///
+/// ⚠️ ONE INSTANCE IN THE APP (#2376), built by the composition root
+/// (`AppContainer.storageScope`) and handed to every store: the stores
+/// observe `didChangeNotification` with THEIR scope as the object, so a store
+/// built over another scope would never follow the viewer, and nothing would
+/// visibly fail. `RepoGuards/ViewerStoreGuardTests` keeps `StorageScope(` to
+/// that one place.
 ///
 /// ⚠️ NOTHING IS WIPED on sign-out: with no server holding these lists yet,
 /// wiping would lose them for good. Keying is what keeps them apart.
@@ -32,9 +39,6 @@ public final class StorageScope: @unchecked Sendable {
         /// profile's keys fall back to the account's meanwhile.
         case member(account: String, profile: String?)
     }
-
-    /// The app's one scope.
-    public static let shared = StorageScope()
 
     /// Posted after `owner` changes, with the scope as the object: stores that
     /// hold a copy in memory (`PostDraftStore`) re-read, and the wallet seeds

@@ -36,7 +36,7 @@ final public class PostAuthorMarks {
     public init(
         writer: (any SocialGraphWriting)?, reader: (any SocialGraphReading)?, entities: any ProfileEntityReading & ProfileEntityWriting,
         followEvents: FollowGraphEvents? = nil,
-        viewer: @escaping @MainActor () -> ProfileID? = SnapAuthorFollowStore.activeProfile
+        viewer: @escaping @MainActor () -> ProfileID?
     ) {
         store = SnapAuthorFollowStore(writer: writer, reader: reader, entities: entities, viewer: viewer)
         binding = AuthorBadgeBinding(store: store)

@@ -1,9 +1,11 @@
 import CoreContracts
 import CoreModels
+import CoreStorage
 import DesignSystem
 import Foundation
 import MediaCore
 import MediaPlayback
+import PostSurfaces
 import Testing
 import UIKit
 @testable import Feed
@@ -57,8 +59,11 @@ struct SnapFeedRepointTests {
 
     fileprivate static func detachedFeed() -> SnapFeedViewController {
         SnapFeedViewController(
-            viewModel: FeedViewModel(repository: SilentFeedProvider()),
-            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+            viewModel: FeedViewModel(repository: SilentFeedProvider(), unavailablePosts: UnavailablePosts()),
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            savedSounds: SavedSoundStore(scope: StorageScope()),
+            viewer: { nil }
         )
     }
 

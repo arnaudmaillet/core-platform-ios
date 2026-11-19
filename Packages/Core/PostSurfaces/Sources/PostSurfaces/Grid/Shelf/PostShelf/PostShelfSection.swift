@@ -316,8 +316,9 @@ final public class PostShelfSection: UIView {
     public private(set) var cards: [GalleryPost] = []
 
     /// The saved pile a text card's save control reads and writes — the one
-    /// the list's cards, the post page and the profile's Saved tab share.
-    private let bookmarks = PostBookmarkStore.shared
+    /// the list's cards, the post page and the profile's Saved tab share: the
+    /// app's one (#2376).
+    private let bookmarks: PostBookmarkStore
     public let header = SectionTitleView(content: .init(title: "", isLink: true))
     /// The media row — the cards that play.
     public let mediaView: UICollectionView
@@ -363,7 +364,8 @@ final public class PostShelfSection: UIView {
     /// The pool itself, for a lifted card's live clip (#1318).
     private let videoPool: VideoPlaybackController?
 
-    public init(imagePipeline: ImagePipeline, videoPlayback: VideoPlaybackController?) {
+    public init(imagePipeline: ImagePipeline, videoPlayback: VideoPlaybackController?, bookmarks: PostBookmarkStore) {
+        self.bookmarks = bookmarks
         self.imagePipeline = imagePipeline
         videoPool = videoPlayback
         playback = videoPlayback.map {

@@ -1,9 +1,11 @@
 import CoreModels
 import CoreNavigation
+import CoreStorage
 import FeedInterface
 import Foundation
 import MediaCore
 import PostGrid
+import PostSurfaces
 import Testing
 import Transitions
 import UIKit
@@ -74,7 +76,8 @@ struct SnapFeedEndOfSourceTests {
 
     @Test func aCompleteSetIsExhaustedOnceLoaded() async throws {
         let viewModel = FeedViewModel(
-            repository: FixedPostsFeedProvider(base: Photos(), ids: ids("a", "b"), isCompleteSet: true)
+            repository: FixedPostsFeedProvider(base: Photos(), ids: ids("a", "b"), isCompleteSet: true),
+            unavailablePosts: UnavailablePosts()
         )
         viewModel.viewDidLoad()
         try #require(await settle { viewModel.isSourceExhausted })
@@ -88,7 +91,7 @@ struct SnapFeedEndOfSourceTests {
             asked += 1
             return []
         }
-        let viewModel = FeedViewModel(repository: provider)
+        let viewModel = FeedViewModel(repository: provider, unavailablePosts: UnavailablePosts())
         viewModel.viewDidLoad()
         await settle(looks: 200) { false }
         viewModel.willDisplayItem(at: 1)
@@ -101,8 +104,11 @@ struct SnapFeedEndOfSourceTests {
 
     private func feed(_ provider: FixedPostsFeedProvider) async throws -> SnapFeedViewController {
         let controller = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: provider),
-            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+            viewModel: FeedViewModel(repository: provider, unavailablePosts: UnavailablePosts()),
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            savedSounds: SavedSoundStore(scope: StorageScope()),
+            viewer: { nil }
         )
         controller.loadViewIfNeeded()
         controller.view.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
@@ -251,7 +257,7 @@ struct SnapFeedEndOfSourceTests {
             asked += 1
             return []
         }
-        let viewModel = FeedViewModel(repository: provider)
+        let viewModel = FeedViewModel(repository: provider, unavailablePosts: UnavailablePosts())
         viewModel.willDisplayItem(at: 1)
         viewModel.viewDidLoad()
         #expect(await settle { asked >= 1 }, "the late cursor never paged from the displayed tile")
@@ -285,7 +291,13 @@ struct SnapFeedEndOfSourceTests {
     private func routed(
         _ open: (FeedFeatureBuilder, UIViewController) -> Void
     ) async throws -> (SnapFeedViewController, [Any]) {
-        let builder = FeedFeatureBuilder(repository: Photos(), imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()))
+        let builder = FeedFeatureBuilder(repository: Photos(), imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+        postDrafts: PostDraftStore(scope: StorageScope()),
+        bookmarks: PostBookmarkStore(scope: StorageScope()),
+        viewHistory: PostViewHistoryStore(scope: StorageScope()),
+        unavailablePosts: UnavailablePosts(),
+        savedSounds: SavedSoundStore(scope: StorageScope()),
+        viewerProfile: { nil })
         let presenter = UIViewController()
         let nav = UINavigationController(rootViewController: presenter)
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))

@@ -36,7 +36,8 @@ struct ProfileGalleryScrubTests {
 
     /// A pager with real bounds, so offsets and page widths are meaningful.
     private func makePager(width: CGFloat = 400) -> ProfileGalleryPagerView {
-        let pager = ProfileGalleryPagerView(tabs: ProfileTab.postTabsForTests, makePage: TestGridPages.pageMaker())
+        let pager = ProfileGalleryPagerView(tabs: ProfileTab.postTabsForTests,
+        presence: SectionPresenceStore(scope: StorageScope()), makePage: TestGridPages.pageMaker())
         pager.frame = CGRect(x: 0, y: 0, width: width, height: 600)
         pager.layoutIfNeeded()
         return pager
@@ -198,7 +199,8 @@ struct ProfileGalleryOffsetSyncTests {
     }
 
     private func makePager() -> ProfileGalleryPagerView {
-        let pager = ProfileGalleryPagerView(tabs: ProfileTab.postTabsForTests, makePage: TestGridPages.pageMaker())
+        let pager = ProfileGalleryPagerView(tabs: ProfileTab.postTabsForTests,
+        presence: SectionPresenceStore(scope: StorageScope()), makePage: TestGridPages.pageMaker())
         pager.frame = CGRect(x: 0, y: 0, width: 400, height: 600)
         pager.layoutIfNeeded()
         return pager
@@ -368,7 +370,8 @@ struct ProfileGalleryOffsetSyncTests {
 @MainActor
 struct ProfileGalleryPullTests {
     @Test func theActivePagesPullReachesTheScreen() throws {
-        let pager = ProfileGalleryPagerView(tabs: ProfileTab.postTabsForTests, makePage: TestGridPages.pageMaker())
+        let pager = ProfileGalleryPagerView(tabs: ProfileTab.postTabsForTests,
+        presence: SectionPresenceStore(scope: StorageScope()), makePage: TestGridPages.pageMaker())
         pager.frame = CGRect(x: 0, y: 0, width: 400, height: 600)
         pager.layoutIfNeeded()
         var offsets: [CGFloat] = []
@@ -393,8 +396,9 @@ struct ProfileTabPresenceTests {
 
     @Test func theAnswerIsRemembered() throws {
         let defaults = try #require(UserDefaults(suiteName: "presence-\(UUID().uuidString)"))
-        let pager = ProfileGalleryPagerView(tabs: ProfileTab.postTabsForTests, makePage: TestGridPages.pageMaker())
-        pager.presence = SectionPresenceStore(defaults: defaults)
+        let pager = ProfileGalleryPagerView(tabs: ProfileTab.postTabsForTests,
+        presence: SectionPresenceStore(scope: StorageScope()), makePage: TestGridPages.pageMaker())
+        pager.presence = SectionPresenceStore(defaults: defaults, scope: StorageScope())
         pager.presenceScreen = { "profile.ada" }
         var snapshot = ProfileViewModel.GallerySnapshot(activity: .empty(message: ""), media: .empty(message: ""))
         pager.render(snapshot)
@@ -412,7 +416,7 @@ struct ProfileTabPresenceTests {
 struct ProfileRememberedTabsTests {
     @Test func aTabWithPostsLastTimeStaysWhileItsSourceLoads() throws {
         let defaults = try #require(UserDefaults(suiteName: "presence-\(UUID().uuidString)"))
-        let presence = SectionPresenceStore(defaults: defaults)
+        let presence = SectionPresenceStore(defaults: defaults, scope: StorageScope())
         presence.remember(4, screen: "profile.ada", section: String(describing: ProfileTab.saved))
         presence.remember(0, screen: "profile.ada", section: String(describing: ProfileTab.reactions))
         var snapshot = ProfileViewModel.GallerySnapshot(activity: .loading, media: .loading)
@@ -436,7 +440,8 @@ struct ProfileGalleryLatePagesTests {
     @Test func aTabsPageIsBuiltWhenShownOnWhatTheGalleryAlreadySaid() throws {
         var built = 0
         let make = TestGridPages.pageMaker()
-        let pager = ProfileGalleryPagerView(tabs: ProfileTab.ownTabs, shown: [.format(.activity)]) { style in
+        let pager = ProfileGalleryPagerView(tabs: ProfileTab.ownTabs, shown: [.format(.activity)],
+        presence: SectionPresenceStore(scope: StorageScope())) { style in
             built += 1
             return make(style)
         }
@@ -447,7 +452,9 @@ struct ProfileGalleryLatePagesTests {
         var tapped: GalleryPost?
         pager.onItemTapped = { post, _ in tapped = post }
         let defaults = try #require(UserDefaults(suiteName: "late-pages-\(UUID().uuidString)"))
-        let staking = PostCardStaking(wallet: WalletStore(defaults: defaults))
+        let staking = PostCardStaking(wallet: WalletStore(defaults: defaults,
+        scope: StorageScope()),
+        saves: PostBookmarkStore(scope: StorageScope()))
         pager.staking = staking
         let snapshot = ProfileViewModel.GallerySnapshot(activity: .empty(message: ""), media: .empty(message: ""))
         pager.render(snapshot)

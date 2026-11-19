@@ -9,13 +9,13 @@ import Foundation
 /// anyone is theirs. A section never seen has no entry (`count` nil): the
 /// screen then decides from what it already knows, or shows no skeleton and
 /// lets the section fade in.
+///
+/// ONE store in the app (`AppContainer.sectionPresence`, #2376).
 public final class SectionPresenceStore: @unchecked Sendable {
-    public static let shared = SectionPresenceStore()
-
     private let defaults: UserDefaults
     private let scope: StorageScope
 
-    public init(defaults: UserDefaults = .standard, scope: StorageScope = .shared) {
+    public init(defaults: UserDefaults = .standard, scope: StorageScope) {
         self.defaults = defaults
         self.scope = scope
     }

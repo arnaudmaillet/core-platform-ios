@@ -155,12 +155,15 @@ struct SnapBarPillWidthsTests {
         defaults.removePersistentDomain(forName: suite)
         // The widest balance the badge spells (`formattedCompact`): five
         // characters.
-        let wallet = WalletStore(defaults: defaults)
+        let wallet = WalletStore(defaults: defaults, scope: StorageScope())
         wallet.credit(88_800)
         let feed = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: InertPillFeedProvider()),
+            viewModel: FeedViewModel(repository: InertPillFeedProvider(), unavailablePosts: UnavailablePosts()),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
-            wallet: wallet
+            wallet: wallet,
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            savedSounds: SavedSoundStore(scope: StorageScope()),
+            viewer: { nil }
         )
         let nav = UINavigationController(rootViewController: UIViewController())
         nav.pushViewController(feed, animated: false)

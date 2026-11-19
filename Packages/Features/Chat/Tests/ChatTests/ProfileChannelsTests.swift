@@ -4,6 +4,7 @@ import CoreModels
 import CoreNavigation
 import CoreNetworking
 import CoreNetworkingMocks
+import CoreStorage
 import Foundation
 import Testing
 import UIKit
@@ -178,10 +179,14 @@ struct ProfileChannelsTests {
         let read = try await make(channels: false).ownedChannels(of: ProfileID("prof-12"))
         #expect(read.isEmpty)
         let off = ChatFeatureBuilder(
-            repository: make(channels: false), showsGroups: false, showsChannels: false
+            repository: make(channels: false),
+            presence: SectionPresenceStore(scope: StorageScope()),
+            voicePlayed: VoicePlayedStore(scope: StorageScope()), showsGroups: false, showsChannels: false
         )
         #expect(off.makeProfileChannels() == nil)
-        let on = ChatFeatureBuilder(repository: make(), showsGroups: false, showsChannels: true)
+        let on = ChatFeatureBuilder(repository: make(),
+        presence: SectionPresenceStore(scope: StorageScope()),
+        voicePlayed: VoicePlayedStore(scope: StorageScope()), showsGroups: false, showsChannels: true)
         #expect(on.makeProfileChannels() != nil)
     }
 }

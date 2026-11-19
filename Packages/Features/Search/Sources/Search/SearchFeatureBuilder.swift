@@ -33,6 +33,9 @@ public struct SearchFeatureBuilder: SearchFeatureBuilding {
     /// The app's follow channel: the person rows hear a follow made on any
     /// screen (#896). Nil: each row keeps the answer it read.
     private let followEvents: FollowGraphEvents?
+    /// Whether the Suggested section had rows last time (#1773): the app's
+    /// one store (#2376).
+    private let presence: SectionPresenceStore
 
     /// - Parameter localStore: the device store (#893): the resting screen's
     ///   trending people open on their last list at a cold start. Nil keeps
@@ -49,8 +52,10 @@ public struct SearchFeatureBuilder: SearchFeatureBuilding {
         makeWalletSheet: (@MainActor () -> UIViewController)? = nil,
         showsBalance: @escaping @MainActor () -> Bool = { true },
         localStore: LocalStore? = nil,
-        followEvents: FollowGraphEvents? = nil
+        followEvents: FollowGraphEvents? = nil,
+        presence: SectionPresenceStore
     ) {
+        self.presence = presence
         self.repository = repository
         self.recentSearches = recentSearches
         self.explore = explore
@@ -77,6 +82,7 @@ public struct SearchFeatureBuilder: SearchFeatureBuilding {
                 followEvents: followEvents
             ),
             imagePipeline: imagePipeline,
+            presence: presence,
             postSurfaces: postSurfaces,
             wallet: wallet,
             makeWalletSheet: makeWalletSheet,

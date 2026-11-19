@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import DesignSystem
 import MediaCore
 import Testing
@@ -17,8 +18,11 @@ import UIKit
 struct SnapAuthorPillItemTests {
     private static func feed() -> (nav: UINavigationController, feed: SnapFeedViewController) {
         let feed = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: PillFeedProvider()),
-            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+            viewModel: FeedViewModel(repository: PillFeedProvider(), unavailablePosts: UnavailablePosts()),
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            savedSounds: SavedSoundStore(scope: StorageScope()),
+            viewer: { nil }
         )
         let nav = UINavigationController(rootViewController: UIViewController())
         nav.pushViewController(feed, animated: false)

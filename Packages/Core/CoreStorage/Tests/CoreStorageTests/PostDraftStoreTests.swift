@@ -9,7 +9,7 @@ struct PostDraftStoreTests {
     private func makeStore(_ name: String = UUID().uuidString) throws -> (PostDraftStore, String) {
         let file = "post-drafts-test-\(name)"
         try CodableFileStore<[PostDraft]>(name: file).clear()
-        return (PostDraftStore(name: file), file)
+        return (PostDraftStore(name: file, scope: StorageScope()), file)
     }
 
     @Test func aSavedDraftLeadsTheList() throws {
@@ -58,7 +58,7 @@ struct PostDraftStoreTests {
         #expect(try Data(contentsOf: kept) == Data([7, 7, 7]))
         #expect(FileManager.default.fileExists(atPath: source.fileURL.path), "the caller's file is the caller's")
 
-        let reopened = PostDraftStore(name: file)
+        let reopened = PostDraftStore(name: file, scope: StorageScope())
         #expect(reopened.drafts.first?.voice == voice)
         store.delete(draft.id)
     }
@@ -134,6 +134,6 @@ struct PostDraftStoreTests {
         let (store, file) = try makeStore()
         store.save("Kept")
 
-        #expect(PostDraftStore(name: file).drafts.map(\.text) == ["Kept"])
+        #expect(PostDraftStore(name: file, scope: StorageScope()).drafts.map(\.text) == ["Kept"])
     }
 }

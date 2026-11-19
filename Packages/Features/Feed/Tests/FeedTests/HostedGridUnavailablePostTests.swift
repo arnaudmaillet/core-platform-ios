@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import FeedInterface
 import Foundation
 import MediaCore
@@ -28,7 +29,9 @@ struct HostedGridUnavailablePostTests {
     }
 
     private func page(withheld: UnavailablePosts) -> PostGridPageView {
-        let page = PostGridPageView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .grid)
+        let page = PostGridPageView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .grid,
+        bookmarks: PostBookmarkStore(scope: StorageScope()),
+        withheldPosts: UnavailablePosts())
         page.withheldPosts = withheld
         page.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
         return page

@@ -44,10 +44,12 @@ struct CardLiveCountTests {
     /// The scenario of the simulator check: a post liked in the vertical feed
     /// is liked on the grid tile it opened from — two surfaces, one count.
     @Test func aLikeInTheFeedReachesEveryBoundTile() {
-        let wallet = WalletStore(defaults: Self.defaults())
+        let wallet = WalletStore(defaults: Self.defaults(), scope: StorageScope())
         let entities = EntityStore()
-        let forYou = PostCardStaking(wallet: wallet, entities: entities)
-        let profile = PostCardStaking(wallet: wallet, entities: entities)
+        let forYou = PostCardStaking(wallet: wallet, entities: entities,
+        saves: PostBookmarkStore(scope: StorageScope()))
+        let profile = PostCardStaking(wallet: wallet, entities: entities,
+        saves: PostBookmarkStore(scope: StorageScope()))
         let gridTile = tile(Self.post("p1", likes: 40))
         let profileTile = tile(Self.post("p1", likes: 40))
         forYou.bindReadout(gridTile, to: PostID("p1"))
@@ -63,7 +65,9 @@ struct CardLiveCountTests {
     @Test func aTileBoundAfterAChangeDrawsTheStoresCount() {
         let entities = EntityStore()
         entities.setLikeCount(57, for: PostID("p1"))
-        let staking = PostCardStaking(wallet: WalletStore(defaults: Self.defaults()), entities: entities)
+        let staking = PostCardStaking(wallet: WalletStore(defaults: Self.defaults(),
+        scope: StorageScope()), entities: entities,
+        saves: PostBookmarkStore(scope: StorageScope()))
         let cell = tile(Self.post("p1", likes: 40))
         staking.bindReadout(cell, to: PostID("p1"))
         #expect(cell.debugCounterText == "57", "the grid's own copy is older than the store's")
@@ -73,7 +77,9 @@ struct CardLiveCountTests {
     /// store's, so the next stake has a number to move.
     @Test func aGridTellsTheStoreTheCountItLoaded() {
         let entities = EntityStore()
-        let staking = PostCardStaking(wallet: WalletStore(defaults: Self.defaults()), entities: entities)
+        let staking = PostCardStaking(wallet: WalletStore(defaults: Self.defaults(),
+        scope: StorageScope()), entities: entities,
+        saves: PostBookmarkStore(scope: StorageScope()))
         staking.bindReadout(tile(Self.post("p1", likes: 40)), to: PostID("p1"))
         #expect(entities.post(PostID("p1"))?.likeCount == 40)
         // …and never over a count the store knows.
@@ -88,7 +94,8 @@ struct CardLiveCountTests {
         let wallet = WalletStore(defaults: Self.defaults(), scope: scope)
         let entities = EntityStore()
         let bridge = WalletStakeLikes(wallet: wallet, entities: entities, scope: scope)
-        let staking = PostCardStaking(wallet: wallet, entities: entities)
+        let staking = PostCardStaking(wallet: wallet, entities: entities,
+        saves: PostBookmarkStore(scope: StorageScope()))
         let card = row(Self.post("p1", likes: 40))
         staking.bind(card, to: PostID("p1"))
 
@@ -103,7 +110,9 @@ struct CardLiveCountTests {
     /// it alone.
     @Test func aRecycledTileFollowsItsNewPost() {
         let entities = EntityStore()
-        let staking = PostCardStaking(wallet: WalletStore(defaults: Self.defaults()), entities: entities)
+        let staking = PostCardStaking(wallet: WalletStore(defaults: Self.defaults(),
+        scope: StorageScope()), entities: entities,
+        saves: PostBookmarkStore(scope: StorageScope()))
         let cell = tile(Self.post("p1", likes: 40))
         staking.bindReadout(cell, to: PostID("p1"))
         cell.prepareForReuse()
@@ -125,7 +134,8 @@ struct CardLiveCountTests {
         let wallet = WalletStore(defaults: Self.defaults(), scope: scope)
         let entities = EntityStore()
         let bridge = WalletStakeLikes(wallet: wallet, entities: entities, scope: scope)
-        let staking = PostCardStaking(wallet: wallet, entities: entities)
+        let staking = PostCardStaking(wallet: wallet, entities: entities,
+        saves: PostBookmarkStore(scope: StorageScope()))
         let bare = tile(Self.post("p1", likes: 40))
         let worded = tile(Self.post("p1", likes: 40))
         staking.bindCount(bare, to: PostID("p1"))
@@ -150,7 +160,8 @@ struct CardLiveCountTests {
         let scope = StorageScope(owner: .unscoped)
         let wallet = WalletStore(defaults: Self.defaults(), scope: scope)
         let entities = EntityStore()
-        let staking = PostCardStaking(wallet: wallet, entities: entities)
+        let staking = PostCardStaking(wallet: wallet, entities: entities,
+        saves: PostBookmarkStore(scope: StorageScope()))
         let cell = tile(Self.post("p1", likes: 40))
         let control = tile(Self.post("p1", likes: 40))
         staking.bindReadout(cell, to: PostID("p1"))
@@ -171,7 +182,9 @@ struct CardLiveCountTests {
         let entities = EntityStore()
         let pile = PostBookmarkStore(defaults: Self.defaults(), scope: StorageScope(owner: .member(account: "A", profile: "P1")))
         pile.facts = entities
-        let staking = PostCardStaking(wallet: WalletStore(defaults: Self.defaults()), entities: entities, saves: pile)
+        let staking = PostCardStaking(wallet: WalletStore(defaults: Self.defaults(),
+        scope: StorageScope()), entities: entities,
+        saves: pile)
         let card = row(Self.post("p1", likes: 40))
         staking.bind(card, to: PostID("p1"))
         #expect(!card.isBookmarked)
@@ -185,7 +198,9 @@ struct CardLiveCountTests {
 
     /// Without a store a card keeps what it loaded, as before.
     @Test func withoutAStoreTheCardKeepsItsCount() {
-        let staking = PostCardStaking(wallet: WalletStore(defaults: Self.defaults()))
+        let staking = PostCardStaking(wallet: WalletStore(defaults: Self.defaults(),
+        scope: StorageScope()),
+        saves: PostBookmarkStore(scope: StorageScope()))
         let cell = tile(Self.post("p1", likes: 40))
         staking.bindReadout(cell, to: PostID("p1"))
         #expect(cell.debugCounterText == "40")

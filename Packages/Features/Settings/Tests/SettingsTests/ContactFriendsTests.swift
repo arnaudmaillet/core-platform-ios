@@ -3,6 +3,7 @@ import CoreContracts
 import CoreModels
 import CoreNetworking
 import CoreNetworkingMocks
+import CoreStorage
 import Foundation
 import Testing
 import UIKit
@@ -117,7 +118,8 @@ struct ContactFriendsTests {
         let backend = MockBackend()
         let client = backend.makeRPCClient()
         let events = FollowGraphEvents()
-        let account = AccountRepository(accountClient: Account_V1_AccountServiceClient(client: client), authSession: Session())
+        let account = AccountRepository(accountClient: Account_V1_AccountServiceClient(client: client), authSession: Session(),
+        teenProtections: TeenProtections())
         let repository = ProfileRepository(
             profileClient: Profile_V1_ProfileServiceClient(client: client),
             counterClient: Counter_V1_CounterServiceClient(client: client),

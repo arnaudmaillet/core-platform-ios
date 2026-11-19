@@ -19,11 +19,15 @@ public final class ProfileItemService: ProfileItemAccess, ProfileItemSelling {
     private let wallet: WalletStore
     private let store: ProfileItemStore
     private let isMember: @MainActor () -> Bool
+    /// The app's one record of the account's age bracket (#401, #2376).
+    private let teen: TeenProtections
 
     public init(
         accountID: String, wallet: WalletStore, store: ProfileItemStore,
+        teen: TeenProtections,
         isMember: @escaping @MainActor () -> Bool = { true }
     ) {
+        self.teen = teen
         self.accountID = accountID
         self.wallet = wallet
         self.store = store
@@ -47,7 +51,7 @@ public final class ProfileItemService: ProfileItemAccess, ProfileItemSelling {
     }
 
     public func buy(_ item: ProfileItem) async -> ProfileItemPurchase {
-        guard isMember(), !TeenProtections.shared.restrictsPurchases else { return .unavailable }
+        guard isMember(), !teen.restrictsPurchases else { return .unavailable }
         guard !owns(item) else { return .alreadyOwned }
         if wallet.isServerBacked {
             let key = UUID().uuidString.replacingOccurrences(of: "-", with: "")

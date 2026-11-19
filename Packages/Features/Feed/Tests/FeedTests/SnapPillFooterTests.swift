@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import MediaCore
 import Testing
 import UIKit
@@ -38,9 +39,12 @@ struct SnapPillFooterTests {
 
     private func feed() -> SnapFeedViewController {
         let controller = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: SilentFooterProvider()),
+            viewModel: FeedViewModel(repository: SilentFooterProvider(), unavailablePosts: UnavailablePosts()),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
-            reporting: FooterReporter()
+            reporting: FooterReporter(),
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            savedSounds: SavedSoundStore(scope: StorageScope()),
+            viewer: { nil }
         )
         controller.loadViewIfNeeded()
         controller.view.frame = CGRect(x: 0, y: 0, width: 390, height: 844)

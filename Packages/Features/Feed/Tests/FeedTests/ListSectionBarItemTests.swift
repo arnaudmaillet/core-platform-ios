@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import DesignSystem
 import Foundation
 import MediaCore
@@ -34,7 +35,9 @@ struct ListSectionBarItemTests {
     ) async rethrows {
         let list = PushedPostListViewController(
             kind: kind, imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
-            videoPlayback: nil, staking: nil,
+            videoPlayback: nil,
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            withheldPosts: UnavailablePosts(), staking: nil,
             header: PushedScreenHeader(wallet: nil, makeWalletSheet: nil, router: nil), openPost: nil
         )
         let navigation = UINavigationController(rootViewController: list)

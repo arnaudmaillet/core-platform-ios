@@ -210,7 +210,7 @@ struct UnavailablePostActionsTests {
         let defaults = UserDefaults(suiteName: suite)!
         defaults.removePersistentDomain(forName: suite)
         defer { defaults.removePersistentDomain(forName: suite) }
-        let wallet = WalletStore(defaults: defaults)
+        let wallet = WalletStore(defaults: defaults, scope: StorageScope())
         wallet.credit(100)
         let before = wallet.balance
 

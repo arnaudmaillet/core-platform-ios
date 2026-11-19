@@ -24,7 +24,7 @@ public final class MapPlaceFollowStore: @unchecked Sendable {
     private var key: String { scope.profileKey(Self.baseKey, adoptingLegacyIn: defaults) }
     private let lock = NSLock()
 
-    public init(defaults: UserDefaults = .standard, scope: StorageScope = .shared) {
+    public init(defaults: UserDefaults = .standard, scope: StorageScope) {
         self.defaults = defaults
         self.scope = scope
         #if DEBUG

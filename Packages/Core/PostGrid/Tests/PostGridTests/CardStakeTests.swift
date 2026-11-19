@@ -59,7 +59,9 @@ struct CardStakeTests {
     /// A guest's card raises no stake menu (#1146): no amounts, no way into
     /// the Shop. A member's still does.
     @Test func aGuestsCardRaisesNoStakeMenu() throws {
-        let staking = PostCardStaking(wallet: WalletStore(defaults: Self.defaults()))
+        let staking = PostCardStaking(wallet: WalletStore(defaults: Self.defaults(),
+        scope: StorageScope()),
+        saves: PostBookmarkStore(scope: StorageScope()))
         for member in [false, true] {
             let holder = GateHolder(member: member)
             let cell = row()
@@ -72,9 +74,9 @@ struct CardStakeTests {
 
     /// Through the wallet: the balance pays, the surface can take it back.
     @Test func stakingSpendsFromTheWalletAndCanBeUndone() throws {
-        let wallet = WalletStore(defaults: Self.defaults())
+        let wallet = WalletStore(defaults: Self.defaults(), scope: StorageScope())
         let before = wallet.balance
-        let staking = PostCardStaking(wallet: wallet)
+        let staking = PostCardStaking(wallet: wallet, saves: PostBookmarkStore(scope: StorageScope()))
         let cell = row()
         staking.bind(cell, to: PostID("post-1"))
 
@@ -91,9 +93,9 @@ struct CardStakeTests {
     /// A burst of taps shows ONE toast with the burst so far, and its Undo
     /// takes all of it back (#957).
     @Test func aBurstShowsOneUndoToastThatTakesItAllBack() throws {
-        let wallet = WalletStore(defaults: Self.defaults())
+        let wallet = WalletStore(defaults: Self.defaults(), scope: StorageScope())
         let before = wallet.balance
-        let staking = PostCardStaking(wallet: wallet)
+        let staking = PostCardStaking(wallet: wallet, saves: PostBookmarkStore(scope: StorageScope()))
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
         let screen = UIViewController()
         window.rootViewController = screen
@@ -132,7 +134,7 @@ struct CardStakeTests {
         let outbox = LikeOutbox(defaults: defaults, scope: scope)
         wallet.likeOutbox = outbox
         let before = wallet.balance
-        let staking = PostCardStaking(wallet: wallet)
+        let staking = PostCardStaking(wallet: wallet, saves: PostBookmarkStore(scope: StorageScope()))
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
         let screen = UIViewController()
         window.rootViewController = screen
@@ -171,8 +173,8 @@ struct CardStakeTests {
     /// The card's menu reads the wallet's pack: the default only without one,
     /// "×100 — N left" with one.
     @Test func theCardMenuReadsThePack() {
-        let wallet = WalletStore(defaults: Self.defaults())
-        let staking = PostCardStaking(wallet: wallet)
+        let wallet = WalletStore(defaults: Self.defaults(), scope: StorageScope())
+        let staking = PostCardStaking(wallet: wallet, saves: PostBookmarkStore(scope: StorageScope()))
 
         let empty = staking.menuState(for: "post-1")
         #expect(empty.shotsLeft == 0)
@@ -192,8 +194,8 @@ struct CardStakeTests {
     /// A stake is a weighty action (`commit`), a refusal the viewer's
     /// error (`error`), and taking it back is silent (#1883).
     @Test func aStakeCommitsARefusalErrsAndAnUndoIsSilent() throws {
-        let wallet = WalletStore(defaults: Self.defaults())
-        let staking = PostCardStaking(wallet: wallet)
+        let wallet = WalletStore(defaults: Self.defaults(), scope: StorageScope())
+        let staking = PostCardStaking(wallet: wallet, saves: PostBookmarkStore(scope: StorageScope()))
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
         let screen = UIViewController()
         window.rootViewController = screen
@@ -222,10 +224,10 @@ struct CardStakeTests {
     /// A shot from a card: a hundred points in one gesture, one shot off the
     /// pack, and the "+100" receipt's amount is what the wallet spent.
     @Test func aShotFromACardStakesAHundredAndUsesOneShot() {
-        let wallet = WalletStore(defaults: Self.defaults())
+        let wallet = WalletStore(defaults: Self.defaults(), scope: StorageScope())
         wallet.buyStakePack()
         let before = wallet.balance
-        let staking = PostCardStaking(wallet: wallet)
+        let staking = PostCardStaking(wallet: wallet, saves: PostBookmarkStore(scope: StorageScope()))
         let cell = row()
         staking.bind(cell, to: PostID("post-1"))
 
@@ -244,9 +246,9 @@ struct CardStakeTests {
         let defaults = Self.defaults()
         defaults.set(true, forKey: "wallet.seeded")
         defaults.set(1_000, forKey: "wallet.balance")
-        let wallet = WalletStore(defaults: defaults)
+        let wallet = WalletStore(defaults: defaults, scope: StorageScope())
         wallet.buyStakePack()
-        let staking = PostCardStaking(wallet: wallet)
+        let staking = PostCardStaking(wallet: wallet, saves: PostBookmarkStore(scope: StorageScope()))
         let cell = row()
         staking.bind(cell, to: PostID("post-1"))
         staking.stake(.shot, on: "post-1", cell: cell, source: cell)
@@ -265,8 +267,8 @@ struct CardStakeTests {
     /// under a screen that can open the Shop, and picking it asks THAT
     /// opener (found up the card's responder chain) for the Shop.
     @Test func theCardsEmptyPackRowOpensTheShop() throws {
-        let wallet = WalletStore(defaults: Self.defaults())
-        let staking = PostCardStaking(wallet: wallet)
+        let wallet = WalletStore(defaults: Self.defaults(), scope: StorageScope())
+        let staking = PostCardStaking(wallet: wallet, saves: PostBookmarkStore(scope: StorageScope()))
         let screen = ShopOpenerSpy()
         let cell = row()
         screen.view.addSubview(cell)
@@ -284,7 +286,9 @@ struct CardStakeTests {
 
     /// No Shop above the card (the fleet): the row stays a disabled signpost.
     @Test func withoutAShopTheEmptyPackRowIsDisabled() throws {
-        let staking = PostCardStaking(wallet: WalletStore(defaults: Self.defaults()))
+        let staking = PostCardStaking(wallet: WalletStore(defaults: Self.defaults(),
+        scope: StorageScope()),
+        saves: PostBookmarkStore(scope: StorageScope()))
         let cell = row()
         staking.bind(cell, to: PostID("post-1"))
 

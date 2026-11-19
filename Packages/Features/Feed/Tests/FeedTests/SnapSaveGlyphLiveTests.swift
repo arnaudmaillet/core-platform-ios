@@ -3,6 +3,7 @@ import CoreModels
 import CoreStorage
 import EntityStore
 import MediaCore
+import PostSurfaces
 import Testing
 import UIKit
 @testable import Feed
@@ -35,10 +36,11 @@ struct SnapSaveGlyphLiveTests {
 
     private static func makeFeed(entities: EntityStore, pile: PostBookmarkStore) -> SnapFeedViewController {
         SnapFeedViewController(
-            viewModel: FeedViewModel(repository: SaveGlyphFeedProvider(), entities: entities),
+            viewModel: FeedViewModel(repository: SaveGlyphFeedProvider(), entities: entities,
+            unavailablePosts: UnavailablePosts()),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             entities: entities,
-            bookmarks: pile
+            bookmarks: pile, savedSounds: SavedSoundStore(scope: StorageScope()), viewer: { nil }
         )
     }
 

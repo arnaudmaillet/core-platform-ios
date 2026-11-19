@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import MediaCore
 import MediaPlayback
 import Testing
@@ -37,7 +38,7 @@ struct SnapFeedLoadingPageTests {
 
     private func feed(_ spy: PanelSpy) -> SnapFeedViewController {
         let controller = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: MuteFeed()),
+            viewModel: FeedViewModel(repository: MuteFeed(), unavailablePosts: UnavailablePosts()),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             makeCommentsPanelContent: { id in
                 spy.asked.append(id)
@@ -46,7 +47,10 @@ struct SnapFeedLoadingPageTests {
                 let panel = UIViewController()
                 panel.view.backgroundColor = .systemPink
                 return panel
-            }
+            },
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            savedSounds: SavedSoundStore(scope: StorageScope()),
+            viewer: { nil }
         )
         controller.loadViewIfNeeded()
         controller.view.frame = CGRect(x: 0, y: 0, width: 390, height: 844)

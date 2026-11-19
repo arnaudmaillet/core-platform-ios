@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import PlaceInterface
 import Foundation
 import MediaCore
@@ -71,6 +72,9 @@ struct PlaceReturnPlayersTests {
             following: nil,
             wallet: nil,
             loadPosts: { posts },
+            presence: SectionPresenceStore(scope: StorageScope()),
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            withheldPosts: UnavailablePosts(),
             openPost: { _, origin, _ in opened = origin }
         )
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
@@ -117,6 +121,9 @@ struct PlaceReturnPlayersTests {
             following: nil,
             wallet: nil,
             loadPosts: { posts },
+            presence: SectionPresenceStore(scope: StorageScope()),
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            withheldPosts: UnavailablePosts(),
             openPost: { _, origin, _ in opened = origin }
         )
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))

@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import Foundation
 import MapsInterface
 import MediaCore
@@ -106,7 +107,7 @@ struct ProfilePushFirstFrameTests {
                 cache: cache
             ),
             imagePipeline: ImagePipeline(fetcher: PictureFetcher()),
-            makeGridPage: TestGridPages.factory(),
+            makeGridPage: TestGridPages.factory(), presence: SectionPresenceStore(scope: StorageScope()),
             onLogout: nil,
             identityStub: stub
         )
@@ -194,7 +195,7 @@ struct ProfilePushFirstFrameTests {
         let first = ProfileViewController(
             viewModel: ProfileViewModel(repository: repository, source: .profile(id), cache: cache),
             imagePipeline: pipeline,
-            makeGridPage: TestGridPages.factory(),
+            makeGridPage: TestGridPages.factory(), presence: SectionPresenceStore(scope: StorageScope()),
             onLogout: nil
         )
         first.loadViewIfNeeded()
@@ -211,7 +212,7 @@ struct ProfilePushFirstFrameTests {
                 repository: repository, source: .profile(ProfileID("prof-kenji")), cache: cache
             ),
             imagePipeline: pipeline,
-            makeGridPage: TestGridPages.factory(),
+            makeGridPage: TestGridPages.factory(), presence: SectionPresenceStore(scope: StorageScope()),
             onLogout: nil
         )
         second.loadViewIfNeeded()
@@ -264,7 +265,7 @@ struct ProfilePushFirstFrameTests {
         let screen = ProfileViewController(
             viewModel: viewModel,
             imagePipeline: ImagePipeline(fetcher: PictureFetcher()),
-            makeGridPage: TestGridPages.factory(),
+            makeGridPage: TestGridPages.factory(), presence: SectionPresenceStore(scope: StorageScope()),
             onLogout: nil
         )
         screen.loadViewIfNeeded()

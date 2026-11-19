@@ -249,7 +249,8 @@ final class ConversationThreadViewController: UIViewController {
     /// when another starts.
     private var voiceShownID: String?
     private let voicePlayer = VoicePlayer.shared
-    private let voicePlayed = VoicePlayedStore.shared
+    /// The played voice messages' memory: the app's one (#2376).
+    private let voicePlayed: VoicePlayedStore
     /// The viewer's messages that just appeared on their way — they rise into
     /// place as their cell is configured (#719).
     private var arrivingIDs: Set<String> = []
@@ -315,9 +316,9 @@ final class ConversationThreadViewController: UIViewController {
 
     /// The day chip's size, for its bone.
     static let dayBoneSize = CGSize(width: 96, height: 26)
-    /// Where the thread's last-known shape is kept (#1774). Injectable for
-    /// tests.
-    var presence: SectionPresenceStore = .shared
+    /// Where the thread's last-known shape is kept (#1774): the app's one
+    /// store (#2376).
+    private let presence: SectionPresenceStore
     /// How many messages the thread had last time; nil never seen.
     private var rememberedMessageCount: Int? {
         driver.presenceKey.flatMap { presence.count(screen: $0, section: "messages") }
@@ -378,10 +379,14 @@ final class ConversationThreadViewController: UIViewController {
         mode: ConversationThreadMode,
         prefill: String,
         imagePipeline: ImagePipeline,
+        presence: SectionPresenceStore,
+        voicePlayed: VoicePlayedStore,
         socialGraph: (any SocialGraphWriting)? = nil,
         followRelations: (any SocialGraphReading)? = nil,
         entities: (any ProfileEntityReading & ProfileEntityWriting)? = nil
     ) {
+        self.presence = presence
+        self.voicePlayed = voicePlayed
         self.entities = entities
         self.driver = driver
         self.mode = mode

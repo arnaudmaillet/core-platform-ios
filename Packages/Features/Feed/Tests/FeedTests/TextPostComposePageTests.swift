@@ -131,7 +131,7 @@ struct TextPostComposePageTests {
         let publisher = RecordingPublisher()
         let draftsFile = "post-drafts-test-\(UUID().uuidString)"
         try CodableFileStore<[PostDraft]>(name: draftsFile).clear()
-        let drafts = PostDraftStore(name: draftsFile)
+        let drafts = PostDraftStore(name: draftsFile, scope: StorageScope())
         // A pile of the test's own unless one is given: the app's shared one
         // is never touched.
         let pile = bookmarks ?? PostBookmarkStore(
@@ -143,7 +143,12 @@ struct TextPostComposePageTests {
             commentsProvider: comments,
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             postDrafts: drafts,
-            entities: entities
+            entities: entities,
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            viewHistory: PostViewHistoryStore(scope: StorageScope()),
+            unavailablePosts: UnavailablePosts(),
+            savedSounds: SavedSoundStore(scope: StorageScope()),
+            viewerProfile: { nil }
         ).makeTextPostScreen(publisher: publisher, bookmarks: pile, recordsVoice: recordsVoice)
         let navigation = try #require(screen as? UINavigationController)
         #expect(navigation.modalPresentationStyle == .pageSheet, "a sheet, not a full screen")
@@ -486,7 +491,13 @@ struct TextPostComposePageTests {
             let navigation = FeedFeatureBuilder(
                 repository: RememberingFeed(),
                 imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
-                entities: entities
+                postDrafts: PostDraftStore(scope: StorageScope()),
+                entities: entities,
+                bookmarks: PostBookmarkStore(scope: StorageScope()),
+                viewHistory: PostViewHistoryStore(scope: StorageScope()),
+                unavailablePosts: UnavailablePosts(),
+                savedSounds: SavedSoundStore(scope: StorageScope()),
+                viewerProfile: { nil }
             ).makeTextPostScreen(publisher: RecordingPublisher()) as? UINavigationController
             released = navigation?.viewControllers.first as? TextPostComposerViewController
             #expect(released != nil)
