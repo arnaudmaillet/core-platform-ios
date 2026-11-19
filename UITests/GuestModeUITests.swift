@@ -276,7 +276,7 @@ final class GuestModeUITests: XCTestCase {
     /// still on it, pushed where they were: its rail and its back button.
     private func assertLikeLanded(_ like: XCUIElement, before: String?, in app: XCUIApplication) {
         let landed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value != %@", before ?? ""), object: like)
-        XCTAssertEqual(XCTWaiter.wait(for: [landed](timeout: Self.step), .completed, "the like did not land")
+        XCTAssertEqual(XCTWaiter.wait(for: [landed], timeout: Self.step), .completed, "the like did not land")
         XCTAssertTrue(like.exists, "signing in moved the viewer off the post")
         XCTAssertTrue(app.navigationBars.buttons["Back"].firstMatch.exists, "signing in reset the post's stack")
     }
