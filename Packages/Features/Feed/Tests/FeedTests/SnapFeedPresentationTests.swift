@@ -27,7 +27,7 @@ struct SnapFeedPresentationTests {
     }
 
     private func makeBuilder() -> FeedFeatureBuilder {
-        FeedFeatureBuilder(
+        FeedFeatureBuilder(dependencies: .testing(
             repository: StubFeedProvider(),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             postDrafts: PostDraftStore(scope: StorageScope()),
@@ -36,7 +36,7 @@ struct SnapFeedPresentationTests {
             unavailablePosts: UnavailablePosts(),
             savedSounds: SavedSoundStore(scope: StorageScope()),
             viewerProfile: { nil }
-        )
+        ))
     }
 }
 

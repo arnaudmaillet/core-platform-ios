@@ -47,7 +47,7 @@ struct WarmPlaybackAutoplayTests {
         MediaPlaybackPolicy.store = store
         #expect(!MediaPlaybackPolicy.autoplays, "guard: grids would not autoplay")
 
-        let builder = FeedFeatureBuilder(
+        let builder = FeedFeatureBuilder(dependencies: .testing(
             repository: ClipProvider(),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             videoPlayback: VideoPlaybackController(source: StubSource(), poolSize: 2, capacity: 2),
@@ -57,7 +57,7 @@ struct WarmPlaybackAutoplayTests {
             unavailablePosts: UnavailablePosts(),
             savedSounds: SavedSoundStore(scope: StorageScope()),
             viewerProfile: { nil }
-        )
+        ))
         let warm = builder.warmPlayback(of: PostID("clip-post"), at: nil)
         #expect(warm != nil, "the warm into a full-screen post refused on Autoplay Never")
         warm?.end(opened: false)

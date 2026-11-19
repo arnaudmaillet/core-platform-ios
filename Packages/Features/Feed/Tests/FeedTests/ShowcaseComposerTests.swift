@@ -98,7 +98,7 @@ struct ShowcaseComposerTests {
             defaults: UserDefaults(suiteName: "showcase.bookmarks.tests.\(UUID().uuidString)")!,
             scope: StorageScope(owner: .member(account: "acc-1", profile: "prof-1"))
         )
-        let screen = FeedFeatureBuilder(
+        let screen = FeedFeatureBuilder(dependencies: .testing(
             repository: HeldFeed(),
             commentsProvider: Viewer(),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
@@ -109,7 +109,7 @@ struct ShowcaseComposerTests {
             unavailablePosts: UnavailablePosts(),
             savedSounds: SavedSoundStore(scope: StorageScope()),
             viewerProfile: { nil }
-        ).makeTextPostScreen(publisher: publisher, bookmarks: pile, attaching: embed, showsEmbeds: showsEmbeds)
+        )).makeTextPostScreen(publisher: publisher, bookmarks: pile, attaching: embed, showsEmbeds: showsEmbeds)
         let navigation = try #require(screen as? UINavigationController)
         let composer = try #require(navigation.viewControllers.first as? TextPostComposerViewController)
         let window = UIWindow(frame: CGRect(origin: .zero, size: CGSize(width: 390, height: 844)))

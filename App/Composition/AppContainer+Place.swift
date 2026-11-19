@@ -17,7 +17,7 @@ import UIKit
 // built here.
 extension AppContainer {
     func makePlaceFeature() -> any PlaceFeatureBuilding {
-        PlaceFeatureBuilder(
+        PlaceFeatureBuilder(dependencies: .init(
             feed: feedBuilder,
             hydrate: { [feedBuilder] ids in try await feedBuilder.placeGalleryPosts(ids) },
             // A place page pages the place's posts past the map's pins (#643).
@@ -36,6 +36,6 @@ extension AppContainer {
             presence: sectionPresence,
             bookmarks: postBookmarks,
             unavailablePosts: unavailablePosts
-        )
+        ))
     }
 }

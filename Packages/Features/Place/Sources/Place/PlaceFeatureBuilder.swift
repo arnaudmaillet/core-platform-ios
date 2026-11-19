@@ -21,17 +21,86 @@ import UIKit
 /// hands in. What a place IS stays the map's (`PlaceIdentity`).
 @MainActor
 public final class PlaceFeatureBuilder: PlaceFeatureBuilding {
+    /// Everything the place page needs, handed in by the composition root
+    /// (#2375): each collaborator the app always wires is required, so
+    /// forgetting one fails to compile.
+    public struct Dependencies {
+        /// The reader the page opens posts in, and the posts the app holds.
+        public var feed: any FeedFeatureBuilding
+        /// The feed's hydration of a set of posts, with their counts.
+        public var hydrate: @Sendable ([PostID]) async throws -> [GalleryPost]
+        /// A place's posts past the map's pins (#643).
+        public var placePosts: any PlacePostsListing
+        public var imagePipeline: ImagePipeline
+        /// The app's one player pool.
+        public var videoPlayback: VideoPlaybackController
+        /// The app's one wallet, the same the map's toolbar shows, and the
+        /// same sheet its badge opens.
+        public var wallet: any WalletStaking
+        public var makeWalletSheet: @MainActor () -> UIViewController
+        /// Whether the viewer is shown a balance at all (a guest is not).
+        public var showsBalance: @MainActor () -> Bool
+        public var entities: any EntityReading & EntityWriting
+        public var router: any Router
+        /// The cards' relation marks (#2300): the feed's own, so a place's
+        /// cards match every other.
+        public var authorMarks: PostAuthorMarks
+        /// The tiles' comment warm-up (#2002): the feed's own. Nil when the
+        /// feed was built without its comments.
+        public var postOpenWarm: PostOpenWarm?
+        /// The app's one memory of each screen's sections (#1774, #2376).
+        public var presence: SectionPresenceStore
+        /// The app's one saved pile and record of withheld posts (#2376): the
+        /// page's cards and pushed lists read the ones every feed does.
+        public var bookmarks: PostBookmarkStore
+        public var unavailablePosts: UnavailablePosts
+
+        public init(
+            feed: any FeedFeatureBuilding,
+            hydrate: @escaping @Sendable ([PostID]) async throws -> [GalleryPost],
+            placePosts: any PlacePostsListing,
+            imagePipeline: ImagePipeline,
+            videoPlayback: VideoPlaybackController,
+            wallet: any WalletStaking,
+            makeWalletSheet: @escaping @MainActor () -> UIViewController,
+            showsBalance: @escaping @MainActor () -> Bool,
+            entities: any EntityReading & EntityWriting,
+            router: any Router,
+            authorMarks: PostAuthorMarks,
+            postOpenWarm: PostOpenWarm?,
+            presence: SectionPresenceStore,
+            bookmarks: PostBookmarkStore,
+            unavailablePosts: UnavailablePosts
+        ) {
+            self.feed = feed
+            self.hydrate = hydrate
+            self.placePosts = placePosts
+            self.imagePipeline = imagePipeline
+            self.videoPlayback = videoPlayback
+            self.wallet = wallet
+            self.makeWalletSheet = makeWalletSheet
+            self.showsBalance = showsBalance
+            self.entities = entities
+            self.router = router
+            self.authorMarks = authorMarks
+            self.postOpenWarm = postOpenWarm
+            self.presence = presence
+            self.bookmarks = bookmarks
+            self.unavailablePosts = unavailablePosts
+        }
+    }
+
     private let feed: any FeedFeatureBuilding
     private let hydrate: @Sendable ([PostID]) async throws -> [GalleryPost]
-    private let placePosts: (any PlacePostsListing)?
+    private let placePosts: any PlacePostsListing
     private let imagePipeline: ImagePipeline
-    private let videoPlayback: VideoPlaybackController?
-    private let wallet: (any WalletStaking)?
-    private let makeWalletSheet: (@MainActor () -> UIViewController)?
+    private let videoPlayback: VideoPlaybackController
+    private let wallet: any WalletStaking
+    private let makeWalletSheet: @MainActor () -> UIViewController
     private let showsBalance: @MainActor () -> Bool
     private let entities: any EntityReading & EntityWriting
-    private let router: (any Router)?
-    private let authorMarks: PostAuthorMarks?
+    private let router: any Router
+    private let authorMarks: PostAuthorMarks
     private let postOpenWarm: PostOpenWarm?
     private let presence: SectionPresenceStore
     private let bookmarks: PostBookmarkStore
@@ -40,48 +109,22 @@ public final class PlaceFeatureBuilder: PlaceFeatureBuilding {
     /// (#2336).
     private var balanceWallet: (any WalletStaking)? { showsBalance() ? wallet : nil }
 
-    public init(
-        /// The reader the page opens posts in, and the posts the app holds.
-        feed: any FeedFeatureBuilding,
-        /// The feed's hydration of a set of posts, with their counts.
-        hydrate: @escaping @Sendable ([PostID]) async throws -> [GalleryPost],
-        /// A place's posts past the map's pins (#643). Nil: a place page shows
-        /// the pins it was handed.
-        placePosts: (any PlacePostsListing)?,
-        imagePipeline: ImagePipeline,
-        videoPlayback: VideoPlaybackController?,
-        /// The app's one wallet, the same the map's toolbar shows.
-        wallet: (any WalletStaking)?,
-        makeWalletSheet: (@MainActor () -> UIViewController)?,
-        showsBalance: @escaping @MainActor () -> Bool,
-        entities: any EntityReading & EntityWriting,
-        router: (any Router)?,
-        /// The cards' relation marks (#2300) and the tiles' comment warm-up
-        /// (#2002): the feed's own, so a place's cards match every other.
-        authorMarks: PostAuthorMarks?,
-        postOpenWarm: PostOpenWarm?,
-        /// The app's one memory of each screen's sections (#1774, #2376).
-        presence: SectionPresenceStore,
-        /// The app's one saved pile and record of withheld posts (#2376): the
-        /// page's cards and pushed lists read the ones every feed does.
-        bookmarks: PostBookmarkStore,
-        unavailablePosts: UnavailablePosts
-    ) {
-        self.presence = presence
-        self.bookmarks = bookmarks
-        self.unavailablePosts = unavailablePosts
-        self.feed = feed
-        self.hydrate = hydrate
-        self.placePosts = placePosts
-        self.imagePipeline = imagePipeline
-        self.videoPlayback = videoPlayback
-        self.wallet = wallet
-        self.makeWalletSheet = makeWalletSheet
-        self.showsBalance = showsBalance
-        self.entities = entities
-        self.router = router
-        self.authorMarks = authorMarks
-        self.postOpenWarm = postOpenWarm
+    public init(dependencies: Dependencies) {
+        presence = dependencies.presence
+        bookmarks = dependencies.bookmarks
+        unavailablePosts = dependencies.unavailablePosts
+        feed = dependencies.feed
+        hydrate = dependencies.hydrate
+        placePosts = dependencies.placePosts
+        imagePipeline = dependencies.imagePipeline
+        videoPlayback = dependencies.videoPlayback
+        wallet = dependencies.wallet
+        makeWalletSheet = dependencies.makeWalletSheet
+        showsBalance = dependencies.showsBalance
+        entities = dependencies.entities
+        router = dependencies.router
+        authorMarks = dependencies.authorMarks
+        postOpenWarm = dependencies.postOpenWarm
     }
 
     public func makePlacePage(title: String, identity: PlaceIdentity) -> UIViewController {
@@ -144,15 +187,13 @@ public final class PlaceFeatureBuilder: PlaceFeatureBuilding {
                 try await hydrate(postIDs)
             },
             // Past the pins (#643): the place's own pages, hydrated the same way.
-            loadMore: identity?.query.flatMap { query in
-                placePosts.map { listing in
-                    { [hydrate] token in
-                        let page = try await listing.placePostIDs(query, after: token)
-                        let posts = page.ids.isEmpty
-                            ? []
-                            : try await hydrate(page.ids)
-                        return PlacePostsPage(posts: posts, nextPageToken: page.next)
-                    }
+            loadMore: identity?.query.map { [placePosts, hydrate] query in
+                { token in
+                    let page = try await placePosts.placePostIDs(query, after: token)
+                    let posts = page.ids.isEmpty
+                        ? []
+                        : try await hydrate(page.ids)
+                    return PlacePostsPage(posts: posts, nextPageToken: page.next)
                 }
             },
             presence: presence,
@@ -184,7 +225,7 @@ public final class PlaceFeatureBuilder: PlaceFeatureBuilding {
         gallery.authorMarks = authorMarks
         // The titles' pushes — For You's own pushed screens, with the header
         // they wear there (`PushedScreenHeader`).
-        let staking = wallet.map { PostCardStaking(wallet: $0, entities: entities, saves: bookmarks) }
+        let staking = PostCardStaking(wallet: wallet, entities: entities, saves: bookmarks)
         let openHero: (UIViewController, SnapFeedHeroOrigin, [PostID]) -> Void = { [feed] presenter, origin, ids in
             feed.presentSnapFeedHero(postIDs: ids, from: presenter, origin: origin)
         }

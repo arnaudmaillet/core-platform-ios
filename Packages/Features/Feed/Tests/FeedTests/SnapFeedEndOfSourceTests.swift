@@ -291,13 +291,15 @@ struct SnapFeedEndOfSourceTests {
     private func routed(
         _ open: (FeedFeatureBuilder, UIViewController) -> Void
     ) async throws -> (SnapFeedViewController, [Any]) {
-        let builder = FeedFeatureBuilder(repository: Photos(), imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
-        postDrafts: PostDraftStore(scope: StorageScope()),
-        bookmarks: PostBookmarkStore(scope: StorageScope()),
-        viewHistory: PostViewHistoryStore(scope: StorageScope()),
-        unavailablePosts: UnavailablePosts(),
-        savedSounds: SavedSoundStore(scope: StorageScope()),
-        viewerProfile: { nil })
+        let builder = FeedFeatureBuilder(dependencies: .testing(
+            repository: Photos(), imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            postDrafts: PostDraftStore(scope: StorageScope()),
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            viewHistory: PostViewHistoryStore(scope: StorageScope()),
+            unavailablePosts: UnavailablePosts(),
+            savedSounds: SavedSoundStore(scope: StorageScope()),
+            viewerProfile: { nil }
+        ))
         let presenter = UIViewController()
         let nav = UINavigationController(rootViewController: presenter)
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))

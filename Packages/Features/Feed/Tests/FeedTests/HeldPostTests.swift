@@ -41,7 +41,7 @@ struct HeldPostTests {
     }
 
     private func builder(_ repository: any FeedProviding, entities: EntityStore) -> FeedFeatureBuilder {
-        FeedFeatureBuilder(
+        FeedFeatureBuilder(dependencies: .testing(
             repository: repository, imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             postDrafts: PostDraftStore(scope: StorageScope()), entities: entities,
             bookmarks: PostBookmarkStore(scope: StorageScope()),
@@ -49,7 +49,7 @@ struct HeldPostTests {
             unavailablePosts: UnavailablePosts(),
             savedSounds: SavedSoundStore(scope: StorageScope()),
             viewerProfile: { nil }
-        )
+        ))
     }
 
     @Test func theMirrorAnswersFirst() {

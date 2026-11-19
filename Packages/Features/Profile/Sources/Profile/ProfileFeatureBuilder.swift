@@ -13,22 +13,151 @@ import ProfileInterface
 import SettingsInterface
 import UIKit
 
+/// What the profile reads and writes on the profiles: the profile itself,
+/// its share link (#412) and its banner. One repository answers all of it
+/// (`ProfileRepository`): composed here, so the wiring is checked by the
+/// compiler instead of asked at run time (#2375).
+public typealias ProfileFeatureRepository = ProfileProviding & ShareLinkManaging & ProfileBannerManaging
+
 /// The profile feature's entry point, resolved by the composition root and
 /// consumed through `ProfileFeatureBuilding` by the app shell.
 @MainActor
 public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
-    private let repository: any ProfileProviding
-    /// Files moderation reports from the profile's overflow menu. Optional:
-    /// nil hides nothing, but a Report tap then reports the feature as
-    /// unavailable rather than silently succeeding.
-    private let reporting: (any ContentReporting)?
-    /// Supplies the share sheet's quick-send row. Nil simply hides the row.
-    private let shareTargeting: (any ProfileShareTargeting)?
-    private let gallery: (any ProfileGalleryProviding)?
-    /// Serves the followers / following lists. Nil leaves the header's
-    /// counters inert — the screen is a destination, not a decoration, and a
-    /// tap that opens an unfillable list is worse than no tap.
-    private let relationships: (any ProfileRelationshipsProviding)?
+    /// Everything the profile screens need, handed in by the composition
+    /// root (#2375). Each collaborator the app always wires is required, so
+    /// forgetting one fails to compile; the cross-feature ones (Feed's grid
+    /// and reader, the map's pins, Chat's channels) included.
+    public struct Dependencies {
+        /// The profiles, their share links and banners.
+        public var repository: any ProfileFeatureRepository
+        /// Files moderation reports from the profile's overflow menu.
+        public var reporting: any ContentReporting
+        /// The share sheet's quick-send row.
+        public var shareTargeting: any ProfileShareTargeting
+        /// A profile's posts, pinned posts and tabs.
+        public var gallery: any ProfileGalleryProviding
+        /// The followers / following lists behind the header's counters.
+        public var relationships: any ProfileRelationshipsProviding
+        public var imagePipeline: ImagePipeline
+        public var router: any Router
+        /// Multi-profile switching for the account (lists profiles, switches
+        /// active).
+        public var switching: any ProfileSwitching
+        /// Settings and Account (#2382), through its interface: the own
+        /// profile's gear, and Edit Profile's Account Type and list privacy
+        /// rows.
+        public var settings: any SettingsFeatureBuilding
+        /// The gem-shop items a profile wears (#944): Edit Profile's Video
+        /// Banner row. Nil outside mock mode (the fleet carries no
+        /// ownership yet): the row is hidden.
+        public var profileItems: (any ProfileItemAccess)?
+        /// The device store (#893): the viewer's own profile and the
+        /// profiles they visited open on their last content at a cold start.
+        /// Nil when the store can't be opened: the cache stays in memory.
+        public var localStore: LocalStore?
+        /// Which tabs each profile had last time (#1773), the viewer's saved
+        /// pile and viewing history: the app's one of each (#2376).
+        public var presence: SectionPresenceStore
+        public var bookmarks: PostBookmarkStore
+        public var viewHistory: PostViewHistoryStore
+        /// The shared player pool, so profile video autoplays on the same
+        /// terms as every other surface.
+        public var videoPlayback: VideoPlaybackController
+        /// Curates the map's pinned people, for the header's pin button: the
+        /// SAME service the map writes through.
+        public var mapPinning: any MapProfilePinning
+        /// One profile of the account's unread notifications (#2034), for
+        /// the switcher's rows and the Profile tab's dot.
+        public var unreadNotifications: @MainActor @Sendable (ProfileID) async -> Int?
+        /// Flies a tapped gallery post into the feed's reader.
+        public var openFeedHero: ([PostID], UIViewController, SnapFeedHeroOrigin) -> Void
+        /// For You's grid page (#1273): the pages the profile's posts are
+        /// drawn on. `savesPosts` offers the save control.
+        public var makePostGridPage: (_ style: PostGridPageStyle, _ savesPosts: Bool) -> any PostGridPage
+        /// The channels a profile owns (#2232): Chat's read. Nil with
+        /// `-channels` off (or nil answered): no profile has a Channels tab.
+        public var makeProfileChannels: (@MainActor () -> (any ProfileChannelsProviding)?)?
+        /// The new channel's sheet (Chat's, the "+" menu's), for the own
+        /// Channels tab's "Create a Channel" (#2232). Nil with `-channels`
+        /// off: the row isn't offered.
+        public var makeChannelCreation: (@MainActor () -> UIViewController?)?
+        /// The gallery cards' like chips: the app's one wallet, with its
+        /// live post counts (#896).
+        public var makeCardStaking: @MainActor () -> PostCardStaking
+        /// What the app knows of a person about to be opened (#1859): the
+        /// route's stub, completed from the app's store.
+        public var knownIdentity: @MainActor (ProfileID, ProfileIdentityStub?) -> ProfileIdentityStub?
+        /// The app's one follow-change channel: the header's Follow button
+        /// and the followers lists keep agreeing with a follow made anywhere
+        /// else.
+        public var followEvents: FollowGraphEvents
+        /// A post of the viewer's own the server deleted here (#896): the
+        /// feeds and For You drop it too.
+        public var onPostDeleted: @MainActor (PostID) -> Void
+
+        public init(
+            repository: any ProfileFeatureRepository,
+            reporting: any ContentReporting,
+            shareTargeting: any ProfileShareTargeting,
+            gallery: any ProfileGalleryProviding,
+            relationships: any ProfileRelationshipsProviding,
+            imagePipeline: ImagePipeline,
+            router: any Router,
+            switching: any ProfileSwitching,
+            settings: any SettingsFeatureBuilding,
+            profileItems: (any ProfileItemAccess)?,
+            localStore: LocalStore?,
+            presence: SectionPresenceStore,
+            bookmarks: PostBookmarkStore,
+            viewHistory: PostViewHistoryStore,
+            videoPlayback: VideoPlaybackController,
+            mapPinning: any MapProfilePinning,
+            unreadNotifications: @escaping @MainActor @Sendable (ProfileID) async -> Int?,
+            openFeedHero: @escaping ([PostID], UIViewController, SnapFeedHeroOrigin) -> Void,
+            makePostGridPage: @escaping (_ style: PostGridPageStyle, _ savesPosts: Bool) -> any PostGridPage,
+            makeProfileChannels: (@MainActor () -> (any ProfileChannelsProviding)?)?,
+            makeChannelCreation: (@MainActor () -> UIViewController?)?,
+            makeCardStaking: @escaping @MainActor () -> PostCardStaking,
+            knownIdentity: @escaping @MainActor (ProfileID, ProfileIdentityStub?) -> ProfileIdentityStub?,
+            followEvents: FollowGraphEvents,
+            onPostDeleted: @escaping @MainActor (PostID) -> Void
+        ) {
+            self.repository = repository
+            self.reporting = reporting
+            self.shareTargeting = shareTargeting
+            self.gallery = gallery
+            self.relationships = relationships
+            self.imagePipeline = imagePipeline
+            self.router = router
+            self.switching = switching
+            self.settings = settings
+            self.profileItems = profileItems
+            self.localStore = localStore
+            self.presence = presence
+            self.bookmarks = bookmarks
+            self.viewHistory = viewHistory
+            self.videoPlayback = videoPlayback
+            self.mapPinning = mapPinning
+            self.unreadNotifications = unreadNotifications
+            self.openFeedHero = openFeedHero
+            self.makePostGridPage = makePostGridPage
+            self.makeProfileChannels = makeProfileChannels
+            self.makeChannelCreation = makeChannelCreation
+            self.makeCardStaking = makeCardStaking
+            self.knownIdentity = knownIdentity
+            self.followEvents = followEvents
+            self.onPostDeleted = onPostDeleted
+        }
+    }
+
+    private let repository: any ProfileFeatureRepository
+    /// Files moderation reports from the profile's overflow menu.
+    private let reporting: any ContentReporting
+    /// Supplies the share sheet's quick-send row.
+    private let shareTargeting: any ProfileShareTargeting
+    private let gallery: any ProfileGalleryProviding
+    /// Serves the followers / following lists behind the header's counters.
+    private let relationships: any ProfileRelationshipsProviding
     /// One store for every profile screen: the gallery filter is a GLOBAL
     /// user preference, so all view models read and write the same place.
     private let galleryPreferences = GalleryPreferences()
@@ -49,65 +178,92 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
     /// Followers, Following and Friends on the device (#1776).
     private let relationshipsCache: ProfileRelationshipsLocalCache?
     private let imagePipeline: ImagePipeline
-    private let router: (any Router)?
+    private let router: any Router
     /// Multi-profile switching for the account (lists profiles, switches active).
-    private let switching: (any ProfileSwitching)?
+    private let switching: any ProfileSwitching
     /// Settings and Account (#2382), through its interface: the own
     /// profile's gear, and Edit Profile's Account Type and list privacy rows.
     private let settings: any SettingsFeatureBuilding
     /// The gem-shop items a profile wears (#944): Edit Profile's Video
-    /// Banner row. Nil hides the row.
+    /// Banner row. Nil (outside mock mode) hides the row.
     private let profileItems: (any ProfileItemAccess)?
+    /// The shared player pool, so profile video autoplays on the same terms
+    /// as every other surface.
+    private let videoPlayback: VideoPlaybackController
+    /// Curates the map's pinned people, for the header's pin button.
+    private let mapPinning: any MapProfilePinning
+    /// One profile of the account's unread notifications (#2034), for the
+    /// switcher's rows and the Profile tab's dot.
+    private let unreadNotifications: @MainActor @Sendable (ProfileID) async -> Int?
+    /// Flies a tapped gallery post into the unified feed.
+    private let openFeedHero: ([PostID], UIViewController, SnapFeedHeroOrigin) -> Void
+    /// For You's grid page, built by the composition root (#1273): the
+    /// profile has no grid of its own any more.
+    private let gridPageFactory: ProfileGridPageFactory
+    /// The channels a profile owns (#2232): Chat's read. Nil, or nil
+    /// answered (the channels off), and no profile has a Channels tab.
+    private let makeProfileChannels: (@MainActor () -> (any ProfileChannelsProviding)?)?
+    /// The new channel's sheet, for the own Channels tab's "Create a
+    /// Channel" (#2232). Nil: the row isn't offered.
+    private let makeChannelCreation: (@MainActor () -> UIViewController?)?
+    /// Builds a gallery's card staking with the app's live post counts
+    /// (#896): a like in the feed shows on the profile's cards.
+    private let makeCardStaking: @MainActor () -> PostCardStaking
+    /// What the app knows of a person about to be opened (#1859): the route's
+    /// stub, completed from the app's store (`EntityStore.knownIdentity`).
+    private let knownIdentity: @MainActor (ProfileID, ProfileIdentityStub?) -> ProfileIdentityStub?
+    /// The app's one follow-change channel: the header's Follow button and
+    /// the followers lists keep agreeing with a follow made anywhere else.
+    /// The shared cache hears it from the moment the builder exists, not
+    /// from the first profile made (#1670): a request asked from a feed's
+    /// "+" before any card was opened must still reach the card opened next.
+    private let followEvents: FollowGraphEvents
+    /// A post of the viewer's own the server deleted here (#896): the
+    /// composition root writes it to the app's `EntityStore`, so the feeds and
+    /// For You drop the post. (Settings → Recently Deleted restores, through
+    /// `SettingsAssembly`.)
+    private let onPostDeleted: @MainActor (PostID) -> Void
 
-    public init(
-        repository: any ProfileProviding,
-        reporting: (any ContentReporting)? = nil,
-        shareTargeting: (any ProfileShareTargeting)? = nil,
-        gallery: (any ProfileGalleryProviding)? = nil,
-        relationships: (any ProfileRelationshipsProviding)? = nil,
-        imagePipeline: ImagePipeline,
-        router: (any Router)? = nil,
-        switching: (any ProfileSwitching)? = nil,
-        settings: any SettingsFeatureBuilding,
-        profileItems: (any ProfileItemAccess)? = nil,
-        /// The device store (#893): the viewer's own profile and the profiles
-        /// they visited open on their last content at a cold start. Nil keeps
-        /// the profile cache in memory.
-        localStore: LocalStore? = nil,
-        presence: SectionPresenceStore,
-        bookmarks: PostBookmarkStore,
-        viewHistory: PostViewHistoryStore
-    ) {
-        self.presence = presence
-        self.bookmarks = bookmarks
-        self.viewHistory = viewHistory
-        self.cache = ProfileCache(store: localStore)
-        self.relationshipsCache = localStore.map(ProfileRelationshipsLocalCache.init(store:))
-        self.repository = repository
-        self.reporting = reporting
-        self.shareTargeting = shareTargeting
-        self.gallery = gallery
-        self.relationships = relationships
-        self.imagePipeline = imagePipeline
-        self.router = router
-        self.switching = switching
-        self.settings = settings
-        self.profileItems = profileItems
+    public init(dependencies: Dependencies) {
+        presence = dependencies.presence
+        bookmarks = dependencies.bookmarks
+        viewHistory = dependencies.viewHistory
+        cache = ProfileCache(store: dependencies.localStore)
+        relationshipsCache = dependencies.localStore.map(ProfileRelationshipsLocalCache.init(store:))
+        repository = dependencies.repository
+        reporting = dependencies.reporting
+        shareTargeting = dependencies.shareTargeting
+        gallery = dependencies.gallery
+        relationships = dependencies.relationships
+        imagePipeline = dependencies.imagePipeline
+        router = dependencies.router
+        switching = dependencies.switching
+        settings = dependencies.settings
+        profileItems = dependencies.profileItems
+        videoPlayback = dependencies.videoPlayback
+        mapPinning = dependencies.mapPinning
+        unreadNotifications = dependencies.unreadNotifications
+        openFeedHero = dependencies.openFeedHero
+        gridPageFactory = dependencies.makePostGridPage
+        makeProfileChannels = dependencies.makeProfileChannels
+        makeChannelCreation = dependencies.makeChannelCreation
+        makeCardStaking = dependencies.makeCardStaking
+        knownIdentity = dependencies.knownIdentity
+        followEvents = dependencies.followEvents
+        onPostDeleted = dependencies.onPostDeleted
+        cache.observe(followEvents)
     }
 
-    private func makeSwitcherFactory() -> ProfileSwitcherMenuFactory? {
-        switching.map {
-            ProfileSwitcherMenuFactory(switching: $0, imagePipeline: imagePipeline, unreadCount: unreadNotifications)
-        }
+    private func makeSwitcherFactory() -> ProfileSwitcherMenuFactory {
+        ProfileSwitcherMenuFactory(switching: switching, imagePipeline: imagePipeline, unreadCount: unreadNotifications)
     }
 
     /// The counter row's destination, shared by both profile entry points —
     /// the viewer's own profile and any routed-to one — so the two can't drift.
     private func makeRelationshipsFactory() -> (
         (ProfileRelationshipsViewModel.Subject, RelationshipDirection) -> UIViewController
-    )? {
-        guard let relationships else { return nil }
-        return { [imagePipeline, router, followEvents, relationshipsCache] subject, direction in
+    ) {
+        { [imagePipeline, router, followEvents, relationshipsCache, relationships] subject, direction in
             ProfileRelationshipsViewController(
                 viewModel: ProfileRelationshipsViewModel(
                     subject: subject,
@@ -152,7 +308,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                 router: router,
                 cache: cache,
                 followEvents: followEvents,
-                shareLinks: repository as? any ShareLinkManaging,
+                shareLinks: repository,
                 postDeleted: onPostDeleted
             ),
             imagePipeline: imagePipeline,
@@ -165,7 +321,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                 let editor = EditProfileViewController(
                     viewModel: EditProfileViewModel(
                         repository: repository, seed: profile,
-                        banner: repository as? any ProfileBannerManaging, gallery: gallery, items: profileItems,
+                        banner: repository, gallery: gallery, items: profileItems,
                         onSaved: onSaved
                     ),
                     imagePipeline: imagePipeline
@@ -193,44 +349,9 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
             makeChannelCreation: makeChannelCreation
         )
         controller.feedHero = openFeedHero
-        controller.staking = makeCardStaking?() ?? wallet.map { PostCardStaking(wallet: $0, saves: bookmarks) }
+        controller.staking = makeCardStaking()
         return controller
     }
-
-    /// Flies a tapped gallery post into the unified feed. Set by the
-    /// composition root, which is the only place that can see both features.
-    /// Nil leaves taps on the plain route — the same feed, without the flight.
-    /// The shared player pool, so profile video autoplays on the same terms
-    /// as every other surface. Nil leaves profiles as stills.
-    /// Curates the map's pinned people, for the header's pin button. Set by
-    /// the composition root — the only place that can see both features — and
-    /// nil leaves the button unoffered rather than inert.
-    public var mapPinning: (any MapProfilePinning)?
-    public var videoPlayback: VideoPlaybackController?
-    /// One profile of the account's unread notifications (#2034), for the
-    /// switcher's rows and the Profile tab's dot. Notifications answers it;
-    /// the app wires it.
-    public var unreadNotifications: (@MainActor @Sendable (ProfileID) async -> Int?)?
-    public var openFeedHero: (([PostID], UIViewController, SnapFeedHeroOrigin) -> Void)?
-    /// For You's grid page, built by the composition root (#1273): the pages
-    /// the profile's posts are drawn on. `savesPosts` offers the save control.
-    public var makePostGridPage: ((_ style: PostGridPageStyle, _ savesPosts: Bool) -> any PostGridPage)?
-
-    /// `makePostGridPage`, which the composition root always wires: the
-    /// profile has no grid of its own any more.
-    private var gridPageFactory: ProfileGridPageFactory {
-        guard let makePostGridPage else {
-            preconditionFailure("ProfileFeatureBuilder.makePostGridPage is not wired (AppContainer)")
-        }
-        return makePostGridPage
-    }
-    /// The channels a profile owns (#2232): Chat's read, handed in by the
-    /// composition root — the only place that sees both features. Nil, or
-    /// nil answered (the channels off), and no profile has a Channels tab.
-    public var makeProfileChannels: (@MainActor () -> (any ProfileChannelsProviding)?)?
-    /// The new channel's sheet (Chat's, the "+" menu's), for the own
-    /// Channels tab's "Create a Channel" (#2232). Nil: the row isn't offered.
-    public var makeChannelCreation: (@MainActor () -> UIViewController?)?
 
     /// The Channels tab's model for one profile screen, or nil with no
     /// channels to read.
@@ -241,38 +362,11 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
         )
     }
 
-    /// The wallet the gallery cards' like chips stake from — the app's one
-    /// instance. Nil leaves the chips counters.
-    public var wallet: (any WalletStaking)?
-    /// Builds a gallery's card staking with the app's live post counts
-    /// (#896): a like in the feed shows on the profile's cards. Nil: the
-    /// cards stake from `wallet` and keep the counts they loaded.
-    public var makeCardStaking: (@MainActor () -> PostCardStaking?)?
-    /// What the app knows of a person about to be opened (#1859): the route's
-    /// stub, completed from the app's store (`EntityStore.knownIdentity`).
-    /// Nil: the stub alone.
-    public var knownIdentity: (@MainActor (ProfileID, ProfileIdentityStub?) -> ProfileIdentityStub?)?
-
     /// The identity a routed profile opens with: the stub, completed.
     private func identity(of source: ProfileViewModel.Source, stub: ProfileIdentityStub?) -> ProfileIdentityStub? {
-        guard case .profile(let id) = source, let knownIdentity else { return stub }
+        guard case .profile(let id) = source else { return stub }
         return knownIdentity(id, stub)
     }
-    /// The app's one follow-change channel: the header's Follow button and
-    /// the followers lists keep agreeing with a follow made anywhere else.
-    /// Nil leaves each screen with the answer it loaded.
-    ///
-    /// The shared cache hears it from the moment it is set, not from the
-    /// first profile made (#1670): a request asked from a feed's "+" before
-    /// any card was opened must still reach the card opened next.
-    public var followEvents: FollowGraphEvents? {
-        didSet { cache.observe(followEvents) }
-    }
-    /// A post of the viewer's own the server deleted here (#896): the
-    /// composition root writes it to the app's `EntityStore`, so the feeds and
-    /// For You drop the post. Nil: only this profile's gallery knows.
-    /// (Settings → Recently Deleted restores, through `SettingsAssembly`.)
-    public var onPostDeleted: (@MainActor (PostID) -> Void)?
 
     public func invalidateGallery(of author: ProfileID) {
         cache.removeGallery(for: author)
@@ -330,7 +424,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
             channels: makeChannelsModel(isOwnProfile: viewModel.isOwnProfile)
         )
         controller.feedHero = openFeedHero
-        controller.staking = makeCardStaking?() ?? wallet.map { PostCardStaking(wallet: $0, saves: bookmarks) }
+        controller.staking = makeCardStaking()
         return controller
     }
 

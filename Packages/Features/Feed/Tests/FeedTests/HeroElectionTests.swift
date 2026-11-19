@@ -190,7 +190,7 @@ struct HeroElectionTests {
         let presenter = UIViewController()
         let nav: UINavigationController
         let tabs = UITabBarController()
-        let builder = FeedFeatureBuilder(
+        let builder = FeedFeatureBuilder(dependencies: .testing(
             repository: SilentElectionProvider(),
             imagePipeline: ImagePipeline(fetcher: SilentElectionFetcher()),
             postDrafts: PostDraftStore(scope: StorageScope()),
@@ -199,7 +199,7 @@ struct HeroElectionTests {
             unavailablePosts: UnavailablePosts(),
             savedSounds: SavedSoundStore(scope: StorageScope()),
             viewerProfile: { nil }
-        )
+        ))
 
         init() {
             nav = UINavigationController(rootViewController: presenter)

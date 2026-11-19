@@ -693,17 +693,6 @@ struct ChannelsTests {
 
     // MARK: - The flag
 
-    private actor Stub: ChatProviding {
-        func viewerProfileID() async throws -> ProfileID { ProfileID("me") }
-        func loadConversations() async throws -> [Conversation] { [] }
-        func loadMessages(in conversationID: ConversationID) async throws -> [ChatMessage] { [] }
-        func send(_ body: String, to conversationID: ConversationID, replyingTo replyToID: String?) async throws -> ChatMessage {
-            ChatMessage(id: "sent", senderID: ProfileID("me"), body: body, createdAt: Date(), isMine: true)
-        }
-        func markRead(_ conversationID: ConversationID, upTo messageID: String) async throws {}
-        func directConversation(with profileID: ProfileID) async throws -> ConversationID { ConversationID("dm") }
-    }
-
     private func categories(_ builder: ChatFeatureBuilder) throws -> [MessagesCategory] {
         let inbox = try #require(builder.makeInboxViewController(initialCategory: .all) as? MessagesInboxViewController)
         return inbox.debugCategories
@@ -713,15 +702,12 @@ struct ChannelsTests {
     /// are in Chats. A "channels" token — a debug hook, a stored tab — no
     /// longer parses, and the callers' fallback is Chats.
     @Test func messagesHasThreePagesAndNoChannelsCategory() throws {
-        let off = ChatFeatureBuilder(
-            repository: make(channels: false),
-            presence: SectionPresenceStore(scope: StorageScope()),
-            voicePlayed: VoicePlayedStore(scope: StorageScope()), showsGroups: false, showsChannels: false
-        )
+        let off = ChatFeatureBuilder(dependencies: .testing(repository: make(channels: false)))
         #expect(try categories(off) == [.all, .requests, .suggestions])
-        let on = ChatFeatureBuilder(repository: make(),
-        presence: SectionPresenceStore(scope: StorageScope()),
-        voicePlayed: VoicePlayedStore(scope: StorageScope()), showsGroups: true, showsChannels: true)
+        let repository = make()
+        let on = ChatFeatureBuilder(
+            dependencies: .testing(repository: repository, groups: repository, channels: repository)
+        )
         #expect(try categories(on) == [.all, .requests, .suggestions])
         #expect(MessagesCategory.allCases == [.all, .requests, .suggestions])
         #expect(MessagesCategory(rawValue: "channels") == nil, "`-open-messages channels`")
@@ -732,20 +718,14 @@ struct ChannelsTests {
     /// The "+" menu's "New Channel" exists only with the channels: the
     /// builder makes the sheet, or nothing (the menu then has no entry).
     @Test func theCreationSheetExistsOnlyWithTheChannels() throws {
-        let on = ChatFeatureBuilder(repository: make(),
-        presence: SectionPresenceStore(scope: StorageScope()),
-        voicePlayed: VoicePlayedStore(scope: StorageScope()), showsChannels: true)
+        let repository = make()
+        let on = ChatFeatureBuilder(dependencies: .testing(repository: repository, channels: repository))
         let sheet = try #require(on.makeChannelCreationViewController() as? UINavigationController)
         #expect(sheet.viewControllers.first is ChannelCreationViewController)
-        let off = ChatFeatureBuilder(repository: make(channels: false),
-        presence: SectionPresenceStore(scope: StorageScope()),
-        voicePlayed: VoicePlayedStore(scope: StorageScope()), showsChannels: false)
+        let off = ChatFeatureBuilder(dependencies: .testing(repository: make(channels: false)))
         #expect(off.makeChannelCreationViewController() == nil)
-        // A repository with no channels makes none, whatever the flag.
-        let none = ChatFeatureBuilder(repository: Stub(),
-        presence: SectionPresenceStore(scope: StorageScope()),
-        voicePlayed: VoicePlayedStore(scope: StorageScope()), showsChannels: true)
-        #expect(none.makeChannelCreationViewController() == nil)
+        // A repository with no channels can't be handed as the channels at
+        // all: `ChatConversationServicing` fails to compile (#2375).
     }
 
     /// The empty search's create rows, for each pair of flags (#2230): one

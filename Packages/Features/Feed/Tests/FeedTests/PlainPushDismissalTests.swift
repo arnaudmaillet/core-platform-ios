@@ -442,7 +442,7 @@ struct PlainPushDismissalTests {
     }
 
     private static func makeBuilder() -> FeedFeatureBuilder {
-        FeedFeatureBuilder(
+        FeedFeatureBuilder(dependencies: .testing(
             repository: SilentProvider(),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             postDrafts: PostDraftStore(scope: StorageScope()),
@@ -451,7 +451,7 @@ struct PlainPushDismissalTests {
             unavailablePosts: UnavailablePosts(),
             savedSounds: SavedSoundStore(scope: StorageScope()),
             viewerProfile: { nil }
-        )
+        ))
     }
 
     private func makeBuilder() -> FeedFeatureBuilder { Self.makeBuilder() }

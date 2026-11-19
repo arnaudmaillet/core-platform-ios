@@ -51,7 +51,7 @@ struct HeldPostViewerChangeTests {
     }
 
     private func builder(_ repository: FeedRepository) -> FeedFeatureBuilder {
-        FeedFeatureBuilder(
+        FeedFeatureBuilder(dependencies: .testing(
             repository: repository, imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             postDrafts: PostDraftStore(scope: StorageScope()), entities: entities,
             bookmarks: PostBookmarkStore(scope: StorageScope()),
@@ -59,7 +59,7 @@ struct HeldPostViewerChangeTests {
             unavailablePosts: UnavailablePosts(),
             savedSounds: SavedSoundStore(scope: StorageScope()),
             viewerProfile: { nil }
-        )
+        ))
     }
 
     private func firstPost(of profileID: String) throws -> PostID {
