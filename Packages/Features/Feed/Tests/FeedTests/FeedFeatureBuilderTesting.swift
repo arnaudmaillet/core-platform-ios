@@ -44,7 +44,6 @@ extension FeedFeatureBuilder.Dependencies {
             reporting: nil,
             socialGraph: nil,
             followRelations: nil,
-            moderation: nil,
             followEvents: FollowGraphEvents(),
             postCounters: nil,
             postDrafts: postDrafts,
