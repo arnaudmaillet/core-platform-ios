@@ -118,6 +118,11 @@ public protocol ProfileFeatureBuilding {
     /// `otherAccountID` once the page has it (#1106) — a supervision
     /// notification's destination. Nil for an account it can't be shown to.
     func makeFamilyAndTeensViewController(openingSupervisionWith otherAccountID: String?) -> UIViewController?
+
+    /// A post of `author`'s came back (Settings → Recently Deleted → Restore,
+    /// #887): the profile screens drop the gallery pages they kept, so a
+    /// revisit doesn't open on pages without it.
+    func invalidateGallery(of author: ProfileID)
 }
 
 public extension ProfileFeatureBuilding {

@@ -1580,6 +1580,45 @@ final class AppContainer {
         people: entityStore
     )
 
+    /// Settings and Account (#2382): every screen's dependency typed, so a
+    /// missing one fails to compile rather than leaving its row "Coming Soon".
+    private lazy var settingsAssembly = SettingsAssembly(dependencies: .init(
+        profile: profileRepository,
+        account: accountRepository,
+        security: accountSessionsRepository,
+        accountStatus: accountStatusRepository,
+        reports: profileReportRepository,
+        notificationPreferences: notificationPreferencesRepository,
+        trash: profileGalleryRepository,
+        switching: profileRepository,
+        // What You See → Your Interests (#413).
+        interestTags: InterestTagsRepository(
+            timelineClient: Timeline_V1_TimelineServiceClient(client: authenticatedRPCClient),
+            profiles: profileRepository
+        ),
+        // Delete Account names what is left in the app's one wallet (#402).
+        wallet: walletStore,
+        imagePipeline: imagePipeline,
+        router: routeResolver,
+        followEvents: followGraphEvents,
+        localStore: localStore,
+        // Settings → Storage measures and clears every cache, and applies the
+        // storage limit and the cellular choice, through the coordinator (#899).
+        cacheCoordinator: cacheCoordinator,
+        // Settings → Wallet and Purchases: the server wallet's history (#400).
+        makeWalletSection: { [unowned self] in
+            WalletScreens.history(wallet: self.walletStore, deviceCache: self.walletHistoryCache)
+        },
+        // The app's one switcher (#2034), for "Switch Profile".
+        makeSwitcher: { [unowned self] in self.profileFeature.makeProfileSwitcher() },
+        // Settings → Passkeys (#551): the same authenticator as sign-in's.
+        makePasskeyAuthorizer: { [environment] in Self.makePasskeyAuthorizer(for: environment) },
+        // A post restored from Recently Deleted is back in its author's
+        // gallery, and may come back to every feed and For You (#887, #896).
+        onGalleryRestored: { [unowned self] author in self.profileFeature.invalidateGallery(of: author) },
+        onPostRestored: { [unowned self] id in self.entityStore.restorePost(id) }
+    ))
+
     private(set) lazy var profileFeature: any ProfileFeatureBuilding = {
         var builder = ProfileFeatureBuilder(
             repository: profileRepository,
@@ -1589,11 +1628,8 @@ final class AppContainer {
             relationships: profileRelationshipsRepository,
             imagePipeline: imagePipeline,
             router: routeResolver,
-            account: accountRepository,
             switching: profileRepository,
-            accountSessions: accountSessionsRepository,
-            accountStatus: accountStatusRepository,
-            notificationPreferences: notificationPreferencesRepository,
+            settings: settingsAssembly,
             profileItems: profileItems,
             localStore: localStore
         )
@@ -1611,10 +1647,6 @@ final class AppContainer {
         }
         // The gallery cards' like chips stake from the app's one wallet.
         builder.wallet = walletStore
-        // Settings → Wallet and Purchases: the server wallet's history (#400).
-        builder.makeWalletSection = { [unowned self] in
-            WalletScreens.history(wallet: self.walletStore, deviceCache: self.walletHistoryCache)
-        }
         // …and draw their posts' live counts (#896).
         // A person opens with what the app already knows of them (#1859).
         builder.knownIdentity = { [unowned self] id, stub in
@@ -1623,23 +1655,11 @@ final class AppContainer {
         builder.makeCardStaking = { [unowned self] in
             PostCardStaking(wallet: self.walletStore, entities: self.entityStore)
         }
-        // A post the viewer deleted leaves every feed and For You, and one
-        // restored from Recently Deleted may come back (#896).
+        // A post the viewer deleted leaves every feed and For You (#896).
         builder.onPostDeleted = { [unowned self] id in self.entityStore.deletePost(id) }
-        builder.onPostRestored = { [unowned self] id in self.entityStore.restorePost(id) }
         // A follow made on another surface (a feed's "+", a card's Unfollow)
         // reaches the profile screens and their followers lists.
         builder.followEvents = followGraphEvents
-        // Settings → Storage measures and clears every cache, and applies the
-        // storage limit and the cellular choice, through the coordinator (#899).
-        builder.cacheCoordinator = cacheCoordinator
-        // Settings → Passkeys (#551): the same authenticator as sign-in's.
-        builder.makePasskeyAuthorizer = { [environment] in Self.makePasskeyAuthorizer(for: environment) }
-        // What You See → Your Interests (#413).
-        builder.interestTags = InterestTagsRepository(
-            timelineClient: Timeline_V1_TimelineServiceClient(client: authenticatedRPCClient),
-            profiles: profileRepository
-        )
         builder.openFeedHero = { [weak self] postIDs, presenter, origin in
             self?.feedFeature.presentSnapFeedHero(
                 postIDs: postIDs, from: presenter, origin: origin

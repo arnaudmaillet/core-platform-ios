@@ -36,7 +36,7 @@ package final class SettingsViewController: UIViewController {
     }
 
     private let switching: (any ProfileSwitching)?
-    private let switcher: ProfileSwitcherMenuFactory?
+    private let switcher: (any ProfileSwitcherPresenting)?
     private let makeDestination: (SettingsSection) -> UIViewController?
     private let onLogout: () -> Void
     /// Set for a guest (guest mode): only what works without an account — the
@@ -54,7 +54,7 @@ package final class SettingsViewController: UIViewController {
 
     package init(
         switching: (any ProfileSwitching)?,
-        switcher: ProfileSwitcherMenuFactory?,
+        switcher: (any ProfileSwitcherPresenting)?,
         makeDestination: @escaping (SettingsSection) -> UIViewController?,
         onLogout: @escaping () -> Void,
         onSignIn: (() -> Void)? = nil
