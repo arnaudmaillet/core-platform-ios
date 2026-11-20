@@ -742,6 +742,15 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         }
     }
 
+    /// For You's own grid page, for a feature that hosts its own posts — the
+    /// profile's pages (#1273, epic #1269): every media tile in the app is
+    /// For You's tile. `savesPosts`: whether its cards offer to save (the
+    /// viewer's own saved pile); false hides the control.
+    ///
+    /// The composition root's, on the concrete builder: `FeedFeatureBuilding`
+    /// no longer names the page, whose protocol needs PostGrid's cards
+    /// (`PostCardStaking`), so FeedInterface stays clear of PostGrid (#2380).
+    /// The profile and Chat receive it as a closure.
     public func makePostGridPage(style: PostGridPageStyle, savesPosts: Bool) -> any PostGridPage {
         // The app's one pool, the same instance For You's tabs borrow from.
         let page = PostGridPages.make(

@@ -1,6 +1,7 @@
-import CoreNavigation
-import Transitions
 import CoreModels
+import CoreNavigation
+import DesignSystem
+import Transitions
 import UIKit
 
 /// What the flying card should look like, named without naming the view.
@@ -116,11 +117,13 @@ public struct TextRevealOrigin {
     ///
     /// The row's default now lives on the initialiser, where "the card's" is
     /// the row's own answer. Downstream, `nil` is a statement, not a shrug.
+    /// That default is `Surface.card`, which `PostGridListRowCell.cardFillColor`
+    /// is too: this type left PostGrid, where the cell lives (#2380).
     public let fill: UIColor?
     /// The row's author band, so the destination can borrow it for the flight —
     /// see `RevealGeometry.installDestinationAuthorBand`. `nil` for a row that
     /// names no author, which is every profile gallery's.
-    public let authorBand: PostAuthorBandView.Model?
+    public let authorBand: PostAuthorBandModel?
     /// Hide the row while the window taken from it is in the air, and put it
     /// back when it lands — the same bargain the flight fields above strike
     /// with `setConcealed`, for the same reason: a grab moves the window off
@@ -147,14 +150,14 @@ public struct TextRevealOrigin {
         captionEnd: CGFloat?,
         depthView: @escaping () -> UIView? = { nil },
         captionTop: CGFloat = 0,
-        authorBand: PostAuthorBandView.Model? = nil,
+        authorBand: PostAuthorBandModel? = nil,
         makeDismissStandIn: @escaping (PostID?) -> UIView? = { _ in nil },
         makePresentStandIn: @escaping () -> UIView? = { nil },
         alignsPageToSource: Bool = true,
         pageFit: RevealPageFit = .clipped,
         cornerRadius: CGFloat? = nil,
         cornerCurve: CALayerCornerCurve? = nil,
-        fill: UIColor? = PostGridListRowCell.cardFillColor,
+        fill: UIColor? = Surface.card,
         setConcealed: @escaping (Bool) -> Void = { _ in },
         presentationDidEnd: @escaping (Bool) -> Void = { _ in },
         willStageDismissal: @escaping (PostID?) -> Void = { _ in },

@@ -6,7 +6,7 @@ import UIKit
 /// The Posts page when no page factory was handed to Chat (#2237): a
 /// composition without Feed's (a test, a preview) still lays the info
 /// screen out, the page's status under the header and nothing else. The
-/// app always hands Feed's own page (`FeedFeatureBuilding.makePostGridPage`).
+/// app always hands Feed's own page (`FeedFeatureBuilder.makePostGridPage`).
 ///
 /// It draws statuses only: it never holds a post, so it never opens one.
 final class ConversationStatusPage: UIView, PostGridPage, UIScrollViewDelegate {

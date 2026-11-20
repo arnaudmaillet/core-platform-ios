@@ -8,6 +8,7 @@ import CoreNavigation
 import CoreNetworking
 import CoreStorage
 import EntityStore
+import Feed
 import FeedInterface
 import Foundation
 import LaunchArguments
@@ -177,7 +178,7 @@ extension AppContainer {
             },
             // The profile's pages are For You's own grid (#1273, epic #1269).
             makePostGridPage: { [unowned self] style, savesPosts in
-                feedFeature.makePostGridPage(style: style, savesPosts: savesPosts)
+                feedBuilder.makePostGridPage(style: style, savesPosts: savesPosts)
             },
             makeProfileChannels: makeProfileChannels,
             makeChannelCreation: makeChannelCreation,

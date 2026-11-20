@@ -9,11 +9,11 @@ let package = Package(
     ],
     dependencies: [
         .package(path: "../../Kit/CoreModels"),
-        // The grid page's and the hero flight's seam types the builder names
-        // (`PostGridPage`, `SnapFeedHeroOrigin`, `TextRevealOrigin`,
-        // `GalleryPost`): the last edge to a Core package beyond navigation
-        // and the design system (#2380, stage 3).
-        .package(path: "../../Core/PostGrid"),
+        // The seam types the builder names (`GalleryPost`, `SnapFeedHeroOrigin`,
+        // `TextRevealOrigin`): CoreModels, CoreNavigation and the design system
+        // only. ⚠️ Never PostGrid or MediaCore (#2380,
+        // `LayeringGuardTests.feedInterfaceStaysClearOfTheGrid`).
+        .package(path: "../../Core/PostGridSeam"),
         .package(path: "../../Core/CoreNavigation"),
         // `OverSheetFeedHost` closes its sheet once (`closePresentation`, #1144).
         .package(path: "../../Core/DesignSystem")
@@ -22,7 +22,7 @@ let package = Package(
         .target(
             name: "FeedInterface",
             dependencies: [
-                "CoreModels", "PostGrid", "CoreNavigation", .product(name: "Transitions", package: "CoreNavigation"), "DesignSystem"]
+                "CoreModels", "PostGridSeam", "CoreNavigation", .product(name: "Transitions", package: "CoreNavigation"), "DesignSystem"]
         )
     ]
 )

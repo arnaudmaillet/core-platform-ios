@@ -19,7 +19,7 @@ import UIKit
 /// - **The bar**: the bell (`MuteMenu`, shared with the thread's) and the
 ///   "⋯", native items (#1679), never a control of our own.
 /// - **The page under the header**: Posts, through the page factory the
-///   profile and the place use (`FeedFeatureBuilding.makePostGridPage`).
+///   profile and the place use (`FeedFeatureBuilder.makePostGridPage`).
 ///
 /// Pushed from the thread's header, it closes with the native pop it came
 /// with (`.nativeBack`). Every rule stays in the view models: a subclass
