@@ -79,6 +79,30 @@ struct LayeringGuardTests {
         #expect(stale.isEmpty, "these edges are gone — drop them from `allowed`: \(stale.sorted())")
     }
 
+    /// FEEDINTERFACE STAYS THIN (#2380). It names the grid's seam types
+    /// (`GalleryPost`, `SnapFeedHeroOrigin`, `TextRevealOrigin`) from
+    /// PostGridSeam, which needs neither PostGrid's cells nor MediaCore. An
+    /// interface that reached them again would make every package that
+    /// depends on it build the grid and the media stack — 12 packages and
+    /// 119k lines where MapsInterface is 121 lines over CoreModels. Checked
+    /// at any depth, so an edge through a third package fails too.
+    @Test func feedInterfaceStaysClearOfTheGrid() throws {
+        var next: [String: Set<String>] = [:]
+        for (from, to) in try Self.edges() { next[from, default: []].insert(to) }
+        let root = "FeatureInterfaces/FeedInterface"
+        #expect(next[root]?.contains("Core/PostGridSeam") == true, "FeedInterface's manifest was not read")
+        var reached: Set<String> = []
+        var queue = [root]
+        while let package = queue.popLast() {
+            for dependency in next[package, default: []] where reached.insert(dependency).inserted {
+                queue.append(dependency)
+            }
+        }
+        for banned in ["Core/PostGrid", "Core/MediaCore"] {
+            #expect(!reached.contains(banned), "FeedInterface reaches \(banned) again: name the type from PostGridSeam")
+        }
+    }
+
     /// The scan can't pass by reading nothing.
     @Test func theManifestsAreRead() throws {
         let edges = try Self.edges()

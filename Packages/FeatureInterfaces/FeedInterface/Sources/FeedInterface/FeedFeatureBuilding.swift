@@ -1,6 +1,6 @@
 import CoreModels
 import CoreNavigation
-import PostGrid
+import PostGridSeam
 import Transitions
 import UIKit
 
@@ -232,12 +232,6 @@ public protocol FeedFeatureBuilding: TextPostScreenBuilding {
     /// is one tab of a pushed screen is not where the remaining loans should
     /// go. Posts render their posters here.
     func makePostSetSurface(style: PostSetSurfaceStyle) -> any PostSetSurface
-
-    /// For You's own grid page, for a feature that hosts its own posts — the
-    /// profile's pages (#1273, epic #1269): every media tile in the app is
-    /// For You's tile. `savesPosts`: whether its cards offer to save (the
-    /// viewer's own saved pile); false hides the control.
-    func makePostGridPage(style: PostGridPageStyle, savesPosts: Bool) -> any PostGridPage
 
     /// The posts behind `ids`, for a surface that lists posts by id without
     /// being a feed — the wallet's stakes. Cached entries answer at once; the

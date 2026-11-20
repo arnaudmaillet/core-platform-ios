@@ -10,6 +10,10 @@ let package = Package(
     dependencies: [
         .package(path: "../../Kit/LaunchArguments"),
         .package(path: "../../Kit/CoreModels"),
+        // The seam types (`GalleryPost`, the flight's and the reveal's origins,
+        // the band's model), re-exported (`PostGridSeam+Export.swift`) so
+        // `import PostGrid` still sees them (#2380).
+        .package(path: "../PostGridSeam"),
         .package(path: "../MediaCore"),
         .package(path: "../MediaPlayback"),
         .package(path: "../DesignSystem"),
@@ -35,7 +39,7 @@ let package = Package(
             name: "PostGrid",
             dependencies: [
                 "LaunchArguments",
-                "CoreModels", "MediaCore", .product(name: "MediaUI", package: "MediaCore"), "MediaPlayback", "DesignSystem", "CoreNavigation", .product(name: "Transitions", package: "CoreNavigation"),
+                "CoreModels", "PostGridSeam", "MediaCore", .product(name: "MediaUI", package: "MediaCore"), "MediaPlayback", "DesignSystem", "CoreNavigation", .product(name: "Transitions", package: "CoreNavigation"),
                 "CoreStorage", "EntityStore", "EmoteKit",
                 .product(name: "VoiceKitUI", package: "VoiceKit")
             ]
