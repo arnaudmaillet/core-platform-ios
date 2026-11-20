@@ -1,0 +1,1 @@
+Before/after captures of the settings screens for issue #2382.
