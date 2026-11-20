@@ -149,7 +149,7 @@ struct SnapFeedEndOfSourceTests {
         // The territory, not the downward grab itself: on a later post the
         // downward drag is the pager's (#2057).
         #expect(feed.zoomUpwardDismissalPermitted(at: point, in: feed.view)
-                == feed.verticalCloseTerritoryPermits(at: point, in: feed.view),
+                == feed.zoomDestination.verticalCloseTerritoryPermits(at: point, in: feed.view),
                 "at the end, the upward grab answers as the downward territory does")
     }
 
@@ -172,7 +172,7 @@ struct SnapFeedEndOfSourceTests {
 
         #expect(feed.isAtEndOfSource)
         #expect(feed.zoomUpwardDismissalPermitted(at: point, in: feed.view)
-                == feed.verticalCloseTerritoryPermits(at: point, in: feed.view))
+                == feed.zoomDestination.verticalCloseTerritoryPermits(at: point, in: feed.view))
     }
 
     /// ⚠️ AT THE END, THE PAGE DRIVE'S DRAGS CLOSE (#770): on an engaged text
@@ -184,20 +184,20 @@ struct SnapFeedEndOfSourceTests {
         let bar = CommentsInputBar()
         let field = UIView()
         bar.addSubview(field)
-        #expect(SnapFeedViewController.upwardCloseTerritory(from: field, inPageDriveBand: false) == .closes,
+        #expect(SnapZoomDestination.upwardCloseTerritory(from: field, inPageDriveBand: false) == .closes,
                 "the composer bar's drag pages a text post: at the end it closes")
 
         let container = SnapCommentsContainerView()
         let row = UIView()
         container.addSubview(row)
-        #expect(SnapFeedViewController.upwardCloseTerritory(from: row, inPageDriveBand: true) == .closes,
+        #expect(SnapZoomDestination.upwardCloseTerritory(from: row, inPageDriveBand: true) == .closes,
                 "the header band's drag pages a text post: at the end it closes")
-        #expect(SnapFeedViewController.upwardCloseTerritory(from: row, inPageDriveBand: false) == .streamDecides,
+        #expect(SnapZoomDestination.upwardCloseTerritory(from: row, inPageDriveBand: false) == .streamDecides,
                 "below the band the stream yields only at its bottom")
 
         let rail = SnapShortcutRailView()
-        #expect(SnapFeedViewController.upwardCloseTerritory(from: rail, inPageDriveBand: true) == .refuses)
-        #expect(SnapFeedViewController.upwardCloseTerritory(from: UIView(), inPageDriveBand: false) == .closes)
+        #expect(SnapZoomDestination.upwardCloseTerritory(from: rail, inPageDriveBand: true) == .refuses)
+        #expect(SnapZoomDestination.upwardCloseTerritory(from: UIView(), inPageDriveBand: false) == .closes)
     }
 
     /// While the next page is on its way, the last post loaded is not the end.
