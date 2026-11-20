@@ -78,7 +78,7 @@ extension AppContainer {
     }
 
     func makeNotificationsFeature() -> any NotificationsFeatureBuilding {
-        NotificationsFeatureBuilder(
+        NotificationsFeatureBuilder(dependencies: .init(
             repository: notificationsRepository,
             router: routeResolver,
             imagePipeline: imagePipeline,
@@ -93,6 +93,6 @@ extension AppContainer {
             // A post notification opens the vertical feed above the drawer (#1577).
             openPost: { [unowned self] opening in NotificationPostFeed.open(opening, feed: self.feedFeature) },
             viewerEvents: viewerEvents
-        )
+        ))
     }
 }
