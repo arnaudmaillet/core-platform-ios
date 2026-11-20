@@ -1,0 +1,1 @@
+Captures for #2387 (before 483216eb8 / after 83d7a12aa), iPhone 18 Pro Max, iOS 27.2.
