@@ -188,11 +188,6 @@ final class SnapFeedViewController: UIViewController {
         set { flight.zoomOwnsInteractiveDismissal = newValue }
     }
 
-    /// The shell's bell — a tab-root feed's leading item while no back arrow
-    /// or ✕ holds the edge (`HeaderAccessoryHosting`). The shell installs it
-    /// on no feed since the reader stopped being the For You root (#2453).
-    private var leadingAccessoryItem: UIBarButtonItem?
-
     /// The two facts whose AND is the surface's visibility.
     private(set) var isOnScreen = false
     /// What is heard, the song, the records' spin, the share of the screen,
@@ -201,23 +196,6 @@ final class SnapFeedViewController: UIViewController {
     private lazy var soundPlayback = SnapSoundPlayback(
         host: self, videoPlayback: videoPlayback, imagePipeline: imagePipeline, soundState: soundState
     )
-    /// Slid aside by the shell — the notifications drawer open over it
-    /// (#1703): on screen, not watched, so nothing plays.
-    private var isSetAside = false
-
-    func setSetAside(_ setAside: Bool) {
-        guard setAside != isSetAside else { return }
-        isSetAside = setAside
-        refreshVisibility()
-    }
-
-    /// The share of this screen the shell's drawer leaves showing (#1914):
-    /// one more source of `viewportShare`, so the clip's sound follows it and
-    /// the clip pauses below half, as under a pushed screen.
-    func setVisibleShare(_ share: CGFloat) {
-        soundPlayback.viewportShare.report(share)
-    }
-
     /// Whether the pages' lifecycle counts the screen as watched — what lets
     /// the post on show play. Internal for tests.
     var debugIsWatchedByLifecycle: Bool { lifecycle.isVisible }
@@ -1753,7 +1731,7 @@ final class SnapFeedViewController: UIViewController {
         // The sort belongs at this end: it is a control over the thread, and
         // this is the end that carries what the screen is DOING. The trailing
         // end carries who the post is by.
-        var items = [backItem ?? leadingAccessoryItem].compactMap { $0 }
+        var items = [backItem].compactMap { $0 }
         if engaged, isCommentSortAvailable {
             items += items.isEmpty ? [sortItem] : [leadingSortSpacer, sortItem]
         }
@@ -2458,10 +2436,9 @@ final class SnapFeedViewController: UIViewController {
         !SnapSoundState.isText(model)
     }
 
-    /// The composer's rail slot, decided in one place (#1999): Share on a
-    /// pushed text page, the sound's cover on a media page (#671) — on the
-    /// sound bubble's frame, a tap opening the sound sheet — no slot on a
-    /// text page of the For You root. Internal for tests.
+    /// The composer's rail slot, decided in one place (#1999): Share on every
+    /// page — a text page never its sound, and a media page's moves to the
+    /// footer. Internal for tests.
     func applyRailSlot(to panel: UIViewController?, hostedByPage: Bool = true) {
         guard let detail = panel as? PostDetailViewController else { return }
         // Every panel this screen mounts passes here: the one place it learns
@@ -2478,12 +2455,8 @@ final class SnapFeedViewController: UIViewController {
             hostedByPage, foldsIntoSlot: model.mediaURL != nil || toolbarComposer.footerCarriesTextLike
         )
         // ⚠️ THE SLOT'S ONE DECISION (#1999), for every page:
-        //   - a pushed page, text or media: Share, the toolbar's old action;
+        //   - a page, text or media: Share, the toolbar's old action;
         //     a media page's sound moves to the footer's trailing item;
-        //   - a media page on the For You root: the sound, greyed with none
-        //     (#683) — the root keeps its column as it is;
-        //   - a text page on the For You root: no slot, the field widens —
-        //     its column already carries Share (#1681);
         //   - scrolled away, any: the way back (#1929), the panel's call.
         let face = soundFace(for: model)
         let sharesInSlot = slotSharesPost(model)
@@ -2822,7 +2795,7 @@ final class SnapFeedViewController: UIViewController {
     func refreshVisibility() {
         // A screen pushed over this one past half the viewport pauses it, and
         // its pop gives it back at half (#1914, `viewportShare`).
-        let isWatched = isOnScreen && soundPlayback.isForeground && !isSetAside
+        let isWatched = isOnScreen && soundPlayback.isForeground
             && ViewportShare.plays(at: soundPlayback.viewportShare.share)
         // Off screen, nothing is planned ahead: the warmed and kept players go
         // back and every head preload is cancelled. The next activation plans
@@ -5288,19 +5261,6 @@ extension SnapFeedViewController: HorizontalDragClaiming {
         guard let sideList else { return false }
         return sideList.isOpen || sideList.isEngaged
     }
-}
-
-extension SnapFeedViewController: HeaderAccessoryHosting {
-    /// The shell's bell: the root's leading item while nothing else holds
-    /// the edge.
-    public func setLeadingAccessoryItem(_ item: UIBarButtonItem?) {
-        leadingAccessoryItem = item
-        applyLeadingNavItem(engaged: engagedChromeOnBar, hasMedia: engagedChromeHasMedia, animated: view.window != nil)
-    }
-
-    /// The feed wears its own points badge (`walletBadgeItem`): the shell's
-    /// is not installed here.
-    public func setTrailingAccessoryItem(_ item: UIBarButtonItem?) {}
 }
 
 // MARK: - The sound's host (#2387)

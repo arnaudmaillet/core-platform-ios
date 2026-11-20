@@ -349,7 +349,7 @@ final class SnapToolbarComposer {
     /// Whether a text page's like stands in this screen's footer (#1924, the
     /// owner): `[author] [♥ count] [☆ ⇄] [↪]`, and no pill floating over the
     /// composer, so a short comment list rests on it. A screen with no
-    /// footer (the For You root, media only) keeps the pill.
+    /// footer (`-no-toolbar`) keeps the pill.
     var footerCarriesTextLike: Bool { !defaultToolbarItems.isEmpty }
 
     /// The footer's like while a text page is active; nil on a media page,
