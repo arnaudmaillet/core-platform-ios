@@ -28,13 +28,6 @@ struct BuilderDependenciesGuardTests {
         "ZoomTransitionDestination", "SnapFeedSettleReporting", "FeedBeneathLanding"
     ]
 
-    /// The builders whose init still defaults collaborators to `nil`: not
-    /// converted to a `Dependencies` yet. Only ever shrinks.
-    static let notConvertedYet: Set<String> = [
-        "AuthFeatureBuilder.swift", "MapsFeatureBuilder.swift",
-        "NotificationsFeatureBuilder.swift", "SearchFeatureBuilder.swift"
-    ]
-
     /// Every feature entry point, as a path under `Packages/Features`.
     static func builderFiles() throws -> [String] {
         let features = RepoRoot.url.appendingPathComponent("Packages/Features")
@@ -110,7 +103,7 @@ struct BuilderDependenciesGuardTests {
 
     @Test func buildersDefaultNoCollaboratorToNil() throws {
         var problems: [String] = []
-        for file in try Self.builderFiles() where !Self.notConvertedYet.contains((file as NSString).lastPathComponent) {
+        for file in try Self.builderFiles() {
             for line in Self.nilDefaults(in: try Self.text(of: file)) {
                 problems.append("Packages/Features/\(file):\(line) defaults a parameter to nil")
             }
@@ -119,26 +112,14 @@ struct BuilderDependenciesGuardTests {
         #expect(problems.isEmpty, "remove the default; the call site passes the value or nil:\n\(found)")
     }
 
-    /// The list of builders still to convert only shrinks: one converted
-    /// leaves it.
-    @Test func theBuildersStillToConvertStillDefaultToNil() throws {
-        let files = try Self.builderFiles()
-        for name in Self.notConvertedYet {
-            let file = try #require(
-                files.first(where: { ($0 as NSString).lastPathComponent == name }), "\(name) is gone"
-            )
-            let defaults = Self.nilDefaults(in: try Self.text(of: file))
-            #expect(!defaults.isEmpty, "\(name) is converted: take it off the list")
-        }
-    }
-
     /// The scan can't pass by reading nothing, and the patterns see what
     /// they look for.
     @Test func theScanReadsTheBuildersAndSeesCastsAndDefaults() throws {
         let names = try Self.builderFiles().map { ($0 as NSString).lastPathComponent }
         #expect(Set(names).isSuperset(of: [
-            "ChatFeatureBuilder.swift", "FeedFeatureBuilder.swift", "ProfileFeatureBuilder.swift",
-            "PlaceFeatureBuilder.swift", "SettingsAssembly.swift"
+            "AuthFeatureBuilder.swift", "ChatFeatureBuilder.swift", "FeedFeatureBuilder.swift",
+            "MapsFeatureBuilder.swift", "NotificationsFeatureBuilder.swift", "PlaceFeatureBuilder.swift",
+            "ProfileFeatureBuilder.swift", "SearchFeatureBuilder.swift", "SettingsAssembly.swift"
         ]), "read \(names)")
         let sample = """
         public init(
