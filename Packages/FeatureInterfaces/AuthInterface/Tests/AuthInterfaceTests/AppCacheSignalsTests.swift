@@ -84,6 +84,10 @@ final class AppCacheSignalsTests {
         #expect(!((try? String(contentsOf: index, encoding: .utf8)) ?? "").contains("seen"), "not flushed yet")
 
         center.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+        // The flush is disk work asked for on the main thread, which this
+        // suite runs on since #2376: the coordinator does it on its own
+        // queue, so wait for it.
+        coordinator.waitForDiskWork()
 
         #expect(!images.contains("r") && images.contains("t"))
         #expect(bytes.contains("seen"))
