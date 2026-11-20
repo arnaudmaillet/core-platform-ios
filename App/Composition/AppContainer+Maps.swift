@@ -83,7 +83,7 @@ extension AppContainer {
     }
 
     func makeMapsFeature() -> any MapsFeatureBuilding {
-        MapsFeatureBuilder(
+        MapsFeatureBuilder(dependencies: .init(
             repository: mapsRepository,
             favoritesRepository: mapsFavoritesRepository,
             imagePipeline: imagePipeline,
@@ -137,7 +137,7 @@ extension AppContainer {
             // which is exactly a fleet build, an evicted asset, or a decode that
             // failed.
             iconCatalog: Self.mapIconProvider,
-            previewCatalog: Self.previewsUnavailable ? Self.unavailableIconCatalog : Self.mapPreviewCatalog,
+            previewCatalog: Self.mapPreviewProvider,
             countryAccess: countryAccess,
             stakePacks: stakePacks,
             profileItems: profileItems,
@@ -149,7 +149,7 @@ extension AppContainer {
             localStore: localStore,
             // The map's own stores are the active profile's (#2376).
             storageScope: storageScope
-        )
+        ))
     }
 
     #if DEBUG
@@ -174,7 +174,6 @@ extension AppContainer {
     static let wearsBakedIcons = false
     static let iconsUnavailable = false
     static let previewsUnavailable = false
-    private static let unavailableIconCatalog: AnimatedIconCatalog? = nil
     #endif
 
     /// Animated avatars (#1358, #1444): the sheets of the authors the mock
@@ -238,9 +237,20 @@ extension AppContainer {
 
     /// `mapIcons`, or under `-map-icons-unavailable` a catalogue that resolves
     /// nothing.
-    private static var mapIconProvider: (any AnimatedIconProviding)? {
+    private static var mapIconProvider: any AnimatedIconProviding {
+        #if DEBUG
         if iconsUnavailable { return unavailableIconCatalog }
+        #endif
         return mapIcons
+    }
+
+    /// `mapPreviewCatalog`, or under `-map-previews-unavailable` a catalogue
+    /// that resolves nothing.
+    private static var mapPreviewProvider: AnimatedIconCatalog {
+        #if DEBUG
+        if previewsUnavailable { return unavailableIconCatalog }
+        #endif
+        return mapPreviewCatalog
     }
 
     /// Which mock post wears which icon face. The dataset decides WHICH text
