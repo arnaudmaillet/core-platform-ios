@@ -75,17 +75,17 @@ struct SnapAuthorFollowTests {
     /// "+" drawn and then withdrawn is the worse of the two errors.
     @Test func anAuthorWhoseRelationIsUnknownOffersNoFollow() throws {
         let feed = Self.feed()
-        feed.showAuthor(Self.model(authorID: "prof-1"))
+        feed.authorBar.showAuthor(Self.model(authorID: "prof-1"))
 
         #expect(try Self.pill(feed).offersFollow == false)
-        #expect(try Self.authorItem(feed).identifier == SnapFeedViewController.authorItemIdentifier(for: nil))
+        #expect(try Self.authorItem(feed).identifier == SnapToolbarComposer.authorItemIdentifier(for: nil))
     }
 
     @Test(arguments: [FollowRelation.following, .mutual, .viewer, .blocked])
     func anAuthorTheViewerCannotFollowOffersNoFollow(_ relation: FollowRelation) throws {
         let feed = Self.feed()
         feed.followStore.setRelation(relation, for: ProfileID("prof-1"))
-        feed.showAuthor(Self.model(authorID: "prof-1"))
+        feed.authorBar.showAuthor(Self.model(authorID: "prof-1"))
 
         #expect(try Self.pill(feed).offersFollow == false)
     }
@@ -93,10 +93,10 @@ struct SnapAuthorFollowTests {
     @Test func anAuthorTheViewerDoesNotFollowOffersFollowInTheSameItem() throws {
         let feed = Self.feed()
         feed.followStore.setRelation(.notFollowing, for: ProfileID("prof-2"))
-        feed.showAuthor(Self.model(authorID: "prof-2"))
+        feed.authorBar.showAuthor(Self.model(authorID: "prof-2"))
 
         #expect(try Self.pill(feed).offersFollow)
-        #expect(try Self.authorItem(feed).identifier == SnapFeedViewController.authorItemIdentifier(for: nil))
+        #expect(try Self.authorItem(feed).identifier == SnapToolbarComposer.authorItemIdentifier(for: nil))
     }
 
     /// The answer arriving for the author ON the pill re-draws its badge — in
@@ -104,7 +104,7 @@ struct SnapAuthorFollowTests {
     @Test func theGraphsAnswerDrawsTheFollowInPlace() async throws {
         let graph = GatedFollowGraph()
         let feed = Self.feed(graph: graph)
-        feed.showAuthor(Self.model(authorID: "prof-2"))
+        feed.authorBar.showAuthor(Self.model(authorID: "prof-2"))
         let before = try Self.authorItem(feed)
         #expect(try Self.pill(feed).offersFollow == false, "precondition: not known yet")
 
@@ -117,7 +117,7 @@ struct SnapAuthorFollowTests {
 
         let after = try Self.authorItem(feed)
         #expect(after === before, "a new item for a badge: iOS 26 morphs the glass between them")
-        #expect(after.identifier == SnapFeedViewController.authorItemIdentifier(for: nil))
+        #expect(after.identifier == SnapToolbarComposer.authorItemIdentifier(for: nil))
         #expect(try Self.pill(feed).offersFollow)
     }
 
@@ -127,11 +127,11 @@ struct SnapAuthorFollowTests {
         feed.followStore.setRelation(.notFollowing, for: ProfileID("prof-2"))
         feed.followStore.setRelation(.following, for: ProfileID("prof-1"))
 
-        feed.showAuthor(Self.model(id: "p1", authorID: "prof-2"))
+        feed.authorBar.showAuthor(Self.model(id: "p1", authorID: "prof-2"))
         #expect(try Self.pill(feed).offersFollow)
-        feed.showAuthor(Self.model(id: "p2", authorID: "prof-1"))
+        feed.authorBar.showAuthor(Self.model(id: "p2", authorID: "prof-1"))
         #expect(try Self.pill(feed).offersFollow == false)
-        feed.showAuthor(Self.model(id: "p3", authorID: "prof-2"))
+        feed.authorBar.showAuthor(Self.model(id: "p3", authorID: "prof-2"))
         #expect(try Self.pill(feed).offersFollow)
     }
 
@@ -141,7 +141,7 @@ struct SnapAuthorFollowTests {
         let graph = GatedFollowGraph()
         let feed = Self.feed(graph: graph)
         feed.followStore.setRelation(.notFollowing, for: ProfileID("prof-2"))
-        feed.showAuthor(Self.model(authorID: "prof-2"))
+        feed.authorBar.showAuthor(Self.model(authorID: "prof-2"))
         let offered = try Self.authorItem(feed)
         let pill = try Self.pill(feed)
 
@@ -150,7 +150,7 @@ struct SnapAuthorFollowTests {
 
         let followed = try Self.authorItem(feed)
         #expect(followed === offered)
-        #expect(followed.identifier == SnapFeedViewController.authorItemIdentifier(for: nil))
+        #expect(followed.identifier == SnapToolbarComposer.authorItemIdentifier(for: nil))
         #expect(try Self.pill(feed).offersFollow == false)
         #expect(try Self.pill(feed).followBadge == .following, "a follow is drawn, not forgotten")
         await Self.settle { graph.pendingFollows == 1 }
@@ -177,11 +177,11 @@ struct SnapAuthorFollowTests {
     ) throws {
         let feed = Self.feed()
         feed.followStore.setRelation(relation, for: ProfileID("prof-2"))
-        feed.showAuthor(Self.model(authorID: "prof-2"))
+        feed.authorBar.showAuthor(Self.model(authorID: "prof-2"))
 
         #expect(try Self.pill(feed).followBadge == badge)
         #expect(try Self.pill(feed).drawnBadgeSymbol == badge.symbolName, "the avatar wears another symbol")
-        #expect(try Self.authorItem(feed).identifier == SnapFeedViewController.authorItemIdentifier(for: nil))
+        #expect(try Self.authorItem(feed).identifier == SnapToolbarComposer.authorItemIdentifier(for: nil))
     }
 
     /// The badge's symbols are the owner's (#925): "+" to follow, a check
@@ -220,7 +220,7 @@ struct SnapAuthorFollowTests {
         defer { window.isHidden = true }
         window.layoutIfNeeded()
         feed.followStore.setRelation(.notFollowing, for: ProfileID("prof-2"))
-        feed.showAuthor(Self.model(authorID: "prof-2"))
+        feed.authorBar.showAuthor(Self.model(authorID: "prof-2"))
         let pill = try Self.pill(feed)
         #expect(pill.window != nil, "the pill is not on screen: nothing to prove")
         // The first author's own swap, over the redaction bars, lands first.
@@ -232,7 +232,7 @@ struct SnapAuthorFollowTests {
         let item = try Self.authorItem(feed)
         let replaces = pill.badgeReplaceCount
 
-        feed.followAuthor(ProfileID("prof-2"))
+        feed.authorBar.followAuthor(ProfileID("prof-2"))
 
         #expect(pill.drawnBadgeSymbol == "checkmark.circle.fill")
         #expect(pill.badgeReplaceCount == replaces + 1, "the badge changed without its symbol replace")
@@ -264,11 +264,11 @@ struct SnapAuthorFollowTests {
         window.isHidden = false
         window.layoutIfNeeded()
         feed.followStore.setRelation(relation, for: ProfileID("prof-2"))
-        feed.showAuthor(Self.model(authorID: "prof-2"))
+        feed.authorBar.showAuthor(Self.model(authorID: "prof-2"))
         let pill = try Self.pill(feed)
         // The landing install re-mints the item under the author's identifier
         // (#1791): what a test then holds is the item the screen keeps.
-        let landed = SnapFeedViewController.authorItemIdentifier(for: ProfileID("prof-2"))
+        let landed = SnapToolbarComposer.authorItemIdentifier(for: ProfileID("prof-2"))
         for _ in 0..<300 where pill.isRedrawingWholePill || (try? Self.authorItem(feed))?.identifier != landed {
             try await Task.sleep(for: .milliseconds(10))
         }
@@ -281,9 +281,9 @@ struct SnapAuthorFollowTests {
         let graph = GatedFollowGraph()
         let (feed, _, window) = try await Self.onScreenFeed(graph: graph, relation: .notFollowing)
         defer { window.isHidden = true }
-        let first = HapticRecorder.recording { feed.followAuthor(ProfileID("prof-2")) }
+        let first = HapticRecorder.recording { feed.authorBar.followAuthor(ProfileID("prof-2")) }
         #expect(first == [.toggleOn])
-        let again = HapticRecorder.recording { feed.followAuthor(ProfileID("prof-2")) }
+        let again = HapticRecorder.recording { feed.authorBar.followAuthor(ProfileID("prof-2")) }
         #expect(again.isEmpty, "a follow under way played \(again)")
         await Self.settle { graph.pendingFollows == 1 }
         graph.answerFollow(accepting: true)
@@ -307,7 +307,7 @@ struct SnapAuthorFollowTests {
         let item = try Self.authorItem(feed)
         let replaces = pill.badgeReplaceCount
 
-        feed.followAuthor(ProfileID("prof-2"))
+        feed.authorBar.followAuthor(ProfileID("prof-2"))
         #expect(pill.badgeReplaceCount == replaces + 1)
         #expect(!pill.isRedrawingWholePill, "the follow tap blurred the whole pill")
         await Self.settle { graph.pendingFollows == 1 }
@@ -354,10 +354,10 @@ struct SnapAuthorFollowTests {
         let graph = GatedFollowGraph()
         let feed = Self.feed(graph: graph)
         feed.followStore.setRelation(.followedBy, for: ProfileID("prof-2"))
-        feed.showAuthor(Self.model(authorID: "prof-2"))
+        feed.authorBar.showAuthor(Self.model(authorID: "prof-2"))
         #expect(try Self.pill(feed).offersFollow, "following back is a follow")
 
-        feed.followAuthor(ProfileID("prof-2"))
+        feed.authorBar.followAuthor(ProfileID("prof-2"))
 
         #expect(try Self.pill(feed).followBadge == .friends)
         #expect(feed.followStore.relation(for: ProfileID("prof-2")) == .mutual)
@@ -427,9 +427,9 @@ struct SnapAuthorFollowTests {
         let graph = GatedFollowGraph()
         let feed = Self.feed(graph: graph)
         feed.followStore.setRelation(.notFollowing, for: ProfileID("prof-2"))
-        feed.showAuthor(Self.model(authorID: "prof-2"))
+        feed.authorBar.showAuthor(Self.model(authorID: "prof-2"))
 
-        feed.followAuthor(ProfileID("prof-2"))
+        feed.authorBar.followAuthor(ProfileID("prof-2"))
         #expect(try Self.pill(feed).offersFollow == false)
         await Self.settle { graph.pendingFollows == 1 }
         #expect(try Self.pill(feed).offersFollow == false, "the \"+\" came back before the graph answered")
@@ -453,8 +453,8 @@ struct SnapAuthorFollowTests {
             avatarURL: nil, caption: nil, mediaURL: nil, mediaKind: .image, thumbnailURL: nil,
             audioText: nil, authorHandle: "ava"
         )
-        #expect(SnapFeedViewController.followName(of: named) == "@ava")
-        #expect(SnapFeedViewController.followName(of: Self.model(authorID: "bo")) == "Name bo")
+        #expect(SnapAuthorBar.followName(of: named) == "@ava")
+        #expect(SnapAuthorBar.followName(of: Self.model(authorID: "bo")) == "Name bo")
     }
 
     private static func toast(in view: UIView) -> ToastView? {
@@ -469,7 +469,7 @@ struct SnapAuthorFollowTests {
         let events = FollowGraphEvents()
         let feed = Self.feed(events: events)
         feed.followStore.setRelation(.notFollowing, for: ProfileID("prof-2"))
-        feed.showAuthor(Self.model(authorID: "prof-2"))
+        feed.authorBar.showAuthor(Self.model(authorID: "prof-2"))
         #expect(try Self.pill(feed).offersFollow)
 
         events.publish(FollowChange(profileID: ProfileID("prof-2"), isFollowing: true))
@@ -487,7 +487,7 @@ struct SnapAuthorFollowTests {
         let events = FollowGraphEvents()
         let feed = Self.feed(events: events)
         feed.followStore.setRelation(.mutual, for: ProfileID("prof-2"))
-        feed.showAuthor(Self.model(authorID: "prof-2"))
+        feed.authorBar.showAuthor(Self.model(authorID: "prof-2"))
         #expect(try Self.pill(feed).followBadge == .friends)
 
         events.publish(FollowChange(profileID: ProfileID("prof-2"), isFollowing: false))
@@ -525,7 +525,7 @@ struct SnapAuthorFollowTests {
     @Test func withoutAFollowSeamThereIsNoFollow() throws {
         let feed = Self.feed(graph: nil)
         feed.followStore.setRelation(.notFollowing, for: ProfileID("prof-2"))
-        feed.showAuthor(Self.model(authorID: "prof-2"))
+        feed.authorBar.showAuthor(Self.model(authorID: "prof-2"))
 
         #expect(try Self.pill(feed).offersFollow == false)
     }

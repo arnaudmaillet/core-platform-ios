@@ -802,7 +802,7 @@ struct SnapActionColumnLayoutTests {
         #expect(!controller.debugTrailingItems.contains { $0.identifier?.hasPrefix("snap.comments.day.") == true })
 
         let today = Calendar.current.startOfDay(for: Date())
-        controller.setCommentsDay(today)
+        controller.authorBar.setCommentsDay(today)
         let first = try #require(controller.debugTrailingItems.last, "no day in the bar")
         #expect(first.identifier?.hasPrefix("snap.comments.day.") == true)
         // With no wallet and the ✕ at the leading edge since #1192, the day
@@ -815,11 +815,11 @@ struct SnapActionColumnLayoutTests {
         #expect(budget < 390)
 
         let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: today)!
-        controller.setCommentsDay(yesterday)
+        controller.authorBar.setCommentsDay(yesterday)
         let second = try #require(controller.debugTrailingItems.last)
         #expect(second !== first && second.identifier != first.identifier, "the day was retitled in place: no morph")
 
-        controller.setCommentsDay(nil)
+        controller.authorBar.setCommentsDay(nil)
         #expect(!controller.debugTrailingItems.contains { $0.identifier?.hasPrefix("snap.comments.day.") == true })
     }
 

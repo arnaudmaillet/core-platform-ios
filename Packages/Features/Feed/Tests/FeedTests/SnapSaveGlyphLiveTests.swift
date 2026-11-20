@@ -57,7 +57,7 @@ struct SnapSaveGlyphLiveTests {
     /// The bars settle on `id` — what `updateBarChrome` does for the active
     /// page.
     private static func settleBars(on id: String, in screen: Screen) {
-        screen.feed.refreshBookmarkGlyph(for: PostID(id))
+        screen.feed.toolbarComposer.refreshBookmarkGlyph(for: PostID(id))
     }
 
     @Test func theVerticalPageGlyphFollowsASaveMadeElsewhere() {
@@ -107,7 +107,7 @@ struct SnapSaveGlyphLiveTests {
         autoreleasepool {
             let feed = Self.makeFeed(entities: entities, pile: pile)
             feed.loadViewIfNeeded()
-            feed.refreshBookmarkGlyph(for: PostID("p1"))
+            feed.toolbarComposer.refreshBookmarkGlyph(for: PostID("p1"))
             released = feed
         }
         #expect(released == nil, "the observation kept the page alive")

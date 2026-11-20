@@ -82,28 +82,28 @@ struct SnapCommentsDayBarTests {
         let feed = feed(["a", "b"], panels: panels)
         #expect(feed.debugRestingCommentsID == PostID("a"), "the premise: a holds the engagement")
         try panels.scroll("a", to: Self.today)
-        #expect(feed.commentsDay == Self.today, "the engaged panel's day is not on the bar")
+        #expect(feed.authorBar.commentsDay == Self.today, "the engaged panel's day is not on the bar")
 
         // b scrolls in as a preview, and its own thread moves.
         feed.debugMountRestingComments(for: PostID("b"))
         #expect(feed.debugPreviewRestingID == PostID("b"), "the premise: b is a preview")
-        #expect(feed.commentsDay == Self.today, "the preview's mount cleared the bar")
+        #expect(feed.authorBar.commentsDay == Self.today, "the preview's mount cleared the bar")
         try panels.scroll("b", to: Self.yesterday)
-        #expect(feed.commentsDay == Self.today, "the preview's day took the bar")
+        #expect(feed.authorBar.commentsDay == Self.today, "the preview's day took the bar")
 
         // The swipe goes back home: still a's day.
         let collection = try pager(of: feed)
         collection.setContentOffset(.zero, animated: false)
         feed.scrollViewDidEndDecelerating(collection)
-        #expect(feed.commentsDay == Self.today, "a cancelled swipe left the bar without a's day")
+        #expect(feed.authorBar.commentsDay == Self.today, "a cancelled swipe left the bar without a's day")
 
         // The swipe commits: b is promoted, and the bar says b's day.
         collection.setContentOffset(CGPoint(x: 0, y: collection.bounds.height), animated: false)
         feed.scrollViewDidEndDecelerating(collection)
         feed.debugLeaveCell(at: 0)
         #expect(feed.debugRestingCommentsID == PostID("b"), "the premise: b was promoted")
-        #expect(feed.commentsDay == Self.yesterday,
-                "the bar's day after the promotion: \(String(describing: feed.commentsDay))")
+        #expect(feed.authorBar.commentsDay == Self.yesterday,
+                "the bar's day after the promotion: \(String(describing: feed.authorBar.commentsDay))")
     }
 
     /// A tap on the bar's day scrolls the ENGAGED panel to that day.
