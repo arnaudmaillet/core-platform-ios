@@ -448,9 +448,10 @@ final class SnapFeedViewController: UIViewController {
     /// engaged toolbar context) has been applied — set when the page
     /// activates, so a pre-render that never settles never locks.
     private var restingLockApplied = false
-    /// Held for the length of a dismissal gesture, so the release restores the
-    /// pager's engagement-owned state instead of enabling it. See `ScrollLock`.
-    private var pagerLock = ScrollLock()
+    /// The one owner of the pager's `isScrollEnabled`: the sheet, the
+    /// resting panel and a dismissal grab each hold it for a reason of their
+    /// own (`SnapPagerScrollLock`). Built on first use.
+    private lazy var pagerScrollLock = SnapPagerScrollLock { [weak self] in self?.collectionView }
     /// Every page whose media carousel the content freeze holds (#1738).
     private let carouselFreeze = CarouselFreezeLedger<SnapFeedCell>()
     /// The page drive and the pull to go back (`SnapPagerDrive`). Built on
@@ -3372,7 +3373,10 @@ final class SnapFeedViewController: UIViewController {
         if let detail {
             SnapCommentsSheetViewController.prepare(detail, commentCount: modelsByID[id]?.cardMetrics?.comments)
         }
-        collectionView.isScrollEnabled = false
+        // ⚠️ AFTER THE HANDOVER: a turned-around session ends inside
+        // `handOverLanding`, and its end releases the sheet's hold — taken
+        // before, this session's hold would go with it.
+        pagerScrollLock.hold(.sheet)
         // The balance moves to the sheet's bar (the page's leaves with its
         // bar): a badge of its own, kept current with the page's.
         let sheetBadge = walletBadgeItem != nil ? WalletBadgeButton() : nil
@@ -3387,7 +3391,7 @@ final class SnapFeedViewController: UIViewController {
         ) { [weak self] in
             guard let self else { return }
             commentsSheet = nil
-            collectionView.isScrollEnabled = true
+            pagerScrollLock.release(.sheet)
             // Reopening is as cheap as opening — warmed once the screen is
             // still, never in the close's own turn: ~100 ms of panel build
             // there held the first frames of whatever the finger did next
@@ -4179,7 +4183,7 @@ final class SnapFeedViewController: UIViewController {
         // chain with it. That is a fact about the page on screen, so it is read
         // off the page on screen — an engagement that outlived its page cannot
         // take the pager down with it.
-        collectionView.isScrollEnabled = !activeIsText
+        pagerScrollLock.followSettledPage(isText: activeIsText)
     }
 
     /// Whether the post still has PIXELS on screen.
@@ -4218,7 +4222,7 @@ final class SnapFeedViewController: UIViewController {
         guard commentsEngagementIsResting, !restingLockApplied,
               commentsEngagedID != nil else { return }
         restingLockApplied = true
-        collectionView.isScrollEnabled = false
+        pagerScrollLock.hold(.restingPanel)
         commentTabs.bind(to: commentsContentVC as? PostDetailViewController)
         syncCommentSortAvailability()
         setEngagedChrome(true, hasMedia: false, animated: true)
@@ -4461,7 +4465,7 @@ final class SnapFeedViewController: UIViewController {
         commentsEngagedID = nil
         commentsEngagementIsResting = false
         restingLockApplied = false
-        collectionView.isScrollEnabled = true
+        pagerScrollLock.release(.restingPanel)
         // REOPENING must be as cheap as opening. The warm is consumed by the
         // engagement, and no further activation is coming for a page that
         // never moved — so without this, engage → close → engage pays the
@@ -7616,7 +7620,8 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     private static var backEdgeZone: CGFloat { PagedScreenDismissalPolicy.edgeZone }
 
     public func setContentScrollEnabled(_ enabled: Bool) {
-        // Through a lock that RESTORES rather than an assignment that enables.
+        // Through the pager's lock, whose release lets go of the grab's own
+        // hold rather than enabling (`SnapPagerScrollLock`).
         //
         // An engaged comments panel disables the pager for the engagement's
         // whole lifetime (see the note at the engage site) — that freeze is
@@ -7626,7 +7631,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // engagement: the comments dragged the feed with them on every
         // subsequent scroll. Reopening the post appeared to fix it, because
         // that rebuilt the engagement.
-        if enabled { pagerLock.thaw(collectionView) } else { pagerLock.freeze(collectionView) }
+        if enabled { pagerScrollLock.release(.dismissal) } else { pagerScrollLock.hold(.dismissal) }
         // The COMMENT STREAM too, and it is the one that was missed.
         //
         // This freezes "the content" for a dismissal swipe, and the pager was
