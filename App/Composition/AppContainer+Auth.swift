@@ -15,7 +15,7 @@ import UIKit
 // built here.
 extension AppContainer {
     func makeAuthFeature() -> any AuthFeatureBuilding {
-        AuthFeatureBuilder(
+        AuthFeatureBuilder(dependencies: .init(
             sessionManager: sessionManager,
             // Sign-up by code (guest mode B4): the new account's profile, and its
             // home country — the country location opened, else the storefront's.
@@ -33,7 +33,7 @@ extension AppContainer {
                 termsOfService: SettingsLinks.current.termsOfService,
                 privacyPolicy: SettingsLinks.current.privacyPolicy
             )
-        )
+        ))
     }
 
     /// The device's passkeys (#551): the system sheet on the fleet. The mock's

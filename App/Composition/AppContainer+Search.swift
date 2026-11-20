@@ -75,7 +75,7 @@ extension AppContainer {
     }
 
     func makeSearchFeature() -> any SearchFeatureBuilding {
-        SearchFeatureBuilder(
+        SearchFeatureBuilder(dependencies: .init(
             repository: searchRepository,
             recentSearches: recentSearchStore,
             explore: exploreRepository,
@@ -98,6 +98,6 @@ extension AppContainer {
             followEvents: followGraphEvents,
             presence: sectionPresence,
             viewerEvents: viewerEvents
-        )
+        ))
     }
 }

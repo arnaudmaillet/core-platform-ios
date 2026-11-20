@@ -16,6 +16,133 @@ import WalletInterface
 /// consumed through `MapsFeatureBuilding` by the app shell.
 @MainActor
 public struct MapsFeatureBuilder: MapsFeatureBuilding {
+    /// Everything the map needs, handed in by the composition root (#2375):
+    /// each collaborator the app always wires is required, so forgetting one
+    /// fails to compile. The optionals are absent in production on the fleet
+    /// (the shop and the country access are the mock's) or when the device
+    /// store can't be opened.
+    public struct Dependencies {
+        /// The tiles' pins and clusters.
+        public var repository: any GeoDiscoveryProviding
+        /// The filter bar's favorites section and the people rail's pins.
+        public var favoritesRepository: any MapFavoritesProviding
+        public var imagePipeline: ImagePipeline
+        /// A Maps-dedicated player pool (separate from the feed's) for the
+        /// live pin previews, so the two surfaces never contend.
+        public var videoPlayback: VideoPlaybackController
+        /// Resolves the feed builder lazily, so the map can expand a
+        /// pin/cluster into the shared snap feed without the composition root
+        /// ordering the two features.
+        public var feedFeature: () -> any FeedFeatureBuilding
+        /// Resolves the place page's builder lazily (#2381): the page a
+        /// hierarchy cluster's feed closes down onto, and a place link's.
+        public var placeFeature: () -> any PlaceFeatureBuilding
+        /// Fires the app's profile destination for a person the map surfaces
+        /// (the sub-filter sheet's Profile swipe). Injected rather than
+        /// imported so Maps keeps knowing nothing about routes or the Profile
+        /// feature.
+        public var openProfile: (ProfileID, ProfileIdentityStub?) -> Void
+        /// Fires the app's message-this-person destination (the sub-filter
+        /// pill menu's Send Message). Injected for the same reason as
+        /// `openProfile`.
+        public var openConversation: (ProfileID, ProfileIdentityStub?) -> Void
+        /// Whether tile responses are decorated with the DEBUG place catalog
+        /// (`MapMockPlaces`) — the semantic city/country clusters. The
+        /// composition root passes its one `seedsMapPlaces` decision here AND
+        /// to the mock backend's seeding, so the pins that arrive and the
+        /// ladders they wear always agree; false keeps the pins
+        /// identity-clean. Release builds ignore it — the catalog does not
+        /// exist there.
+        public var seedsMockPlaces: Bool
+        /// Each mock post's author avatar, keyed by post id — the stand-in for
+        /// the author `RadarPin` does not carry. Empty off the mock.
+        public var mockAuthorAvatars: [PostID: URL]
+        /// Baked animated icons, keyed by post id — text-only posts only.
+        ///
+        /// Same shape of absence as `mockAuthorAvatars`: `RadarPin` carries no
+        /// `icon_id` yet (`dev/issues/BACKEND_ANIMATED_PIN_ICONS.md` proposes
+        /// field 12), so mock mode supplies what the wire cannot and
+        /// production leaves it empty.
+        public var mockAnimatedIcons: [PostID: String]
+        /// Baked preview sheets, keyed by post id — MEDIA posts only. Empty
+        /// off the mock.
+        public var mockPreviewSheets: [PostID: String]
+        /// What the markers wear as icon faces.
+        public var iconCatalog: any AnimatedIconProviding
+        /// The media markers' baked previews.
+        public var previewCatalog: AnimatedIconCatalog
+        /// Which countries the account has unlocked — see `CountryAccess`.
+        /// Nil on the fleet, which has no country access yet: every country
+        /// opens and none is sold.
+        public var countryAccess: (any CountryAccess)?
+        /// What the Shop's Boosts sells — see `StakePackSelling`. Nil on the
+        /// fleet, like the shop itself: none is sold.
+        public var stakePacks: (any StakePackSelling)?
+        /// What the Shop's Profile shelf sells (#944). Nil on the fleet, like
+        /// the shop itself: none is sold.
+        public var profileItems: (any ProfileItemSelling)?
+        /// Whether the viewer has an account. A guest has no people: no
+        /// favourites dock, no Friends / Following rows.
+        public var isMember: @MainActor () -> Bool
+        /// Where the device is, for the locate button and the "See posts
+        /// around you" card.
+        public var locator: any CurrentCountryLocating
+        /// The device store (#893): the map opens on the pins of its last
+        /// viewports at a cold start. Nil when the device store can't be
+        /// opened: the map stays in memory only.
+        public var localStore: LocalStore?
+        /// The app's one storage scope (#2376): the map's own stores — the
+        /// followed places, the people rails, the dock — are the active
+        /// profile's.
+        public var storageScope: StorageScope
+
+        public init(
+            repository: any GeoDiscoveryProviding,
+            favoritesRepository: any MapFavoritesProviding,
+            imagePipeline: ImagePipeline,
+            videoPlayback: VideoPlaybackController,
+            feedFeature: @escaping () -> any FeedFeatureBuilding,
+            placeFeature: @escaping () -> any PlaceFeatureBuilding,
+            openProfile: @escaping (ProfileID, ProfileIdentityStub?) -> Void,
+            openConversation: @escaping (ProfileID, ProfileIdentityStub?) -> Void,
+            seedsMockPlaces: Bool,
+            mockAuthorAvatars: [PostID: URL],
+            mockAnimatedIcons: [PostID: String],
+            mockPreviewSheets: [PostID: String],
+            iconCatalog: any AnimatedIconProviding,
+            previewCatalog: AnimatedIconCatalog,
+            countryAccess: (any CountryAccess)?,
+            stakePacks: (any StakePackSelling)?,
+            profileItems: (any ProfileItemSelling)?,
+            isMember: @escaping @MainActor () -> Bool,
+            locator: any CurrentCountryLocating,
+            localStore: LocalStore?,
+            storageScope: StorageScope
+        ) {
+            self.repository = repository
+            self.favoritesRepository = favoritesRepository
+            self.imagePipeline = imagePipeline
+            self.videoPlayback = videoPlayback
+            self.feedFeature = feedFeature
+            self.placeFeature = placeFeature
+            self.openProfile = openProfile
+            self.openConversation = openConversation
+            self.seedsMockPlaces = seedsMockPlaces
+            self.mockAuthorAvatars = mockAuthorAvatars
+            self.mockAnimatedIcons = mockAnimatedIcons
+            self.mockPreviewSheets = mockPreviewSheets
+            self.iconCatalog = iconCatalog
+            self.previewCatalog = previewCatalog
+            self.countryAccess = countryAccess
+            self.stakePacks = stakePacks
+            self.profileItems = profileItems
+            self.isMember = isMember
+            self.locator = locator
+            self.localStore = localStore
+            self.storageScope = storageScope
+        }
+    }
+
     private let repository: any GeoDiscoveryProviding
     private let favoritesRepository: any MapFavoritesProviding
     private let imagePipeline: ImagePipeline
@@ -44,33 +171,8 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
     /// The interface-typed seam the composition root hands to other features.
     public var profilePinning: any MapProfilePinning { pinService }
 
-    /// - Parameters:
-    ///   - videoPlayback: a Maps-dedicated player pool (separate from the feed's)
-    ///     for the live pin previews, so the two surfaces never contend.
-    ///   - feedFeature: resolves the feed builder lazily, so the map can expand a
-    ///     pin/cluster into the shared snap feed without the composition root
-    ///     ordering the two features.
-    ///   - placeFeature: resolves the place page's builder lazily (#2381): the
-    ///     page a hierarchy cluster's feed closes down onto, and a place link's.
-    ///   - openProfile: fires the app's profile destination for a person the map
-    ///     surfaces (the sub-filter sheet's Profile swipe). Injected rather than
-    ///     imported so Maps keeps knowing nothing about routes or the Profile
-    ///     feature.
-    ///   - openConversation: fires the app's message-this-person destination
-    ///     (the sub-filter pill menu's Send Message). Injected for the same
-    ///     reason as `openProfile`.
-    /// - Parameter seedsMockPlaces: whether tile responses are decorated
-    ///   with the DEBUG place catalog (`MapMockPlaces`) — the semantic
-    ///   city/country clusters. The composition root passes its one
-    ///   `seedsMapPlaces` decision here AND to the mock backend's seeding,
-    ///   so the pins that arrive and the ladders they wear always agree;
-    ///   the false default keeps any other construction identity-clean.
-    ///   Release builds ignore it — the catalog does not exist there.
     private let countryAccess: (any CountryAccess)?
-    /// Where the device is, for the locate button and the "See posts around
-    /// you" card. Nil hides both (a map that sells no country has no use for
-    /// the device's).
-    private let locator: (any CurrentCountryLocating)?
+    private let locator: any CurrentCountryLocating
     private let stakePacks: (any StakePackSelling)?
     private let profileItems: (any ProfileItemSelling)?
     private let isMember: @MainActor () -> Bool
@@ -80,67 +182,29 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
     /// The dock's and the rows' people on the device (#1776).
     private let peopleCache: MapPeopleLocalCache?
 
-    public init(
-        repository: any GeoDiscoveryProviding,
-        favoritesRepository: any MapFavoritesProviding,
-        imagePipeline: ImagePipeline,
-        videoPlayback: VideoPlaybackController,
-        feedFeature: @escaping () -> any FeedFeatureBuilding,
-        placeFeature: @escaping () -> any PlaceFeatureBuilding,
-        openProfile: @escaping (ProfileID, ProfileIdentityStub?) -> Void,
-        openConversation: @escaping (ProfileID, ProfileIdentityStub?) -> Void,
-        seedsMockPlaces: Bool = false,
-        mockAuthorAvatars: [PostID: URL] = [:],
-        /// Baked animated icons, keyed by post id — text-only posts only.
-        ///
-        /// Same shape of absence as `mockAuthorAvatars`: `RadarPin` carries no
-        /// `icon_id` yet (`dev/issues/BACKEND_ANIMATED_PIN_ICONS.md` proposes
-        /// field 12), so mock mode supplies what the wire cannot and production
-        /// leaves it empty.
-        mockAnimatedIcons: [PostID: String] = [:],
-        /// Baked preview sheets, keyed by post id — MEDIA posts only.
-        mockPreviewSheets: [PostID: String] = [:],
-        iconCatalog: (any AnimatedIconProviding)? = nil,
-        previewCatalog: AnimatedIconCatalog? = nil,
-        /// Which countries the account has unlocked — see `CountryAccess`.
-        /// Nil opens every country and sells none.
-        countryAccess: (any CountryAccess)? = nil,
-        /// What the Shop's Boosts sells — see `StakePackSelling`. Nil sells
-        /// none.
-        stakePacks: (any StakePackSelling)? = nil,
-        /// What the Shop's Profile shelf sells (#944). Nil sells none.
-        profileItems: (any ProfileItemSelling)? = nil,
-        /// Whether the viewer has an account. A guest has no people: no
-        /// favourites dock, no Friends / Following rows.
-        isMember: @escaping @MainActor () -> Bool = { true },
-        locator: (any CurrentCountryLocating)? = nil,
-        /// The device store (#893): the map opens on the pins of its last
-        /// viewports at a cold start. Nil keeps the map in memory only.
-        localStore: LocalStore? = nil,
-        /// The app's one storage scope (#2376): the map's own stores — the
-        /// followed places, the people rails, the dock — are the active
-        /// profile's.
-        storageScope: StorageScope
-    ) {
+    public init(dependencies: Dependencies) {
+        let storageScope = dependencies.storageScope
+        let localStore = dependencies.localStore
+        let favoritesRepository = dependencies.favoritesRepository
         self.placeFollows = MapPlaceFollowStore(scope: storageScope)
         self.dockedPlaces = MapDockedPlacesStore(scope: storageScope)
         self.pinsCache = localStore.map(MapPinsLocalCache.init(store:))
         self.peopleCache = localStore.map(MapPeopleLocalCache.init(store:))
-        self.isMember = isMember
-        self.locator = locator
-        self.countryAccess = countryAccess
-        self.stakePacks = stakePacks
-        self.profileItems = profileItems
-        self.iconCatalog = iconCatalog
-        self.previewCatalog = previewCatalog
-        self.repository = repository
+        self.isMember = dependencies.isMember
+        self.locator = dependencies.locator
+        self.countryAccess = dependencies.countryAccess
+        self.stakePacks = dependencies.stakePacks
+        self.profileItems = dependencies.profileItems
+        self.iconCatalog = dependencies.iconCatalog
+        self.previewCatalog = dependencies.previewCatalog
+        self.repository = dependencies.repository
         self.favoritesRepository = favoritesRepository
-        self.imagePipeline = imagePipeline
-        self.videoPlayback = videoPlayback
-        self.feedFeature = feedFeature
-        self.placeFeature = placeFeature
-        self.openProfile = openProfile
-        self.openConversation = openConversation
+        self.imagePipeline = dependencies.imagePipeline
+        self.videoPlayback = dependencies.videoPlayback
+        self.feedFeature = dependencies.feedFeature
+        self.placeFeature = dependencies.placeFeature
+        self.openProfile = dependencies.openProfile
+        self.openConversation = dependencies.openConversation
         self.pinService = MapProfilePinService(
             store: MapFavoritesStore(scope: storageScope), favorites: favoritesRepository
         )
@@ -150,10 +214,10 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
         // an author (`dev/issues/BACKEND_MAP_PIN_AUTHOR.md`), so mock mode
         // supplies each from what the mock dataset knows and production leaves
         // both nil. Folded into one closure so a pin is decorated once.
-        let places = seedsMockPlaces
-        let avatars = mockAuthorAvatars
-        let icons = mockAnimatedIcons
-        let previews = mockPreviewSheets
+        let places = dependencies.seedsMockPlaces
+        let avatars = dependencies.mockAuthorAvatars
+        let icons = dependencies.mockAnimatedIcons
+        let previews = dependencies.mockPreviewSheets
         if places || !avatars.isEmpty || !icons.isEmpty || !previews.isEmpty {
             self.placeDecoration = { pins in
                 let tagged = places ? MapMockPlaces.decorate(pins) : pins
@@ -217,8 +281,8 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
     /// What the view model runs over every tile response — the place
     /// decoration in DEBUG mock mode, identity everywhere else.
     private let placeDecoration: ([MapPin]) -> [MapPin]
-    private let iconCatalog: (any AnimatedIconProviding)?
-    private let previewCatalog: AnimatedIconCatalog?
+    private let iconCatalog: any AnimatedIconProviding
+    private let previewCatalog: AnimatedIconCatalog
 
     public func makeMapViewController() -> UIViewController {
         let feedFeature = feedFeature
