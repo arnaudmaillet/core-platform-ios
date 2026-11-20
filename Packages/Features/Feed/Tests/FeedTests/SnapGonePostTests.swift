@@ -211,11 +211,11 @@ struct SnapGonePostTests {
 
     /// The spelling that reads a missing model as text stays out of the snap
     /// feed: `modelsByID[…]?.mediaURL == nil` is true when there is no model.
-    /// The screen's file, its comments', its hero destination's and its
-    /// toolbar's (#2387), which read the same models.
+    /// The screen's file, its comments', its hero destination's, its
+    /// toolbar's and its author pill's (#2387), which read the same models.
     @Test(arguments: [
         "SnapFeedViewController.swift", "SnapCommentsCoordinator.swift", "SnapZoomDestination.swift",
-        "SnapToolbarComposer.swift",
+        "SnapToolbarComposer.swift", "SnapAuthorBar.swift",
     ])
     func noCheckReadsAMissingModelAsText(in file: String) throws {
         let source = URL(fileURLWithPath: #filePath)

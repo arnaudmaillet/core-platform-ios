@@ -55,11 +55,11 @@ struct SnapAuthorPillItemTests {
 
     @Test func aNewAuthorIsANewItemUnderTheirIdentifier() throws {
         let (_, feed) = Self.feed()
-        feed.showAuthor(Self.model(id: "p1", author: "Ada Lovelace", authorID: "prof-1", meta: "@ada · 2h"))
+        feed.authorBar.showAuthor(Self.model(id: "p1", author: "Ada Lovelace", authorID: "prof-1", meta: "@ada · 2h"))
         let first = try #require(Self.authorItem(feed))
         let firstPill = try #require(first.customView as? SnapAuthorIdentityView)
 
-        feed.showAuthor(Self.model(id: "p2", author: "Grace Hopper", authorID: "prof-2", meta: "@grace · 1d"))
+        feed.authorBar.showAuthor(Self.model(id: "p2", author: "Grace Hopper", authorID: "prof-2", meta: "@grace · 1d"))
         let second = try #require(Self.authorItem(feed))
         let secondPill = try #require(second.customView as? SnapAuthorIdentityView)
 
@@ -74,7 +74,7 @@ struct SnapAuthorPillItemTests {
         #expect(pills.count == 1)
 
         // The same author again: no new item, no transition.
-        feed.showAuthor(Self.model(id: "p3", author: "Grace Hopper", authorID: "prof-2", meta: "@grace · 5m"))
+        feed.authorBar.showAuthor(Self.model(id: "p3", author: "Grace Hopper", authorID: "prof-2", meta: "@grace · 5m"))
         #expect(Self.authorItem(feed) === second)
     }
 
@@ -82,9 +82,9 @@ struct SnapAuthorPillItemTests {
     /// leaves it, and its taps reach the screen.
     @Test func aFreshPillIsWiredLikeTheFirst() throws {
         let (_, feed) = Self.feed()
-        feed.showAuthor(Self.model(id: "p1", author: "Ada Lovelace", authorID: "prof-1", meta: "@ada"))
+        feed.authorBar.showAuthor(Self.model(id: "p1", author: "Ada Lovelace", authorID: "prof-1", meta: "@ada"))
         let first = try #require(Self.authorItem(feed)?.customView as? SnapAuthorIdentityView)
-        feed.showAuthor(Self.model(id: "p2", author: "Grace Hopper", authorID: "prof-2", meta: "@grace"))
+        feed.authorBar.showAuthor(Self.model(id: "p2", author: "Grace Hopper", authorID: "prof-2", meta: "@grace"))
         let fresh = try #require(Self.authorItem(feed)?.customView as? SnapAuthorIdentityView)
 
         #expect(fresh.onAuthorTapped != nil && fresh.onFollowTapped != nil)
@@ -98,14 +98,14 @@ struct SnapAuthorPillItemTests {
     /// it: same item, same words.
     @Test func thePillShowsTheHandleWithoutThePostsAge() throws {
         let (_, feed) = Self.feed()
-        feed.showAuthor(Self.model(id: "p1", author: "Ada Lovelace", authorID: "prof-1", meta: "@ada · 2h"))
+        feed.authorBar.showAuthor(Self.model(id: "p1", author: "Ada Lovelace", authorID: "prof-1", meta: "@ada · 2h"))
         let first = try #require(Self.authorItem(feed))
         let pill = try #require(first.customView)
         #expect(Self.labels(in: pill).contains("@ada"))
         #expect(!Self.labels(in: pill).contains { $0.contains("2h") || $0.contains("·") },
                 "the pill still dates the post: \(Self.labels(in: pill))")
 
-        feed.showAuthor(Self.model(id: "p2", author: "Ada Lovelace", authorID: "prof-1", meta: "@ada · 3d"))
+        feed.authorBar.showAuthor(Self.model(id: "p2", author: "Ada Lovelace", authorID: "prof-1", meta: "@ada · 3d"))
         let second = try #require(Self.authorItem(feed))
 
         #expect(second === first)
@@ -149,7 +149,7 @@ struct SnapAuthorPillItemTests {
             ("prof-2", "Grace Hopper With A Very Long Name Indeed", "@grace.hopper.the.admiral · 1d"),
             ("prof-3", "Ada Byron", "@ada · 3w"),
         ] {
-            feed.showAuthor(Self.model(id: "p-\(id)", author: name, authorID: id, meta: meta))
+            feed.authorBar.showAuthor(Self.model(id: "p-\(id)", author: name, authorID: id, meta: meta))
             let pill = try #require(Self.authorItem(feed)?.customView as? SnapAuthorIdentityView)
             #expect(abs(pill.widthCap - cap) < 0.5, "\(id)'s cap is \(pill.widthCap), the toolbar leaves \(cap)")
             #expect(pill.onAuthorTapped != nil)
@@ -229,12 +229,12 @@ struct SnapAuthorPillItemTests {
     /// author is still its own item there.
     @Test func anAuthorChangeWithTheThreadOpenIsDrawnInTheToolbar() throws {
         let (_, feed) = Self.feed()
-        feed.showAuthor(Self.model(id: "p1", author: "Ada Lovelace", authorID: "prof-1", meta: "@ada · 2h"))
+        feed.authorBar.showAuthor(Self.model(id: "p1", author: "Ada Lovelace", authorID: "prof-1", meta: "@ada · 2h"))
         let before = try #require(Self.authorItem(feed))
         feed.setEngagedChrome(true, hasMedia: true, animated: false)
         #expect(!(feed.navigationItem.rightBarButtonItems ?? []).contains { $0.customView is SnapAuthorIdentityView })
 
-        feed.showAuthor(Self.model(id: "p2", author: "Grace Hopper", authorID: "prof-2", meta: "@grace · 1d"))
+        feed.authorBar.showAuthor(Self.model(id: "p2", author: "Grace Hopper", authorID: "prof-2", meta: "@grace · 1d"))
         let open = try #require(Self.authorItem(feed))
         #expect(open !== before)
         #expect(open.identifier == SnapToolbarComposer.authorItemIdentifier(for: ProfileID("prof-2")))
@@ -247,7 +247,7 @@ struct SnapAuthorPillItemTests {
     /// where the first one was drawn as a square.
     @Test func theItemIsReinstalledOnceTheScreenHasLanded() async throws {
         let (nav, feed) = Self.feed()
-        feed.showAuthor(Self.model(id: "p1", author: "Ada Lovelace", authorID: "prof-1", meta: "@ada · 2h"))
+        feed.authorBar.showAuthor(Self.model(id: "p1", author: "Ada Lovelace", authorID: "prof-1", meta: "@ada · 2h"))
         let rode = try #require(Self.authorItem(feed))
 
         // Showing the window is the appearance: willAppear arms the install,

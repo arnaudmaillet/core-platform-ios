@@ -183,7 +183,7 @@ struct SnapBarPillWidthsTests {
             caption: "c", mediaURL: nil, mediaKind: .image, thumbnailURL: nil,
             audioText: "Original sound · @maximilian.featherstonehaugh"
         )
-        feed.showAuthor(model)
+        feed.authorBar.showAuthor(model)
         feed.setCommentTabsAvailable(true)
         feed.setEngagedChrome(true, hasMedia: false, animated: false)
         for _ in 0..<30 {
