@@ -48,44 +48,14 @@ final class SnapFeedViewController: UIViewController {
     /// transition. The same author keeps the pill and the item, and changes
     /// in place (`showAuthor`).
     private(set) var authorIdentityView = SnapAuthorIdentityView()
-    /// The navigation controller whose toolbar this feed is showing — held
-    /// weakly across its own pop, when `navigationController` is already nil
-    /// but the toolbar bookkeeping must still be settled (`viewDidDisappear`).
-    private weak var toolbarHost: UINavigationController?
-    /// The save star — a stock bar item (`SnapFooterToolbar`, #1679); a
-    /// property because its image follows the active page's saved state.
-    private lazy var bookmarkItem = SnapFooterToolbar.makeSaveItem { [weak self] in
-        guard let self, let model = self.activeModel else { return }
-        self.toggleBookmark(for: model.id)
-    }
 
     /// The comments' Popular | Recent selector (#2007), beside the leading
     /// item while a thread that has the tabs holds the engaged chrome — bound
     /// to that thread's panel.
     let commentTabs = CommentTabsSelector()
-    /// The one living toolbar's items (keep-and-stack): built once. The
-    /// author pill's content changes inside its item (`showAuthor`), at a fixed
-    /// width (`applyBarPillWidths`). The engagement no longer touches the
-    /// footer — see `configureToolbarItems` for why the trailing ✕ left it.
-    private(set) var defaultToolbarItems: [UIBarButtonItem] = []
     /// The nav bar's two trailing items, held so comment mode can add the
     /// sort selector beside the author pill and take it away again.
-    private var authorItem = UIBarButtonItem()
     private var sortItem = UIBarButtonItem()
-    /// The author item's identifier: the AUTHOR's (#1791).
-    ///
-    /// iOS 26 treats two items with one identifier as ONE item: a fresh item
-    /// under the SAME identifier swaps in a single frame, while a DIFFERENT
-    /// identifier gets the bar's own replacement (the glass morphs between the
-    /// two platters while the contents blur). So a new author is a different
-    /// identifier — UIKit's transition — and the same author's item is
-    /// re-minted only invisibly (`reinstallAuthorItem`). The follow badge is
-    /// not part of it: a relation change is the badge's symbol replace (#925).
-    /// No author yet (the pill before the first page) is the slot's own.
-    static func authorItemIdentifier(for author: ProfileID?) -> String {
-        guard let author else { return "feed.snap.author-pill" }
-        return "feed.snap.author-pill." + author.rawValue
-    }
     /// The back chevron's and the comments exit's identities (#1679): two
     /// items for UIKit, so the swap is its morph between them.
     static let backItemIdentifier = "feed.snap.back"
@@ -110,7 +80,7 @@ final class SnapFeedViewController: UIViewController {
     /// surfaces reading one list is precisely what a store is for. See
     /// `PostBookmarkStore` for what a client-owned list can and cannot claim.
     /// The app's one pile outside tests (#2376).
-    private let bookmarks: PostBookmarkStore
+    let bookmarks: PostBookmarkStore
     /// The sounds the viewer saved, for the sound sheet (#2376).
     private let savedSounds: SavedSoundStore
     /// Keeps the save glyph on the saved fact of the post it draws (#1067):
@@ -121,11 +91,6 @@ final class SnapFeedViewController: UIViewController {
     /// filtered to `bookmarkGlyphPostID`: it ends with the screen, and a page
     /// paged away from is never the one it re-draws.
     private var savedObservation: EntityObservation?
-    /// The post whose saved state the glyph draws — the page the bars last
-    /// settled on. Nil before the first.
-    private var bookmarkGlyphPostID: PostID?
-    /// The glyph's symbol as last drawn.
-    private var drawnBookmarkSymbol = AppSymbol.save.rawValue
 
     /// The viewer's point balance, spent by the rail's boost anchor.
     ///
@@ -399,6 +364,10 @@ final class SnapFeedViewController: UIViewController {
     /// the grab, the landing and the dismissal gates (`SnapZoomDestination`).
     /// Built on first use; building it does nothing else.
     private(set) lazy var zoomDestination = SnapZoomDestination(host: self)
+    /// The bottom toolbar: its one set of items, their faces for the page in
+    /// front and the bar's presence (`SnapToolbarComposer`), the only writer of
+    /// `toolbarItems`. Built on first use; building it does nothing else.
+    private(set) lazy var toolbarComposer = SnapToolbarComposer(host: self)
 
     /// Files a post's Report. Nil withholds the row entirely: an action that
     /// cannot act is not offered — the grid's card menu follows the same rule.
@@ -473,15 +442,17 @@ final class SnapFeedViewController: UIViewController {
         super.init(nibName: nil, bundle: nil)
         savedObservation = entities.observePosts { [weak self] change in
             // The footer like's count moves with the store (#1924).
-            if let self, let id = self.footerLikeFace?.id, change.contains(id) {
-                self.refreshFooterLike(for: self.modelsByID[id], animated: true)
+            if let self, let id = self.toolbarComposer.footerLikeFace?.id, change.contains(id) {
+                self.toolbarComposer.refreshFooterLike(for: self.modelsByID[id], animated: true)
             }
-            guard let self, let id = self.bookmarkGlyphPostID, change.contains(id) else { return }
+            guard let self, let id = self.toolbarComposer.bookmarkGlyphPostID, change.contains(id) else { return }
             // The post's counts move here too (a realtime tick): only a
             // changed save re-draws.
             let saved = self.bookmarks.isSaved(id.rawValue)
-            guard Self.bookmarkSymbol(saved: saved) != self.drawnBookmarkSymbol else { return }
-            self.refreshBookmarkGlyph(for: id)
+            guard SnapToolbarComposer.bookmarkSymbol(saved: saved) != self.toolbarComposer.drawnBookmarkSymbol else {
+                return
+            }
+            self.toolbarComposer.refreshBookmarkGlyph(for: id)
         }
         // Every pill showing an author — the page's rows and the bar's —
         // through one binding (#1972).
@@ -527,7 +498,7 @@ final class SnapFeedViewController: UIViewController {
             sideListEdgePull = edgePull
         }
         configureNavigationItem()
-        configureToolbarItems()
+        toolbarComposer.configureToolbarItems()
         configureStatusLabel()
         observeAppLifecycle()
 
@@ -813,7 +784,7 @@ final class SnapFeedViewController: UIViewController {
         // Install through the same resolver the engagement uses, so
         // re-appearing under a text page's engagement keeps its sort.
         applyLeadingNavItem(engaged: commentsEngagedID != nil, hasMedia: false, animated: false)
-        presentToolbar()
+        toolbarComposer.presentToolbar()
         // Re-borrow the bars for whatever page is settled: they are shared,
         // and anything pushed on top has since reset them.
         //
@@ -1176,9 +1147,9 @@ final class SnapFeedViewController: UIViewController {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                 QAWait.until("-save-elsewhere", { [weak self] in self?.activeModel != nil }) { [weak self] in
                     guard let self, let id = self.activeModel?.id else { return }
-                    let before = self.drawnBookmarkSymbol
+                    let before = self.toolbarComposer.drawnBookmarkSymbol
                     let saved = self.bookmarks.toggle(id.rawValue)
-                    print("[qa] -save-elsewhere: \(id.rawValue) saved=\(saved) glyph \(before) -> \(self.drawnBookmarkSymbol)")
+                    print("[qa] -save-elsewhere: \(id.rawValue) saved=\(saved) glyph \(before) -> \(self.toolbarComposer.drawnBookmarkSymbol)")
                 }
             }
         }
@@ -1311,7 +1282,7 @@ final class SnapFeedViewController: UIViewController {
         // Unlike the visibility bookkeeping below, the toolbar choreography
         // runs for every disappearance: it registers on the coordinator when
         // one exists (fade, restore-on-cancel) and hides instantly otherwise.
-        concealToolbar()
+        toolbarComposer.concealToolbar()
         // Leaving while engaged: the native bar never left (keep-and-stack),
         // so there is no footer handoff — only the keyboard must not
         // outlive the screen it was typing into.
@@ -1375,7 +1346,7 @@ final class SnapFeedViewController: UIViewController {
             print(String(format: "[page-play] %.3f screen didDisappear", CACurrentMediaTime()))
         }
         #endif
-        settleToolbarAfterDisappearance()
+        toolbarComposer.settleToolbarAfterDisappearance()
         isOnScreen = false
         refreshVisibility()
         // ⚠️ DISMISSED, THE LIST CLOSES (#1580, the owner's recording): this
@@ -1664,7 +1635,7 @@ final class SnapFeedViewController: UIViewController {
                     self?.commentsPanel(for: id)?.scrollToStart(animated: true)
                 }
                 // A text page's like, in the footer when there is one (#1924).
-                cell.setLikeInFooter(self.footerCarriesTextLike)
+                cell.setLikeInFooter(self.toolbarComposer.footerCarriesTextLike)
                 // The sound bubble's Share (#1999).
                 cell.onRequestShare = { [weak self] in self?.presentShareSheet(for: id) }
             }
@@ -1782,9 +1753,9 @@ final class SnapFeedViewController: UIViewController {
 
     /// The pill's room: the footer's, less the like's on a text post (#1924),
     /// so the run never folds.
-    private func applyAuthorWidthBudget(bar: CGFloat? = nil, sortOnBar: Bool? = nil) {
+    func applyAuthorWidthBudget(bar: CGFloat? = nil, sortOnBar: Bool? = nil) {
         guard let widths = barPillWidths else { return }
-        authorWidthBudget = footerLikeItem == nil ? widths.toolbarAuthor : widths.toolbarAuthorBesideLike
+        authorWidthBudget = toolbarComposer.footerLikeItem == nil ? widths.toolbarAuthor : widths.toolbarAuthorBesideLike
         authorIdentityView.setWidthBudget(authorWidthBudget)
     }
 
@@ -2002,13 +1973,6 @@ final class SnapFeedViewController: UIViewController {
 
     // MARK: - Author pill
 
-    /// A fresh item wearing THE pill, under the slot's one identifier.
-    private func makeAuthorItem() -> UIBarButtonItem {
-        BarItems.container(
-            id: Self.authorItemIdentifier(for: authorIdentityView.shownAuthor?.authorID), view: authorIdentityView
-        )
-    }
-
     /// Wires a pill for this screen: its taps, the theme hook, the width the
     /// bar leaves it and the ground it floats over — everything the screen
     /// told the pill before, so a fresh pill for a new author (#1791) is the
@@ -2101,7 +2065,7 @@ final class SnapFeedViewController: UIViewController {
         pill.setFollowBadge(badge)
         pill.setAuthor(model, pipeline: imagePipeline, animated: false)
         authorIdentityView = pill
-        reinstallAuthorItem(animated: view.window != nil)
+        toolbarComposer.reinstallAuthorItem(animated: view.window != nil)
     }
 
     /// An author that arrived while a transition owned the bar — swapped in
@@ -2126,26 +2090,8 @@ final class SnapFeedViewController: UIViewController {
     /// Whether a bar-item change may animate now: on screen, and not inside a
     /// presentation's transition, whose own bar animation already owns the
     /// items (a morph started under it lands in the flight's first frames).
-    private var canAnimateBarItems: Bool {
+    var canAnimateBarItems: Bool {
         view.window != nil && transitionCoordinator == nil && !flight.isAwaitingAnyFlight
-    }
-
-    /// Mints the author item for the pill shown now and swaps it into the
-    /// toolbar. The SAME pill re-minted keeps its identifier, so the bar swaps
-    /// it in one unseen frame — the landing install. A NEW author's pill has a
-    /// new identifier, and `animated` hands it to UIKit's replacement (#1791).
-    ///
-    /// A fresh item is a fresh custom-view wrapper, measured at hand-over — the
-    /// landing install's second guard, and the cure for a wrapper whose width
-    /// drifted from the pill's (memory `bar-item-wrapper-drift`), should one.
-    private func reinstallAuthorItem(animated: Bool = false) {
-        let previousItem = authorItem
-        authorItem = makeAuthorItem()
-        // The toolbar's leading item (#671).
-        defaultToolbarItems = defaultToolbarItems.map { $0 === previousItem ? authorItem : $0 }
-        guard var items = toolbarItems, let index = items.firstIndex(of: previousItem) else { return }
-        items[index] = authorItem
-        setToolbarItems(items, animated: animated)
     }
 
     /// Set by an appearance, spent once the screen has LANDED: the pill that
@@ -2177,7 +2123,7 @@ final class SnapFeedViewController: UIViewController {
         // animation context it closes in.
         DispatchQueue.main.async { [weak self] in
             guard let self, self.view.window != nil else { return }
-            self.reinstallAuthorItem()
+            self.toolbarComposer.reinstallAuthorItem()
             // A follow relation that arrived during the flight was left for
             // this moment (`drawBarAuthorBadge`): its symbol replaces
             // the badge's now.
@@ -2290,7 +2236,7 @@ final class SnapFeedViewController: UIViewController {
         wireAuthorIdentityView(authorIdentityView)
         // No badge until the graph has answered for an author.
         authorIdentityView.setFollowBadge(.none)
-        authorItem = makeAuthorItem()
+        toolbarComposer.authorItem = toolbarComposer.makeAuthorItem()
         sortItem = BarItems.container(id: "feed.snap.commentTabs", view: commentTabs.tabBar)
         if wallet != nil {
             // Tappable exactly when a sheet is wired: the badge opens the
@@ -2345,189 +2291,12 @@ final class SnapFeedViewController: UIViewController {
         navigationItem.titleView = UIView()
     }
 
-    /// The native bottom toolbar's content, left to right: the attribution
-    /// bubble, the system flexible spacer, the actions bubble (bookmark +
-    /// repost in ONE capsule), a fixed gap, the more bubble. Three *isolated*
-    /// glass bubbles by construction — every item is a custom view, and
-    /// custom views never join a shared item background — each on the 36pt
-    /// bar-bubble invariant the top bar's controls already follow.
-    ///
-    /// Items are installed once; the bookmark glyph follows the active page in
-    /// place, and a new author is a new pill in a new item, which UIKit
-    /// transitions (`showAuthor`, #1791). Every action
-    /// resolves the active post at action time, so none can act on a page the
-    /// user has scrolled past.
-    private func configureToolbarItems() {
-        // REPOST takes the share's place in the capsule and SHARE moved into
-        // ⋯ (#671, `moreMenuActions`). SAVE LEADS, then repost — [🔖 ⇄]
-        // (#865), the order VoiceOver reads.
-        //
-        // ⚠️ Repost has no action yet, and is drawn anyway — the same posture the gallery card's band takes
-        // for the same glyph, and for the same reason: `CreatePost` carries
-        // `parent_id` on the wire and `GalleryPost.isRepost` already reads it,
-        // but `PostComposer` takes no parent, so there is no client path that
-        // publishes one. Pressing it does nothing today.
-        let repost = SnapFooterToolbar.makeRepostItem()
-        repostToolbarItem = repost
-        // ⚠️ THE SOUND TAKES SHARE'S PLACE (#1999, the owner 2026-11-01):
-        // Share moved to the page's column, on the sound bubble's frame, and
-        // the post's sound came here — the active page's cover, turning
-        // while it plays; a tap opens the sound sheet. A stock container
-        // (#1679) whose CONTENT follows the page, so paging never re-lays
-        // out the bar. A text page has no sound: its footer drops it.
-        footerSoundButton.onTap = { [weak self] in self?.presentSoundSheet() }
-        let sound = BarItems.container(id: SnapFooterToolbar.ID.sound, view: footerSoundButton, ownBackground: true)
-        footerSoundItem = sound
-
-        // ONE item set, for every state (#671):
-        //
-        //   [author pill] … [🔖 ⇄] [↪]
-        //
-        // The author pill leads, in the slot the audio capsule had; the sound
-        // lives on the page (`SnapSoundBubbleButton`). Save and repost are
-        // STOCK items side by side, so the bar puts them in one platter; the
-        // separator gives Share its own (#1679). The toolbar is STATE-INVARIANT:
-        // the comments exit is the nav bar's ✕, and the sort selector is the
-        // nav bar's too (`setEngagedChrome`).
-        defaultToolbarItems = [authorItem, footerFlexibleSpace, bookmarkItem, repost, shareSeparator, sound]
-        #if DEBUG
-        // `-no-toolbar`: the upper bound on what trimming the footer can buy.
-        // Measured (push work, 3 runs): the floating bar's machinery costs ~45
-        // ms cold and ~14 ms warm whatever is in it, against ~2 ms for one
-        // platter fewer — the lever is architectural, not the item count.
-        if LaunchArgument.noToolbar.isPassed() {
-            defaultToolbarItems = []
-        }
-        #endif
-        toolbarItems = defaultToolbarItems
-    }
-
-    /// Optimistic local toggle (no backend seam yet — see the set's comment);
-    /// the glyph flips immediately, scoped to the acted-on post.
-    private func toggleBookmark(for id: PostID) {
-        guard !unavailablePostIDs.contains(id) else { return }
-        MemberGates.perform(.save, from: self) { [weak self] in
-            guard let self else { return }
-            // The fill says it; the hand feels it, saving only (#803, #1881).
-            Feedback.toggled(on: bookmarks.toggle(id.rawValue))
-            refreshBookmarkGlyph(for: id)
-        }
-    }
-
-    /// Points the bookmark glyph at `id`'s state — called on toggle, when
-    /// the active page changes, and when the saved fact of the post it draws
-    /// changes anywhere (`savedObservation`).
-    func refreshBookmarkGlyph(for id: PostID) {
-        bookmarkGlyphPostID = id
-        let saved = bookmarks.isSaved(id.rawValue)
-        drawnBookmarkSymbol = Self.bookmarkSymbol(saved: saved)
-        // The label follows the state, like the glyph: "Save" and "Saved" are
-        // different offers, and a reader who cannot see the fill has only this.
-        bookmarkItem.accessibilityLabel = saved ? "Saved" : "Save"
-        bookmarkItem.image = SnapFooterToolbar.saveImage(saved: saved)
-    }
-
-    /// The save glyph (#1128): the star, outline at rest; filled in the
-    /// save gold once saved (`SaveStar`, the one contract, #1190).
-    static func bookmarkSymbol(saved: Bool) -> String {
-        SaveStar.symbol(saved: saved)
-    }
-
     #if DEBUG
     /// The save glyph as drawn: its symbol and its spoken label.
     var debugBookmarkGlyph: (symbol: String, label: String?) {
-        (drawnBookmarkSymbol, bookmarkItem.accessibilityLabel)
+        (toolbarComposer.drawnBookmarkSymbol, toolbarComposer.bookmarkItem.accessibilityLabel)
     }
     #endif
-
-    // MARK: - Toolbar visibility
-
-    /// The toolbar's push/pop choreography — UIKit's, through UIKit's API.
-    ///
-    /// ⚠️ NATIVE CHROME IS UIKIT'S (see `TabBarRevealPolicy`). This used to
-    /// show the bar unanimated and then fade its `alpha` 0 → 1 on the
-    /// transition coordinator, and the grab faded it 1 → 0 with the finger.
-    /// Both are gone: `setToolbarHidden(_:animated:)` is the whole of it, and
-    /// with a transition in flight UIKit animates the change alongside it, the
-    /// way it animates a navigation bar's items.
-    ///
-    /// ⚠️ THE GEOMETRY QUESTION the unanimated show used to answer: the bottom
-    /// safe area has to be final before a zoom present's `layoutIfNeeded`
-    /// bakes the flight replica's insets. UIKit's animated form commits the
-    /// toolbar's frame (and the safe area it implies) as a model value inside
-    /// its own animation block, so it is final before the transition lays
-    /// anything out — `-dock-trace` prints the safe area either side of the
-    /// call to prove it on a device.
-    private func presentToolbar() {
-        guard let nav = navigationController else { return }
-        toolbarHost = nav
-
-        // The stack's toolbar is shown by this screen alone, so configuring
-        // the shared instance here cannot fight another owner. Transparent
-        // for the same reason the navigation bar is: full-bleed media, no
-        // scroll-edge darkening, items carry their own legibility.
-        let appearance = UIToolbarAppearance()
-        appearance.configureWithTransparentBackground()
-        nav.toolbar.standardAppearance = appearance
-        nav.toolbar.compactAppearance = appearance
-        nav.toolbar.scrollEdgeAppearance = appearance
-        nav.toolbar.tintColor = .white
-
-        guard nav.isToolbarHidden else { return }
-        #if DEBUG
-        let safeBefore = view.safeAreaInsets.bottom
-        #endif
-        nav.setToolbarHidden(false, animated: transitionCoordinator != nil)
-        #if DEBUG
-        if LaunchArgument.dockTrace.isPassed() {
-            view.layoutIfNeeded()
-            print("[dock] feed toolbar shown animated=\(transitionCoordinator != nil)"
-                + " safeB \(safeBefore) -> \(view.safeAreaInsets.bottom)"
-                + " alpha=\(nav.toolbar.alpha)")
-        }
-        #endif
-    }
-
-    /// The exit leg: UIKit hides the toolbar, alongside whatever transition is
-    /// carrying the feed away (the percent-driven slide scrubs it with the
-    /// finger; the zoom pop runs it on the transition clock; the free-floating
-    /// grab runs it over the post-release remainder, exactly like the
-    /// navigation bar's own item cross-fade on that leg). A cancelled close
-    /// re-appears this screen, and `presentToolbar` puts it back the same way.
-    private func concealToolbar() {
-        guard let nav = navigationController, !nav.isToolbarHidden else { return }
-        // Hand the bar over intact when the incoming screen is a toolbar
-        // owner too (the profile's filter tray): it adopts the shared
-        // instance and reconfigures it in its own viewWillAppear — hiding it
-        // here would fight that presentation, the flash this rule replaces.
-        if successorUsesToolbar(on: nav) { return }
-        // Instant paths (tab switch) have no transition to ride.
-        nav.setToolbarHidden(true, animated: transitionCoordinator != nil)
-    }
-
-    /// Deterministic backstop for the toolbar's hide, in the one callback
-    /// that fires only for *completed* disappearances. If the hide above was
-    /// undone or never ran, settle it here so the screen underneath can never
-    /// inherit a visible empty toolbar. Unanimated: nothing of this screen is
-    /// on display any more.
-    private func settleToolbarAfterDisappearance() {
-        guard let nav = toolbarHost, !nav.isToolbarHidden,
-              nav.topViewController !== self else { return }
-        // Same handover rule as concealToolbar: a successor that shows its
-        // own toolbar owns the bar now — settling it hidden would strand
-        // that screen's chrome.
-        if successorUsesToolbar(on: nav) { return }
-        nav.setToolbarHidden(true, animated: false)
-    }
-
-    /// Whether the navigation stack's current top — the screen this feed is
-    /// disappearing underneath or popping back to — presents toolbar items of
-    /// its own. `topViewController` is already the successor by the time the
-    /// disappearance callbacks run.
-    private func successorUsesToolbar(on nav: UINavigationController) -> Bool {
-        guard let top = nav.topViewController, top !== self else { return false }
-        return top.toolbarItems?.isEmpty == false
-    }
 
     /// One item == one full screen; a plain vertical layout, paged by
     /// `isPagingEnabled` against the (inset-free) bounds.
@@ -2806,7 +2575,7 @@ final class SnapFeedViewController: UIViewController {
     /// verdict's role here (`commit`, `error`), visuals on the cell that
     /// asked. A nil wallet (unwired host) drops the
     /// tap silently; the mock store is always wired in the app itself.
-    private func performBoost(on id: PostID, spend: WalletStakeSpend, feedbackCell: SnapFeedCell?) {
+    func performBoost(on id: PostID, spend: WalletStakeSpend, feedbackCell: SnapFeedCell?) {
         MemberGates.perform(.like, from: self) { [weak self, weak feedbackCell] in
             self?.commitBoost(on: id, spend: spend, feedbackCell: feedbackCell)
         }
@@ -2980,128 +2749,22 @@ final class SnapFeedViewController: UIViewController {
         // On screen now; a page already dequeued but not yet shown is told
         // at `willDisplay`, every later one at configure.
         snapCell(for: id)?.setPostUnavailable(true)
-        if activeModel?.id == id { applyToolbarPostActions(for: id) }
+        if activeModel?.id == id { toolbarComposer.applyToolbarPostActions(for: id) }
         soundPlayback.refreshAudibleSurface()
-    }
-
-    /// The toolbar's post actions — save, repost, ⋯ — for the page in front:
-    /// disabled on a post no one may act on (#1409), never removed, so the
-    /// bar keeps its shape from page to page.
-    private func applyToolbarPostActions(for id: PostID) {
-        let available = !unavailablePostIDs.contains(id)
-        bookmarkItem.isEnabled = available
-        repostToolbarItem?.isEnabled = available
-        footerSoundItem?.isEnabled = available
-        footerSoundButton.isUserInteractionEnabled = available
-        // A text page's like (#1924): none for a post that turned unavailable.
-        refreshFooterLike(for: modelsByID[id], animated: true)
-    }
-
-    private var repostToolbarItem: UIBarButtonItem?
-    /// The footer's trailing item: the active page's sound (#1999).
-    private var footerSoundItem: UIBarButtonItem?
-    /// What it draws: the record, as the page's bubble drew it, on the bar's
-    /// 36 pt bubble.
-    private let footerSoundButton: SnapSoundBubbleButton = {
-        let button = SnapSoundBubbleButton()
-        button.isHidden = false
-        button.accessibilityIdentifier = SnapFooterToolbar.ID.sound
-        button.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            button.widthAnchor.constraint(equalToConstant: SnapFooterToolbar.bubbleSide),
-            button.heightAnchor.constraint(equalToConstant: SnapFooterToolbar.bubbleSide),
-        ])
-        return button
-    }()
-
-    /// The footer's sound for `model`, in place (#1999): its cover, or the
-    /// greyed note for a media post with none (#683).
-    private func refreshFooterSound(for model: FeedItemDisplayModel) {
-        footerSoundButton.setFace(soundFace(for: model), pipeline: imagePipeline)
-    }
-
-    // MARK: - A text page's footer like (#1924)
-
-    /// Whether a text page's like stands in this screen's footer (#1924, the
-    /// owner): `[author] [♥ count] [☆ ⇄] [↪]`, and no pill floating over the
-    /// composer, so a short comment list rests on it. A screen with no
-    /// footer (the For You root, media only) keeps the pill.
-    private var footerCarriesTextLike: Bool { !defaultToolbarItems.isEmpty }
-
-    /// The footer's like while a text page is active; nil on a media page,
-    /// whose like is its column's pill.
-    private var footerLikeItem: UIBarButtonItem?
-    /// What that item draws, so an unchanged face mints nothing.
-    private var footerLikeFace: FooterLikeFace?
-
-    private struct FooterLikeFace: Equatable {
-        let id: PostID
-        let count: Int64?
-        let spent: Int
-    }
-
-    /// Points the footer like at `model` — minted for a text page, gone for
-    /// a media one. A new count or a new face is a new item under the same
-    /// identifier, set animated (R3): the bar morphs it.
-    private func refreshFooterLike(for model: FeedItemDisplayModel?, animated: Bool) {
-        guard footerCarriesTextLike else { return }
-        let face = model.flatMap { model -> FooterLikeFace? in
-            guard model.mediaURL == nil, !unavailablePostIDs.contains(model.id) else { return nil }
-            return FooterLikeFace(
-                id: model.id, count: viewModel.visibleLikeCount(for: model), spent: boost.boostTotal(on: model.id) ?? 0
-            )
-        }
-        guard face != footerLikeFace else { return }
-        let presenceChanged = (face == nil) != (footerLikeFace == nil)
-        footerLikeFace = face
-        footerLikeItem = face.map { face in
-            SnapFooterToolbar.makeLikeItem(count: face.count, spent: face.spent) { [weak self] in
-                self?.likeFromFooter()
-            }
-        }
-        if presenceChanged { applyAuthorWidthBudget() }
-        setToolbarItems(footerToolbarItems(), animated: animated && canAnimateBarItems)
-    }
-
-    /// The footer as it stands. On a text page the like follows the author,
-    /// in a bubble of its own, and repost moves into the share sheet — as on
-    /// Shots (`shareSheetActions`) — or the run folds into `•••` on an
-    /// iPhone SE (the owner, 2026-10-30). ⚠️ Share leaves it for the slot
-    /// right of the comment field (#1999): `[author] [♥ 382] [☆]`.
-    private func footerToolbarItems() -> [UIBarButtonItem] {
-        var items = defaultToolbarItems
-        guard let like = footerLikeItem,
-              let flexible = items.firstIndex(where: { $0 === footerFlexibleSpace }) else { return items }
-        items.removeAll { $0 === repostToolbarItem || $0 === footerSoundItem || $0 === shareSeparator }
-        items.insert(contentsOf: [like, footerLikeSeparator], at: flexible + 1)
-        return items
-    }
-
-    /// The footer's spacer and the like's separator, kept so the like goes
-    /// in its place.
-    private let footerFlexibleSpace = UIBarButtonItem.flexibleSpace()
-    private let footerLikeSeparator = BarItems.separator()
-    /// Share's own bubble, kept so a text page's footer drops it with Share.
-    private let shareSeparator = BarItems.separator()
-
-    /// A tap on the footer's heart: the page's pill's tap, on the active
-    /// text page.
-    private func likeFromFooter() {
-        guard let id = footerLikeFace?.id else { return }
-        performBoost(on: id, spend: .likes(WalletStore.Policy.defaultStakeAmount), feedbackCell: snapCell(for: id))
     }
 
     #if DEBUG
     /// The toolbar's post actions, for a test: save, repost, the sound.
     var debugToolbarPostActions: [UIBarButtonItem] {
-        [bookmarkItem, repostToolbarItem, footerSoundItem].compactMap { $0 }
+        let toolbar = toolbarComposer
+        return [toolbar.bookmarkItem, toolbar.repostToolbarItem, toolbar.footerSoundItem].compactMap { $0 }
     }
 
     /// The footer's like, nil off a text page (#1924).
-    var debugFooterLikeItem: UIBarButtonItem? { footerLikeItem }
+    var debugFooterLikeItem: UIBarButtonItem? { toolbarComposer.footerLikeItem }
 
     /// A tap on the footer's like, through the screen's own path.
-    func debugTapFooterLike() { likeFromFooter() }
+    func debugTapFooterLike() { toolbarComposer.likeFromFooter() }
 
     /// A like staked straight through the wallet, as a tap's spend lands —
     /// without the toast, whose one undo slot is shared by the whole process.
@@ -3116,7 +2779,7 @@ final class SnapFeedViewController: UIViewController {
 
     #endif
 
-    private func snapCell(for id: PostID) -> SnapFeedCell? {
+    func snapCell(for id: PostID) -> SnapFeedCell? {
         guard let indexPath = dataSource.indexPath(for: id) else { return nil }
         return collectionView.cellForItem(at: indexPath) as? SnapFeedCell
     }
@@ -3171,7 +2834,7 @@ final class SnapFeedViewController: UIViewController {
             cell.setSoundFace(soundFace(for: model))
             cell.setSlotSharesPost(slotSharesPost(model), holdArmsShare: slotHoldArmsShare(model))
         }
-        if let model = activeModel { refreshFooterSound(for: model) }
+        if let model = activeModel { toolbarComposer.refreshFooterSound(for: model) }
         applyRailSlot(to: commentsContentVC)
         applyRailSlot(to: previewRestingVC)
     }
@@ -3206,7 +2869,7 @@ final class SnapFeedViewController: UIViewController {
         // A text page's like stands in the footer (#1924): its column is the
         // sound alone too.
         detail.setActionColumnHostedByPage(
-            hostedByPage, foldsIntoSlot: model.mediaURL != nil || footerCarriesTextLike
+            hostedByPage, foldsIntoSlot: model.mediaURL != nil || toolbarComposer.footerCarriesTextLike
         )
         // ⚠️ THE SLOT'S ONE DECISION (#1999), for every page:
         //   - a pushed page, text or media: Share, the toolbar's old action;
@@ -3263,7 +2926,7 @@ final class SnapFeedViewController: UIViewController {
     }
 
     private func refreshVisibleBoostControls() {
-        refreshFooterLike(for: activeModel, animated: true)
+        toolbarComposer.refreshFooterLike(for: activeModel, animated: true)
         guard boost.wallet != nil else { return }
         for indexPath in collectionView.indexPathsForVisibleItems {
             guard orderedIDs.indices.contains(indexPath.item),
@@ -3613,7 +3276,7 @@ final class SnapFeedViewController: UIViewController {
         // waited for the settle, a beat after the author beside it. Drawn
         // first, so the author's swap re-installs into the bar it set.
         if let owner, orderedIDs.indices.contains(owner), let model = modelsByID[orderedIDs[owner]] {
-            refreshFooterLike(for: model, animated: true)
+            toolbarComposer.refreshFooterLike(for: model, animated: true)
             showAuthor(model)
         }
     }
@@ -3821,13 +3484,13 @@ final class SnapFeedViewController: UIViewController {
         // come from the theme above.
         authorOverMedia = overMedia
         authorIdentityView.setOverMedia(overMedia)
-        refreshBookmarkGlyph(for: model.id)
-        applyToolbarPostActions(for: model.id)
+        toolbarComposer.refreshBookmarkGlyph(for: model.id)
+        toolbarComposer.applyToolbarPostActions(for: model.id)
         // The page's sound bubble and the panel's rail slot (#671).
         activeSnapCell?.setSoundFace(soundFace(for: model))
         activeSnapCell?.setSlotSharesPost(slotSharesPost(model), holdArmsShare: slotHoldArmsShare(model))
         // The footer's sound follows the page in place (#1999).
-        refreshFooterSound(for: model)
+        toolbarComposer.refreshFooterSound(for: model)
         applyRailSlot(to: commentsContentVC)
     }
 
@@ -3842,7 +3505,7 @@ final class SnapFeedViewController: UIViewController {
     // MARK: - Sound sheet
 
     /// The attribution's tap: the sound the page is set to, in a sheet.
-    private func presentSoundSheet() {
+    func presentSoundSheet() {
         guard presentedViewController == nil, let model = activeModel,
               let inputs = soundState.sheetInputs(for: model)
         else { return }
@@ -4204,7 +3867,7 @@ final class SnapFeedViewController: UIViewController {
     private weak var styledBottomEdgeBlur: BottomEdgeBlurView?
 
     /// The settled page's model — what the toolbar's share/more act on.
-    private var activeModel: FeedItemDisplayModel? {
+    var activeModel: FeedItemDisplayModel? {
         guard let index = lifecycle.activeIndex,
               orderedIDs.indices.contains(index) else { return nil }
         return modelsByID[orderedIDs[index]]
@@ -4276,7 +3939,7 @@ final class SnapFeedViewController: UIViewController {
         // Repost on a text page, whose footer gave its place to the like
         // (#1924); a media post's toolbar carries it (#1728, the owner).
         var actions: [ShareSheetAction] = []
-        if footerLikeFace?.id == id {
+        if toolbarComposer.footerLikeFace?.id == id {
             actions.append(ShareSheetAction(title: "Repost", symbol: PostActionSymbol.repost, dismissesSheet: false) {
                 [weak self] in self?.repostRequested()
             })
@@ -6062,7 +5725,7 @@ extension SnapFeedViewController: SnapSoundPlaybackHost {
 
     func drawSoundSpinning(_ playing: Bool) {
         activeSnapCell?.setSoundSpinning(playing)
-        footerSoundButton.setSpinning(playing)
+        toolbarComposer.footerSoundButton.setSpinning(playing)
         (commentsContentVC as? PostDetailViewController)?.setRailSoundSpinning(playing)
         (previewRestingVC as? PostDetailViewController)?.setRailSoundSpinning(playing)
     }
@@ -6113,6 +5776,14 @@ extension SnapFeedViewController: SnapCommentsCoordinatorHost {
 // MARK: - The hero destination's host (#2387)
 
 extension SnapFeedViewController: SnapZoomDestinationHost {}
+
+// MARK: - The toolbar's host (#2387)
+
+extension SnapFeedViewController: SnapToolbarComposerHost {
+    /// The toolbar's items as built (`SnapToolbarComposer`), read by the
+    /// bars' widths and the comments' teardown.
+    var defaultToolbarItems: [UIBarButtonItem] { toolbarComposer.defaultToolbarItems }
+}
 
 /// The comments' state, read where the screen reads it — the bars, the page
 /// drive, the drag router, the sound's spin (`SnapCommentsCoordinator`).

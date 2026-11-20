@@ -65,7 +65,7 @@ struct SnapAuthorPillItemTests {
 
         #expect(second !== first, "one item for two authors: UIKit has nothing to transition")
         #expect(secondPill !== firstPill)
-        #expect(second.identifier == SnapFeedViewController.authorItemIdentifier(for: ProfileID("prof-2")))
+        #expect(second.identifier == SnapToolbarComposer.authorItemIdentifier(for: ProfileID("prof-2")))
         #expect(second.identifier != first.identifier)
         #expect(Self.labels(in: secondPill).contains("Grace Hopper"))
         #expect(Self.labels(in: firstPill).contains("Ada Lovelace"), "the leaving pill still shows who it was")
@@ -237,7 +237,7 @@ struct SnapAuthorPillItemTests {
         feed.showAuthor(Self.model(id: "p2", author: "Grace Hopper", authorID: "prof-2", meta: "@grace · 1d"))
         let open = try #require(Self.authorItem(feed))
         #expect(open !== before)
-        #expect(open.identifier == SnapFeedViewController.authorItemIdentifier(for: ProfileID("prof-2")))
+        #expect(open.identifier == SnapToolbarComposer.authorItemIdentifier(for: ProfileID("prof-2")))
         #expect(Self.labels(in: try #require(open.customView)).contains("Grace Hopper"))
     }
 
@@ -266,7 +266,7 @@ struct SnapAuthorPillItemTests {
         // Same pill, under its author's identifier now; not animated, so the
         // swap is one item to the bar, unseen.
         #expect(landed.customView === rode.customView)
-        #expect(landed.identifier == SnapFeedViewController.authorItemIdentifier(for: ProfileID("prof-1")))
+        #expect(landed.identifier == SnapToolbarComposer.authorItemIdentifier(for: ProfileID("prof-1")))
         #expect(Self.labels(in: try #require(landed.customView)).contains("Ada Lovelace"))
     }
 

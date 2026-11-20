@@ -147,7 +147,7 @@ final class TextPostComposerViewController: UIViewController {
             guard let self, let id = self.publishedModel?.id, change.contains(id) else { return }
             // Its counts move here too: only a changed save re-draws.
             let saved = self.bookmarks.isSaved(id.rawValue)
-            guard SnapFeedViewController.bookmarkSymbol(saved: saved) != self.drawnBookmarkSymbol else { return }
+            guard SnapToolbarComposer.bookmarkSymbol(saved: saved) != self.drawnBookmarkSymbol else { return }
             self.refreshBookmarkGlyph()
         }
     }
@@ -914,7 +914,7 @@ final class TextPostComposerViewController: UIViewController {
     private func refreshBookmarkGlyph() {
         guard let id = publishedModel?.id else { return }
         let saved = bookmarks.isSaved(id.rawValue)
-        drawnBookmarkSymbol = SnapFeedViewController.bookmarkSymbol(saved: saved)
+        drawnBookmarkSymbol = SnapToolbarComposer.bookmarkSymbol(saved: saved)
         bookmarkItem.accessibilityLabel = saved ? "Saved" : "Save"
         bookmarkItem.image = SnapFooterToolbar.saveImage(saved: saved)
     }
