@@ -15,14 +15,14 @@ struct FlightMediaStartTests {
 
     @Test("A flight that named its post starts that post's page, and no other")
     func aNamedPostIsTheOnlyTarget() {
-        #expect(SnapFeedViewController.isFlightEntryPage(carried, carried: carried, entry: other))
-        #expect(!SnapFeedViewController.isFlightEntryPage(other, carried: carried, entry: other))
+        #expect(SnapZoomDestination.isFlightEntryPage(carried, carried: carried, entry: other))
+        #expect(!SnapZoomDestination.isFlightEntryPage(other, carried: carried, entry: other))
     }
 
     @Test("A flight that took off before the feed had posts starts the entry page once it exists")
     func aColdOpenStartsTheEntryPage() {
-        #expect(SnapFeedViewController.isFlightEntryPage(carried, carried: nil, entry: carried))
-        #expect(!SnapFeedViewController.isFlightEntryPage(other, carried: nil, entry: carried))
-        #expect(!SnapFeedViewController.isFlightEntryPage(carried, carried: nil, entry: nil))
+        #expect(SnapZoomDestination.isFlightEntryPage(carried, carried: nil, entry: carried))
+        #expect(!SnapZoomDestination.isFlightEntryPage(other, carried: nil, entry: carried))
+        #expect(!SnapZoomDestination.isFlightEntryPage(carried, carried: nil, entry: nil))
     }
 }
