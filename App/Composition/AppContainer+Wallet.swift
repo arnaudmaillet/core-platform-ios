@@ -119,12 +119,20 @@ extension AppContainer {
     func makeWalletBadge(
         presenter: UIViewController?, apply: @escaping (UIBarButtonItem) -> Void
     ) -> AnyObject {
-        WalletBadgeInstaller(
+        let installer = WalletBadgeInstaller(
             wallet: walletStore,
             presenter: presenter,
             makeSheet: { [unowned self] in self.makeWalletSheet() },
             apply: apply
         )
+        #if DEBUG
+        // `-open-wallet` (QA, `WalletSheetUITests`): the Profile tab's badge
+        // is the one root badge left since For You left the bar (#2455), so
+        // it answers the hook. It presents only once its presenter is in the
+        // window: pair `-open-wallet` with `-select-tab 2`.
+        installer.presentSheetIfAskedAtLaunch()
+        #endif
+        return installer
     }
 
     func makeLikeStaking() -> WalletLikeStaking {

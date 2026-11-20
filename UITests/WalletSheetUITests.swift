@@ -4,10 +4,10 @@ import XCTest
 /// heights, opening expanded, three doors under the balance — the Shop,
 /// Settled and Activity — the Claim under them, and the active stakes below.
 ///
-/// ⚠️ **THE SHEET LIVES IN THE APP TARGET**, which has no unit-test bundle:
-/// `WalletSheetViewController` is the shell's (it joins the wallet store, the
-/// Feed feature's posts and the Maps feature's shop). So what the sheet SHOWS
-/// is asked here, of the running app — the Shop list's own geometry and edge
+/// ⚠️ **THE SHEET JOINS THREE FEATURES**: `WalletSheetViewController` (the
+/// Wallet package since #2385) joins the wallet store, the Feed feature's
+/// posts and the Maps feature's shop. So what the sheet SHOWS is asked here,
+/// of the running app — the Shop list's own geometry and edge
 /// effect are unit-tested in `MapsTests/CountryShopViewControllerTests`.
 final class WalletSheetUITests: XCTestCase {
 
@@ -19,7 +19,10 @@ final class WalletSheetUITests: XCTestCase {
 
     private func launch(_ extra: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["-mock-auto-login", "-open-wallet", "-wallet-how-it-works-seen"] + extra
+        // `-select-tab 2`: the Profile tab's badge answers `-open-wallet`,
+        // the one root badge left since For You left the bar (#2455).
+        app.launchArguments = ["-mock-auto-login", "-select-tab", "2", "-open-wallet", "-wallet-how-it-works-seen"]
+            + extra
         app.launch()
         return app
     }

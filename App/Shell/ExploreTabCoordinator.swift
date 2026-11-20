@@ -107,8 +107,8 @@ final class ExploreTabCoordinator: TabCoordinator {
             self?.applyBarItems()
         }
         installBarItems()
-        // No `-open-wallet` here any more: the map wears no badge (#2336), and
-        // For You presents the sheet at launch.
+        // No `-open-wallet` here any more: the map wears no badge (#2336); the
+        // Profile tab's badge presents the sheet at launch (#2455).
     }
 
     /// The header for the viewer now: a member's `[bell] … [search]`, a
