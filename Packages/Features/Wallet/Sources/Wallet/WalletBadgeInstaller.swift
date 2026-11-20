@@ -196,12 +196,14 @@ public final class WalletBadgeInstaller: NSObject {
     /// the one whose presenter is in the window answers: the hook lived on
     /// Explore's badge alone, and once the app launched on Shots (#1765) it
     /// presented from a tab nobody saw — `WalletSheetUITests` found no sheet.
-    /// Since #2336 the map wears no badge, so For You is the one that asks.
+    /// Since #2336 the map wears no badge, and since For You left the bar
+    /// (#2455) the Profile tab's badge is the one that asks: launch with
+    /// `-select-tab 2` so its presenter is on screen.
     ///
     /// After `-switch-tab`, which selects its tab at 2.5 s, it waits for the
     /// tab to be on screen; and it opens one sheet per process, whichever
     /// root answers first.
-    func presentSheetIfAskedAtLaunch() {
+    public func presentSheetIfAskedAtLaunch() {
         let arguments = ProcessInfo.processInfo.arguments
         guard LaunchArgument.openWallet.isPassed(in: arguments) else { return }
         let delay: TimeInterval = LaunchArgument.switchTab.isPassed(in: arguments) ? 3.5 : 1.5
