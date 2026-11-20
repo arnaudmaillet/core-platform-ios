@@ -107,8 +107,35 @@ final class GuestModeUITests: XCTestCase {
         let bell = app.navigationBars.buttons["Notifications"]
         XCTAssertTrue(bell.waitForExistence(timeout: 60), "the member's Explore never showed the bell")
         XCTAssertFalse(balance(in: app).exists, "the member's map wears the balance (#2336)")
-        XCTAssertTrue(bell.waitForNonExistence(timeout: 90), "signing out left Explore's bell")
+        // ⚠️ WAIT FOR THE SETTLED GUEST BAR, NOT FOR ONE ABSENCE OF THE BELL.
+        // The sign-out re-dresses the tab bar (`setTabs(animated:)`) and swaps
+        // Explore's leading item in the same turn, both animated: one snapshot
+        // in between lacked the bell, the next had it again, still fading out,
+        // and the absence check below read it (hero-uitests run 44723558388,
+        // PR #2510). The guest's markers in the tab bar first — the "Sign in"
+        // bubble in, Profile out — then a fresh wait for the bell to go, and
+        // a short window it has to stay gone through.
+        XCTAssertTrue(bar.buttons["Sign in"].waitForExistence(timeout: 90),
+                      "signing out did not bring the guest's Sign in bubble")
+        XCTAssertTrue(bar.buttons["Profile"].waitForNonExistence(timeout: Self.step),
+                      "signing out left Profile in the bar")
+        XCTAssertTrue(bell.waitForNonExistence(timeout: Self.step), "signing out left Explore's bell")
+        assertStaysAbsent(bell, for: 3, "Explore's bell came back after signing out")
         assertNoMemberItems(in: app, on: "Explore after signing out")
+    }
+
+    /// `element` is absent now and through the next `duration` seconds:
+    /// one `waitForNonExistence` passes on a single snapshot, which an
+    /// animation between two bars can provide.
+    private func assertStaysAbsent(
+        _ element: XCUIElement, for duration: TimeInterval, _ message: String,
+        file: StaticString = #filePath, line: UInt = #line
+    ) {
+        let deadline = Date().addingTimeInterval(duration)
+        repeat {
+            XCTAssertFalse(element.exists, message, file: file, line: line)
+            RunLoop.current.run(until: Date().addingTimeInterval(0.25))
+        } while Date() < deadline
     }
 
     /// A pushed profile: no balance for a guest (#1146).
