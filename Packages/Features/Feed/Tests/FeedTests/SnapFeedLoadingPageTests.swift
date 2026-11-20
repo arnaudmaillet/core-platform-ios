@@ -38,7 +38,7 @@ struct SnapFeedLoadingPageTests {
 
     private func feed(_ spy: PanelSpy) -> SnapFeedViewController {
         let controller = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: MuteFeed(), unavailablePosts: UnavailablePosts()),
+            viewModel: FeedViewModel(repository: MuteFeed(), unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents())),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             makeCommentsPanelContent: { id in
                 spy.asked.append(id)

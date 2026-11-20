@@ -32,7 +32,7 @@ struct GridHandoffActivationTests {
             style: .discover,
             videoPlayback: VideoPlaybackController(source: FixedVideoSource()),
             bookmarks: PostBookmarkStore(scope: StorageScope()),
-            withheldPosts: UnavailablePosts()
+            withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents())
         )
     }
 

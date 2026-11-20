@@ -76,7 +76,7 @@ struct SnapViewportPlaybackSpecTests {
 
         init(_ models: [FeedItemDisplayModel]) {
             feed = SnapFeedViewController(
-                viewModel: FeedViewModel(repository: MuteProvider(), unavailablePosts: UnavailablePosts()),
+                viewModel: FeedViewModel(repository: MuteProvider(), unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents())),
                 imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
                 makeCommentsPanelContent: { _ in UIViewController() },
                 bookmarks: PostBookmarkStore(scope: StorageScope()),

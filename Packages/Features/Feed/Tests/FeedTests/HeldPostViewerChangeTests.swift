@@ -56,7 +56,7 @@ struct HeldPostViewerChangeTests {
             postDrafts: PostDraftStore(scope: StorageScope()), entities: entities,
             bookmarks: PostBookmarkStore(scope: StorageScope()),
             viewHistory: PostViewHistoryStore(scope: StorageScope()),
-            unavailablePosts: UnavailablePosts(),
+            unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents()),
             savedSounds: SavedSoundStore(scope: StorageScope()),
             viewerProfile: { nil }
         ))

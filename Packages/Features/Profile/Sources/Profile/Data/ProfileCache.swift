@@ -57,8 +57,9 @@ public final class ProfileCache {
     /// "+" while no card for that person was alive.
     private var requestSubscription: FollowGraphSubscription?
     /// Every relationship here is the VIEWER's ("you follow them"): once the
-    /// viewer is someone else, none of it is true any more.
-    private var viewerObserver: NSObjectProtocol?
+    /// viewer is someone else, none of it is true any more (#2376: the app's
+    /// `ViewerEvents`).
+    private var viewerSubscription: ViewerEventSubscription?
     /// The device tier; nil keeps this cache in memory only (tests, previews).
     private let disk: ProfileDiskTier?
     /// Ids the device was asked for and did not have, so a miss reads it once.
@@ -71,21 +72,26 @@ public final class ProfileCache {
     /// Whether the device was asked which profile is the viewer's own.
     private var askedDiskForCurrentUser = false
 
-    /// `center` is where viewer changes are heard: the default one; a test
-    /// hands its own, since posting on the shared one reaches every suite.
+    /// `viewerEvents` is where viewer changes are heard (`observe(_:)`): the
+    /// app's channel, or a test's own; nil hears none until one is handed in.
     /// `store` is the device tier (#893); nil keeps the cache in memory.
     /// `now` is the clock a revisit's freshness is judged by.
     public init(
-        limit: Int = 16, center: NotificationCenter = .default, store: LocalStore? = nil,
+        limit: Int = 16, viewerEvents: ViewerEvents? = nil, store: LocalStore? = nil,
         now: @escaping () -> Date = Date.init
     ) {
         self.limit = limit
         self.now = now
         disk = store.map(ProfileDiskTier.init(store:))
-        viewerObserver = center.addObserver(
-            forName: .viewerDidChange, object: nil, queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.removeAll() }
+        observe(viewerEvents)
+    }
+
+    /// Forgets everything on each viewer change of `events`, from now on.
+    /// Idempotent: the first channel handed in is the one heard.
+    public func observe(_ events: ViewerEvents?) {
+        guard viewerSubscription == nil, let events else { return }
+        viewerSubscription = events.onViewerChange { [weak self] in
+            self?.removeAll()
         }
     }
 

@@ -250,7 +250,7 @@ struct HeroPushHardeningFeedTests {
             postDrafts: PostDraftStore(scope: StorageScope()),
             bookmarks: PostBookmarkStore(scope: StorageScope()),
             viewHistory: PostViewHistoryStore(scope: StorageScope()),
-            unavailablePosts: UnavailablePosts(),
+            unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents()),
             savedSounds: SavedSoundStore(scope: StorageScope()),
             viewerProfile: { nil }
         ))
@@ -293,7 +293,7 @@ struct HeroPushHardeningFeedTests {
             postDrafts: PostDraftStore(scope: StorageScope()),
             bookmarks: PostBookmarkStore(scope: StorageScope()),
             viewHistory: PostViewHistoryStore(scope: StorageScope()),
-            unavailablePosts: UnavailablePosts(),
+            unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents()),
             savedSounds: SavedSoundStore(scope: StorageScope()),
             viewerProfile: { nil }
         ))

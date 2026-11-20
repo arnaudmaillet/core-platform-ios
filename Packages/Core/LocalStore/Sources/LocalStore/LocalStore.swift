@@ -82,7 +82,7 @@ public final class LocalStore: ManagedCache {
     ///   - directory: where the file lives; `defaultDirectory` in the app,
     ///     a temporary folder in tests.
     ///   - viewer: who is using the app now, asked on every read and write
-    ///     (the app maps `StorageScope.shared.owner`). Must be cheap and
+    ///     (the app maps its one `StorageScope`'s owner). Must be cheap and
     ///     must not call back into the store.
     ///   - limits: until the coordinator sets its own, the Automatic budget.
     public convenience init(

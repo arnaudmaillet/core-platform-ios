@@ -62,7 +62,7 @@ struct ShelfHostsTests {
         let surface = PostSetSurfaceViewController(
             style: .discover,
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
-            videoPlayback: nil, bookmarks: PostBookmarkStore(scope: StorageScope()), withheldPosts: UnavailablePosts(),
+            videoPlayback: nil, bookmarks: PostBookmarkStore(scope: StorageScope()), withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents()),
             hydrate: { ids in ids.compactMap { byID[$0] } }
         )
         surface.onLeadRowTitleTapped = {}
@@ -82,7 +82,7 @@ struct ShelfHostsTests {
         let surface = PostSetSurfaceViewController(
             style: .discover,
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
-            videoPlayback: nil, bookmarks: PostBookmarkStore(scope: StorageScope()), withheldPosts: UnavailablePosts(),
+            videoPlayback: nil, bookmarks: PostBookmarkStore(scope: StorageScope()), withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents()),
             hydrate: { ids in ids.compactMap { byID[$0] } }
         )
         var pushed = 0

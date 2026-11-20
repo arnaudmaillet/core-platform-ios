@@ -47,10 +47,10 @@ struct SearchViewerChangeTests {
     }
 
     @Test func aViewerChangeReadsTheRowsAgainForTheNewViewer() async {
-        let center = NotificationCenter()
+        let viewerEvents = ViewerEvents()
         let metadata = Metadata()
         let viewModel = SearchViewModel(
-            repository: Provider(), metadata: metadata, suggestDebounce: .zero, notificationCenter: center
+            repository: Provider(), metadata: metadata, suggestDebounce: .zero, viewerEvents: viewerEvents
         )
         var phases: [SearchViewModel.Phase] = []
         viewModel.onPhaseChange = { phases.append($0) }
@@ -63,21 +63,23 @@ struct SearchViewerChangeTests {
         // The switch: the metadata repository already answers for B.
         metadata.viewer.withLock { $0 = "B" }
         phases = []
-        center.post(name: .viewerDidChange, object: nil)
+        viewerEvents.publishViewerChange()
 
         #expect(await settle { results(phases)?.isEmpty == true },
                 "the pushed screen kept A's Following row for B: \(phases)")
     }
 
     @Test func theModelStopsHearingViewerChangesWhenItGoes() async {
-        let center = NotificationCenter()
+        let viewerEvents = ViewerEvents()
         weak var released: SearchViewModel?
         do {
-            let viewModel = SearchViewModel(repository: Provider(), notificationCenter: center)
+            let viewModel = SearchViewModel(repository: Provider(), viewerEvents: viewerEvents)
+            #expect(viewerEvents.debugObservationCount == 1, "guard: the model hears viewer changes")
             released = viewModel
         }
-        #expect(released == nil, "the observer kept the model alive")
-        // Nothing left to call: posting must not reach a freed model.
-        center.post(name: .viewerDidChange, object: nil)
+        #expect(released == nil, "the subscription kept the model alive")
+        #expect(viewerEvents.debugObservationCount == 0, "the subscription outlived its model")
+        // Nothing left to call: publishing must not reach a freed model.
+        viewerEvents.publishViewerChange()
     }
 }

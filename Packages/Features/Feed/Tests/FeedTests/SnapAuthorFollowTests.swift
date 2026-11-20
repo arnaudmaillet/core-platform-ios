@@ -38,7 +38,7 @@ struct SnapAuthorFollowTests {
         events: FollowGraphEvents? = nil
     ) -> SnapFeedViewController {
         let feed = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: FollowFeedProvider(), unavailablePosts: UnavailablePosts()),
+            viewModel: FeedViewModel(repository: FollowFeedProvider(), unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents())),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             socialGraph: graph,
             followRelations: readable ? graph : nil,
@@ -205,7 +205,7 @@ struct SnapAuthorFollowTests {
     @Test func aFollowTapReplacesTheBadgeAndNothingElse() async throws {
         let graph = GatedFollowGraph()
         let feed = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: FollowFeedProvider(), unavailablePosts: UnavailablePosts()),
+            viewModel: FeedViewModel(repository: FollowFeedProvider(), unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents())),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             socialGraph: graph, followRelations: graph,
             bookmarks: PostBookmarkStore(scope: StorageScope()),
@@ -250,7 +250,7 @@ struct SnapAuthorFollowTests {
         graph: GatedFollowGraph, relation: FollowRelation
     ) async throws -> (SnapFeedViewController, SnapAuthorIdentityView, UIWindow) {
         let feed = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: FollowFeedProvider(), unavailablePosts: UnavailablePosts()),
+            viewModel: FeedViewModel(repository: FollowFeedProvider(), unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents())),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             socialGraph: graph, followRelations: graph,
             bookmarks: PostBookmarkStore(scope: StorageScope()),
@@ -541,7 +541,7 @@ struct SnapAuthorFollowTests {
 struct SnapAttributionItemTests {
     private static func feed() -> SnapFeedViewController {
         let feed = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: FollowFeedProvider(), unavailablePosts: UnavailablePosts()),
+            viewModel: FeedViewModel(repository: FollowFeedProvider(), unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents())),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             bookmarks: PostBookmarkStore(scope: StorageScope()),
             savedSounds: SavedSoundStore(scope: StorageScope()),

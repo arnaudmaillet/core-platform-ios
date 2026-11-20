@@ -177,7 +177,7 @@ struct SnapSideListTests {
 
     private func feed(sideList: Bool) -> SnapFeedViewController {
         let controller = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: SideListProvider(), unavailablePosts: UnavailablePosts()),
+            viewModel: FeedViewModel(repository: SideListProvider(), unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents())),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             reporting: SideListReporter(),
             bookmarks: PostBookmarkStore(scope: StorageScope()),
@@ -227,7 +227,7 @@ struct SnapSideListTests {
         #expect(feed.shareSheetActions(for: PostID("p1")).map(\.title) == ["Not interested", "Report"])
 
         let unfiled = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: SideListProvider(), unavailablePosts: UnavailablePosts()),
+            viewModel: FeedViewModel(repository: SideListProvider(), unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents())),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             bookmarks: PostBookmarkStore(scope: StorageScope()),
             savedSounds: SavedSoundStore(scope: StorageScope()),
@@ -240,7 +240,7 @@ struct SnapSideListTests {
     /// On by default (#1473): a vertical feed installs it with no flag.
     @Test func everyVerticalFeedInstallsItByDefault() {
         let controller = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: SideListProvider(), unavailablePosts: UnavailablePosts()),
+            viewModel: FeedViewModel(repository: SideListProvider(), unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents())),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             reporting: SideListReporter(),
             bookmarks: PostBookmarkStore(scope: StorageScope()),
@@ -465,7 +465,7 @@ struct SnapSideListTests {
             viewModel: FeedViewModel(
                 repository: PostsProvider(entries: ids.map {
                     carousels.contains($0) ? Self.carouselEntry($0) : Self.entry($0, media: !text.contains($0))
-                }), commentsProvider: comments, router: router, unavailablePosts: UnavailablePosts()
+                }), commentsProvider: comments, router: router, unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents())
             ),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             reporting: SideListReporter(),
@@ -1022,7 +1022,7 @@ struct SnapSwipeChainTests {
 @MainActor
 struct FeedViewModelSideListSessionTests {
     private func loaded(_ ids: [String]) async -> (FeedViewModel, () -> [String]) {
-        let viewModel = FeedViewModel(repository: SideListProvider(), unavailablePosts: UnavailablePosts())
+        let viewModel = FeedViewModel(repository: SideListProvider(), unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents()))
         var shown: [String] = []
         var renders = 0
         viewModel.onStateChange = { state in

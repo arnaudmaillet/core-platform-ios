@@ -82,7 +82,9 @@ extension AppContainer {
             // A post restored from Recently Deleted is back in its author's
             // gallery, and may come back to every feed and For You (#887, #896).
             onGalleryRestored: { [unowned self] author in self.profileFeature.invalidateGallery(of: author) },
-            onPostRestored: { [unowned self] id in self.entityStore.restorePost(id) }
+            onPostRestored: { [unowned self] id in self.entityStore.restorePost(id) },
+            // The profile section follows a switch made anywhere (#2376).
+            viewerEvents: viewerEvents
         ))
     }
 }

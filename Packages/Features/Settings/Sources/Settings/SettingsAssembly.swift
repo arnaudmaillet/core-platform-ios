@@ -89,6 +89,10 @@ public struct SettingsAssembly: SettingsFeatureBuilding {
         public var onGalleryRestored: (ProfileID) -> Void
         /// …and the app's feeds and For You let it in again (#896).
         public var onPostRestored: @MainActor (PostID) -> Void
+        /// The app's viewer channel (#2376): Settings' profile section
+        /// follows a switch made on any surface. Nil: it reads the active
+        /// profile once.
+        public var viewerEvents: ViewerEvents?
 
         public init(
             profile: any ProfileSettingsManaging,
@@ -110,7 +114,8 @@ public struct SettingsAssembly: SettingsFeatureBuilding {
             makeSwitcher: @escaping @MainActor () -> (any ProfileSwitcherPresenting)?,
             makePasskeyAuthorizer: @escaping @MainActor () -> any PasskeyAuthorizing,
             onGalleryRestored: @escaping (ProfileID) -> Void,
-            onPostRestored: @escaping @MainActor (PostID) -> Void
+            onPostRestored: @escaping @MainActor (PostID) -> Void,
+            viewerEvents: ViewerEvents?
         ) {
             self.profile = profile
             self.account = account
@@ -132,6 +137,7 @@ public struct SettingsAssembly: SettingsFeatureBuilding {
             self.makePasskeyAuthorizer = makePasskeyAuthorizer
             self.onGalleryRestored = onGalleryRestored
             self.onPostRestored = onPostRestored
+            self.viewerEvents = viewerEvents
         }
     }
 
@@ -154,7 +160,8 @@ public struct SettingsAssembly: SettingsFeatureBuilding {
             switching: dependencies.switching,
             switcher: dependencies.makeSwitcher(),
             makeDestination: { section in makeDestination(section, onLogout: onLogout) },
-            onLogout: onLogout
+            onLogout: onLogout,
+            viewerEvents: dependencies.viewerEvents
         )
     }
 
@@ -181,7 +188,8 @@ public struct SettingsAssembly: SettingsFeatureBuilding {
                 }
             },
             onLogout: {},
-            onSignIn: onSignIn
+            onSignIn: onSignIn,
+            viewerEvents: dependencies.viewerEvents
         )
     }
 

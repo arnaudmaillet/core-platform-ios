@@ -15,7 +15,7 @@ import UIKit
 /// section header and footer is the whole difference between a privacy
 /// setting the viewer understands and one they believe applies to the profile
 /// they switched to a minute ago. The profile header follows the switcher
-/// through `.activeProfileDidChange`, whichever surface made the switch.
+/// through the app's `ViewerEvents`, whichever surface made the switch.
 ///
 /// A section whose rows are not built yet pushes `SettingsComingSoonViewController`
 /// (the factory returns nil for it), never a screen of controls that do nothing.
@@ -44,6 +44,11 @@ package final class SettingsViewController: UIViewController {
     /// Set for a guest (guest mode): only what works without an account — the
     /// app-wide section — and "Log in or sign up" where Log Out would be.
     private let onSignIn: (() -> Void)?
+    /// The app's viewer channel (#2376): a switch made anywhere re-reads the
+    /// profile section. Nil (tests): none is heard.
+    private let viewerEvents: ViewerEvents?
+    /// The switch subscription, for this screen's lifetime.
+    private var activeProfileSubscription: ViewerEventSubscription?
 
     /// "@handle" of the active profile once known; the header reads "Profile"
     /// until then rather than guessing.
@@ -59,8 +64,10 @@ package final class SettingsViewController: UIViewController {
         switcher: (any ProfileSwitcherPresenting)?,
         makeDestination: @escaping (SettingsSection) -> UIViewController?,
         onLogout: @escaping () -> Void,
-        onSignIn: (() -> Void)? = nil
+        onSignIn: (() -> Void)? = nil,
+        viewerEvents: ViewerEvents? = nil
     ) {
+        self.viewerEvents = viewerEvents
         self.switching = switching
         self.switcher = switcher
         self.makeDestination = makeDestination
@@ -76,10 +83,6 @@ package final class SettingsViewController: UIViewController {
     @available(*, unavailable)
     package required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    deinit {
-        NotificationCenter.default.removeObserver(self)
-    }
-
     package override func viewDidLoad() {
         super.viewDidLoad()
         title = "Settings"
@@ -94,10 +97,9 @@ package final class SettingsViewController: UIViewController {
         configureCollectionView()
         configureDataSource()
         applySnapshot()
-        NotificationCenter.default.addObserver(
-            self, selector: #selector(activeProfileDidChange(_:)),
-            name: .activeProfileDidChange, object: nil
-        )
+        activeProfileSubscription = viewerEvents?.onActiveProfileChange { [weak self] _ in
+            self?.loadProfileScope()
+        }
         loadProfileScope()
     }
 
@@ -293,10 +295,6 @@ package final class SettingsViewController: UIViewController {
         var snapshot = dataSource.snapshot()
         snapshot.reloadSections(snapshot.sectionIdentifiers)
         dataSource.apply(snapshot, animatingDifferences: false)
-    }
-
-    @objc private func activeProfileDidChange(_ note: Notification) {
-        loadProfileScope()
     }
 
     /// The app's one switcher (#2034), from the row. Switch-only: creating a

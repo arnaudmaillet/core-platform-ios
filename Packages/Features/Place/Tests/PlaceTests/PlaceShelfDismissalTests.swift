@@ -39,7 +39,7 @@ struct PlaceShelfDismissalTests {
             following: nil, wallet: nil, loadPosts: { posts },
             presence: SectionPresenceStore(scope: StorageScope()),
             bookmarks: PostBookmarkStore(scope: StorageScope()),
-            withheldPosts: UnavailablePosts(), openPost: { _, _, _ in }
+            withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents()), openPost: { _, _, _ in }
         )
         // Pushed, as the map pushes it: a root screen has nothing to close to.
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))

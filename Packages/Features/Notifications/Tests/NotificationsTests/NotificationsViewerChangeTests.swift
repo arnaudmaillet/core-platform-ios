@@ -45,15 +45,15 @@ struct NotificationsViewerChangeTests {
         }
     }
 
-    /// The block observer goes with the model (#978): its holder is released
-    /// with it, and unregisters from the center as it goes.
+    /// The viewer subscription goes with the model (#978): it is released
+    /// with it, and ends as it goes.
     @Test func theViewerObserverIsRemovedWithTheModel() async {
-        let center = NotificationCenter()
+        let viewerEvents = ViewerEvents()
         weak var model: NotificationsViewModel?
         weak var observation: AnyObject?
         do {
             let viewModel = NotificationsViewModel(repository: SwitchableProvider())
-            viewModel.notificationCenter = center
+            viewModel.viewerEvents = viewerEvents
             viewModel.viewDidLoad()
             model = viewModel
             observation = viewModel.viewerObservation
@@ -65,14 +65,15 @@ struct NotificationsViewerChangeTests {
         }
         #expect(model == nil, "the model was never released")
         #expect(observation == nil, "the viewer observer outlived its model")
-        center.post(name: .viewerDidChange, object: nil)
+        #expect(viewerEvents.debugObservationCount == 0)
+        viewerEvents.publishViewerChange()
     }
 
     @Test func aViewerChangeLoadsTheNewViewersRows() async {
         let provider = SwitchableProvider()
-        let center = NotificationCenter()
+        let viewerEvents = ViewerEvents()
         let viewModel = NotificationsViewModel(repository: provider)
-        viewModel.notificationCenter = center
+        viewModel.viewerEvents = viewerEvents
         var phases: [NotificationsViewModel.Phase] = []
         viewModel.onPhaseChange = { phases.append($0) }
         viewModel.viewDidLoad()
@@ -81,7 +82,7 @@ struct NotificationsViewerChangeTests {
 
         await provider.become("B")
         phases = []
-        center.post(name: .viewerDidChange, object: nil)
+        viewerEvents.publishViewerChange()
 
         #expect(phases.first == .loading, "the previous viewer's rows stayed up while B's loaded")
         await settle { rowIDs(phases.last) == ["B-1"] }
@@ -92,9 +93,9 @@ struct NotificationsViewerChangeTests {
     /// failed refresh keeps content, so the content has to go first.
     @Test func aFailedReloadAfterAChangeShowsTheFailureNotTheOldRows() async {
         let provider = SwitchableProvider()
-        let center = NotificationCenter()
+        let viewerEvents = ViewerEvents()
         let viewModel = NotificationsViewModel(repository: provider)
-        viewModel.notificationCenter = center
+        viewModel.viewerEvents = viewerEvents
         var last: NotificationsViewModel.Phase?
         viewModel.onPhaseChange = { last = $0 }
         viewModel.viewDidLoad()
@@ -102,7 +103,7 @@ struct NotificationsViewerChangeTests {
         #expect(rowIDs(last) == ["A-1"])
 
         await provider.become("B", failing: true)
-        center.post(name: .viewerDidChange, object: nil)
+        viewerEvents.publishViewerChange()
         await settle { if case .failed = last { true } else { false } }
 
         guard case .failed = last else {

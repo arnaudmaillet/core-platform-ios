@@ -57,7 +57,7 @@ struct SnapPageRenderSpecTests {
     private func feed(_ models: [FeedItemDisplayModel]) -> (SnapFeedViewController, UIWindow) {
         let panels = Panels()
         let controller = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: QuietProvider(), unavailablePosts: UnavailablePosts()),
+            viewModel: FeedViewModel(repository: QuietProvider(), unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents())),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             makeCommentsPanelContent: { id in panels.make(id) },
             bookmarks: PostBookmarkStore(scope: StorageScope()),
@@ -298,7 +298,7 @@ struct SnapPageRenderSpecTests {
     /// toolbar item actually RESOLVES with, wherever UIKit put it.
     @Test func aMediaPagesToolbarItemsResolveDarkOnALightDevice() throws {
         let controller = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: QuietProvider(), unavailablePosts: UnavailablePosts()),
+            viewModel: FeedViewModel(repository: QuietProvider(), unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents())),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             bookmarks: PostBookmarkStore(scope: StorageScope()),
             savedSounds: SavedSoundStore(scope: StorageScope()),

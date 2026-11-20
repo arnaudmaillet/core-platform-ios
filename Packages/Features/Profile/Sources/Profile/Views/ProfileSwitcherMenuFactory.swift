@@ -17,6 +17,9 @@ import UIKit
 package final class ProfileSwitcherMenuFactory: ProfileSwitcherPresenting {
     private let switching: any ProfileSwitching
     private let imagePipeline: ImagePipeline
+    /// Where a switch is published (#2376): the app's viewer channel. Nil
+    /// (tests): the switch is made and told to no one.
+    private let viewerEvents: ViewerEvents?
     /// One profile's unread notifications (#2034), nil when it can't be read.
     private let unreadCount: (@MainActor @Sendable (ProfileID) async -> Int?)?
     /// Every profile's, as last read.
@@ -34,8 +37,10 @@ package final class ProfileSwitcherMenuFactory: ProfileSwitcherPresenting {
     package init(
         switching: any ProfileSwitching,
         imagePipeline: ImagePipeline,
-        unreadCount: (@MainActor @Sendable (ProfileID) async -> Int?)? = nil
+        unreadCount: (@MainActor @Sendable (ProfileID) async -> Int?)? = nil,
+        viewerEvents: ViewerEvents? = nil
     ) {
+        self.viewerEvents = viewerEvents
         self.switching = switching
         self.imagePipeline = imagePipeline
         self.unreadCount = unreadCount
@@ -172,11 +177,7 @@ package final class ProfileSwitcherMenuFactory: ProfileSwitcherPresenting {
             // The id rides along so observers can render that profile from
             // cache on this very turn, rather than waiting to be told who it
             // is by a round trip.
-            NotificationCenter.default.post(
-                name: .activeProfileDidChange,
-                object: nil,
-                userInfo: [ActiveProfileChange.profileIDKey: id]
-            )
+            viewerEvents?.publishActiveProfileChange(id)
             onSwitch()
         }
     }

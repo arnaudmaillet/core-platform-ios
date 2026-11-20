@@ -62,6 +62,7 @@ extension AppContainer {
             wallet: walletStore,
             unlocks: unlocks,
             teen: teenProtections,
+            viewerEvents: viewerEvents,
             activity: CountryAccessService.mockActivity(in: mockBackend),
             isMember: { [unowned self] in self.memberGate.isMember },
             locator: currentCountry,

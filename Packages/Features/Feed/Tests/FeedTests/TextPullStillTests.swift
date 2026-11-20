@@ -36,7 +36,7 @@ struct TextPullStillTests {
 
     private func makeFeed(_ models: [FeedItemDisplayModel]) -> SnapFeedViewController {
         let feed = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: Posts(), unavailablePosts: UnavailablePosts()),
+            viewModel: FeedViewModel(repository: Posts(), unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents())),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             bookmarks: PostBookmarkStore(scope: StorageScope()),
             savedSounds: SavedSoundStore(scope: StorageScope()),

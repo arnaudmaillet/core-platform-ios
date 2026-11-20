@@ -12,7 +12,7 @@ import UIKit
 struct EngagedDismissalVisibilityTests {
     private func feed() -> SnapFeedViewController {
         let controller = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: QuietFeedProvider(), unavailablePosts: UnavailablePosts()),
+            viewModel: FeedViewModel(repository: QuietFeedProvider(), unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents())),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             bookmarks: PostBookmarkStore(scope: StorageScope()),
             savedSounds: SavedSoundStore(scope: StorageScope()),

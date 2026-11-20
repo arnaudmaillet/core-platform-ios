@@ -33,7 +33,7 @@ struct PostGridPageContractTests {
         let page: any PostGridPage = PostGridPageView(
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: PostGridPageView.Style(style),
             bookmarks: PostBookmarkStore(scope: StorageScope()),
-            withheldPosts: UnavailablePosts()
+            withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents())
         )
         page.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
         page.setCorpusComplete(true)

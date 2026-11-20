@@ -26,7 +26,7 @@ struct GridLandingGateTests {
         let page = PostGridPageView(
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .grid,
             bookmarks: PostBookmarkStore(scope: StorageScope()),
-            withheldPosts: UnavailablePosts()
+            withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents())
         )
         page.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
         page.render(.content(posts))
@@ -85,7 +85,7 @@ struct GridRepeatedRoundTripTests {
         let page = PostGridPageView(
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .grid,
             bookmarks: PostBookmarkStore(scope: StorageScope()),
-            withheldPosts: UnavailablePosts()
+            withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents())
         )
         page.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
         page.render(.content((0..<count).map {
@@ -180,7 +180,7 @@ struct GridHiddenCellRecyclingTests {
         let page = PostGridPageView(
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .grid,
             bookmarks: PostBookmarkStore(scope: StorageScope()),
-            withheldPosts: UnavailablePosts()
+            withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents())
         )
         page.frame = CGRect(x: 0, y: 0, width: 393, height: 500)
         page.render(.content((0..<count).map {

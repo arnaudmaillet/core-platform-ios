@@ -18,7 +18,7 @@ import UIKit
 struct SnapAuthorPillItemTests {
     private static func feed() -> (nav: UINavigationController, feed: SnapFeedViewController) {
         let feed = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: PillFeedProvider(), unavailablePosts: UnavailablePosts()),
+            viewModel: FeedViewModel(repository: PillFeedProvider(), unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents())),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             bookmarks: PostBookmarkStore(scope: StorageScope()),
             savedSounds: SavedSoundStore(scope: StorageScope()),

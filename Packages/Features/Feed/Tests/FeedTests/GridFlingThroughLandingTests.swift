@@ -43,7 +43,7 @@ struct GridFlingThroughLandingTests {
     @Test func aPageLandingLeavesAMovingListAlone() throws {
         let page = PostGridPageView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .discover,
         bookmarks: PostBookmarkStore(scope: StorageScope()),
-        withheldPosts: UnavailablePosts())
+        withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents()))
         page.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
         page.render(.content(corpus(20)))
         page.layoutIfNeeded()

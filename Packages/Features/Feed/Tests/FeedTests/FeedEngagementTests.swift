@@ -135,7 +135,7 @@ struct FeedEngagementTests {
         let viewModel = FeedViewModel(
             repository: SinglePageProvider(entries: [makeEntry("post-a", likeCount: 10), makeEntry("post-b", likeCount: 5)]),
             engagementProvider: engagement,
-            realtime: realtime, unavailablePosts: UnavailablePosts()
+            realtime: realtime, unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents())
         )
         await withCheckedContinuation { continuation in
             viewModel.onStateChange = { state in
@@ -248,7 +248,7 @@ struct FeedEntityStoreTests {
             repository: SinglePageProvider(entries: entries),
             engagementProvider: engagement,
             realtime: realtime,
-            entities: entities, unavailablePosts: UnavailablePosts()
+            entities: entities, unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents())
         )
         await withCheckedContinuation { continuation in
             viewModel.onStateChange = { state in
@@ -329,7 +329,7 @@ struct FeedEntityStoreTests {
         first.like(for: PostID("post-a"))
         let cached = FeedViewModel(
             repository: CachedPageProvider(entries: [makeEntry("post-a", likeCount: 10)]),
-            entities: entities, unavailablePosts: UnavailablePosts()
+            entities: entities, unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents())
         )
         await withCheckedContinuation { continuation in
             cached.onStateChange = { state in

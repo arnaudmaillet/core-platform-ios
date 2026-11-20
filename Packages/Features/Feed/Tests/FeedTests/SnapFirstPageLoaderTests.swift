@@ -13,7 +13,7 @@ import UIKit
 struct SnapFirstPageLoaderTests {
     private func feed(_ provider: any FeedProviding) -> SnapFeedViewController {
         let controller = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: provider, unavailablePosts: UnavailablePosts()),
+            viewModel: FeedViewModel(repository: provider, unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents())),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             reporting: SilentReporter(),
             bookmarks: PostBookmarkStore(scope: StorageScope()),

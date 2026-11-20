@@ -48,7 +48,7 @@ struct PostSetSurfaceLandingTests {
                 imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
                 videoPlayback: nil,
                 bookmarks: PostBookmarkStore(scope: StorageScope()),
-                withheldPosts: UnavailablePosts(),
+                withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents()),
                 hydrate: { ids in ids.compactMap { byID[$0] } }
             )
             screen.addChild(surface)

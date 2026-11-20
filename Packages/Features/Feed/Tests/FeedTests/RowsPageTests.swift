@@ -48,7 +48,7 @@ struct RowsPageTests {
     private func page() -> (any PostGridPage, PostGridPageView) {
         let grid = PostGridPageView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: PostGridPageView.Style(.rows),
         bookmarks: PostBookmarkStore(scope: StorageScope()),
-        withheldPosts: UnavailablePosts())
+        withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents()))
         grid.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
         grid.setCorpusComplete(true)
         return (grid, grid)

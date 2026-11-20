@@ -219,17 +219,17 @@ struct NotificationsLocalCacheTests {
         let network = PagedDrawer(total: 20)
         try await firstLaunch(network, pages: 1)
         let (_, cache) = try launch()
-        let center = NotificationCenter()
+        let viewerEvents = ViewerEvents()
         let viewModel = NotificationsViewModel(repository: network)
         viewModel.deviceCache = cache
         viewModel.connectivity = ConnectivityMonitor(offlineGrace: 0)
-        viewModel.notificationCenter = center
+        viewModel.viewerEvents = viewerEvents
         let shown = Shown()
         viewModel.onPhaseChange = { shown.phase = $0 }
         viewModel.viewDidLoad()
         #expect(shown.count == 20)
         await network.goOffline(true)
-        center.post(name: .viewerDidChange, object: nil)
+        viewerEvents.publishViewerChange()
         #expect(shown.ids.isEmpty)
         #expect(await settle {
             if case .failed = shown.phase { return true }

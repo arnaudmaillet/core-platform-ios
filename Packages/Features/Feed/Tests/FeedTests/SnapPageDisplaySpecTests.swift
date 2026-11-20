@@ -67,7 +67,7 @@ struct SnapPageDisplaySpecTests {
         _ models: [FeedItemDisplayModel], panels: Panels
     ) -> SnapFeedViewController {
         let controller = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: SilentProvider(), unavailablePosts: UnavailablePosts()),
+            viewModel: FeedViewModel(repository: SilentProvider(), unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents())),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             makeCommentsPanelContent: { id in panels.make(id) },
             bookmarks: PostBookmarkStore(scope: StorageScope()),

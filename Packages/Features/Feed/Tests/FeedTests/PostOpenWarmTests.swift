@@ -234,7 +234,7 @@ struct SeedKeepsTheFirstCueTests {
             )
         }
         let viewModel = FeedViewModel(repository: NoFeed(), commentsProvider: WarmedComments(sentences),
-        unavailablePosts: UnavailablePosts())
+        unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents()))
         let id = PostID("post-0042")
 
         let seed = viewModel.commentStreams(for: id)

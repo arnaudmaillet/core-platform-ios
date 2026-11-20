@@ -101,7 +101,7 @@ struct SnapGonePostTests {
         _ window: [PostID]
     ) async throws -> (Server, FeedViewModel, UnavailablePosts, SnapFeedViewController) {
         let server = Server()
-        let unavailable = UnavailablePosts()
+        let unavailable = UnavailablePosts(viewerEvents: ViewerEvents())
         let viewModel = FeedViewModel(
             repository: FixedPostsFeedProvider(base: server, ids: window), unavailablePosts: unavailable
         )
@@ -158,7 +158,7 @@ struct SnapGonePostTests {
     @Test func aNewPostAtTheIndexOnShowIsAPageChange() async throws {
         let server = Server()
         server.window = ids("a", "b", "c")
-        let viewModel = FeedViewModel(repository: server, unavailablePosts: UnavailablePosts())
+        let viewModel = FeedViewModel(repository: server, unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents()))
         let feed = makeFeed(viewModel)
         #expect(await eventually { feed.orderedIDs == ids("a", "b", "c") }, "the feed never loaded")
         try settle(feed, on: 0)
@@ -183,7 +183,7 @@ struct SnapGonePostTests {
     @Test func aPostLearntUnavailableAheadLeavesThePages() async throws {
         let server = Server()
         server.window = ids("a", "b", "c")
-        let unavailable = UnavailablePosts()
+        let unavailable = UnavailablePosts(viewerEvents: ViewerEvents())
         let viewModel = FeedViewModel(repository: server, unavailablePosts: unavailable)
         let feed = makeFeed(viewModel)
         #expect(await eventually { feed.orderedIDs == ids("a", "b", "c") }, "the feed never loaded")
@@ -203,7 +203,7 @@ struct SnapGonePostTests {
     /// A page with no model is never a text page: unknown is not text.
     @Test func aMissingModelIsNeverAText() throws {
         let server = Server()
-        let feed = makeFeed(FeedViewModel(repository: server, unavailablePosts: UnavailablePosts()))
+        let feed = makeFeed(FeedViewModel(repository: server, unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents())))
         #expect(!feed.isTextPage(PostID("nowhere")))
         #expect(!feed.isTextPage(nil))
         withExtendedLifetime(feed) {}

@@ -16,7 +16,7 @@ import UIKit
 struct SnapPushedPageChromeTests {
     private func feed() -> SnapFeedViewController {
         let controller = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: EmptyFeedProvider(), unavailablePosts: UnavailablePosts()),
+            viewModel: FeedViewModel(repository: EmptyFeedProvider(), unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents())),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             bookmarks: PostBookmarkStore(scope: StorageScope()),
             savedSounds: SavedSoundStore(scope: StorageScope()),

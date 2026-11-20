@@ -131,7 +131,7 @@ struct FailedFirstLoadRetryTests {
 
     @Test func aFailedTimelineOffersTryAgainWhichReloadsIt() async throws {
         let feed = FlakyFeed()
-        let viewModel = FeedViewModel(repository: feed, unavailablePosts: UnavailablePosts())
+        let viewModel = FeedViewModel(repository: feed, unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents()))
         let screen = SnapFeedViewController(
             viewModel: viewModel,
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),

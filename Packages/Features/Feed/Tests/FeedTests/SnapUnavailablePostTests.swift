@@ -85,7 +85,7 @@ struct SnapUnavailablePostTests {
         _ models: [FeedItemDisplayModel], panels: Panels, wallet: WalletStore? = nil
     ) -> SnapFeedViewController {
         let controller = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: panels.posts, unavailablePosts: UnavailablePosts()),
+            viewModel: FeedViewModel(repository: panels.posts, unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents())),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             makeCommentsPanelContent: { id in panels.make(id) },
             wallet: wallet,

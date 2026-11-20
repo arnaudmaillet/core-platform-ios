@@ -22,7 +22,7 @@ struct MaskedRevealGroundTests {
 
     private func feed(_ models: [FeedItemDisplayModel]) -> SnapFeedViewController {
         let controller = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: QuietFeed(), unavailablePosts: UnavailablePosts()),
+            viewModel: FeedViewModel(repository: QuietFeed(), unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents())),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             makeCommentsPanelContent: { _ in
                 let panel = UIViewController()

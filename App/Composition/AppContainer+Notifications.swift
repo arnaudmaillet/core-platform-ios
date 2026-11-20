@@ -91,7 +91,8 @@ extension AppContainer {
             // backend #971.
             allowsClearAll: notificationsClear != nil,
             // A post notification opens the vertical feed above the drawer (#1577).
-            openPost: { [unowned self] opening in NotificationPostFeed.open(opening, feed: self.feedFeature) }
+            openPost: { [unowned self] opening in NotificationPostFeed.open(opening, feed: self.feedFeature) },
+            viewerEvents: viewerEvents
         )
     }
 }

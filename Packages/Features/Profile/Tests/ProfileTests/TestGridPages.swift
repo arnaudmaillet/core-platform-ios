@@ -1,3 +1,4 @@
+import CoreModels
 import CoreStorage
 import FeedInterface
 import Foundation
@@ -26,7 +27,7 @@ enum TestGridPages {
             PostGridPages.make(
                 style: style, imagePipeline: pipeline, videoPlayback: videoPlayback,
                 bookmarks: savesPosts ? PostBookmarkStore(scope: StorageScope()) : nil,
-                withheldPosts: UnavailablePosts()
+                withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents())
             )
         }
     }

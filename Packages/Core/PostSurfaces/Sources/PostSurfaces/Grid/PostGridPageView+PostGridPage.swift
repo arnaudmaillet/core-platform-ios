@@ -47,19 +47,12 @@ extension PostGridPageView: PostGridPage {
 
     /// Hears the record once a host has shown something: a post learnt
     /// unavailable that this page holds leaves it at once.
-    private func observeWithheldPosts() {
-        guard withheldObservation.isEmpty else { return }
-        withheldObservation.add(NotificationCenter.default.addObserver(
-            forName: UnavailablePosts.didChange, object: nil, queue: .main
-        ) { [weak self] note in
-            let ids = note.userInfo?[UnavailablePosts.idsKey] as? Set<PostID> ?? []
-            let sender = note.object.map { ObjectIdentifier($0 as AnyObject) }
-            MainActor.assumeIsolated {
-                guard let self, sender == ObjectIdentifier(self.withheldPosts),
-                      let state = self.hostedState, Self.holds(state, anyOf: ids) else { return }
-                self.show(state)
-            }
-        })
+    func observeWithheldPosts() {
+        guard withheldObservation == nil else { return }
+        withheldObservation = withheldPosts.onChange { [weak self] ids in
+            guard let self, let state = self.hostedState, Self.holds(state, anyOf: ids) else { return }
+            self.show(state)
+        }
     }
 
     private static func holds(_ state: PostGridPageState, anyOf ids: Set<PostID>) -> Bool {

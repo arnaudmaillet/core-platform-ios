@@ -49,7 +49,7 @@ struct SnapCommentsDayBarTests {
 
     private func feed(_ ids: [String], panels: Panels) -> SnapFeedViewController {
         let controller = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: DayMuteProvider(), unavailablePosts: UnavailablePosts()),
+            viewModel: FeedViewModel(repository: DayMuteProvider(), unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents())),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             makeCommentsPanelContent: { id in panels.make(id) },
             bookmarks: PostBookmarkStore(scope: StorageScope()),

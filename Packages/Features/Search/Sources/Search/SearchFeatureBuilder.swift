@@ -36,6 +36,9 @@ public struct SearchFeatureBuilder: SearchFeatureBuilding {
     /// Whether the Suggested section had rows last time (#1773): the app's
     /// one store (#2376).
     private let presence: SectionPresenceStore
+    /// The app's viewer channel (#2376): a search screen asks again for
+    /// whoever is here now.
+    private let viewerEvents: ViewerEvents
 
     /// - Parameter localStore: the device store (#893): the resting screen's
     ///   trending people open on their last list at a cold start. Nil keeps
@@ -53,9 +56,11 @@ public struct SearchFeatureBuilder: SearchFeatureBuilding {
         showsBalance: @escaping @MainActor () -> Bool = { true },
         localStore: LocalStore? = nil,
         followEvents: FollowGraphEvents? = nil,
-        presence: SectionPresenceStore
+        presence: SectionPresenceStore,
+        viewerEvents: ViewerEvents
     ) {
         self.presence = presence
+        self.viewerEvents = viewerEvents
         self.repository = repository
         self.recentSearches = recentSearches
         self.explore = explore
@@ -79,7 +84,8 @@ public struct SearchFeatureBuilder: SearchFeatureBuilding {
                 explore: explore,
                 metadata: metadata,
                 localCache: localCache,
-                followEvents: followEvents
+                followEvents: followEvents,
+                viewerEvents: viewerEvents
             ),
             imagePipeline: imagePipeline,
             presence: presence,

@@ -232,6 +232,11 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     /// True between an account switch and the incoming profile landing. While
     /// set, the skeleton is withheld and updates cross-dissolve.
     private var isSwitchingProfile = false
+    /// The app's viewer channel (#2376), whose profile switches this screen
+    /// follows, whichever switcher made them. Nil (tests): none is heard.
+    private let viewerEvents: ViewerEvents?
+    /// The switch subscription, for this screen's lifetime: it ends with it.
+    private var activeProfileSubscription: ViewerEventSubscription?
 
     private enum Metrics {
         /// Between the identity block and the selector.
@@ -280,8 +285,10 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         identityStub: ProfileIdentityStub? = nil,
         trayPlacement: ProfileTrayPlacement = .navigationToolbar,
         channels: ProfileChannelsViewModel? = nil,
-        makeChannelCreation: (@MainActor () -> UIViewController?)? = nil
+        makeChannelCreation: (@MainActor () -> UIViewController?)? = nil,
+        viewerEvents: ViewerEvents? = nil
     ) {
+        self.viewerEvents = viewerEvents
         self.trayPlacement = trayPlacement
         self.channels = channels
         self.makeChannelCreation = makeChannelCreation
@@ -391,12 +398,10 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     override func viewDidLoad() {
         // The hero page's layout, bar dress and travel (#1655).
         super.viewDidLoad()
-        // Selector-based, so UIKit drops it with this object — no token to hold
-        // and no `deinit` to remember.
-        NotificationCenter.default.addObserver(
-            self, selector: #selector(activeProfileDidChange(_:)),
-            name: .activeProfileDidChange, object: nil
-        )
+        // Kept on this screen, so it ends with it — no `deinit` to remember.
+        activeProfileSubscription = viewerEvents?.onActiveProfileChange { [weak self] id in
+            self?.activeProfileSwitched(to: id)
+        }
         configureNavigationBar()
         // Compose the bar before first layout so the push animation carries a
         // finished toolbar (the title and action slot fill in when the data
@@ -1758,7 +1763,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         // ⚠️ THE SWITCHER IS THE NAME'S, NOT THE BAR'S (the owner,
         // 2026-11-08): the own profile's name wears a chevron, and a tap on
         // it opens the app's one switcher (#2034), anchored to the name. The
-        // switch itself is picked up through `.activeProfileDidChange`, so
+        // switch itself is picked up through `viewerEvents`, so
         // this screen refreshes whichever switcher was used.
         if switcherFactory != nil {
             headerView.onTitleTapped = { [weak self] in self?.presentSwitcherFromName() }
@@ -1872,7 +1877,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     /// switcher item. Re-run after a switch so the active marker updates.
     ///
     /// `onSwitch` is empty on purpose. Refreshing is driven by
-    /// `.activeProfileDidChange` instead, so it happens no matter WHICH switcher
+    /// `viewerEvents` instead, so it happens no matter WHICH switcher
     /// was used — this screen's own, or the Profile tab's long-press menu, which
     /// is built by the shell and cannot call back into here.
     private func reloadSwitcherMenu() {
@@ -1886,7 +1891,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     /// viewer changed, so the follow state and relationship button this screen
     /// shows are now answers to a different question, not just the identity at
     /// the top.
-    @objc private func activeProfileDidChange(_ notification: Notification) {
+    private func activeProfileSwitched(to profile: ProfileID) {
         // Cache-first: a profile already seen renders on THIS turn, and the
         // fetch behind it becomes a silent revalidation. A miss has nothing
         // truthful to show for the new identity, so it redacts rather than
@@ -1898,7 +1903,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         // no phase at all, and hanging the reset off one that may never come
         // is what stranded this screen in a skeleton.
         isSwitchingProfile = true
-        if !viewModel.revalidate(after: ActiveProfileChange.profileID(from: notification)) {
+        if !viewModel.revalidate(after: profile) {
             // Nothing known about the new identity: bones are the honest state,
             // and their un-redact reveal is the animation — no stagger over it.
             isSwitchingProfile = false

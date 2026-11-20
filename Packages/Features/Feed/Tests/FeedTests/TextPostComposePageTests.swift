@@ -146,7 +146,7 @@ struct TextPostComposePageTests {
             entities: entities,
             bookmarks: PostBookmarkStore(scope: StorageScope()),
             viewHistory: PostViewHistoryStore(scope: StorageScope()),
-            unavailablePosts: UnavailablePosts(),
+            unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents()),
             savedSounds: SavedSoundStore(scope: StorageScope()),
             viewerProfile: { nil }
         )).makeTextPostScreen(publisher: publisher, bookmarks: pile, recordsVoice: recordsVoice)
@@ -495,7 +495,7 @@ struct TextPostComposePageTests {
                 entities: entities,
                 bookmarks: PostBookmarkStore(scope: StorageScope()),
                 viewHistory: PostViewHistoryStore(scope: StorageScope()),
-                unavailablePosts: UnavailablePosts(),
+                unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents()),
                 savedSounds: SavedSoundStore(scope: StorageScope()),
                 viewerProfile: { nil }
             )).makeTextPostScreen(publisher: RecordingPublisher()) as? UINavigationController

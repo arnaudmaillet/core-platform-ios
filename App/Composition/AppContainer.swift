@@ -222,6 +222,13 @@ final class AppContainer {
     /// only `StorageScope(` in the app).
     let storageScope = StorageScope()
 
+    /// Who is using the app changed (#2376): THE APP'S ONE CHANNEL for a
+    /// viewer change and an active-profile switch, handed to every surface
+    /// that forgets or re-reads on one. Not lazy: the cache coordinator's
+    /// wipe subscribes first, at launch (`startCacheCoordinator`), in the
+    /// `.caches` phase that runs before every observer.
+    let viewerEvents = ViewerEvents()
+
     /// Bridge from the compose feature to the feed's optimistic insert.
     let composedPostChannel = ComposedPostChannel()
     /// The viewer's accepted follows and unfollows, announced by every
@@ -293,10 +300,11 @@ final class AppContainer {
     func observeViewerTransitions() {
         guard viewerTransitionsTask == nil else { return }
         let viewer = viewerSession
+        let events = viewerEvents
         // Every app-lifetime cache holding answers computed FOR the viewer
         // (#892): their follow state, their requests, their filtered pages.
         // The device store is wiped by the cache coordinator, on the
-        // `.viewerDidChange` posted below (#893).
+        // viewer change published below (#893), before any observer.
         let scoped: [any ViewerScoped] = [
             commentsRepository, profileRelationshipsRepository, profileMetadataRepository,
             // What notification lookups answered, missing posts included (#978).
@@ -312,7 +320,7 @@ final class AppContainer {
                 for cache in scoped {
                     await cache.viewerDidChange(state)
                 }
-                NotificationCenter.default.post(name: .viewerDidChange, object: nil)
+                events.publishViewerChange()
             }
         }
     }
@@ -474,7 +482,7 @@ final class AppContainer {
 
     /// The posts the server withholds from this viewer (#2048), learnt on any
     /// feed and dropped from every grid page.
-    private(set) lazy var unavailablePosts = UnavailablePosts()
+    private(set) lazy var unavailablePosts = UnavailablePosts(viewerEvents: viewerEvents)
 
     /// Teen protections (#401): the account's age bracket on this device.
     private(set) lazy var teenProtections = TeenProtections()
@@ -636,7 +644,7 @@ final class AppContainer {
 
     /// Forwards every profile switch to `commentsRepository`, for as long as the
     /// container lives.
-    var activeViewerObserver: NSObjectProtocol?
+    var activeViewerObserver: ViewerEventSubscription?
 
     private(set) lazy var commentsRepository = makeCommentsRepository()
 

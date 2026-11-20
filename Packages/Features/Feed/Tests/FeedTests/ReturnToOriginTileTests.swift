@@ -219,7 +219,7 @@ struct ReturnToOriginTileTests {
         let page = PostGridPageView(
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .list, videoPlayback: pool,
             bookmarks: PostBookmarkStore(scope: StorageScope()),
-            withheldPosts: UnavailablePosts()
+            withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents())
         )
         page.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
         page.render(.content((0..<6).map { Self.post("row\($0)") }))

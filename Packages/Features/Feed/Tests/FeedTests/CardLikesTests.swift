@@ -58,7 +58,7 @@ struct CardLikesTests {
     ) -> PostGridPageView {
         let page = PostGridPageView(imagePipeline: pipeline(), style: style,
         bookmarks: PostBookmarkStore(scope: StorageScope()),
-        withheldPosts: UnavailablePosts())
+        withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents()))
         page.staking = PostCardStaking(wallet: wallet, saves: PostBookmarkStore(scope: StorageScope()))
         page.frame = CGRect(x: 0, y: 0, width: 393, height: 6000)
         page.setCorpusComplete(true)

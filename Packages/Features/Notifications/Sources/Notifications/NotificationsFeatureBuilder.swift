@@ -26,6 +26,9 @@ public struct NotificationsFeatureBuilder: NotificationsFeatureBuilding {
     /// Opens a post notification's post above the drawer (#1577); nil routes
     /// it.
     private let openPost: (@MainActor (NotificationPostOpening) -> Void)?
+    /// The app's viewer channel (#2376): the drawer empties and reloads for
+    /// whoever is here now.
+    private let viewerEvents: ViewerEvents
 
     /// `localStore`: the drawer opens on its last rows, offline and at a cold
     /// start (#897). Nil keeps them in memory.
@@ -36,8 +39,10 @@ public struct NotificationsFeatureBuilder: NotificationsFeatureBuilding {
         localStore: LocalStore? = nil,
         allowsLongPushPauses: Bool = false,
         allowsClearAll: Bool = false,
-        openPost: (@MainActor (NotificationPostOpening) -> Void)? = nil
+        openPost: (@MainActor (NotificationPostOpening) -> Void)? = nil,
+        viewerEvents: ViewerEvents
     ) {
+        self.viewerEvents = viewerEvents
         self.allowsLongPushPauses = allowsLongPushPauses
         self.allowsClearAll = allowsClearAll
         self.openPost = openPost
@@ -50,6 +55,7 @@ public struct NotificationsFeatureBuilder: NotificationsFeatureBuilding {
     public func makeNotificationsViewController() -> UIViewController {
         let viewModel = NotificationsViewModel(repository: repository, router: router)
         viewModel.deviceCache = deviceCache
+        viewModel.viewerEvents = viewerEvents
         return NotificationsViewController(
             viewModel: viewModel, imagePipeline: imagePipeline,
             muteModel: NotificationsMuteModel(repository: repository, allowsLongPauses: allowsLongPushPauses),

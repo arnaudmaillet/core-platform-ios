@@ -26,7 +26,7 @@ import UIKit
 struct CarouselPageSyncTests {
     private func feed() -> SnapFeedViewController {
         let controller = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: SilentFeedProvider(), unavailablePosts: UnavailablePosts()),
+            viewModel: FeedViewModel(repository: SilentFeedProvider(), unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents())),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             bookmarks: PostBookmarkStore(scope: StorageScope()),
             savedSounds: SavedSoundStore(scope: StorageScope()),

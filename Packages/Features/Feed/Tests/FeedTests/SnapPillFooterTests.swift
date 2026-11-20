@@ -39,7 +39,7 @@ struct SnapPillFooterTests {
 
     private func feed() -> SnapFeedViewController {
         let controller = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: SilentFooterProvider(), unavailablePosts: UnavailablePosts()),
+            viewModel: FeedViewModel(repository: SilentFooterProvider(), unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents())),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             reporting: FooterReporter(),
             bookmarks: PostBookmarkStore(scope: StorageScope()),

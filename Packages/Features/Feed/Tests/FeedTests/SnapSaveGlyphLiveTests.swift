@@ -37,7 +37,7 @@ struct SnapSaveGlyphLiveTests {
     private static func makeFeed(entities: EntityStore, pile: PostBookmarkStore) -> SnapFeedViewController {
         SnapFeedViewController(
             viewModel: FeedViewModel(repository: SaveGlyphFeedProvider(), entities: entities,
-            unavailablePosts: UnavailablePosts()),
+            unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents())),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             entities: entities,
             bookmarks: pile, savedSounds: SavedSoundStore(scope: StorageScope()), viewer: { nil }

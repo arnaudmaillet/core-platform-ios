@@ -41,7 +41,7 @@ struct SnapFeedEmptyGroundTests {
 
     private func feed() -> SnapFeedViewController {
         let controller = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: SilentFeed(), unavailablePosts: UnavailablePosts()),
+            viewModel: FeedViewModel(repository: SilentFeed(), unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents())),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             makeCommentsPanelContent: { _ in
                 let panel = UIViewController()

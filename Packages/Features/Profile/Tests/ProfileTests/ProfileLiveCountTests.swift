@@ -65,7 +65,7 @@ struct ProfileLiveCountTests {
     private func mosaic(staking: PostCardStaking) -> PostGridPageView {
         let page = PostGridPageView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .grid,
         bookmarks: PostBookmarkStore(scope: StorageScope()),
-        withheldPosts: UnavailablePosts())
+        withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents()))
         page.staking = staking
         page.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
         page.layoutIfNeeded()
@@ -108,7 +108,7 @@ struct ProfileLiveCountTests {
         // the page the profile now draws its media on.
         let page = PostGridPageView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .grid,
         bookmarks: PostBookmarkStore(scope: StorageScope()),
-        withheldPosts: UnavailablePosts())
+        withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents()))
         page.staking = staking
         page.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
         page.setCorpusComplete(true)

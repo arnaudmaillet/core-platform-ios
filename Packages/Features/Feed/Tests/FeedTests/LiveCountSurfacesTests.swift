@@ -50,7 +50,7 @@ struct LiveCountSurfacesTests {
         let surface = PostSetSurfaceViewController(
             style: .cards,
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
-            videoPlayback: nil, bookmarks: PostBookmarkStore(scope: StorageScope()), withheldPosts: UnavailablePosts(),
+            videoPlayback: nil, bookmarks: PostBookmarkStore(scope: StorageScope()), withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents()),
             hydrate: { ids in ids.compactMap { byID[$0] } }
         )
         surface.staking = PostCardStaking(wallet: Self.wallet(), entities: entities,
@@ -94,7 +94,7 @@ struct LiveCountSurfacesTests {
         saves: PostBookmarkStore(scope: StorageScope()))
         let page = PostGridPageView(imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()), style: .discover, videoPlayback: nil,
         bookmarks: PostBookmarkStore(scope: StorageScope()),
-        withheldPosts: UnavailablePosts())
+        withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents()))
         let card = Self.post("c1", likes: 123)
         entities.mergeCounts([card.id: PostCounts(likes: 123)])
 

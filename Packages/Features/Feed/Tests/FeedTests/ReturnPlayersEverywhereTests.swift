@@ -95,7 +95,7 @@ struct ReturnPlayersEverywhereTests {
         let page = PostGridPageView(
             imagePipeline: ImagePipeline(fetcher: fetcher), style: style, videoPlayback: pool,
             bookmarks: PostBookmarkStore(scope: StorageScope()),
-            withheldPosts: UnavailablePosts()
+            withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents())
         )
         page.frame = window.bounds
         window.addSubview(page)
@@ -265,7 +265,7 @@ struct ReturnPlayersEverywhereTests {
         await Self.settle { pool.returnPlaybackCount == 1 }
         let page = PostGridPageView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .discover,
         bookmarks: PostBookmarkStore(scope: StorageScope()),
-        withheldPosts: UnavailablePosts())
+        withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents()))
         let reveal = PostShelfOrigins.cardReveal(for: posts[0], cover: Self.picture(), shelf: shelf, page: page)
         let standIn = try #require(reveal.makeDismissStandIn(nil))
         #expect(Self.firstVideoSurface(in: standIn) != nil, "the card's window carried a still")
@@ -304,7 +304,7 @@ struct ReturnPlayersEverywhereTests {
         var opened: SnapFeedHeroOrigin?
         let gallery = DiscoverGalleryViewController(
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
-            videoPlayback: pool, bookmarks: PostBookmarkStore(scope: StorageScope()), withheldPosts: UnavailablePosts(),
+            videoPlayback: pool, bookmarks: PostBookmarkStore(scope: StorageScope()), withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents()),
             header: PushedScreenHeader(wallet: nil, makeWalletSheet: nil, router: nil),
             openPost: { _, origin, _ in opened = origin }
         )
@@ -323,7 +323,7 @@ struct ReturnPlayersEverywhereTests {
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
             videoPlayback: Self.makePool(),
             bookmarks: PostBookmarkStore(scope: StorageScope()),
-            withheldPosts: UnavailablePosts(),
+            withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents()),
             staking: nil,
             header: PushedScreenHeader(wallet: nil, makeWalletSheet: nil, router: nil),
             openPost: { _, origin, _ in opened = origin }
@@ -347,7 +347,7 @@ struct ReturnPlayersEverywhereTests {
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
             videoPlayback: Self.makePool(),
             bookmarks: PostBookmarkStore(scope: StorageScope()),
-            withheldPosts: UnavailablePosts(),
+            withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents()),
             hydrate: { ids in ids.compactMap { byID[$0] } }
         )
         var opened: SnapFeedHeroOrigin?

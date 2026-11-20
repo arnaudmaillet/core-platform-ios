@@ -1,3 +1,4 @@
+import CoreModels
 import CoreStorage
 import DesignSystem
 import FeedInterface
@@ -43,7 +44,7 @@ struct GridSkeletonGateTests {
     private func page(_ time: ManualClock) -> PostGridPageView {
         let page = PostGridPageView(imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()), style: .grid, videoPlayback: nil,
         bookmarks: PostBookmarkStore(scope: StorageScope()),
-        withheldPosts: UnavailablePosts())
+        withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents()))
         page.skeletonClock = time.clock
         page.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
         page.layoutIfNeeded()
@@ -139,7 +140,7 @@ struct GridSkeletonGateTests {
         let time = ManualClock()
         let page = PostGridPageView(imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()), style: .discover, videoPlayback: nil,
         bookmarks: PostBookmarkStore(scope: StorageScope()),
-        withheldPosts: UnavailablePosts())
+        withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents()))
         page.skeletonClock = time.clock
         page.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
         page.layoutIfNeeded()

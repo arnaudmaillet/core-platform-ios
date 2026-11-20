@@ -33,18 +33,18 @@ struct PushedListBackSwipeTests {
             ("Discover mosaic", DiscoverGalleryViewController(
                 imagePipeline: pipeline, videoPlayback: nil,
                 bookmarks: PostBookmarkStore(scope: StorageScope()),
-                withheldPosts: UnavailablePosts(), header: header(), openPost: nil
+                withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents()), header: header(), openPost: nil
             )),
             ("Following list", PushedPostListViewController(
                 kind: .following, imagePipeline: pipeline, videoPlayback: nil,
                 bookmarks: PostBookmarkStore(scope: StorageScope()),
-                withheldPosts: UnavailablePosts(), staking: nil,
+                withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents()), staking: nil,
                 header: header(), openPost: nil
             )),
             ("Friends list", PushedPostListViewController(
                 kind: .friends, imagePipeline: pipeline, videoPlayback: nil,
                 bookmarks: PostBookmarkStore(scope: StorageScope()),
-                withheldPosts: UnavailablePosts(), staking: nil,
+                withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents()), staking: nil,
                 header: header(), openPost: nil
             ))
         ]

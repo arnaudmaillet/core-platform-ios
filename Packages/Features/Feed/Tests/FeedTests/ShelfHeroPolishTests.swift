@@ -425,7 +425,7 @@ struct ShelfHeroPolishTests {
             lead = ShelfLeadFixture(pipeline: pipeline, videoPlayback: nil)
             page = PostGridPageView(imagePipeline: pipeline, style: .discover, videoPlayback: nil,
             bookmarks: PostBookmarkStore(scope: StorageScope()),
-            withheldPosts: UnavailablePosts())
+            withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents()))
             lead.render(following: cards)
             window.rootViewController = host
             window.isHidden = false

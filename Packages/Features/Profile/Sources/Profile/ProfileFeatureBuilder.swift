@@ -94,6 +94,10 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
         /// A post of the viewer's own the server deleted here (#896): the
         /// feeds and For You drop it too.
         public var onPostDeleted: @MainActor (PostID) -> Void
+        /// The app's viewer channel (#2376): the shared cache forgets on a
+        /// viewer change, the switchers publish a switch on it, and every
+        /// profile screen follows that switch.
+        public var viewerEvents: ViewerEvents
 
         public init(
             repository: any ProfileFeatureRepository,
@@ -120,7 +124,8 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
             makeCardStaking: @escaping @MainActor () -> PostCardStaking,
             knownIdentity: @escaping @MainActor (ProfileID, ProfileIdentityStub?) -> ProfileIdentityStub?,
             followEvents: FollowGraphEvents,
-            onPostDeleted: @escaping @MainActor (PostID) -> Void
+            onPostDeleted: @escaping @MainActor (PostID) -> Void,
+            viewerEvents: ViewerEvents
         ) {
             self.repository = repository
             self.reporting = reporting
@@ -147,6 +152,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
             self.knownIdentity = knownIdentity
             self.followEvents = followEvents
             self.onPostDeleted = onPostDeleted
+            self.viewerEvents = viewerEvents
         }
     }
 
@@ -223,12 +229,14 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
     /// For You drop the post. (Settings → Recently Deleted restores, through
     /// `SettingsAssembly`.)
     private let onPostDeleted: @MainActor (PostID) -> Void
+    /// The app's viewer channel (#2376), for the switchers and the screens.
+    private let viewerEvents: ViewerEvents
 
     public init(dependencies: Dependencies) {
         presence = dependencies.presence
         bookmarks = dependencies.bookmarks
         viewHistory = dependencies.viewHistory
-        cache = ProfileCache(store: dependencies.localStore)
+        cache = ProfileCache(viewerEvents: dependencies.viewerEvents, store: dependencies.localStore)
         relationshipsCache = dependencies.localStore.map(ProfileRelationshipsLocalCache.init(store:))
         repository = dependencies.repository
         reporting = dependencies.reporting
@@ -251,11 +259,15 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
         knownIdentity = dependencies.knownIdentity
         followEvents = dependencies.followEvents
         onPostDeleted = dependencies.onPostDeleted
+        viewerEvents = dependencies.viewerEvents
         cache.observe(followEvents)
     }
 
     private func makeSwitcherFactory() -> ProfileSwitcherMenuFactory {
-        ProfileSwitcherMenuFactory(switching: switching, imagePipeline: imagePipeline, unreadCount: unreadNotifications)
+        ProfileSwitcherMenuFactory(
+            switching: switching, imagePipeline: imagePipeline, unreadCount: unreadNotifications,
+            viewerEvents: viewerEvents
+        )
     }
 
     /// The counter row's destination, shared by both profile entry points —
@@ -346,7 +358,8 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
             identityStub: identityStub,
             trayPlacement: trayPlacement,
             channels: makeChannelsModel(isOwnProfile: true),
-            makeChannelCreation: makeChannelCreation
+            makeChannelCreation: makeChannelCreation,
+            viewerEvents: viewerEvents
         )
         controller.feedHero = openFeedHero
         controller.staking = makeCardStaking()
@@ -421,7 +434,8 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
             identityStub: known,
             // `isOwnProfile` follows the view model's source: a routed
             // profile is read as someone's page, even the viewer's (#2232).
-            channels: makeChannelsModel(isOwnProfile: viewModel.isOwnProfile)
+            channels: makeChannelsModel(isOwnProfile: viewModel.isOwnProfile),
+            viewerEvents: viewerEvents
         )
         controller.feedHero = openFeedHero
         controller.staking = makeCardStaking()

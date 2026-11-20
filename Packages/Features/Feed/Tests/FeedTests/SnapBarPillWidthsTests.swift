@@ -158,7 +158,7 @@ struct SnapBarPillWidthsTests {
         let wallet = WalletStore(defaults: defaults, scope: StorageScope())
         wallet.credit(88_800)
         let feed = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: InertPillFeedProvider(), unavailablePosts: UnavailablePosts()),
+            viewModel: FeedViewModel(repository: InertPillFeedProvider(), unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents())),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             wallet: wallet,
             bookmarks: PostBookmarkStore(scope: StorageScope()),

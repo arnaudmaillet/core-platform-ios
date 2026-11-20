@@ -51,7 +51,7 @@ struct PlaceProfileTests {
             loadPosts: { posts },
             presence: SectionPresenceStore(scope: StorageScope()),
             bookmarks: PostBookmarkStore(scope: StorageScope()),
-            withheldPosts: UnavailablePosts(),
+            withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents()),
             openPost: { _, _, _ in }
         )
         // The reader's reveal, as `PlaceFeatureBuilder` wires it, reduced to
@@ -223,7 +223,7 @@ struct PlaceProfileTests {
             videoPlayback: nil, loadPosts: { [] },
             presence: SectionPresenceStore(scope: StorageScope()),
             bookmarks: PostBookmarkStore(scope: StorageScope()),
-            withheldPosts: UnavailablePosts(), openPost: { _, _, _ in }
+            withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents()), openPost: { _, _, _ in }
         )
         laidOut(profile)
         #expect(profile.debugFlag.image === flag)
@@ -563,7 +563,7 @@ struct PlaceProfileTests {
             loadPosts: { [] },
             presence: SectionPresenceStore(scope: StorageScope()),
             bookmarks: PostBookmarkStore(scope: StorageScope()),
-            withheldPosts: UnavailablePosts(), openPost: { _, _, _ in }
+            withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents()), openPost: { _, _, _ in }
         )
         laidOut(profile)
         #expect(profile.debugTrailingItems.isEmpty, "a guest's place page shows the balance")
@@ -589,7 +589,7 @@ struct PlaceProfileTests {
             loadPosts: { [] },
             presence: SectionPresenceStore(scope: StorageScope()),
             bookmarks: PostBookmarkStore(scope: StorageScope()),
-            withheldPosts: UnavailablePosts(), openPost: { _, _, _ in }
+            withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents()), openPost: { _, _, _ in }
         )
         laidOut(profile)
         // No posts, no banner: the bannerless page (its skeleton until then).
@@ -652,7 +652,7 @@ struct PlaceProfileTests {
             loadPosts: { [] },
             presence: SectionPresenceStore(scope: StorageScope()),
             bookmarks: PostBookmarkStore(scope: StorageScope()),
-            withheldPosts: UnavailablePosts(), openPost: { _, _, _ in }
+            withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents()), openPost: { _, _, _ in }
         )
         var toasts: [String] = []
         profile.confirmDock = { _, docked in toasts.append(PlaceProfileViewController.dockToast(docked: docked)) }
@@ -786,7 +786,7 @@ struct PlaceProfileTests {
             loadPosts: { try await answers.next() },
             presence: SectionPresenceStore(scope: StorageScope()),
             bookmarks: PostBookmarkStore(scope: StorageScope()),
-            withheldPosts: UnavailablePosts(),
+            withheldPosts: UnavailablePosts(viewerEvents: ViewerEvents()),
             openPost: { _, _, _ in }
         )
     }

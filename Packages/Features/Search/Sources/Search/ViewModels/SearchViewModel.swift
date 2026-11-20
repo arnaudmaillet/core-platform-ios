@@ -132,8 +132,9 @@ public final class SearchViewModel {
     /// The app's follow channel (#896): a follow or an unfollow accepted on any
     /// screen re-draws the person's row ("Following", or their followers).
     private var followSubscription: FollowGraphSubscription?
-    /// Hears `.viewerDidChange` for as long as this model lives (#978).
-    private var viewerObservation: NotificationTokens?
+    /// Hears the app's viewer changes for as long as this model lives
+    /// (#978, #2376). Nil channel (tests): none is heard.
+    private var viewerObservation: ViewerEventSubscription?
 
     public convenience init(
         repository: any SearchProviding,
@@ -147,13 +148,13 @@ public final class SearchViewModel {
         suggestLimit: Int32 = 8,
         suggestDebounce: Duration = .milliseconds(200),
         followEvents: FollowGraphEvents? = nil,
-        notificationCenter: NotificationCenter = .default
+        viewerEvents: ViewerEvents? = nil
     ) {
         self.init(
             repository: repository, router: router, recentSearches: recentSearches, explore: explore,
             metadata: metadata, pageSize: pageSize, trendingLimit: trendingLimit, creatorLimit: creatorLimit,
             suggestLimit: suggestLimit, suggestDebounce: suggestDebounce, localCache: nil, followEvents: followEvents,
-            notificationCenter: notificationCenter
+            viewerEvents: viewerEvents
         )
     }
 
@@ -173,7 +174,7 @@ public final class SearchViewModel {
         localCache: SearchLocalCache?,
         now: @escaping () -> Date = Date.init,
         followEvents: FollowGraphEvents? = nil,
-        notificationCenter: NotificationCenter = .default
+        viewerEvents: ViewerEvents? = nil
     ) {
         self.localCache = localCache
         self.now = now
@@ -202,11 +203,9 @@ public final class SearchViewModel {
         followSubscription = followEvents?.subscribeOnMain { [weak self] change in
             self?.applyFollowChange(change)
         }
-        let viewerTokens = NotificationTokens(center: notificationCenter)
-        viewerTokens.observe(.viewerDidChange) { [weak self] in
+        viewerObservation = viewerEvents?.onViewerChange { [weak self] in
             self?.viewerDidChange()
         }
-        viewerObservation = viewerTokens
     }
 
     /// A follow the graph accepted elsewhere (a profile pushed from these
@@ -227,7 +226,7 @@ public final class SearchViewModel {
     /// again for whatever it is showing: the history and the trending people,
     /// the typeahead, or the submitted search, run again from the top. The
     /// metadata repository has already reset itself for the new viewer by the
-    /// time this is posted (`AppContainer.observeViewerTransitions`).
+    /// time this is published (`AppContainer.observeViewerTransitions`).
     func viewerDidChange() {
         metadataTask?.cancel()
         metadataTask = nil

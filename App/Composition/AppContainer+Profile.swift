@@ -194,7 +194,10 @@ extension AppContainer {
             // reaches the profile screens and their followers lists.
             followEvents: followGraphEvents,
             // A post the viewer deleted leaves every feed and For You (#896).
-            onPostDeleted: { [unowned self] id in self.entityStore.deletePost(id) }
+            onPostDeleted: { [unowned self] id in self.entityStore.deletePost(id) },
+            // The app's viewer channel (#2376): the shared profile cache forgets
+            // on a viewer change, and the switchers publish on it.
+            viewerEvents: viewerEvents
         ))
     }
 }

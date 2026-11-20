@@ -67,7 +67,7 @@ struct SnapComposerSoundSlotTests {
 
     private func feed(root: Bool, model: FeedItemDisplayModel) -> SnapFeedViewController {
         let feed = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: SlotSilentProvider(), unavailablePosts: UnavailablePosts()),
+            viewModel: FeedViewModel(repository: SlotSilentProvider(), unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents())),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             bookmarks: PostBookmarkStore(scope: StorageScope()),
             savedSounds: SavedSoundStore(scope: StorageScope()),
