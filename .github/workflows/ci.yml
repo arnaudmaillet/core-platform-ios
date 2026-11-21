@@ -215,7 +215,68 @@ jobs:
       # job's 9.8 minutes (PR #354). The optimiser still runs on every push to
       # develop, where a crash inside it would surface — nobody waits on that
       # run.
-      - name: Build app (Release)
+      #
+      # TWO RELEASE BUILDS SINCE #2391, sharing one DerivedData so the packages
+      # compile once: the production app (`core-platform-ios-production`, the
+      # real backend only, no `MOCK_BACKEND`) and Demo (`core-platform-ios` in
+      # Release: the mock backend, `MOCK_BACKEND` without DEBUG). Each is a
+      # combination no other build compiles.
+      #
+      # ⚠️ CLANG_COVERAGE_MAPPING=NO ON BOTH. `core-platform-ios`'s scheme
+      # gathers coverage for its UI tests, and Xcode then instruments every
+      # module it builds, packages included (`-profile-generate`), even for a
+      # plain `build`; the production scheme has no tests, so it does not. The
+      # two builds' packages then differed by those flags and Demo compiled the
+      # whole graph again. Nobody reads coverage from a Release build.
+      - name: Build app (Release, production)
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -o pipefail
+          OPT=()
+          if [ "$EVENT" = "pull_request" ]; then
+            OPT=(SWIFT_OPTIMIZATION_LEVEL=-Onone GCC_OPTIMIZATION_LEVEL=0)
+          fi
+          xcodebuild build \
+            -project core-platform-ios.xcodeproj \
+            -scheme core-platform-ios-production \
+            -destination "generic/platform=iOS Simulator" \
+            -configuration Release \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData-release" \
+            -clonedSourcePackagesDirPath .spm \
+            -skipMacroValidation \
+            CODE_SIGNING_ALLOWED=NO ARCHS=arm64 CLANG_COVERAGE_MAPPING=NO "$NO_INDEX" "${OPT[@]}"
+
+      # ⚠️ THE PRODUCTION APP SHIPS NO MOCK (#2391). Its target does not list
+      # the mock products, so this holds by construction; the step is what
+      # notices the day it stops: a mock product added to the target, or a
+      # package that starts depending on one.
+      - name: Check the production app carries no mock
+        run: |
+          set -euo pipefail
+          DD="$RUNNER_TEMP/DerivedData-release"
+          APP="$DD/Build/Products/Release-iphonesimulator/YuyuProduction.app"
+          BIN="$APP/YuyuProduction"
+          [ -f "$BIN" ] || { echo "::error::no production binary at $BIN"; exit 1; }
+          BUNDLES=$(find "$APP" -maxdepth 2 -name '*Mocks*.bundle')
+          if [ -n "$BUNDLES" ]; then
+            echo "::error::mock resources in the production app: $BUNDLES"; exit 1
+          fi
+          SYMBOLS=$(nm "$BIN" | xcrun swift-demangle | grep -cE '(CoreNetworkingMocks|CoreRealtimeMocks)\.' || true)
+          if [ "$SYMBOLS" -ne 0 ]; then
+            echo "::error::$SYMBOLS mock symbols in the production binary"
+            nm "$BIN" | xcrun swift-demangle | grep -E '(CoreNetworkingMocks|CoreRealtimeMocks)\.' | head -20
+            exit 1
+          fi
+          LISTS=$(find "$DD/Build/Intermediates.noindex" -name 'YuyuProduction.LinkFileList')
+          [ -n "$LISTS" ] || { echo "::error::no LinkFileList for the production app"; exit 1; }
+          if grep -hE '/(CoreNetworkingMocks|CoreRealtimeMocks)\.o$' $LISTS; then
+            echo "::error::the production app links a mock object"; exit 1
+          fi
+          echo "Production app: $(du -sh "$APP" | cut -f1), no mock bundle, 0 mock symbols, no mock object linked" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Build app (Release, Demo)
         env:
           EVENT: ${{ github.event_name }}
         run: |
@@ -229,9 +290,10 @@ jobs:
             -scheme core-platform-ios \
             -destination "generic/platform=iOS Simulator" \
             -configuration Release \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData-release" \
             -clonedSourcePackagesDirPath .spm \
             -skipMacroValidation \
-            CODE_SIGNING_ALLOWED=NO ARCHS=arm64 "$NO_INDEX" "${OPT[@]}"
+            CODE_SIGNING_ALLOWED=NO ARCHS=arm64 CLANG_COVERAGE_MAPPING=NO "$NO_INDEX" "${OPT[@]}"
 
   # ── One lane per package ─────────────────────────────────────────────────
   # Was a sequential loop in a single job: 18 invocations, 45 min, of which
@@ -493,7 +555,7 @@ jobs:
           if [ "${{ needs.build-app.result }}" = "skipped" ]; then
             echo "Documentation-only change: nothing to build or test."
           elif [ "${{ needs.test.result }}" = "skipped" ] && [ "${{ needs.test-hosted.result }}" = "skipped" ]; then
-            echo "App builds (Debug + Release) passed. No package could be reached by this change, so no lane ran."
+            echo "App builds (Debug, Release, Demo) passed. No package could be reached by this change, so no lane ran."
           else
-            echo "App builds (Debug + Release) and every selected package test passed."
+            echo "App builds (Debug, Release, Demo) and every selected package test passed."
           fi
