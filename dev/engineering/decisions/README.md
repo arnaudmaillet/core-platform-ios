@@ -16,7 +16,7 @@ Records 0001 to 0011 were written on 2026-11-21 from decisions already in force;
 | [0004](0004-mock-backend-in-debug-and-demo-only.md) | The mock backend is linked into Debug and Demo only | Accepted |
 | [0005](0005-native-chrome-belongs-to-uikit.md) | Native chrome is shown, hidden and animated by UIKit only | Accepted |
 | [0006](0006-screens-close-the-way-they-open.md) | A screen closes the way it opened, through its stack's contract | Accepted |
-| [0007](0007-one-component-per-concept.md) | One shared component per visual concept, held by a guard | Accepted |
+| [0007](0007-one-implementation-per-concept.md) | One shared implementation per concept, at every layer, held by a guard where it can be | Accepted |
 | [0008](0008-viewer-state-injected-and-scoped.md) | Per-viewer state is injected and cleared on a viewer change | Accepted |
 | [0009](0009-repo-guards-as-fitness-functions.md) | Repository rules run as tests on every pull request | Accepted |
 | [0010](0010-compilation-cache-in-ci-only.md) | Compilation caching in CI only | Accepted |

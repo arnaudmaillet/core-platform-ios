@@ -70,4 +70,4 @@ Look for a helper before you write one. A second copy of these fails `SharedHelp
 | Rewriting a media host | `HostRewrite` (CoreModels) |
 | Who holds the sound | `AudioFocus` (CoreModels) |
 
-Shared UI components (avatar, banner, loader, toast…) are listed in [Components § Shared components](COMPONENTS.md#shared-components).
+Every shared building block, from data and services to views, is listed in [Components § Shared building blocks](COMPONENTS.md#shared-building-blocks).

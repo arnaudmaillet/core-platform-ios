@@ -13,5 +13,5 @@ The app is a media-heavy social client: paging feeds of video, custom zoom trans
 
 ## Consequences
 - Transitions, gestures and chrome can be driven exactly, with UIKit's own API.
-- More code per screen than SwiftUI would need. The shared components ([0007](0007-one-component-per-concept.md)) and DesignSystem's helpers keep it in check.
+- More code per screen than SwiftUI would need. The shared components ([0007](0007-one-implementation-per-concept.md)) and DesignSystem's helpers keep it in check.
 - View models stay free of UIKit where they can, so they test without a window.

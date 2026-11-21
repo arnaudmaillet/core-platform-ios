@@ -4,7 +4,7 @@ The rules every change to this repository follows, whoever writes it: a develope
 
 | Page | What it rules |
 |---|---|
-| [Before you code](BEFORE_YOU_CODE.md) | The checklist before the first line: the issue, what exists already, the similar components, research, the plan |
+| [Before you code](BEFORE_YOU_CODE.md) | The checklist before the first line: the issue, what exists already, the similar and neighbouring code at every layer, research, the plan |
 | [Architecture](ARCHITECTURE.md) | Packages and layers, feature interfaces, the composition root, dependency injection, state, navigation |
 | [Components](COMPONENTS.md) | How code is cut: one responsibility per type, sizes, when a component becomes shared, how a large controller is split |
 | [Swift style](SWIFT_STYLE.md) | Naming, API shape, access control, concurrency, errors, comments |
@@ -20,7 +20,7 @@ A rule that a machine can check runs as a test. The rest is held in review.
 
 - **`Packages/Tools/RepoGuards`** runs on every pull request. Each guard scans the sources for one rule. The guards are listed in [Architecture § Guards](ARCHITECTURE.md#guards).
 - **Package boundaries** are held by the compiler: a target can only import what its `Package.swift` declares, and `LayeringGuardTests` checks the declarations.
-- **Review** holds what a scan cannot judge: naming, the size of an abstraction, whether a similar component was looked for.
+- **Review** holds what a scan cannot judge: naming, the size of an abstraction, whether the similar code was looked for.
 
 When a review comment repeats, write the rule into a guard.
 

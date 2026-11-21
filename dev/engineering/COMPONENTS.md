@@ -49,25 +49,59 @@ A protocol is the seam that lets one side change without the other.
 - **The consumer owns the protocol** when it is a seam for one consumer: the protocol lists what that consumer needs, and the provider conforms (`extension RealtimeClient: FeedRealtimeSubscribing {}`).
 - **Compose small protocols** (`A & B`) rather than growing one large one.
 
-## When to make a component shared
+## When to share code
 
-Before a new component, survey the similar and the neighbouring ones ([Before you code § 3](BEFORE_YOU_CODE.md#3-look-at-the-similar-and-the-neighbouring-components)). Then:
+This applies to all code, at every layer: views, view models, data, services, navigation, tests and scripts. Before writing a new piece, survey the similar and the neighbouring code ([Before you code § 3](BEFORE_YOU_CODE.md#3-look-at-the-similar-and-the-neighbouring-code)). Then:
 
-- **The same concept under the same rules → one shared component.** A person's face is the same thing in a message bubble, a profile header and a notification row: one picture, one skeleton while it loads, initials without a picture. It is drawn by one component, `AvatarView`, injected everywhere. **A second use is the moment to extract.** Don't copy the first one.
-- **The same look by coincidence → two components.** Two rows that share a height today but answer to different screens will change for different reasons. Factoring them welds those reasons together. Duplication is cheaper than the wrong abstraction.
-- **A single use stays in its feature**, unless it is designed as a core service from the start (a design doc says so).
+- **The same concept under the same rules → one shared implementation.** Some examples:
+  - A person's face in a bubble, a header and a row: one picture, one skeleton, the initials without a picture. One `AvatarView`.
+  - Paging a list with a server token, in the inbox, the followers and the comments. One `TokenPager`.
+  - Keeping fetched content within a budget and releasing it under pressure. One `CacheKit`.
+  - A post liked on one screen and shown on another. One `EntityStore`.
+
+  **A second use is the moment to extract.** Don't copy the first one.
+- **A resemblance by coincidence → two implementations.** Two rows that share a height today, or two loaders that both retry three times, but that answer to different needs will change for different reasons. Factoring them welds those reasons together. Duplication is cheaper than the wrong abstraction.
+- **A single use stays where it is used**, unless it is designed as a core service from the start (a design doc says so).
 - **When unsure**, ask the question "if one changes, must the other change too?". Yes: share. No: keep apart.
 
 **How to extract:**
-1. **Put it in the lowest layer both users can see**: DesignSystem for a pure visual, MediaCore's `MediaUI` for anything that loads media, a Core package for a shared domain surface (`ThreadKit`, `PostGrid`, `HeroPage`), Kit for models.
-2. **Configure it with values, not with its callers' names.** A `Configuration` or a style enum says what varies. A flag named for a caller (`isProfile`, `inChat`) is a leak: replace it with the property it actually changes (`size`, `showsRing`).
-3. **Inject behaviour**: what it shows comes in as a value, what it does goes out through a delegate, a closure or a protocol. The shared component never imports a feature.
-4. **Move the existing use onto it in the same pull request**, so there is never a period with two implementations.
-5. **Guard it** when a hand-made copy is easy to write: a RepoGuards scan that fails on the copy (`HandMadeAvatarGuardTests`, `HandMadeBannerGuardTests`).
+1. **Put it in the lowest layer both users can see.**
+   - Kit for models and pure logic (`TokenPager`, `TypedID`).
+   - A Core package for a service or a shared domain surface (`CacheKit`, `EntityStore`, `ThreadKit`, `PostGrid`).
+   - DesignSystem for a pure visual; MediaCore's `MediaUI` for anything that loads media.
+   - TestSupport for a test helper.
+2. **Put an interface in front of it** when it crosses a module boundary or does side effects ([Interfaces](#interfaces)). Its users depend on the interface, and the composition root injects the implementation.
+3. **Configure it with values, not with its callers' names.** A `Configuration` or a style enum says what varies. A flag named for a caller (`isProfile`, `inChat`) is a leak: replace it with the property it actually changes (`size`, `pageSize`, `showsRing`).
+4. **Inject behaviour.** What it works on comes in as a value. What it does goes out through a delegate, a closure or a protocol. The shared piece never imports a feature.
+5. **Move the existing use onto it in the same pull request**, so there is never a period with two implementations.
+6. **Guard it** when a hand-made copy is easy to write. A RepoGuards scan fails on the copy (`HandMadeAvatarGuardTests`, `ImageCachesOutsidePipelineGuardTests`, `LaunchArgumentReadGuardTests`).
 
-## Shared components
+## Shared building blocks
 
-Look here before drawing any of these concepts.
+Look here before writing any of these. Add a row when you create a shared piece.
+
+### Data, services and logic
+
+| Concept | Shared piece | Where | Guard |
+|---|---|---|---|
+| Paging with a server token | `TokenPager` | CoreModels | |
+| An entity's identifier | `TypedID` | CoreModels | |
+| A post or profile shown on several screens | `EntityStore` | EntityStore | |
+| A cache with budgets, trims and release rules | `ManagedCache`, `CacheCoordinator`, `CacheBudgets` | CacheKit | |
+| A fetched image | `ImagePipeline` | MediaCore | `ImageCachesOutsidePipelineGuardTests`, `UnsizedImageDecodesGuardTests` |
+| Observing a store's changes | `StoreChanges` | CoreStorage | `NotificationNameGuardTests` |
+| A cache of the viewer's data | `ViewerScoped` | AuthInterface | `ViewerScopedGuardTests` |
+| A handoff of a just-composed post | `ComposedPostChannel` | CoreModels | |
+| Who holds the sound | `AudioFocus` | CoreModels | |
+| Rewriting a media host | `HostRewrite` | CoreModels | `SharedHelperGuardTests` |
+| Notification observer tokens | `NotificationTokens` | CoreModels | `SharedHelperGuardTests` |
+| A launch argument | `LaunchArgument` | LaunchArguments | `LaunchArgumentReadGuardTests` |
+| Closing a screen | `StackArbiter`, `closeScreen()` | CoreNavigation, DesignSystem | `StackCloseGuardTests` |
+| Loader timing | `LoaderGate` | DesignSystem | `LoaderTimerGuardTests` |
+| A short count ("1.2k") | `CountFormatter` | DesignSystem | `SharedHelperGuardTests` |
+| Waiting in a test for main-actor work | `settle(looks:isolation:until:)` | TestSupport | `SharedHelperGuardTests` |
+
+### Views
 
 | Concept | Component | Where | Guard |
 |---|---|---|---|
@@ -87,4 +121,3 @@ Look here before drawing any of these concepts.
 | A haptic | the haptic roles | DesignSystem | `HapticsGuardTests` |
 | A comment or message input | `CommentsInputBar` | ThreadKit | |
 
-Add a row when you create a shared component.

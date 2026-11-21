@@ -29,8 +29,8 @@ How others solve this problem, with links:
 - the literature, when the problem has one.
 At least two approaches, and what each costs.
 
-## Similar and neighbouring components
-What already exists in this repository that does part of the job, and what this design reuses, extracts or leaves apart.
+## Similar and neighbouring code
+What already exists in this repository, at any layer, that does part of the job or sits next to it, and what this design reuses, extracts or leaves apart.
 
 ## Design
 The chosen approach: the types and protocols, which package each lives in, how data flows, who owns which state. A diagram when it helps.
