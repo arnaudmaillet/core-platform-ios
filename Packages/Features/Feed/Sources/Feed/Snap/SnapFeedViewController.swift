@@ -336,6 +336,10 @@ final class SnapFeedViewController: UIViewController {
     /// both bars' pill widths and the comments' day (`SnapAuthorBar`). Built
     /// on first use; building it does nothing else.
     private(set) lazy var authorBar = SnapAuthorBar(host: self)
+    /// The share sheet and its chips: Repost, Not interested, Report
+    /// (`SnapPostActions`). Built on first use; building it does nothing
+    /// else.
+    private(set) lazy var postActions = SnapPostActions(host: self, reporting: reporting)
     /// The warms around the settled page, and what is let go while the feed
     /// is not watched (`SnapWarmPlanner`). Built on first use; building it
     /// does nothing else.
@@ -1707,7 +1711,7 @@ final class SnapFeedViewController: UIViewController {
         // it, and never comes back.
         let previousOrder = orderedIDs
         var ids = state.items.map(\.id).filter {
-            !notInterestedIDs.contains($0) || $0 == activePostID
+            !postActions.notInterestedIDs.contains($0) || $0 == activePostID
         }
         var models = Dictionary(uniqueKeysWithValues: state.items.map { ($0.id, $0) })
         // ⚠️ THE POST IN FRONT, GONE FROM THE SERVER, GIVES WAY WITH A WORD
@@ -2869,140 +2873,11 @@ final class SnapFeedViewController: UIViewController {
 
     // MARK: - Media toolbar actions
 
-    /// The post's share sheet (#1710) — the app's ONE share surface
-    /// (`ShareSheet`, the profile's and the place's), tuned rather than
-    /// cloned (`ShareSheetConfiguration`): the post's author on the QR card,
-    /// the post's own link (`AppRoute.postLink`), Repost after Copy Link. Its escape hatches come back here once it is
-    /// gone: the system sheet, and a send to someone (the link, in a DM).
-    func presentShareSheet(for id: PostID) {
-        guard presentedViewController == nil, let model = modelsByID[id],
-              let link = AppRoute.postLink(id) else { return }
-        let card = ShareCard(
-            displayName: model.authorName,
-            handle: SnapAuthorIdentityView.pillMetaLine(fromMeta: model.metaText),
-            avatarURL: model.avatarURL,
-            url: link,
-            // A showcase says its channel (#2216), a voice post its voice
-            // (#2208), where no card or player is drawn.
-            detail: PostEmbeds.shareText(caption: model.caption, embed: model.embed)
-                ?? VoicePosts.shareText(caption: model.caption, voice: model.voice)
-        )
-        let sheet = ShareSheetViewController(
-            card: card,
-            imagePipeline: imagePipeline,
-            targeting: shareTargeting,
-            // Read HERE, where there is a window (the sheet has none yet).
-            deviceCornerRadius: ScreenGeometry.cornerRadius(behind: view),
-            fallbackWidth: view.bounds.width,
-            // The app's appearance (#1718, the owner: no forced dark).
-            configuration: ShareSheetConfiguration(extraActions: shareSheetActions(for: id))
-        )
-        sheet.onSystemShare = { [weak self] card, image in
-            guard let self else { return }
-            let activity = UIActivityViewController(
-                activityItems: [ShareItemSource(card: card, icon: image), image], applicationActivities: nil
-            )
-            activity.popoverPresentationController?.sourceView = view
-            present(activity, animated: true)
-        }
-        sheet.onSendToTarget = { [weak self] target, card in
-            self?.viewModel.sendLink(card.url.absoluteString, to: target.id, stub: ProfileIdentityStub(
-                handle: target.handle, displayName: target.displayName
-            ))
-        }
-        present(sheet, animated: true)
-    }
+    /// The post's share sheet (`SnapPostActions`).
+    func presentShareSheet(for id: PostID) { postActions.presentShareSheet(for: id) }
 
-    /// The post sheet's own chips, after Share and Copy Link: Repost (#1710,
-    /// Shots only since #1728), then Not interested and Report (#1712) — the
-    /// old ⋯ menu's two, which live only here now: neither on a post no one
-    /// may read (#1409), Report only with somewhere to file it. Both leave
-    /// the sheet first.
-    func shareSheetActions(for id: PostID) -> [ShareSheetAction] {
-        // Repost on a text page, whose footer gave its place to the like
-        // (#1924); a media post's toolbar carries it (#1728, the owner).
-        var actions: [ShareSheetAction] = []
-        if toolbarComposer.footerLikeFace?.id == id {
-            actions.append(ShareSheetAction(title: "Repost", symbol: PostActionSymbol.repost, dismissesSheet: false) {
-                [weak self] in self?.repostRequested()
-            })
-        }
-        guard !unavailablePostIDs.contains(id) else { return actions }
-        actions.append(ShareSheetAction(title: "Not interested", symbol: "hand.thumbsdown") { [weak self] in
-            self?.markNotInterested(id)
-        })
-        if reporting != nil {
-            actions.append(ShareSheetAction(title: "Report", symbol: "flag") { [weak self] in
-                self?.presentReportReasons(for: id)
-            })
-        }
-        return actions
-    }
-
-    /// Repost, from the share sheet (#1710). ⚠️ No client path publishes a
-    /// repost yet (`PostComposer` takes no parent — the action column's old
-    /// repost button had no action either), so the sheet says so instead of
-    /// pretending.
-    private func repostRequested() {
-        // Over the sheet, which is still up.
-        Feedback.info("Reposting is coming soon", symbol: PostActionSymbol.repost, from: presentedViewController ?? self)
-    }
-
-    /// The posts the viewer has asked not to see again, for as long as this
-    /// screen lives.
-    ///
-    /// ⚠️ THE SESSION, AND NOTHING MORE — and the toast says exactly that.
-    /// There is no "not interested" signal anywhere in the contracts: no
-    /// ranking feedback in `timeline.v1`, no hide in `post.v1`. What this can
-    /// honestly do is stop the post coming back on THIS surface, so that is
-    /// what it does and what the confirmation claims. A toast promising a
-    /// better feed tomorrow would be the lie.
-    private var notInterestedIDs: Set<PostID> = []
-
-    private func markNotInterested(_ id: PostID) {
-        notInterestedIDs.insert(id)
-        // ⚠️ NOT REMOVED FROM UNDER THE VIEWER. The post is on screen, and
-        // pulling the page they are reading out from under their thumb to
-        // acknowledge a menu tap is a worse answer than the one they asked for.
-        // The next render drops it — see `render(_:)` — so it goes when they
-        // move on, which is when "not interested" means anything.
-        //
-        // With Undo (#957): nothing is sent either way (the hiding is this
-        // screen's), so the commit is empty and Undo forgets the id. Not
-        // rendered back at once: a post already dropped is one the viewer
-        // moved past, and inserting it behind them would shift the page they
-        // are on — the next render brings it back.
-        Feedback.undoable(
-            "Hidden from this feed", symbol: "hand.thumbsdown", from: self,
-            commit: {},
-            undo: { [weak self] in self?.notInterestedIDs.remove(id) }
-        )
-    }
-
-    private func presentReportReasons(for id: PostID) {
-        ReportReasonSheet.present(from: self, subject: "this post", sourceView: view) { [weak self] reason in
-            self?.report(id, reason: reason)
-        }
-    }
-
-    /// Files the report and says which way it went — a report the viewer
-    /// believes was filed but wasn't is the worst outcome here.
-    private func report(_ id: PostID, reason: ReportReason) {
-        guard let reporting else { return }
-        // Under way (#1775): said past the loader's grace, the answer in its place.
-        let pending = PendingFeedback("Sending report…", from: self)
-        Task {
-            do {
-                // The surface is a triage signal in its own right: the same post
-                // reported from the feed and from a profile are different
-                // reports.
-                try await reporting.report(.post(id), reason: reason, surface: "ios.feed")
-                pending.succeed("Report sent", symbol: "flag.fill")
-            } catch {
-                pending.fail("Couldn't send this report")
-            }
-        }
-    }
+    /// The post sheet's own chips (`SnapPostActions`), for tests.
+    func shareSheetActions(for id: PostID) -> [ShareSheetAction] { postActions.shareSheetActions(for: id) }
 
     func lifecycleCell(at index: Int) -> SnapCellLifecycle? {
         guard orderedIDs.indices.contains(index) else { return nil }
@@ -4560,6 +4435,10 @@ extension SnapFeedViewController: SnapToolbarComposerHost {
 // MARK: - The author bar's host (#2387)
 
 extension SnapFeedViewController: SnapAuthorBarHost {}
+
+// MARK: - The post actions' host (#2514)
+
+extension SnapFeedViewController: SnapPostActionsHost {}
 
 // MARK: - The warm planner's host (#2514)
 
