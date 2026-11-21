@@ -65,7 +65,7 @@ struct SnapComposerSoundSlotTests {
         #expect(holds == 1)
     }
 
-    private func feed(root: Bool, model: FeedItemDisplayModel) -> SnapFeedViewController {
+    private func feed(model: FeedItemDisplayModel) -> SnapFeedViewController {
         let feed = SnapFeedViewController(
             viewModel: FeedViewModel(repository: SlotSilentProvider(), unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents())),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
@@ -99,14 +99,14 @@ struct SnapComposerSoundSlotTests {
         let (panel, window) = Layout.engagedPanel()
         defer { window.isHidden = true }
 
-        feed(root: false, model: Self.textPage).applyRailSlot(to: panel)
+        feed(model: Self.textPage).applyRailSlot(to: panel)
         let bar = try Layout.composerColumn(in: panel.view, space: window).bar
         #expect(bar.railFace == .share, "a pushed text page's slot is not Share")
         #expect(bar.debugRailButton.accessibilityLabel == "Share")
         #expect(bar.debugRailButton.accessibilityIdentifier == SnapFooterToolbar.ID.share)
         #expect(bar.onRailLongPress == nil, "the slot's hold still does something")
 
-        feed(root: false, model: Self.mediaPage).applyRailSlot(to: panel)
+        feed(model: Self.mediaPage).applyRailSlot(to: panel)
         #expect(bar.railFace == .share, "a pushed media page's slot is not Share")
 
     }

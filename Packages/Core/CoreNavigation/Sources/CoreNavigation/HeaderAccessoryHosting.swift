@@ -10,12 +10,12 @@ import UIKit
 /// screen an item to wear.
 ///
 /// The item cannot simply be written onto a `navigationItem` from outside,
-/// which is why this exists: these screens COMPOSE their trailing run — For You
-/// writes it at `viewDidLoad`, the profile recomposes it whenever its follow
-/// state or identity moves — so anything assigned from out here is erased by
-/// the next write. A screen that adopts this promises the opposite: it keeps
-/// the item through every rebuild, and it puts it inboard of its own (`[0]` is
-/// the screen edge, so the screen's action keeps the corner).
+/// which is why this exists: these screens COMPOSE their trailing run — the
+/// messages inbox writes its resting bar, the profile recomposes it whenever
+/// its follow state or identity moves — so anything assigned from out here is
+/// erased by the next write. A screen that adopts this promises the opposite:
+/// it keeps the item through every rebuild, and it puts it inboard of its own
+/// (`[0]` is the screen edge, so the screen's action keeps the corner).
 ///
 /// Setting it again REPLACES it: a badge whose count changes width hands over a
 /// fresh `UIBarButtonItem`, because a bar measures a custom view once, at

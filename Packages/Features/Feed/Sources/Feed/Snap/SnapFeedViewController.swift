@@ -1320,7 +1320,7 @@ final class SnapFeedViewController: UIViewController {
                 // The sound bubble (#671): its face, and its tap. No hold since
                 // #1931: the sound follows the device.
                 cell.setSoundFace(self.soundFace(for: model))
-                cell.setSlotSharesPost(self.slotSharesPost(model), holdArmsShare: self.slotHoldArmsShare(model))
+                cell.setSlotSharesPost(true, holdArmsShare: self.slotHoldArmsShare(model))
                 cell.onRequestSoundSheet = { [weak self] in self?.presentSoundSheet() }
                 // Its way back, while the comments are scrolled away (#1929).
                 cell.onRequestSoundReturn = { [weak self, weak cell] in
@@ -1801,17 +1801,11 @@ final class SnapFeedViewController: UIViewController {
                   let model = modelsByID[orderedIDs[indexPath.item]],
                   let cell = collectionView.cellForItem(at: indexPath) as? SnapFeedCell else { continue }
             cell.setSoundFace(soundFace(for: model))
-            cell.setSlotSharesPost(slotSharesPost(model), holdArmsShare: slotHoldArmsShare(model))
+            cell.setSlotSharesPost(true, holdArmsShare: slotHoldArmsShare(model))
         }
         if let model = activeModel { toolbarComposer.refreshFooterSound(for: model) }
         applyRailSlot(to: commentsContentVC)
         applyRailSlot(to: previewRestingVC)
-    }
-
-    /// Whether `model`'s slot is its Share (#1999): every page — a text post
-    /// has no sound, and a media post's moves to the footer.
-    func slotSharesPost(_ model: FeedItemDisplayModel) -> Bool {
-        true
     }
 
     /// Whether the way back's hold over Share arms it (#1999): a media
@@ -1844,12 +1838,8 @@ final class SnapFeedViewController: UIViewController {
         //     a media page's sound moves to the footer's trailing item;
         //   - scrolled away, any: the way back (#1929), the panel's call.
         let face = soundFace(for: model)
-        let sharesInSlot = slotSharesPost(model)
-        detail.setRailShare(
-            sharesInSlot ? { [weak self] in self?.presentShareSheet(for: id) } : nil,
-            holdArms: slotHoldArmsShare(model)
-        )
-        detail.setRailSoundFace(face, keepsSlot: face != nil || sharesInSlot)
+        detail.setRailShare({ [weak self] in self?.presentShareSheet(for: id) }, holdArms: slotHoldArmsShare(model))
+        detail.setRailSoundFace(face)
         // The composer on the page's breath (#1716, #1722).
         detail.setComposerLift(SnapActionColumn.bottomBreath)
         // A remote cover loads in the rail's own slot (#1772).
@@ -2420,7 +2410,7 @@ final class SnapFeedViewController: UIViewController {
         toolbarComposer.applyToolbarPostActions(for: model.id)
         // The page's sound bubble and the panel's rail slot (#671).
         activeSnapCell?.setSoundFace(soundFace(for: model))
-        activeSnapCell?.setSlotSharesPost(slotSharesPost(model), holdArmsShare: slotHoldArmsShare(model))
+        activeSnapCell?.setSlotSharesPost(true, holdArmsShare: slotHoldArmsShare(model))
         // The footer's sound follows the page in place (#1999).
         toolbarComposer.refreshFooterSound(for: model)
         applyRailSlot(to: commentsContentVC)
