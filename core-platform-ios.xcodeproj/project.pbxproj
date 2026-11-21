@@ -54,6 +54,50 @@
 		5F00000000000000000060B1 /* EntityStore in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000060C1 /* EntityStore */; };
 		5F00000000000000000070B1 /* VoiceKit in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000070C1 /* VoiceKit */; };
 		5F00000000000000000071B1 /* VoiceKitUI in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000071C1 /* VoiceKitUI */; };
+		5F000000000000002391000B /* CoreNavigation in Frameworks */ = {isa = PBXBuildFile; productRef = 5F000000000000002391000C /* CoreNavigation */; };
+		5F000000000000002391000D /* Transitions in Frameworks */ = {isa = PBXBuildFile; productRef = 5F000000000000002391000E /* Transitions */; };
+		5F000000000000002391000F /* Instrumentation in Frameworks */ = {isa = PBXBuildFile; productRef = 5F0000000000000023910010 /* Instrumentation */; };
+		5F0000000000000023910011 /* DebugDashboard in Frameworks */ = {isa = PBXBuildFile; productRef = 5F0000000000000023910012 /* DebugDashboard */; };
+		5F0000000000000023910013 /* CoreNetworking in Frameworks */ = {isa = PBXBuildFile; productRef = 5F0000000000000023910014 /* CoreNetworking */; };
+		5F0000000000000023910015 /* DesignSystem in Frameworks */ = {isa = PBXBuildFile; productRef = 5F0000000000000023910016 /* DesignSystem */; };
+		5F0000000000000023910017 /* FeedInterface in Frameworks */ = {isa = PBXBuildFile; productRef = 5F0000000000000023910018 /* FeedInterface */; };
+		5F0000000000000023910019 /* CoreModels in Frameworks */ = {isa = PBXBuildFile; productRef = 5F000000000000002391001A /* CoreModels */; };
+		5F000000000000002391001B /* CoreContracts in Frameworks */ = {isa = PBXBuildFile; productRef = 5F000000000000002391001C /* CoreContracts */; };
+		5F000000000000002391001D /* CoreStorage in Frameworks */ = {isa = PBXBuildFile; productRef = 5F000000000000002391001E /* CoreStorage */; };
+		5F000000000000002391001F /* AuthInterface in Frameworks */ = {isa = PBXBuildFile; productRef = 5F0000000000000023910020 /* AuthInterface */; };
+		5F0000000000000023910021 /* Auth in Frameworks */ = {isa = PBXBuildFile; productRef = 5F0000000000000023910022 /* Auth */; };
+		5F0000000000000023910023 /* MediaCore in Frameworks */ = {isa = PBXBuildFile; productRef = 5F0000000000000023910024 /* MediaCore */; };
+		5F0000000000000023910025 /* MediaUI in Frameworks */ = {isa = PBXBuildFile; productRef = 5F0000000000000023910026 /* MediaUI */; };
+		5F0000000000000023910027 /* MediaPlayback in Frameworks */ = {isa = PBXBuildFile; productRef = 5F0000000000000023910028 /* MediaPlayback */; };
+		5F0000000000000023910029 /* Feed in Frameworks */ = {isa = PBXBuildFile; productRef = 5F000000000000002391002A /* Feed */; };
+		5F000000000000002391002B /* CoreRealtime in Frameworks */ = {isa = PBXBuildFile; productRef = 5F000000000000002391002C /* CoreRealtime */; };
+		5F000000000000002391002D /* Upload in Frameworks */ = {isa = PBXBuildFile; productRef = 5F000000000000002391002E /* Upload */; };
+		5F000000000000002391002F /* ProfileInterface in Frameworks */ = {isa = PBXBuildFile; productRef = 5F0000000000000023910030 /* ProfileInterface */; };
+		5F0000000000000023910031 /* Profile in Frameworks */ = {isa = PBXBuildFile; productRef = 5F0000000000000023910032 /* Profile */; };
+		5F0000000000000023910033 /* SearchInterface in Frameworks */ = {isa = PBXBuildFile; productRef = 5F0000000000000023910034 /* SearchInterface */; };
+		5F0000000000000023910035 /* Search in Frameworks */ = {isa = PBXBuildFile; productRef = 5F0000000000000023910036 /* Search */; };
+		5F0000000000000023910037 /* NotificationsInterface in Frameworks */ = {isa = PBXBuildFile; productRef = 5F0000000000000023910038 /* NotificationsInterface */; };
+		5F0000000000000023910039 /* Notifications in Frameworks */ = {isa = PBXBuildFile; productRef = 5F000000000000002391003A /* Notifications */; };
+		5F000000000000002391003B /* ChatInterface in Frameworks */ = {isa = PBXBuildFile; productRef = 5F000000000000002391003C /* ChatInterface */; };
+		5F000000000000002391003D /* Chat in Frameworks */ = {isa = PBXBuildFile; productRef = 5F000000000000002391003E /* Chat */; };
+		5F000000000000002391003F /* MapsInterface in Frameworks */ = {isa = PBXBuildFile; productRef = 5F0000000000000023910040 /* MapsInterface */; };
+		5F0000000000000023910041 /* Maps in Frameworks */ = {isa = PBXBuildFile; productRef = 5F0000000000000023910042 /* Maps */; };
+		5F0000000000000023910043 /* EmoteKit in Frameworks */ = {isa = PBXBuildFile; productRef = 5F0000000000000023910044 /* EmoteKit */; };
+		5F0000000000000023910045 /* Wallet in Frameworks */ = {isa = PBXBuildFile; productRef = 5F0000000000000023910046 /* Wallet */; };
+		5F0000000000000023910047 /* WalletInterface in Frameworks */ = {isa = PBXBuildFile; productRef = 5F0000000000000023910048 /* WalletInterface */; };
+		5F0000000000000023910049 /* ProfileData in Frameworks */ = {isa = PBXBuildFile; productRef = 5F000000000000002391004A /* ProfileData */; };
+		5F000000000000002391004B /* Settings in Frameworks */ = {isa = PBXBuildFile; productRef = 5F000000000000002391004C /* Settings */; };
+		5F000000000000002391004D /* SettingsInterface in Frameworks */ = {isa = PBXBuildFile; productRef = 5F000000000000002391004E /* SettingsInterface */; };
+		5F000000000000002391004F /* UploadInterface in Frameworks */ = {isa = PBXBuildFile; productRef = 5F0000000000000023910050 /* UploadInterface */; };
+		5F0000000000000023910051 /* AppPreferences in Frameworks */ = {isa = PBXBuildFile; productRef = 5F0000000000000023910052 /* AppPreferences */; };
+		5F0000000000000023910053 /* PlaceInterface in Frameworks */ = {isa = PBXBuildFile; productRef = 5F0000000000000023910054 /* PlaceInterface */; };
+		5F0000000000000023910055 /* Place in Frameworks */ = {isa = PBXBuildFile; productRef = 5F0000000000000023910056 /* Place */; };
+		5F0000000000000023910057 /* LaunchArguments in Frameworks */ = {isa = PBXBuildFile; productRef = 5F0000000000000023910058 /* LaunchArguments */; };
+		5F0000000000000023910059 /* CacheKit in Frameworks */ = {isa = PBXBuildFile; productRef = 5F000000000000002391005A /* CacheKit */; };
+		5F000000000000002391005B /* LocalStore in Frameworks */ = {isa = PBXBuildFile; productRef = 5F000000000000002391005C /* LocalStore */; };
+		5F000000000000002391005D /* EntityStore in Frameworks */ = {isa = PBXBuildFile; productRef = 5F000000000000002391005E /* EntityStore */; };
+		5F000000000000002391005F /* VoiceKit in Frameworks */ = {isa = PBXBuildFile; productRef = 5F0000000000000023910060 /* VoiceKit */; };
+		5F0000000000000023910061 /* VoiceKitUI in Frameworks */ = {isa = PBXBuildFile; productRef = 5F0000000000000023910062 /* VoiceKitUI */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -69,6 +113,7 @@
 /* Begin PBXFileReference section */
 		51A1B7722FFBCAB6005918BC /* core-platform-ios.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "core-platform-ios.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		5F000000000000000000E102 /* core-platform-iosUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "core-platform-iosUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+		5F0000000000000023910007 /* YuyuProduction.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = YuyuProduction.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -79,6 +124,13 @@
 			);
 			target = 51A1B7712FFBCAB6005918BC /* core-platform-ios */;
 		};
+		5F0000000000000023910008 /* Exceptions for "App" folder in "core-platform-ios-production" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 5F0000000000000023910001 /* core-platform-ios-production */;
+		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -86,6 +138,7 @@
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
 				51A1B7842FFBCAB8005918BC /* Exceptions for "App" folder in "core-platform-ios" target */,
+				5F0000000000000023910008 /* Exceptions for "App" folder in "core-platform-ios-production" target */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -159,6 +212,57 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		5F0000000000000023910004 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5F000000000000002391000B /* CoreNavigation in Frameworks */,
+				5F000000000000002391000D /* Transitions in Frameworks */,
+				5F000000000000002391000F /* Instrumentation in Frameworks */,
+				5F0000000000000023910011 /* DebugDashboard in Frameworks */,
+				5F0000000000000023910013 /* CoreNetworking in Frameworks */,
+				5F0000000000000023910015 /* DesignSystem in Frameworks */,
+				5F0000000000000023910017 /* FeedInterface in Frameworks */,
+				5F0000000000000023910019 /* CoreModels in Frameworks */,
+				5F000000000000002391001B /* CoreContracts in Frameworks */,
+				5F000000000000002391001D /* CoreStorage in Frameworks */,
+				5F000000000000002391001F /* AuthInterface in Frameworks */,
+				5F0000000000000023910021 /* Auth in Frameworks */,
+				5F0000000000000023910023 /* MediaCore in Frameworks */,
+				5F0000000000000023910025 /* MediaUI in Frameworks */,
+				5F0000000000000023910027 /* MediaPlayback in Frameworks */,
+				5F0000000000000023910029 /* Feed in Frameworks */,
+				5F000000000000002391002B /* CoreRealtime in Frameworks */,
+				5F000000000000002391002D /* Upload in Frameworks */,
+				5F000000000000002391002F /* ProfileInterface in Frameworks */,
+				5F0000000000000023910031 /* Profile in Frameworks */,
+				5F0000000000000023910033 /* SearchInterface in Frameworks */,
+				5F0000000000000023910035 /* Search in Frameworks */,
+				5F0000000000000023910037 /* NotificationsInterface in Frameworks */,
+				5F0000000000000023910039 /* Notifications in Frameworks */,
+				5F000000000000002391003B /* ChatInterface in Frameworks */,
+				5F000000000000002391003D /* Chat in Frameworks */,
+				5F000000000000002391003F /* MapsInterface in Frameworks */,
+				5F0000000000000023910041 /* Maps in Frameworks */,
+				5F0000000000000023910043 /* EmoteKit in Frameworks */,
+				5F0000000000000023910045 /* Wallet in Frameworks */,
+				5F0000000000000023910047 /* WalletInterface in Frameworks */,
+				5F0000000000000023910049 /* ProfileData in Frameworks */,
+				5F000000000000002391004B /* Settings in Frameworks */,
+				5F000000000000002391004D /* SettingsInterface in Frameworks */,
+				5F000000000000002391004F /* UploadInterface in Frameworks */,
+				5F0000000000000023910051 /* AppPreferences in Frameworks */,
+				5F0000000000000023910053 /* PlaceInterface in Frameworks */,
+				5F0000000000000023910055 /* Place in Frameworks */,
+				5F0000000000000023910057 /* LaunchArguments in Frameworks */,
+				5F0000000000000023910059 /* CacheKit in Frameworks */,
+				5F000000000000002391005B /* LocalStore in Frameworks */,
+				5F000000000000002391005D /* EntityStore in Frameworks */,
+				5F000000000000002391005F /* VoiceKit in Frameworks */,
+				5F0000000000000023910061 /* VoiceKitUI in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -176,6 +280,7 @@
 			children = (
 				51A1B7722FFBCAB6005918BC /* core-platform-ios.app */,
 				5F000000000000000000E102 /* core-platform-iosUITests.xctest */,
+				5F0000000000000023910007 /* YuyuProduction.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -265,6 +370,73 @@
 			productReference = 5F000000000000000000E102 /* core-platform-iosUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
+		5F0000000000000023910001 /* core-platform-ios-production */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 5F0000000000000023910002 /* Build configuration list for PBXNativeTarget "core-platform-ios-production" */;
+			buildPhases = (
+				5F0000000000000023910006 /* Refuse every configuration but Release */,
+				5F0000000000000023910003 /* Sources */,
+				5F0000000000000023910004 /* Frameworks */,
+				5F0000000000000023910005 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				51A1B7742FFBCAB6005918BC /* App */,
+			);
+			name = "core-platform-ios-production";
+			packageProductDependencies = (
+				5F000000000000002391000C /* CoreNavigation */,
+				5F000000000000002391000E /* Transitions */,
+				5F0000000000000023910010 /* Instrumentation */,
+				5F0000000000000023910012 /* DebugDashboard */,
+				5F0000000000000023910014 /* CoreNetworking */,
+				5F0000000000000023910016 /* DesignSystem */,
+				5F0000000000000023910018 /* FeedInterface */,
+				5F000000000000002391001A /* CoreModels */,
+				5F000000000000002391001C /* CoreContracts */,
+				5F000000000000002391001E /* CoreStorage */,
+				5F0000000000000023910020 /* AuthInterface */,
+				5F0000000000000023910022 /* Auth */,
+				5F0000000000000023910024 /* MediaCore */,
+				5F0000000000000023910026 /* MediaUI */,
+				5F0000000000000023910028 /* MediaPlayback */,
+				5F000000000000002391002A /* Feed */,
+				5F000000000000002391002C /* CoreRealtime */,
+				5F000000000000002391002E /* Upload */,
+				5F0000000000000023910030 /* ProfileInterface */,
+				5F0000000000000023910032 /* Profile */,
+				5F0000000000000023910034 /* SearchInterface */,
+				5F0000000000000023910036 /* Search */,
+				5F0000000000000023910038 /* NotificationsInterface */,
+				5F000000000000002391003A /* Notifications */,
+				5F000000000000002391003C /* ChatInterface */,
+				5F000000000000002391003E /* Chat */,
+				5F0000000000000023910040 /* MapsInterface */,
+				5F0000000000000023910042 /* Maps */,
+				5F0000000000000023910044 /* EmoteKit */,
+				5F0000000000000023910046 /* Wallet */,
+				5F0000000000000023910048 /* WalletInterface */,
+				5F000000000000002391004A /* ProfileData */,
+				5F000000000000002391004C /* Settings */,
+				5F000000000000002391004E /* SettingsInterface */,
+				5F0000000000000023910050 /* UploadInterface */,
+				5F0000000000000023910052 /* AppPreferences */,
+				5F0000000000000023910054 /* PlaceInterface */,
+				5F0000000000000023910056 /* Place */,
+				5F0000000000000023910058 /* LaunchArguments */,
+				5F000000000000002391005A /* CacheKit */,
+				5F000000000000002391005C /* LocalStore */,
+				5F000000000000002391005E /* EntityStore */,
+				5F0000000000000023910060 /* VoiceKit */,
+				5F0000000000000023910062 /* VoiceKitUI */,
+			);
+			productName = "core-platform-ios-production";
+			productReference = 5F0000000000000023910007 /* YuyuProduction.app */;
+			productType = "com.apple.product-type.application";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -276,6 +448,9 @@
 				LastUpgradeCheck = 2660;
 				TargetAttributes = {
 					51A1B7712FFBCAB6005918BC = {
+						CreatedOnToolsVersion = 26.6;
+					};
+					5F0000000000000023910001 = {
 						CreatedOnToolsVersion = 26.6;
 					};
 					5F000000000000000000E101 = {
@@ -342,6 +517,7 @@
 			targets = (
 				51A1B7712FFBCAB6005918BC /* core-platform-ios */,
 				5F000000000000000000E101 /* core-platform-iosUITests */,
+				5F0000000000000023910001 /* core-platform-ios-production */,
 			);
 		};
 /* End PBXProject section */
@@ -361,7 +537,36 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		5F0000000000000023910005 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		5F0000000000000023910006 /* Refuse every configuration but Release */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Refuse every configuration but Release";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "if [ \"$CONFIGURATION\" != \"Release\" ]; then\n  echo \"error: core-platform-ios-production builds Release only (#2391). Debug, and Demo (Release), are the core-platform-ios target's: the mock backend's builds.\"\n  exit 1\nfi\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		51A1B76E2FFBCAB6005918BC /* Sources */ = {
@@ -372,6 +577,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		5F000000000000000000E103 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		5F0000000000000023910003 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -448,6 +660,7 @@
 				DEVELOPMENT_TEAM = 4ZZ7J5Z8ZX;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = App/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Yuyu Demo";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Record a video to share in a post.";
 				INFOPLIST_KEY_NSContactsUsageDescription = "Find the people in your contacts who are here. Only codes made from their email addresses and phone numbers are checked, and nothing is stored.";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "Unlock the app with Face ID when App Lock is on.";
@@ -464,11 +677,11 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "cn.wynn.core-platform-ios";
+				PRODUCT_BUNDLE_IDENTIFIER = "cn.wynn.core-platform-ios.demo";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REALTIME_URL = "ws://localhost:8443/ws";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
-				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "MOCK_BACKEND $(inherited)";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEMO MOCK_BACKEND $(inherited)";
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -633,6 +846,95 @@
 			};
 			name = Release;
 		};
+		5F0000000000000023910009 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APP_ATTEST_ENVIRONMENT = development;
+				APS_ENVIRONMENT = development;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				BFF_HOST = "http://localhost:8080";
+				CODE_SIGN_ENTITLEMENTS = "core-platform-ios.entitlements";
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]" = "core-platform-ios-device-debug.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 4ZZ7J5Z8ZX;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = App/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "core-platform-ios";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Record a video to share in a post.";
+				INFOPLIST_KEY_NSContactsUsageDescription = "Find the people in your contacts who are here. Only codes made from their email addresses and phone numbers are checked, and nothing is stored.";
+				INFOPLIST_KEY_NSFaceIDUsageDescription = "Unlock the app with Face ID when App Lock is on.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Your location opens the country you are in on the map. Only the country leaves your device.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Record voice messages, and capture sound while recording a video to share.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Keep a copy of the photos and videos you post, when you ask for one.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Choose photos and videos from your library to share in a post.";
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchStoryboardName = Launch;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "cn.wynn.core-platform-ios";
+				PRODUCT_NAME = YuyuProduction;
+				REALTIME_URL = "ws://localhost:8443/ws";
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		5F000000000000002391000A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APP_ATTEST_ENVIRONMENT = production;
+				APS_ENVIRONMENT = production;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				BFF_HOST = "http://localhost:8080";
+				CODE_SIGN_ENTITLEMENTS = "core-platform-ios.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 4ZZ7J5Z8ZX;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = App/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "core-platform-ios";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Record a video to share in a post.";
+				INFOPLIST_KEY_NSContactsUsageDescription = "Find the people in your contacts who are here. Only codes made from their email addresses and phone numbers are checked, and nothing is stored.";
+				INFOPLIST_KEY_NSFaceIDUsageDescription = "Unlock the app with Face ID when App Lock is on.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Your location opens the country you are in on the map. Only the country leaves your device.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Record voice messages, and capture sound while recording a video to share.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Keep a copy of the photos and videos you post, when you ask for one.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Choose photos and videos from your library to share in a post.";
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchStoryboardName = Launch;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "cn.wynn.core-platform-ios";
+				PRODUCT_NAME = YuyuProduction;
+				REALTIME_URL = "ws://localhost:8443/ws";
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -659,6 +961,15 @@
 			buildConfigurations = (
 				5F000000000000000000E107 /* Debug */,
 				5F000000000000000000E108 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		5F0000000000000023910002 /* Build configuration list for PBXNativeTarget "core-platform-ios-production" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5F0000000000000023910009 /* Debug */,
+				5F000000000000002391000A /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
@@ -1014,6 +1325,182 @@
 			productName = VoiceKit;
 		};
 		5F00000000000000000071C1 /* VoiceKitUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = VoiceKitUI;
+		};
+		5F000000000000002391000C /* CoreNavigation */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = CoreNavigation;
+		};
+		5F000000000000002391000E /* Transitions */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = Transitions;
+		};
+		5F0000000000000023910010 /* Instrumentation */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = Instrumentation;
+		};
+		5F0000000000000023910012 /* DebugDashboard */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = DebugDashboard;
+		};
+		5F0000000000000023910014 /* CoreNetworking */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = CoreNetworking;
+		};
+		5F0000000000000023910016 /* DesignSystem */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = DesignSystem;
+		};
+		5F0000000000000023910018 /* FeedInterface */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = FeedInterface;
+		};
+		5F000000000000002391001A /* CoreModels */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = CoreModels;
+		};
+		5F000000000000002391001C /* CoreContracts */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = CoreContracts;
+		};
+		5F000000000000002391001E /* CoreStorage */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = CoreStorage;
+		};
+		5F0000000000000023910020 /* AuthInterface */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = AuthInterface;
+		};
+		5F0000000000000023910022 /* Auth */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = Auth;
+		};
+		5F0000000000000023910024 /* MediaCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MediaCore;
+		};
+		5F0000000000000023910026 /* MediaUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MediaUI;
+		};
+		5F0000000000000023910028 /* MediaPlayback */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MediaPlayback;
+		};
+		5F000000000000002391002A /* Feed */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = Feed;
+		};
+		5F000000000000002391002C /* CoreRealtime */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = CoreRealtime;
+		};
+		5F000000000000002391002E /* Upload */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = Upload;
+		};
+		5F0000000000000023910030 /* ProfileInterface */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ProfileInterface;
+		};
+		5F0000000000000023910032 /* Profile */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = Profile;
+		};
+		5F0000000000000023910034 /* SearchInterface */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = SearchInterface;
+		};
+		5F0000000000000023910036 /* Search */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = Search;
+		};
+		5F0000000000000023910038 /* NotificationsInterface */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = NotificationsInterface;
+		};
+		5F000000000000002391003A /* Notifications */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = Notifications;
+		};
+		5F000000000000002391003C /* ChatInterface */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ChatInterface;
+		};
+		5F000000000000002391003E /* Chat */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = Chat;
+		};
+		5F0000000000000023910040 /* MapsInterface */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MapsInterface;
+		};
+		5F0000000000000023910042 /* Maps */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = Maps;
+		};
+		5F0000000000000023910044 /* EmoteKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = EmoteKit;
+		};
+		5F0000000000000023910046 /* Wallet */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = Wallet;
+		};
+		5F0000000000000023910048 /* WalletInterface */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = WalletInterface;
+		};
+		5F000000000000002391004A /* ProfileData */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ProfileData;
+		};
+		5F000000000000002391004C /* Settings */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = Settings;
+		};
+		5F000000000000002391004E /* SettingsInterface */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = SettingsInterface;
+		};
+		5F0000000000000023910050 /* UploadInterface */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = UploadInterface;
+		};
+		5F0000000000000023910052 /* AppPreferences */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = AppPreferences;
+		};
+		5F0000000000000023910054 /* PlaceInterface */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = PlaceInterface;
+		};
+		5F0000000000000023910056 /* Place */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = Place;
+		};
+		5F0000000000000023910058 /* LaunchArguments */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = LaunchArguments;
+		};
+		5F000000000000002391005A /* CacheKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = CacheKit;
+		};
+		5F000000000000002391005C /* LocalStore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = LocalStore;
+		};
+		5F000000000000002391005E /* EntityStore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = EntityStore;
+		};
+		5F0000000000000023910060 /* VoiceKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = VoiceKit;
+		};
+		5F0000000000000023910062 /* VoiceKitUI */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = VoiceKitUI;
 		};

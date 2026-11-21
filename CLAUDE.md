@@ -77,6 +77,8 @@ from fighting over `develop` and over CI.
     **Xcode 26**: the guard against Swift only Xcode 27 accepts.
     `compile tests (Xcode 26)` does the same for the Mac lanes' tests, so it
     runs only while lanes run on the Mac: `MACOS_RUNNER=github` skips it.
+    `build app` builds Release twice (#2391): `core-platform-ios-production`, the real
+    backend only, checked for mock symbols; and Demo, the mock target in Release.
   - **The test lanes, by repository variable:**
     - `MACOS_RUNNER=github` (set since 2026-11-18, the owner: one session
       works on the repository during audit #2366): **every lane runs on
