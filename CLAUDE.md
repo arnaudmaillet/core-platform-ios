@@ -79,6 +79,10 @@ from fighting over `develop` and over CI.
     runs only while lanes run on the Mac: `MACOS_RUNNER=github` skips it.
     `build app` builds Release twice (#2391): `core-platform-ios-production`, the real
     backend only, checked for mock symbols; and Demo, the mock target in Release.
+  - `swiftlint (report-only)` runs on `ubuntu-latest`, in SwiftLint's container
+    (#2519): a pull request lints the Swift files it changes, a push to develop
+    lints them all and writes the count per rule to the job summary. It is not
+    part of `build-test` yet: findings are annotations, not a red check.
   - **The test lanes, by repository variable:**
     - `MACOS_RUNNER=github` (set since 2026-11-18, the owner: one session
       works on the repository during audit #2366): **every lane runs on

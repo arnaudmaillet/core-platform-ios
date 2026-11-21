@@ -503,6 +503,64 @@ jobs:
             exit 1
           fi
 
+  # ── SwiftLint (#2519) ────────────────────────────────────────────────────
+  # Ubuntu and SwiftLint's own container: no macOS runner is spent. A pull
+  # request lints the Swift files it adds or changes; a push to develop lints
+  # every file and writes the count per rule to the job summary, the debt to
+  # pay down. REPORT-ONLY for now: findings show as annotations on the diff,
+  # and the job is not part of `build-test`. It becomes blocking for errors
+  # once develop's count is known and the rules are tuned to it.
+  lint:
+    name: swiftlint (report-only)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Pick the files
+        id: files
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git diff --name-only --diff-filter=AMR "${{ github.event.pull_request.base.sha }}"...HEAD -- '*.swift' \
+              | grep -E '^(App|Packages)/' | grep -v '/Generated/' > lint-files.txt || true
+          else
+            git ls-files -- 'App/*.swift' 'Packages/*.swift' | grep -v '/Generated/' > lint-files.txt
+          fi
+          echo "count=$(wc -l < lint-files.txt | tr -d ' ')" >> "$GITHUB_OUTPUT"
+      - name: Lint
+        if: steps.files.outputs.count != '0'
+        run: |
+          set -uo pipefail
+          # The list goes in through the environment, as SwiftLint's
+          # SCRIPT_INPUT_FILE_* variables, so no command line grows past
+          # its limit on a push that lints every file.
+          ENVFILE=lint-env.txt; : > "$ENVFILE"
+          i=0
+          while IFS= read -r f; do echo "SCRIPT_INPUT_FILE_$i=$f" >> "$ENVFILE"; i=$((i+1)); done < lint-files.txt
+          echo "SCRIPT_INPUT_FILE_COUNT=$i" >> "$ENVFILE"
+          docker run --rm --env-file "$ENVFILE" -v "$PWD:/work" -w /work ghcr.io/realm/swiftlint:0.57.0 \
+            swiftlint lint --use-script-input-files --config .swiftlint.yml --reporter json > lint.json || true
+          python3 - <<'PY'
+          import json, collections, os
+          try:
+              findings = json.load(open("lint.json"))
+          except Exception as error:
+              print(f"::warning::SwiftLint produced no report: {error}")
+              raise SystemExit(0)
+          root = os.getcwd() + "/"
+          for f in findings[:500]:
+              path = (f.get("file") or "").replace("/work/", "").replace(root, "")
+              level = "error" if f.get("severity") == "Error" else "warning"
+              message = f.get("reason", "").replace("\n", " ")
+              print(f"::{level} file={path},line={f.get('line') or 1},title=SwiftLint {f.get('rule_id')}::{message}")
+          by_rule = collections.Counter((f.get("rule_id"), f.get("severity")) for f in findings)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+              summary.write(f"### SwiftLint (report-only): {len(findings)} findings\n\n| Rule | Severity | Count |\n|---|---|---|\n")
+              for (rule, severity), count in by_rule.most_common():
+                  summary.write(f"| {rule} | {severity} | {count} |\n")
+          PY
+
   # ── The required check ───────────────────────────────────────────────────
   # `develop`'s branch protection requires a status check literally named
   # "build-test". Keep this job's name in sync with it, or merges stop being
