@@ -17,8 +17,9 @@ import UIKit
 // private: this file reaches them through the thin `debug*` wrappers in the
 // main file (`debugDrivePageSwipe`, `debugReachableCeiling`,
 // `debugMoreMenuActions`). The launch-argument hooks that drive the screen
-// (`runDebugAppearanceHooks`) stay in `SnapFeedViewController.swift`, and so
-// do the comments, loading-page and dismissal accessors and the
+// (`runDebugAppearanceHooks`) are `SnapFeedDebugHooks`'. The comments,
+// loading-page and dismissal accessors stay in `SnapFeedViewController.swift`,
+// and so do the
 // `ArrivalInvariantReporting` facts: each reads private state that a file of
 // its own could only reach by widening it.
 

@@ -10,8 +10,9 @@ import CoreStorage
 /// can still be undone, and how much — and its lifetime: the undo window is
 /// the post's time on screen.
 ///
-/// The screen keeps the member gate, the haptics, the cell's theatre and the
-/// DEBUG `-wallet-log` lines; it hears plain values back.
+/// The screen's half (`SnapBoostDrive`) keeps the member gate, the haptics,
+/// the cell's theatre, the stake toast and the DEBUG `-wallet-log` lines; it
+/// hears plain values back.
 ///
 /// Unit-tested without a screen (`SnapBoostControllerTests`).
 @MainActor

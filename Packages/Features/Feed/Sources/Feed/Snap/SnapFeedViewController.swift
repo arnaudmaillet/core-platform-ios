@@ -193,7 +193,7 @@ final class SnapFeedViewController: UIViewController {
     /// What is heard, the song, the records' spin, the share of the screen,
     /// Background Play and Picture in Picture (`SnapSoundPlayback`). Built on
     /// first use; building it does nothing else.
-    private lazy var soundPlayback = SnapSoundPlayback(
+    private(set) lazy var soundPlayback = SnapSoundPlayback(
         host: self, videoPlayback: videoPlayback, imagePipeline: imagePipeline, soundState: soundState
     )
     /// Whether the pages' lifecycle counts the screen as watched — what lets
@@ -272,8 +272,6 @@ final class SnapFeedViewController: UIViewController {
     /// The source row's author band, borrowed for a flight — see
     /// `installRevealAuthorBand`.
     private var revealAuthorBand: PostAuthorBandView?
-    /// The next captions' emotes, warmed at each settle (#1504).
-    private let emotePrefetch = EmotePrefetch()
     /// The side list (#1425): nil on a screen that opted out.
     private(set) var sideList: SnapSideListController?
     /// The screen's horizontal swipe chain (#1525) — see `swipeStage`.
@@ -338,6 +336,34 @@ final class SnapFeedViewController: UIViewController {
     /// both bars' pill widths and the comments' day (`SnapAuthorBar`). Built
     /// on first use; building it does nothing else.
     private(set) lazy var authorBar = SnapAuthorBar(host: self)
+    /// The boost on screen: the gate, the theatre, the stake toast and the
+    /// boost anchors (`SnapBoostDrive`). Built on first use; building it does
+    /// nothing else.
+    private(set) lazy var boostDrive = SnapBoostDrive(host: self, wallet: wallet)
+    /// The share sheet and its chips: Repost, Not interested, Report
+    /// (`SnapPostActions`). Built on first use; building it does nothing
+    /// else.
+    private(set) lazy var postActions = SnapPostActions(host: self, reporting: reporting)
+    /// The warms around the settled page, and what is let go while the feed
+    /// is not watched (`SnapWarmPlanner`). Built on first use; building it
+    /// does nothing else.
+    private(set) lazy var warmPlanner = SnapWarmPlanner(host: self, videoPlayback: videoPlayback)
+    /// The page's theme lent to the shared bars and blurs, and handed back on
+    /// the way out (`SnapChromeThemeLender`). Built on first use; building it
+    /// does nothing else.
+    private(set) lazy var chromeThemeLender = SnapChromeThemeLender(host: self)
+    /// The sound sheet: its sections and tiles, what it covers and pauses,
+    /// and the post a tile brings to the screen (`SnapSoundSheetPresenter`).
+    /// Built on first use; building it does nothing else.
+    private(set) lazy var soundSheetPresenter = SnapSoundSheetPresenter(
+        host: self, soundState: soundState, savedSounds: savedSounds, videoPlayback: videoPlayback,
+        useSound: useSound, openFeedHero: openFeedHero, galleryPost: galleryPost, prewarmPosts: prewarmPosts
+    )
+    #if DEBUG
+    /// The launch-argument hooks `viewDidAppear` arms (`SnapFeedDebugHooks`).
+    /// Built on first use; building it does nothing else.
+    private(set) lazy var debugHooks = SnapFeedDebugHooks(host: self)
+    #endif
 
     /// Files a post's Report. Nil withholds the row entirely: an action that
     /// cannot act is not offered — the grid's card menu follows the same rule.
@@ -623,7 +649,7 @@ final class SnapFeedViewController: UIViewController {
         navigationController?.flagHidesAppTabBar(at: self) ?? false
     }
 
-    private var isClosable: Bool {
+    var isClosable: Bool {
         if presentingViewController != nil { return true }
         guard let nav = navigationController else { return false }
         return nav.viewControllers.first !== self
@@ -642,7 +668,7 @@ final class SnapFeedViewController: UIViewController {
     /// Leaves the feed the way it arrived: pop when pushed (runs the
     /// interactive-capable zoom-out on the map's stack), dismiss when
     /// presented.
-    private func closeFeed() {
+    func closeFeed() {
         #if DEBUG
         // `-grab-log`: a chevron tap, and whether the stack could act on it —
         // a pop asked for while a transition is still running is dropped by
@@ -730,7 +756,7 @@ final class SnapFeedViewController: UIViewController {
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         // On screen again (a return, a cancelled grab): the bars may be lent.
-        hasHandedChromeBack = false
+        chromeThemeLender.resumeLending()
         // A RETURN (a pop back from a profile, a sheet gone), never the first
         // arrival: that one is the opening's, whose owner hides the dock
         // through UIKit as it pushes.
@@ -910,300 +936,14 @@ final class SnapFeedViewController: UIViewController {
         authorBar.showPendingAuthor()
         if !flight.isAwaitingZoomPresentation { applyPendingComments(animated: true) }
         #if DEBUG
-        runDebugAppearanceHooks()
+        debugHooks.runDebugAppearanceHooks()
         #endif
     }
 
     #if DEBUG
-    private var didDebugPause = false
-    private var didDebugScroll = false
-    private var didDebugScrollDemo = false
-    private var didDebugCommentsDemo = false
-    /// `-snap-start-paused`: pauses the active cell shortly after appearing so
-    /// the pause glyph can be screenshotted (taps can't be injected in the sim).
-    /// `-snap-auto-dismiss`: dismisses a presented (map-opened) feed shortly
-    /// after it settles, so the zoom-out leg can be recorded in the sim.
-    /// `-snap-start-index N`: snaps to page N shortly after appearing (mock:
-    /// every index%3==2 is text-only) — deterministic access to a given page
-    /// kind without scroll injection.
-    private var didDebugPageSwipe = false
-    private var didDebugFling = false
-    private var didDebugAutoDismiss = false
-    /// ONCE PER LAUNCH, not per feed: a feed opened from the sheet's own grid
-    /// ran the hook again and stacked a second sheet over it.
-    private static var didDebugSoundSheet = false
-    /// Once per launch, like the sound sheet's.
-    private static var didDebugSaveElsewhere = false
-    private weak var debugPresentedSoundSheet: SoundSheetViewController?
-
-    private func runDebugAppearanceHooks() {
-        // Once per screen, like every other hook here: this runs from
-        // `viewDidAppear`, and without the flag each re-appearance (a sheet
-        // dismissed over the feed, a pop back onto it) armed ANOTHER close —
-        // a second `closeFeed()` 2.5s later against whatever was then on top.
-        let arguments = ProcessInfo.processInfo.arguments
-        // `-snap-auto-dismiss [delay]`: the delay (2.5s by default) lets a run
-        // page first (`-snap-fling`, +3s) and film the close from another post
-        // on any surface (#951), not only For You's (`-foryou-demo-close`).
-        if !didDebugAutoDismiss, LaunchArgument.snapAutoDismiss.isPassed(in: arguments), isClosable {
-            didDebugAutoDismiss = true
-            let delay = LaunchArgument.snapAutoDismiss.doubleValue(in: arguments) ?? 2.5
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-                self?.closeFeed()
-            }
-        }
-        // `-snap-page-demo [delay]`: drive the page swipe once the feed has
-        // settled, so the animated page change can be filmed.
-        if !didDebugPageSwipe, LaunchArgument.snapPageDemo.isPassed(in: arguments) {
-            didDebugPageSwipe = true
-            let delay = LaunchArgument.snapPageDemo.doubleValue(in: arguments) ?? 3.0
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-                self?.debugDrivePageSwipe()
-            }
-        }
-        // `-snap-page-back-demo [delay]`: the same drive downward — the
-        // previous post (#2058). Pair with `-snap-start-index N`.
-        if !didDebugPageSwipe, LaunchArgument.snapPageBackDemo.isPassed(in: arguments) {
-            didDebugPageSwipe = true
-            let delay = LaunchArgument.snapPageBackDemo.doubleValue(in: arguments) ?? 3.0
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-                self?.debugDrivePageSwipe(distance: -520)
-            }
-        }
-        // `-snap-fling [pages]`: scrolls the pager one page at a time the way a
-        // FLICK does — a stream of small offset changes, each with its own
-        // delegate callback, then a settle.
-        //
-        // Nothing before this could exercise a scroll at all. `-snap-page-demo`
-        // drives the text page's own swipe gesture, and `-snap-start-index`
-        // teleports; both reach the settle without ever passing through the
-        // middle of the screen, which is exactly where the picture now changes
-        // hands (`updateViewportPlayback`). Read the run with `-media-log`: a
-        // `[page-play]` between `[fling] begin` and `[fling] settle` is the
-        // clip starting mid-scroll, which is the whole claim.
-        if !didDebugFling, LaunchArgument.snapFling.isPassed(in: arguments) {
-            didDebugFling = true
-            let pages = LaunchArgument.snapFling.intValue(in: arguments) ?? 1
-            let back = LaunchArgument.snapFlingBack.isPassed(in: arguments) ? pages : 0
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
-                self?.debugFlingPages(pages, back: back)
-            }
-        }
-        // ⚠️ WAITS FOR THE PAGE TO EXIST, not for 1.5s. On a cold run the
-        // posts had not arrived by then, `indices.contains(target)` failed and
-        // the hook returned without a word — the screenshot showed page 0 and
-        // read as the page asked for. The 1.5s stays as the floor (the feed's
-        // own settle); past it the jump waits for the data, and says so if it
-        // never comes or the jump does not land.
-        if !didDebugScroll,
-           let target = LaunchArgument.snapStartIndex.intValue(in: arguments) {
-            didDebugScroll = true
-            let label = "-snap-start-index \(target)"
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-                QAWait.until(label, { [weak self] in
-                    guard let self else { return false }
-                    return self.orderedIDs.indices.contains(target) && self.collectionView.bounds.height > 0
-                }) { [weak self] in
-                    guard let self else { return }
-                    self.collectionView.scrollToItem(at: IndexPath(item: target, section: 0), at: .top, animated: false)
-                    self.updateActiveItem()
-                    if self.lifecycle.activeIndex == target {
-                        print("[qa] \(label): active page \(target) of \(self.orderedIDs.count)")
-                    } else {
-                        QAWait.fail(label, "jumped but active page is \(self.lifecycle.activeIndex.map(String.init) ?? "nil")")
-                    }
-                }
-            }
-        }
-        // `-snap-sound-sheet [large|roundtrip|push]`: opens the active page's
-        // sound sheet — the attribution's tap — once the page (or
-        // `-snap-start-index`'s target) is settled; `large` then raises it to
-        // large 2s later, `roundtrip` also comes back to collapsed 2.5s after
-        // that; `push` presses Popular's "View all" 2s later (at collapsed:
-        // the sheet must not move) and comes back 3s after that. Pair with
-        // `-sound-sheet-trace` for the collapsed detent's measures and the
-        // reveal's progress.
-        if !Self.didDebugSoundSheet, LaunchArgument.snapSoundSheet.isPassed(in: arguments) {
-            Self.didDebugSoundSheet = true
-            let mode = LaunchArgument.snapSoundSheet.value(in: arguments) ?? ""
-            let expands = mode == "large" || mode == "roundtrip"
-            let jumpTarget = LaunchArgument.snapStartIndex.intValue(in: arguments)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
-                QAWait.until("-snap-sound-sheet", { [weak self] in
-                    guard let self, let index = self.lifecycle.activeIndex else { return false }
-                    return jumpTarget == nil || index == jumpTarget
-                }) { [weak self] in
-                    guard let self else { return }
-                    self.presentSoundSheet()
-                    guard let sheet = self.debugPresentedSoundSheet else {
-                        QAWait.fail("-snap-sound-sheet", "the active page has no sound")
-                        return
-                    }
-                    print("[qa] -snap-sound-sheet: opened")
-                    if mode == "push" {
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak sheet] in
-                            sheet?.debugShowPopular()
-                        }
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak sheet] in
-                            sheet?.debugPopSection()
-                        }
-                        return
-                    }
-                    guard expands else { return }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak sheet] in
-                        sheet?.debugExpand()
-                    }
-                    guard mode == "roundtrip" else { return }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 4.5) { [weak sheet] in
-                        sheet?.debugCollapse()
-                    }
-                }
-            }
-        }
-        // `-feed-open-wallet`: presents the wallet sheet over the feed ~2s
-        // after settle — the header badge opens it on tap, which the sim
-        // can't deliver. The map's `-open-wallet` stays separate: both
-        // firing at once would race two presentations of one sheet.
-        if LaunchArgument.feedOpenWallet.isPassed(in: arguments) {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
-                self?.presentWalletSheet()
-            }
-        }
-        // `-wallet-demo-boost [amount]`: boosts the ACTIVE post through the
-        // real spend path (wallet debit → haptic → "+N" float) shortly after
-        // settle — the rail anchor opens it on tap, which the sim can't
-        // deliver. Pair with `-wallet-log` for the ledger line and
-        // `-wallet-balance 0` for the denied shake. `-wallet-demo-shot` fires
-        // one ×100 shot instead (pair with `-wallet-stake-shots N`).
-        if LaunchArgument.walletDemoBoost.isPassed(in: arguments) || LaunchArgument.walletDemoShot.isPassed(in: arguments) {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
-                guard let self else { return }
-                let index = self.lifecycle.activeIndex ?? 0
-                guard self.orderedIDs.indices.contains(index) else { return }
-                let amount: Int
-                if let chosen = LaunchArgument.walletDemoBoost.intValue(in: arguments) {
-                    amount = chosen
-                } else {
-                    amount = WalletStore.Policy.defaultStakeAmount
-                }
-                let cell = self.collectionView.visibleCells
-                    .compactMap { $0 as? SnapFeedCell }.first
-                let spend: WalletStakeSpend = LaunchArgument.walletDemoShot.isPassed(in: arguments) ? .shot : .likes(amount)
-                self.performBoost(on: self.orderedIDs[index], spend: spend, feedbackCell: cell)
-            }
-        }
-        // `-wallet-demo-undo`: takes back the active post's session boosts
-        // ~2s after `-wallet-demo-boost` landed them — the menu's Undo
-        // entry, minus the long-press the sim can't deliver. The pair
-        // exercises the full loop: spend, receipt face, refund, glyph face.
-        if LaunchArgument.walletDemoUndo.isPassed(in: arguments) {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 4.5) { [weak self] in
-                guard let self else { return }
-                let index = self.lifecycle.activeIndex ?? 0
-                guard self.orderedIDs.indices.contains(index) else { return }
-                let cell = self.collectionView.visibleCells
-                    .compactMap { $0 as? SnapFeedCell }.first
-                self.performBoostUndo(on: self.orderedIDs[index], feedbackCell: cell)
-            }
-        }
-        // `-save-elsewhere [seconds]` (#1067): toggles the active post's save
-        // `seconds` (default 3) after appearing THROUGH THE APP'S PILE, as a
-        // card or a grid saves — never this screen's own toggle, which draws
-        // its glyph itself. Only the saved fact's observation can redraw the
-        // glyph; the log line reads it back right after the write.
-        if !Self.didDebugSaveElsewhere, LaunchArgument.saveElsewhere.isPassed(in: arguments) {
-            Self.didDebugSaveElsewhere = true
-            let delay = LaunchArgument.saveElsewhere.doubleValue(in: arguments) ?? 3
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-                QAWait.until("-save-elsewhere", { [weak self] in self?.activeModel != nil }) { [weak self] in
-                    guard let self, let id = self.activeModel?.id else { return }
-                    let before = self.toolbarComposer.drawnBookmarkSymbol
-                    let saved = self.bookmarks.toggle(id.rawValue)
-                    print("[qa] -save-elsewhere: \(id.rawValue) saved=\(saved) glyph \(before) -> \(self.toolbarComposer.drawnBookmarkSymbol)")
-                }
-            }
-        }
-        // `-snap-scroll-demo`: animated-scrolls one page forward shortly
-        // after settle, so a page *transition* can be recorded in the sim
-        // (scroll gestures can't be injected) — the comment ticker must be
-        // flowing on both pages during the motion, not pop in at rest.
-        if !didDebugScrollDemo, LaunchArgument.snapScrollDemo.isPassed(in: arguments) {
-            didDebugScrollDemo = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) { [weak self] in
-                guard let self else { return }
-                let target = (self.lifecycle.activeIndex ?? 0) + 1
-                guard self.orderedIDs.indices.contains(target) else { return }
-                // Settles in scrollViewDidEndScrollingAnimation.
-                self.collectionView.scrollToItem(at: IndexPath(item: target, section: 0), at: .top, animated: true)
-            }
-        }
-        // `-snap-comments-demo`: opens the comments engagement on the active
-        // page ~2.5s after appear (after any `-snap-start-index` jump at
-        // 1.5s settles) — the mutated layout can be screenshotted without
-        // tap injection.
-        //
-        // ⚠️ "AFTER THE JUMP" IS A STATE, not a time. With `-snap-start-index`
-        // the 2.5s used to race the jump's own 1.5s + data arrival: on a cold
-        // run the engagement opened on page 0 and the jump then scrolled away
-        // under it. It now waits for the active page to BE the jump's target
-        // (or, alone, for any active page), and says so if that never happens.
-        if !didDebugCommentsDemo, LaunchArgument.snapCommentsDemo.isPassed(in: arguments) {
-            didDebugCommentsDemo = true
-            let jumpTarget = LaunchArgument.snapStartIndex.intValue(in: arguments)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
-                QAWait.until("-snap-comments-demo", { [weak self] in
-                    guard let self, let index = self.lifecycle.activeIndex,
-                          self.orderedIDs.indices.contains(index) else { return false }
-                    return jumpTarget == nil || index == jumpTarget
-                }) { [weak self] in
-                    guard let self, let index = self.lifecycle.activeIndex,
-                          self.orderedIDs.indices.contains(index) else { return }
-                    self.commentsCoordinator.presentComments(for: self.orderedIDs[index])
-                    // `-snap-comments-close N`: dismisses the engagement N
-                    // seconds after it opens, landing the page back at rest.
-                    // The RETURN leg is a state change of its own — the page's
-                    // chrome comes back and the empty state re-reads its words
-                    // — and it was the one leg no launch arg could reach, so it
-                    // could only be reasoned about. Chained off the open rather
-                    // than scheduled from appear, so the delay means what it
-                    // says whatever the open cost.
-                    guard let after = LaunchArgument.snapCommentsClose.doubleValue(in: arguments) else { return }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + after) { [weak self] in
-                        self?.commentsCoordinator.dismissComments()
-                        // `-snap-comments-reopen N`: taps the entry point again N
-                        // seconds after the close. The REOPEN is what a broken
-                        // teardown kills — the page still looks right, and every
-                        // comment surface is simply dead — so the QA path has to
-                        // go all the way round.
-                        guard let reopenAfter = LaunchArgument.snapCommentsReopen.doubleValue(in: arguments) else { return }
-                        DispatchQueue.main.asyncAfter(deadline: .now() + reopenAfter) { [weak self] in
-                            guard let self, let index = self.lifecycle.activeIndex,
-                                  self.orderedIDs.indices.contains(index) else { return }
-                            self.commentsCoordinator.presentComments(for: self.orderedIDs[index])
-                        }
-                    }
-                }
-            }
-        }
-        // `-dump-bars`: prints the navigation view hierarchy (class, frame,
-        // alpha, hidden) plus each toolbar item's superview chain ~5s after
-        // appear — the tool that pins down WHERE iOS 26 hosts the Liquid
-        // Glass item platters (they are not in the toolbar's subtree).
-        if LaunchArgument.dumpBars.isPassed(in: arguments) {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
-                self?.dumpBarHierarchy()
-            }
-        }
-        guard !didDebugPause,
-              LaunchArgument.snapStartPaused.isPassed() else { return }
-        didDebugPause = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
-            guard let self, let index = self.lifecycle.activeIndex,
-                  let cell = self.collectionView.cellForItem(at: IndexPath(item: index, section: 0)) as? SnapFeedCell
-            else { return }
-            cell.togglePlayback()
-        }
-    }
+    /// The sound sheet the last `presentSoundSheet` raised, for the hooks
+    /// (`SnapFeedDebugHooks`).
+    var debugPresentedSoundSheet: SoundSheetViewController? { soundSheetPresenter.debugPresentedSoundSheet }
     #endif
 
     override func viewWillDisappear(_ animated: Bool) {
@@ -1356,7 +1096,7 @@ final class SnapFeedViewController: UIViewController {
         // Leaving the screen finalizes the session's boosts, same as paging
         // away (`SnapBoostController.finalize`).
         boost.finalize()
-        closeStakeToastIfSettled()
+        boostDrive.closeStakeToastIfSettled()
     }
 
     // MARK: - Setup
@@ -1861,7 +1601,7 @@ final class SnapFeedViewController: UIViewController {
             walletObservation = wallet?.changes.observeOnMain { [weak self] in
                 guard let self else { return }
                 self.refreshWalletBadge()
-                self.refreshVisibleBoostControls()
+                self.boostDrive.refreshVisibleBoostControls()
             }
         }
         // Both pills' widths BEFORE their items are handed over: the bar reads
@@ -1975,7 +1715,7 @@ final class SnapFeedViewController: UIViewController {
         // it, and never comes back.
         let previousOrder = orderedIDs
         var ids = state.items.map(\.id).filter {
-            !notInterestedIDs.contains($0) || $0 == activePostID
+            !postActions.notInterestedIDs.contains($0) || $0 == activePostID
         }
         var models = Dictionary(uniqueKeysWithValues: state.items.map { ($0.id, $0) })
         // ⚠️ THE POST IN FRONT, GONE FROM THE SERVER, GIVES WAY WITH A WORD
@@ -2155,141 +1895,15 @@ final class SnapFeedViewController: UIViewController {
 
     // MARK: - Boost
 
-    /// One boost spend, wallet-first (`SnapBoostController.stake`). The
-    /// verdict's role here (`commit`, `error`), visuals on the cell that
-    /// asked. A nil wallet (unwired host) drops the
-    /// tap silently; the mock store is always wired in the app itself.
+    /// One boost spend (`SnapBoostDrive`).
     func performBoost(on id: PostID, spend: WalletStakeSpend, feedbackCell: SnapFeedCell?) {
-        MemberGates.perform(.like, from: self) { [weak self, weak feedbackCell] in
-            self?.commitBoost(on: id, spend: spend, feedbackCell: feedbackCell)
-        }
+        boostDrive.performBoost(on: id, spend: spend, feedbackCell: feedbackCell)
     }
 
-    private func commitBoost(on id: PostID, spend: WalletStakeSpend, feedbackCell: SnapFeedCell?) {
-        // Nothing to like on a post the viewer may no longer see (#1409) — a
-        // tap that finished a member gate after it turned unavailable.
-        guard !unavailablePostIDs.contains(id), let verdict = boost.stake(spend, on: id) else { return }
-        switch verdict {
-        case .boosted(let targetTotal, let spent):
-            Haptics.play(.commit)
-            // Receipt before theatre: the anchor flips to (or grows) its
-            // number face, then the "+N" float rises off it.
-            feedbackCell?.setBoostTotal(targetTotal, animated: true)
-            feedbackCell?.playBoostConfirmation(amount: spent)
-            refreshVisibleBoostControls()
-            // The burst so far, with Undo for all of it (#957): one toast
-            // per post, updated by every tap.
-            // ⚠️ THE TOAST IS THE UNDO WINDOW (#1375): it follows the
-            // screen on top through a push or a pop, its Undo live until it
-            // ends — when it sends the burst. Paging away or leaving no
-            // longer closes it.
-            stakeToastPostID = id
-            boost.toastHolds = id
-            let burst = stakeBursts[id] ?? StakeMenu.Burst()
-            stakeBursts[id] = burst
-            let generation = burst.next()
-            let amount = boost.undoable(on: id)
-            let wallet = wallet
-            stakeToast = StakeMenu.undoToast(
-                staked: amount, on: id.rawValue, from: self,
-                commit: { [weak self] in
-                    guard burst.isCurrent(generation) else { return }
-                    wallet?.commitStakes(on: id.rawValue)
-                    guard let self else { return }
-                    stakeBursts[id] = nil
-                    if boost.toastHolds == id { boost.toastHolds = nil }
-                    if stakeToastPostID == id {
-                        stakeToast = nil
-                        stakeToastPostID = nil
-                    }
-                },
-                undo: { [weak self] in
-                    // The session still names the post: the screen's own
-                    // undo. Moved on (paged away, or the screen is gone): the
-                    // burst straight from the wallet.
-                    if let self, boost.undoable(on: id) > 0 {
-                        performBoostUndo(on: id, feedbackCell: snapCell(for: id))
-                    } else if let refund = wallet?.undoBoost(targetID: id.rawValue, amount: amount) {
-                        self?.snapCell(for: id)?.setBoostTotal(refund.targetTotal, animated: true)
-                        self?.refreshVisibleBoostControls()
-                    }
-                    if self?.boost.toastHolds == id { self?.boost.toastHolds = nil }
-                }
-            )
-            #if DEBUG
-            if LaunchArgument.walletLog.isPassed(), let wallet {
-                print("[wallet] boosted post=\(id.rawValue) requested=\(spend) spent=\(spent) targetTotal=\(targetTotal) balance=\(wallet.balance) shots=\(wallet.stakeShots)")
-            }
-            #endif
-        case .refused(let refusal):
-            // The refusal is drawn on the rail: no toast to say it twice.
-            Haptics.play(.error)
-            feedbackCell?.playBoostDenied()
-            #if DEBUG
-            if LaunchArgument.walletLog.isPassed(), let wallet {
-                switch refusal {
-                case .insufficientBalance(let balance):
-                    print("[wallet] boost DENIED post=\(id.rawValue) spend=\(spend) balance=\(balance) shots=\(wallet.stakeShots)")
-                case .targetCapReached(let targetTotal):
-                    print("[wallet] boost CAP post=\(id.rawValue) targetTotal=\(targetTotal)")
-                case .noShotsLeft, .shotDoesNotFit:
-                    print("[wallet] shot REFUSED post=\(id.rawValue) outcome=\(refusal) shots=\(wallet.stakeShots)")
-                }
-            }
-            #endif
-        }
+    /// Takes back the whole session spend on `id` (`SnapBoostDrive`).
+    func performBoostUndo(on id: PostID, feedbackCell: SnapFeedCell?) {
+        boostDrive.performBoostUndo(on: id, feedbackCell: feedbackCell)
     }
-
-    /// Takes back the whole session spend on `id` — the menu's Undo entry
-    /// (`SnapBoostController.undo`).
-    private func performBoostUndo(on id: PostID, feedbackCell: SnapFeedCell?) {
-        guard let refund = takeBackSessionStake(on: id, feedbackCell: feedbackCell, withFeedback: true) else { return }
-        #if DEBUG
-        if LaunchArgument.walletLog.isPassed() {
-            print("[wallet] boost UNDO post=\(id.rawValue) refunded=\(refund.refunded) targetTotal=\(refund.targetTotal) balance=\(refund.newBalance)")
-        }
-        #endif
-    }
-
-    /// The stake toast up (#957), and the post its burst is on.
-    private weak var stakeToast: ToastView?
-    private var stakeToastPostID: PostID?
-
-    /// Takes back the session's spend on `id` and settles its toast — the
-    /// menu's Undo (`withFeedback`: the refund's float, and no haptic:
-    /// turning off is silent, #1881) and a post that turned unavailable
-    /// (#1409), quietly. Nil when there was nothing to take back.
-    @discardableResult
-    private func takeBackSessionStake(
-        on id: PostID, feedbackCell: SnapFeedCell?, withFeedback: Bool
-    ) -> SnapBoostController.Refund? {
-        guard let refund = boost.undo(on: id) else { return nil }
-        // Taken back: the toast closing must not send it.
-        _ = stakeBursts.removeValue(forKey: id)?.next()
-        if boost.toastHolds == id { boost.toastHolds = nil }
-        feedbackCell?.setBoostTotal(refund.targetTotal, animated: withFeedback)
-        if withFeedback { feedbackCell?.playBoostRefund(amount: refund.refunded) }
-        refreshVisibleBoostControls()
-        closeStakeToastIfSettled()
-        return refund
-    }
-
-    /// Closes the stake toast once its burst can no longer be taken back —
-    /// undone from the menu, or finalized by paging away or leaving — so its
-    /// Undo never outlives the session tally it would take back.
-    private func closeStakeToastIfSettled() {
-        // A toast whose burst moved on (paged away, the screen leaving) stays:
-        // it is the undo window now (#1375). Only a burst taken back closes it.
-        guard let id = stakeToastPostID, boost.undoable(on: id) == 0, boost.toastHolds != id else { return }
-        StakeMenu.closeUndoToast(stakeToast)
-        stakeToast = nil
-        stakeToastPostID = nil
-    }
-
-    /// Numbers each post's stake toasts (`StakeMenu.Burst`) — per post: a
-    /// stake on the next post settles the previous post's toast (the one
-    /// undo slot), which must still send ITS burst.
-    private var stakeBursts: [PostID: StakeMenu.Burst] = [:]
 
     // MARK: - Unavailable posts (#1409)
 
@@ -2329,7 +1943,7 @@ final class SnapFeedViewController: UIViewController {
             viewModel.postBecameUnavailable(id, onShow: givesWay ? nil : activePostID)
         }
         guard unavailablePostIDs.insert(id).inserted else { return }
-        takeBackSessionStake(on: id, feedbackCell: snapCell(for: id), withFeedback: false)
+        boostDrive.takeBackSessionStake(on: id, feedbackCell: snapCell(for: id), withFeedback: false)
         // On screen now; a page already dequeued but not yet shown is told
         // at `willDisplay`, every later one at configure.
         snapCell(for: id)?.setPostUnavailable(true)
@@ -2391,7 +2005,7 @@ final class SnapFeedViewController: UIViewController {
 
     /// Presents the shell-vended wallet sheet over this screen — the badge's
     /// tap, and the `-feed-open-wallet` hook's shared path.
-    private func presentWalletSheet() {
+    func presentWalletSheet() {
         guard let makeWalletSheet, presentedViewController == nil else { return }
         present(makeWalletSheet(), animated: true)
     }
@@ -2501,19 +2115,6 @@ final class SnapFeedViewController: UIViewController {
         guard let model = modelsByID[id] else { return }
         for case let cell as SnapFeedCell in collectionView.visibleCells where cell.representedPostID == id {
             cell.setPostLikeCount(viewModel.visibleLikeCount(for: model))
-        }
-    }
-
-    private func refreshVisibleBoostControls() {
-        toolbarComposer.refreshFooterLike(for: activeModel, animated: true)
-        guard boost.wallet != nil else { return }
-        for indexPath in collectionView.indexPathsForVisibleItems {
-            guard orderedIDs.indices.contains(indexPath.item),
-                  let cell = collectionView.cellForItem(at: indexPath) as? SnapFeedCell,
-                  let context = boost.anchorContext(for: orderedIDs[indexPath.item]) else { continue }
-            cell.setBoostContext(
-                balance: context.balance, undoable: context.undoable, stakeShots: context.stakeShots
-            )
         }
     }
 
@@ -2797,19 +2398,7 @@ final class SnapFeedViewController: UIViewController {
         // its pop gives it back at half (#1914, `viewportShare`).
         let isWatched = isOnScreen && soundPlayback.isForeground
             && ViewportShare.plays(at: soundPlayback.viewportShare.share)
-        // Off screen, nothing is planned ahead: the warmed and kept players go
-        // back and every head preload is cancelled. The next activation plans
-        // again (`warmSettledWindow`).
-        if !isWatched {
-            videoLookahead?.stop()
-            emotePrefetch.cancelAll()
-            // The stay's pictures too: what only this feed wanted is cancelled.
-            imageLookahead?.revoke()
-            imageLookahead = nil
-        } else if let pending = pendingImagePlan {
-            // Shown: the plan a settle made off screen starts this stay.
-            applyImagePlan(pending)
-        }
+        warmPlanner.followVisibility(isWatched: isWatched)
         apply(lifecycle.setVisible(isWatched))
         lifecycleActiveID = lifecycle.activeIndex.flatMap { orderedIDs.indices.contains($0) ? orderedIDs[$0] : nil }
         soundPlayback.refreshAudibleSurface()
@@ -2830,7 +2419,7 @@ final class SnapFeedViewController: UIViewController {
     /// from the one that lost it. Runs on EVERY scroll callback, so it must
     /// stay this cheap: an index, a comparison, and nothing at all when the
     /// answer has not changed.
-    private func updateViewportPlayback() {
+    func updateViewportPlayback() {
         let owner = SnapActiveItemTracker.activeIndex(
             contentOffsetY: collectionView.contentOffset.y,
             pageHeight: collectionView.bounds.height,
@@ -2924,7 +2513,7 @@ final class SnapFeedViewController: UIViewController {
             // its taps (#676).
             if orderedIDs.indices.contains(resign) {
                 boost.pageResigned(orderedIDs[resign])
-                closeStakeToastIfSettled()
+                boostDrive.closeStakeToastIfSettled()
             }
             // A text page's resting engagement is not retired here: it keeps
             // its interface until its last pixel has left (`didEndDisplaying`).
@@ -2952,7 +2541,7 @@ final class SnapFeedViewController: UIViewController {
             // The pages either side get ready NOW, at the settle, rather than
             // when UIKit's scroll heuristic happens to ask — see
             // `warmSettledWindow`.
-            warmSettledWindow(around: activate)
+            warmPlanner.warmSettledWindow(around: activate)
             // Same settle-quantized seam that drives playback: both bar
             // surfaces (identity pill above, media attribution below) follow
             // the active page.
@@ -3081,316 +2670,29 @@ final class SnapFeedViewController: UIViewController {
 
     // MARK: - Sound sheet
 
-    /// The attribution's tap: the sound the page is set to, in a sheet.
-    func presentSoundSheet() {
-        guard presentedViewController == nil, let model = activeModel,
-              let inputs = soundState.sheetInputs(for: model)
-        else { return }
-        // The sheet lists EVERY post set to this sound, not only this feed's
-        // (`SnapSoundState.sheetInputs`).
-        let rankings = inputs.rankings
-        let original = inputs.original
-        let current = model.id
-        let content = soundSheetContent(current: current, original: original, rankings: rankings)
-        // The sheet's own track (the owner, 2026-10-31): a clip's original
-        // sound is the clip itself, which the pool opens even where a bare
-        // player cannot (`mock://`) — the sheet resolves it through the pool.
-        var sound = inputs.sound
-        if sound.previewURL == nil, SnapSoundState.isSingleClip(model), let clip = model.mediaURL {
-            sound = PostSound(
-                id: sound.id, title: sound.title, artist: sound.artist,
-                previewURL: clip, artworkURL: sound.artworkURL, duration: sound.duration
-            )
-        }
-        let sheet = SoundSheetViewController(
-            sound: sound,
-            authorHandle: inputs.authorHandle,
-            fallbackArtworkURL: inputs.fallbackArtworkURL,
-            sections: content.sections,
-            tiles: content.tiles,
-            imagePipeline: imagePipeline,
-            savedSounds: savedSounds,
-            bookmarks: bookmarks,
-            // The tiles play on the app's one pool, beside this page (#884).
-            videoPlayback: videoPlayback,
-            // This post: set to the sound, counted, shown nowhere (#1147).
-            watchedPosts: 1
-        )
-        // Only a sound the device HOLDS can go under a new clip.
-        if inputs.offersUseSound, let useSound {
-            sheet.onUseSound = { sound in useSound(sound) }
-        }
-        // The cell that is covered now is the one to uncover, whatever the
-        // feed does meanwhile.
-        weak var covered = activeSnapCell
-        // The record is the sheet's own track (the owner, 2026-10-31): its
-        // preview covers the page while it plays (`onCoverChanged`), and the
-        // page playing again stops it (`refreshCoverSpin`).
-        soundPlayback.soundSheet = sheet
-        sheet.onCoverChanged = { [weak self] covering in
-            covered?.setCoveredBySheet(covering)
-            self?.soundPlayback.yieldAudio(covering)
-        }
-        sheet.onDismissed = { [weak self] in
-            covered?.setCoveredBySheet(false)
-            self?.soundPlayback.yieldAudio(false)
-        }
-        // The expanded sheet pauses the post, and its collapse or its going
-        // plays it again: the sheet declares itself a cover (#1970), and
-        // `viewportShare` hears it — nothing to wire here.
-        sheet.onSelectPost = { [weak self] id in self?.showPost(id) }
-        sheet.openFeedHero = openFeedHero
-        sheet.galleryPost = galleryPost
-        // Inside a navigation controller, for the toolbar its actions live in.
-        present(sheet.wrappedInSheet(), animated: true)
-        // Its posts open full screen: their first comments are warmed, in
-        // the sheet's order, and dropped from the queue when it goes (#2002).
-        postOpenWarm?.warmLater(content.tiles.map(\.postID), owner: sheet)
-        #if DEBUG
-        debugPresentedSoundSheet = sheet
-        #endif
-        // ⚠️ THE SHEET RISES AT ONCE, never after an await: the posts this
-        // feed does not hold are placeholders, filled in when the repository
-        // has loaded them — and a post it cannot load leaves the sheet, since
-        // its tile would lead nowhere; the sections are dealt again without
-        // it.
-        let pending = content.tiles.filter { !$0.isLoaded }.map(\.postID)
-        guard !pending.isEmpty, let prewarmPosts else { return }
-        Task { @MainActor [weak self, weak sheet] in
-            await prewarmPosts(pending)
-            guard let self, let sheet else { return }
-            let loaded = soundSheetContent(
-                current: current, original: original, rankings: rankings, droppingUnknown: true
-            )
-            sheet.update(sections: loaded.sections, tiles: loaded.tiles)
-        }
-    }
+    /// The attribution's tap: the sound the page is set to, in a sheet
+    /// (`SnapSoundSheetPresenter`).
+    func presentSoundSheet() { soundSheetPresenter.presentSoundSheet() }
 
-    /// The sound sheet's sections, and a tile for each post in them, from
-    /// what the feed knows of each post NOW: its own page, else the
-    /// repository's cache (a post shown elsewhere, or loaded for the sheet),
-    /// else nothing yet — a placeholder. `droppingUnknown` leaves out the
-    /// posts still unknown (the loading is over: they could not be loaded),
-    /// the page watched excepted.
-    private func soundSheetContent(
-        current: PostID, original: PostID?, rankings: PostSoundRankings, droppingUnknown: Bool = false
-    ) -> (sections: [SoundSheetSection], tiles: [SoundSheetViewController.Tile]) {
-        let galleryPost = galleryPost
-        typealias Known = (thumbnailURL: URL?, caption: String?, isMedia: Bool, likes: Int64?, video: URL?)
-        let known: (PostID) -> Known? = { [modelsByID] id in
-            if let model = modelsByID[id] {
-                return (
-                    model.thumbnailURL, model.caption, model.mediaURL != nil, model.likeCount,
-                    model.mediaKind == .video ? model.mediaURL : nil
-                )
-            }
-            if let post = galleryPost?(id) {
-                return (
-                    post.thumbnailURL, post.caption.isEmpty ? nil : post.caption,
-                    post.kind != .text, post.reactionCount,
-                    post.hasPlayableVideo ? post.videoURL : nil
-                )
-            }
-            return nil
-        }
-        let everyPost = Set(rankings.popular + rankings.recent + [original].compactMap { $0 })
-        let dropped = Self.soundSheetExclusions(
-            everyPost, current: current, droppingUnknown: droppingUnknown, isMedia: { known($0)?.isMedia }
-        )
-        let dealt = SoundSheetSections.make(
-            rankings: rankings, current: current, original: original,
-            isMedia: { known($0)?.isMedia }, excluding: dropped
-        )
-        var seen = Set<PostID>()
-        let ids = dealt.sections.flatMap(\.all).filter { seen.insert($0).inserted }
-        let tiles = ids.map { id in
-            let post = known(id)
-            return SoundSheetViewController.Tile(
-                postID: id, thumbnailURL: post?.thumbnailURL, caption: post?.caption,
-                isOriginal: id == dealt.original, isLoaded: post != nil,
-                likeCount: post?.likes, videoURL: post?.video,
-                // The post as the repository has it — author included — for
-                // the standard tile's words (#1280).
-                post: galleryPost?(id)
-            )
-        }
-        return (dealt.sections, tiles)
-    }
-
-    /// The posts the sound sheet leaves out:
-    /// - ⚠️ every TEXT post (#1999): a text post has no sound, so none is set
-    ///   to this one, whatever an older post or a server still says;
-    /// - once the loading is over (`droppingUnknown`), every post still
-    ///   unknown, the page watched excepted.
-    /// `isMedia`: nil for a post not known yet.
+    /// The posts the sound sheet leaves out (`SnapSoundSheetPresenter`), for
+    /// tests.
     nonisolated static func soundSheetExclusions(
         _ posts: Set<PostID>, current: PostID, droppingUnknown: Bool, isMedia: (PostID) -> Bool?
     ) -> Set<PostID> {
-        posts.filter { id in
-            switch isMedia(id) {
-            case false?: true
-            case nil: droppingUnknown && id != current
-            case true?: false
-            }
-        }
+        SnapSoundSheetPresenter.soundSheetExclusions(
+            posts, current: current, droppingUnknown: droppingUnknown, isMedia: isMedia
+        )
     }
 
-    /// Brings `id` to the screen — a tile of the sound sheet.
-    private func showPost(_ id: PostID) {
-        guard let index = orderedIDs.firstIndex(of: id), index != lifecycle.activeIndex else { return }
-        UIView.transition(with: collectionView, duration: 0.25, options: .transitionCrossDissolve) {
-            self.collectionView.scrollToItem(at: IndexPath(item: index, section: 0), at: .top, animated: false)
-        }
-        updateActiveItem()
-        updateViewportPlayback()
-    }
-
-    /// Puts the SCREEN's bars on the page's theme.
-    ///
-    /// The bars are the half of the page that the cell cannot reach: they
-    /// belong to the navigation controller, not to the cell's view tree, so
-    /// nothing propagates into them. Overriding the bars themselves — rather
-    /// than each item's custom view — is what matters, because the Liquid
-    /// Glass PLATTER behind an item is drawn by UIKit from the bar's own
-    /// traits. Styling only the contents produced the exact bug this fixes:
-    /// white text sitting on a light platter, over a dark page.
-    ///
-    /// Applied per settled page (`updateBarChrome`) and re-applied on
-    /// appearance, since the bars are shared with whatever the feed pushes.
-    ///
-    /// ⚠️ THE TOOLBAR'S GLASS IS NOT IN THE TOOLBAR. On iOS 26/27 the bottom
-    /// toolbar's item platters are hosted in a floating-bar container that is
-    /// a SIBLING of `UIToolbar`, directly under the navigation controller's
-    /// view (`-dump-bars` prints the chain). So the override on `toolbar`
-    /// never reached them: on a light device a photograph wore a dark
-    /// navigation bar over a LIGHT toolbar — grey glass, black glyphs — the
-    /// "not always dark on media" that was reported. The nav bar's platters
-    /// do live under `UINavigationBar`, which is why only the bottom half was
-    /// wrong. See `toolbarGlassHost` for where the style goes instead.
+    /// Puts the SCREEN's bars on the page's theme (`SnapChromeThemeLender`).
     func applyChromeTheme(hasMedia: Bool) {
-        // ⚠️ NOTHING IS LENT ONCE THE SCREEN IS LEAVING OR GONE (#1500): a
-        // page settling, the author pill re-hosted or an appearance callback
-        // landing after the hand-back re-styled the presenter's bars, and
-        // nothing handed them back again. Undecided grab: wait (#1325).
-        guard !isHandingChromeBack, !hasHandedChromeBack else { return }
-        let style = SnapChromeTheme.style(hasMedia: hasMedia)
-        // In one frame, not dissolved like the bars: the variants differ by
-        // one half-opacity layer over 62pt.
-        statusBarBlur?.lendStyle(style, from: self)
-        if let band = BottomEdgeBlurView.installed(in: navigationController) {
-            band.lendStyle(style, from: self)
-            styledBottomEdgeBlur = band
-        }
-        guard let nav = navigationController else {
-            overrideUserInterfaceStyle = style
-            return
-        }
-        lentChromeNavigation = nav
-        let host = toolbarGlassHost()
-        if let previous = themedToolbarGlassHost, previous !== host {
-            previous.overrideUserInterfaceStyle = .unspecified
-        }
-        themedToolbarGlassHost = host
-        // A CHANGE between two settled pages dissolves instead of snapping.
-        // Filmed: paging from a text page to a photograph kept the light bars
-        // over the incoming dark page for the whole scroll (right — they
-        // follow the SETTLED page) and then turned them dark in one frame at
-        // the settle. A cross-dissolve on the two bar views is UIKit's own
-        // transition over their rendered content — no alpha is written on
-        // either bar — and it is skipped whenever nothing is changing, or
-        // while a presentation's own bar animation owns them.
-        let changes = nav.navigationBar.overrideUserInterfaceStyle != style
-            || nav.toolbar.overrideUserInterfaceStyle != style
-            || (host.map { $0.overrideUserInterfaceStyle != style } ?? false)
-        let apply = {
-            nav.navigationBar.overrideUserInterfaceStyle = style
-            nav.toolbar.overrideUserInterfaceStyle = style
-            host?.overrideUserInterfaceStyle = style
-        }
-        if changes, canAnimateBarItems {
-            // Both transitions ride the one change: they are added in this
-            // turn, and the new style is what both layers commit with.
-            if let host {
-                UIView.transition(
-                    with: host, duration: 0.25,
-                    options: [.transitionCrossDissolve, .allowUserInteraction], animations: nil
-                )
-            }
-            UIView.transition(
-                with: nav.navigationBar, duration: 0.25,
-                options: [.transitionCrossDissolve, .allowUserInteraction], animations: apply
-            )
-        } else {
-            apply()
-        }
-        overrideUserInterfaceStyle = style
+        chromeThemeLender.applyChromeTheme(hasMedia: hasMedia)
     }
 
-    /// The view that hosts the toolbar items' glass: the ancestor of one of
-    /// this screen's own toolbar views that sits directly under the navigation
-    /// controller's view.
-    ///
-    /// Found by walking up from a view this screen owns, through public API
-    /// only, rather than by naming UIKit's private container. And NOT the
-    /// navigation controller itself, which was the first fix and is filmed
-    /// wrong: its override cascades into every controller in the stack, and
-    /// the For You list under an opening flight is ON SCREEN — the whole list
-    /// turned dark in the flight's first frames. The container holds the
-    /// toolbar and nothing else.
-    ///
-    /// Nil while no item has been hosted yet (early in a presentation); the
-    /// theme is re-applied once the screen has appeared. If UIKit ever hosts
-    /// the items inside `UIToolbar` again, the walk lands on the toolbar,
-    /// which is overridden anyway.
-    ///
-    /// ⚠️ ANY hosted item, not the first: an item handed over in the same turn
-    /// as this runs is not in any window yet — when the attribution was a fresh
-    /// view per page, walking up from it found nothing, and the toolbar stayed
-    /// light after paging onto a photograph (filmed).
-    private func toolbarGlassHost() -> UIView? {
-        guard let root = navigationController?.view else { return themedToolbarGlassHost }
-        for item in toolbarItems ?? [] {
-            guard var view = item.customView else { continue }
-            while let parent = view.superview, parent !== root { view = parent }
-            if view.superview === root { return view }
-        }
-        // None hosted right now (a hand-over in flight): keep the one already
-        // found rather than dropping the style it carries.
-        return themedToolbarGlassHost
-    }
-
-    /// What `applyChromeTheme` styled, so the release hands back exactly that.
-    private weak var themedToolbarGlassHost: UIView?
-
-    /// Hands the shared bars back before anything else uses them.
-    ///
-    /// The feed does not own the navigation bar or the toolbar — it borrows
-    /// them under the keep-and-stack contract. A pushed profile inheriting
-    /// a dark-pinned bar because the feed happened to be showing a photo is
-    /// exactly the kind of leak that shared chrome invites.
-    ///
-    /// The disappearance's hand-back: at once, or — an interactive one —
-    /// once `whenDecided` reports a committed close (a cancel keeps it).
-    /// Internal so a test can decide.
+    /// Hands the shared bars back (`SnapChromeThemeLender`). Internal so a
+    /// test can decide.
     func handBackChromeTheme(interactive: Bool, whenDecided: (@escaping (Bool) -> Void) -> Void) {
-        guard interactive else { return releaseChromeTheme() }
-        // ⚠️ THE STACK NOW, NOT AT THE DECISION (#1500). A committed grab
-        // reports from the transition's completion, after the pop: the feed
-        // has no `navigationController` any more, and the release found no
-        // bars to hand back — the presenter's header stayed dark after a
-        // rightward grab (filmed by the owner, 2026-10-21).
-        let nav = navigationController ?? lentChromeNavigation
-        // ⚠️ BOTH BARS, NOT ONLY THE BOTTOM ONE (#1325). The header was handed
-        // back at the grab's first frame, on the reading that it is the
-        // destination's — and it turned light over the media page for the
-        // whole grab (filmed by the owner). It stays on screen too until the
-        // close is decided: a media post's bars are dark for as long as it is.
-        isHandingChromeBack = true
-        whenDecided { [weak self] committed in
-            guard let self else { return }
-            self.isHandingChromeBack = false
-            if committed { self.releaseChromeTheme(from: nav) }
-        }
+        chromeThemeLender.handBackChromeTheme(interactive: interactive, whenDecided: whenDecided)
     }
 
     /// A grab's outcome, reported by the first of its release and its
@@ -3406,42 +2708,15 @@ final class SnapFeedViewController: UIViewController {
         }
     }
 
-    /// A grab is undecided: nothing re-themes or hands back meanwhile.
-    private(set) var isHandingChromeBack = false
-    /// The bars are handed back and the screen is leaving or gone: nothing
-    /// lends them again until it appears (#1500).
-    private var hasHandedChromeBack = false
-    /// The stack whose bars `applyChromeTheme` styled, so the hand-back
-    /// reaches them once the feed is off it.
-    private weak var lentChromeNavigation: UINavigationController?
+    /// A grab is undecided: nothing re-themes or hands back meanwhile
+    /// (`SnapChromeThemeLender`).
+    var isHandingChromeBack: Bool { chromeThemeLender.isHandingChromeBack }
 
-    /// Hands every lent style back — to `nav`'s bars, or the stack's.
+    /// Hands every lent style back — to `nav`'s bars, or the stack's
+    /// (`SnapChromeThemeLender`).
     func releaseChromeTheme(from nav: UINavigationController? = nil) {
-        let nav = nav ?? navigationController ?? lentChromeNavigation
-        hasHandedChromeBack = true
-        lentChromeNavigation = nil
-        themedToolbarGlassHost?.overrideUserInterfaceStyle = .unspecified
-        themedToolbarGlassHost = nil
-        nav?.toolbar.overrideUserInterfaceStyle = .unspecified
-        nav?.navigationBar.overrideUserInterfaceStyle = .unspecified
-        overrideUserInterfaceStyle = .unspecified
-        statusBarBlur?.returnStyle(from: self)
-        styledBottomEdgeBlur?.returnStyle(from: self)
-        styledBottomEdgeBlur = nil
+        chromeThemeLender.releaseChromeTheme(from: nav)
     }
-
-    /// The window's status-band blur, which wears the settled page's style
-    /// while the feed covers it — the dark variant over a photograph, as when
-    /// the band lived in this screen's view. See `StatusBarBlurView`.
-    private var statusBarBlur: StatusBarBlurView? {
-        StatusBarBlurView.installed(in: viewIfLoaded?.window ?? navigationController?.viewIfLoaded?.window)
-    }
-
-    /// The stack's bottom blur (#1002) this feed lent its style to, so the
-    /// release hands it back even once the feed is off the stack (the
-    /// departing-flight release runs with `navigationController` nil). See
-    /// `BottomEdgeBlurView`.
-    private weak var styledBottomEdgeBlur: BottomEdgeBlurView?
 
     /// The settled page's model — what the toolbar's share/more act on.
     var activeModel: FeedItemDisplayModel? {
@@ -3463,331 +2738,21 @@ final class SnapFeedViewController: UIViewController {
 
     // MARK: - Media toolbar actions
 
-    /// The post's share sheet (#1710) — the app's ONE share surface
-    /// (`ShareSheet`, the profile's and the place's), tuned rather than
-    /// cloned (`ShareSheetConfiguration`): the post's author on the QR card,
-    /// the post's own link (`AppRoute.postLink`), Repost after Copy Link. Its escape hatches come back here once it is
-    /// gone: the system sheet, and a send to someone (the link, in a DM).
-    func presentShareSheet(for id: PostID) {
-        guard presentedViewController == nil, let model = modelsByID[id],
-              let link = AppRoute.postLink(id) else { return }
-        let card = ShareCard(
-            displayName: model.authorName,
-            handle: SnapAuthorIdentityView.pillMetaLine(fromMeta: model.metaText),
-            avatarURL: model.avatarURL,
-            url: link,
-            // A showcase says its channel (#2216), a voice post its voice
-            // (#2208), where no card or player is drawn.
-            detail: PostEmbeds.shareText(caption: model.caption, embed: model.embed)
-                ?? VoicePosts.shareText(caption: model.caption, voice: model.voice)
-        )
-        let sheet = ShareSheetViewController(
-            card: card,
-            imagePipeline: imagePipeline,
-            targeting: shareTargeting,
-            // Read HERE, where there is a window (the sheet has none yet).
-            deviceCornerRadius: ScreenGeometry.cornerRadius(behind: view),
-            fallbackWidth: view.bounds.width,
-            // The app's appearance (#1718, the owner: no forced dark).
-            configuration: ShareSheetConfiguration(extraActions: shareSheetActions(for: id))
-        )
-        sheet.onSystemShare = { [weak self] card, image in
-            guard let self else { return }
-            let activity = UIActivityViewController(
-                activityItems: [ShareItemSource(card: card, icon: image), image], applicationActivities: nil
-            )
-            activity.popoverPresentationController?.sourceView = view
-            present(activity, animated: true)
-        }
-        sheet.onSendToTarget = { [weak self] target, card in
-            self?.viewModel.sendLink(card.url.absoluteString, to: target.id, stub: ProfileIdentityStub(
-                handle: target.handle, displayName: target.displayName
-            ))
-        }
-        present(sheet, animated: true)
-    }
+    /// The post's share sheet (`SnapPostActions`).
+    func presentShareSheet(for id: PostID) { postActions.presentShareSheet(for: id) }
 
-    /// The post sheet's own chips, after Share and Copy Link: Repost (#1710,
-    /// Shots only since #1728), then Not interested and Report (#1712) — the
-    /// old ⋯ menu's two, which live only here now: neither on a post no one
-    /// may read (#1409), Report only with somewhere to file it. Both leave
-    /// the sheet first.
-    func shareSheetActions(for id: PostID) -> [ShareSheetAction] {
-        // Repost on a text page, whose footer gave its place to the like
-        // (#1924); a media post's toolbar carries it (#1728, the owner).
-        var actions: [ShareSheetAction] = []
-        if toolbarComposer.footerLikeFace?.id == id {
-            actions.append(ShareSheetAction(title: "Repost", symbol: PostActionSymbol.repost, dismissesSheet: false) {
-                [weak self] in self?.repostRequested()
-            })
-        }
-        guard !unavailablePostIDs.contains(id) else { return actions }
-        actions.append(ShareSheetAction(title: "Not interested", symbol: "hand.thumbsdown") { [weak self] in
-            self?.markNotInterested(id)
-        })
-        if reporting != nil {
-            actions.append(ShareSheetAction(title: "Report", symbol: "flag") { [weak self] in
-                self?.presentReportReasons(for: id)
-            })
-        }
-        return actions
-    }
-
-    /// Repost, from the share sheet (#1710). ⚠️ No client path publishes a
-    /// repost yet (`PostComposer` takes no parent — the action column's old
-    /// repost button had no action either), so the sheet says so instead of
-    /// pretending.
-    private func repostRequested() {
-        // Over the sheet, which is still up.
-        Feedback.info("Reposting is coming soon", symbol: PostActionSymbol.repost, from: presentedViewController ?? self)
-    }
-
-    /// The posts the viewer has asked not to see again, for as long as this
-    /// screen lives.
-    ///
-    /// ⚠️ THE SESSION, AND NOTHING MORE — and the toast says exactly that.
-    /// There is no "not interested" signal anywhere in the contracts: no
-    /// ranking feedback in `timeline.v1`, no hide in `post.v1`. What this can
-    /// honestly do is stop the post coming back on THIS surface, so that is
-    /// what it does and what the confirmation claims. A toast promising a
-    /// better feed tomorrow would be the lie.
-    private var notInterestedIDs: Set<PostID> = []
-
-    private func markNotInterested(_ id: PostID) {
-        notInterestedIDs.insert(id)
-        // ⚠️ NOT REMOVED FROM UNDER THE VIEWER. The post is on screen, and
-        // pulling the page they are reading out from under their thumb to
-        // acknowledge a menu tap is a worse answer than the one they asked for.
-        // The next render drops it — see `render(_:)` — so it goes when they
-        // move on, which is when "not interested" means anything.
-        //
-        // With Undo (#957): nothing is sent either way (the hiding is this
-        // screen's), so the commit is empty and Undo forgets the id. Not
-        // rendered back at once: a post already dropped is one the viewer
-        // moved past, and inserting it behind them would shift the page they
-        // are on — the next render brings it back.
-        Feedback.undoable(
-            "Hidden from this feed", symbol: "hand.thumbsdown", from: self,
-            commit: {},
-            undo: { [weak self] in self?.notInterestedIDs.remove(id) }
-        )
-    }
-
-    private func presentReportReasons(for id: PostID) {
-        ReportReasonSheet.present(from: self, subject: "this post", sourceView: view) { [weak self] reason in
-            self?.report(id, reason: reason)
-        }
-    }
-
-    /// Files the report and says which way it went — a report the viewer
-    /// believes was filed but wasn't is the worst outcome here.
-    private func report(_ id: PostID, reason: ReportReason) {
-        guard let reporting else { return }
-        // Under way (#1775): said past the loader's grace, the answer in its place.
-        let pending = PendingFeedback("Sending report…", from: self)
-        Task {
-            do {
-                // The surface is a triage signal in its own right: the same post
-                // reported from the feed and from a profile are different
-                // reports.
-                try await reporting.report(.post(id), reason: reason, surface: "ios.feed")
-                pending.succeed("Report sent", symbol: "flag.fill")
-            } catch {
-                pending.fail("Couldn't send this report")
-            }
-        }
-    }
+    /// The post sheet's own chips (`SnapPostActions`), for tests.
+    func shareSheetActions(for id: PostID) -> [ShareSheetAction] { postActions.shareSheetActions(for: id) }
 
     func lifecycleCell(at index: Int) -> SnapCellLifecycle? {
         guard orderedIDs.indices.contains(index) else { return nil }
         return collectionView.cellForItem(at: IndexPath(item: index, section: 0)) as? SnapCellLifecycle
     }
 
-    /// Everything a page needs that is NOT its player or its pictures: the
-    /// comment stream to fetch. The pictures are the settle's image lookahead
-    /// (`warmImages`, #970).
-    ///
-    /// Cheap, and what a viewer notices missing — a page that snaps in and
-    /// then fills itself in reads as a stutter even when no frame was dropped.
-    func warmContent(at items: [Int]) {
-        let ids = items.compactMap { orderedIDs.indices.contains($0) ? orderedIDs[$0] : nil }
-        // Loaded before the page scrolls in, so its band enters the viewport
-        // already streaming (subtitles still wait for settle — their gate is
-        // activation, not content).
-        for id in ids where modelsByID[id] != nil {
-            viewModel.ensureCommentStreams(for: id)
-        }
-    }
-
-    /// The players, kept to the immediate neighbours — see `SnapWarmWindow`.
-    ///
-    /// Deliberately a narrower window than the content's: a player holds a
-    /// decoder and the platform caps how many can render at once, so this is
-    /// the one warm that has to stay stingy.
-    func warmPlayers(at items: [Int]) {
-        // Data saver on cellular: upcoming videos aren't loaded ahead (#409).
-        guard MediaPlaybackPolicy.preloads else { return }
-        for item in items where orderedIDs.indices.contains(item) {
-            guard let model = modelsByID[orderedIDs[item]],
-                  model.mediaKind == .video, let url = model.mediaURL else { continue }
-            videoPlayback?.preroll(url)
-        }
-    }
-
-    /// The video around the settled page (#895): with the byte cache, the
-    /// lookahead warms +1's player, preloads the head ranges of +2 and +3 to
-    /// disk once the playing clip has buffered enough, and keeps −1's player
-    /// (`VideoLookahead`). A pool without a byte cache (tests) only prerolls
-    /// the neighbours, as before.
-    private func warmVideo(around active: Int, speculative: [String: VideoLookahead.SpeculativeRequest] = [:]) {
-        guard let videoLookahead else {
-            warmPlayers(at: SnapWarmWindow.players(around: active, count: orderedIDs.count))
-            return
-        }
-        guard orderedIDs.indices.contains(active) else { return }
-        let window = SnapWarmWindow.videoLookahead(around: active, count: orderedIDs.count)
-        videoLookahead.update(
-            page: orderedIDs[active].rawValue,
-            playing: lookaheadItem(at: active),
-            ahead: window.ahead.map(lookaheadItem(at:)),
-            behind: window.behind.flatMap(lookaheadItem(at:)),
-            // Data saver on cellular: nothing loads ahead of the viewer (#409).
-            allowsPreload: MediaPlaybackPolicy.preloads,
-            // +2/+3's pictures, to disk: under the video's page owner and
-            // gate, cancelled with its head ranges on a swipe (#970).
-            speculative: speculative
-        )
-    }
-
-    /// The pictures around the settled page (#970, `VerticalLookaheadPlan`):
-    /// the page, −1, +1 and +2 decoded at screen size under this stay's owner
-    /// (P1); +3 returned as a speculative request for the video lookahead to
-    /// start once the playing clip has buffered enough, bytes to disk only
-    /// (P2). Depth follows the coordinator's policy. A text page has no
-    /// picture to fetch: it is data only.
-    ///
-    /// The owner is made on the feed's first visibility, never by a settle
-    /// that lands off screen (data arriving under a covering screen): that
-    /// plan waits in `pendingImagePlan` and is applied when the feed shows.
-    ///
-    /// ⚠️ THE POSTER IS THE PICTURE of a video page: it falls back on it
-    /// whenever it is not decoding — before its first frame and after its
-    /// last — so an uncached poster is a black page until an async hop lands
-    /// it (measured ~350ms of black on arrival, ~150ms with it warmed).
-    private func warmImages(around active: Int) -> [String: VideoLookahead.SpeculativeRequest] {
-        let depth = imagePipeline.prefetchPolicy.videoPreloadDepth
-        let reach = (active - 1)...(active + max(depth, 1))
-        let pages: [[ImageRequest]] = orderedIDs.indices.map { reach.contains($0) ? lookaheadImages(at: $0) : [] }
-        let plan = VerticalLookaheadPlan.images(around: active, pages: pages, depth: depth)
-        applyImagePlan(plan.display)
-        let pipeline = imagePipeline
-        var speculative: [String: VideoLookahead.SpeculativeRequest] = [:]
-        for request in plan.preload {
-            speculative["image:\(request.url.absoluteString)"] = { owner in
-                pipeline.prefetch(request.url, size: request.size, window: .preload, owner: owner)
-            }
-        }
-        return speculative
-    }
-
-    /// What a page's cell asks the pipeline for: a photo page's photo, a
-    /// video page's poster, and the author's face; nothing for a text page.
-    private func lookaheadImages(at index: Int) -> [ImageRequest] {
-        guard orderedIDs.indices.contains(index), let model = modelsByID[orderedIDs[index]] else { return [] }
-        let picture: URL? = model.mediaKind == .video ? model.thumbnailURL : model.mediaURL
-        guard let picture else { return [] }
-        return [picture, model.avatarURL].compactMap(\.self).map { ImageRequest(url: $0) }
-    }
-
-    /// The decoded pictures' lookahead for this stay on screen; dropped (its
-    /// owner revoked) when the feed leaves it.
-    private var imageLookahead: ImageLookahead?
-    /// The last plan made while the feed was off screen, for its next stay.
-    private var pendingImagePlan: [ImageRequest]?
-
-    /// Decodes `display` under this stay's owner, made here on first
-    /// visibility; off screen, the plan only waits for the next stay.
-    private func applyImagePlan(_ display: [ImageRequest]) {
-        guard isOnScreen && soundPlayback.isForeground else {
-            pendingImagePlan = display
-            return
-        }
-        pendingImagePlan = nil
-        let lookahead = imageLookahead ?? ImageLookahead(pipeline: imagePipeline, name: "snap-feed.images")
-        imageLookahead = lookahead
-        lookahead.update(display: display, preload: [])
-    }
-
-    /// A single-video page's clip, under the post it plays for — the scope
-    /// its cell plays it with. Galleries warm their own pages.
-    private func lookaheadItem(at index: Int) -> VideoLookaheadItem? {
-        guard orderedIDs.indices.contains(index), let model = modelsByID[orderedIDs[index]],
-              model.mediaKind == .video, let url = model.mediaURL else { return nil }
-        return VideoLookaheadItem(url: url, scope: orderedIDs[index].rawValue)
-    }
-
-    /// The vertical feed's video lookahead; nil when the pool has no byte cache.
-    private lazy var videoLookahead: VideoLookahead? = videoPlayback?.makeLookahead(name: "snap-feed")
-
-    /// ⚠️ A DEFINED WINDOW AROUND THE PAGE THE VIEWER SETTLED ON.
-    ///
-    /// `UICollectionViewDataSourcePrefetching` is UIKit's guess, made from
-    /// scroll velocity: it warms nothing at all while the pager is at rest, and
-    /// what it warms during a fling is whatever its heuristic reached. A feed
-    /// whose whole promise is that the next page is INSTANT cannot be built on
-    /// a guess — after every settle the window is stated outright, so the pages
-    /// either side are ready whether the viewer arrived by flick, by tap, or by
-    /// sitting still for a minute first.
-    ///
-    /// Kept alongside the prefetch callback rather than replacing it: UIKit's
-    /// guess is genuinely good DURING a fast scroll, where it runs ahead of the
-    /// settles. The two overlap, and both are idempotent.
-    private func warmSettledWindow(around active: Int) {
-        let count = orderedIDs.count
-        let content = SnapWarmWindow.content(around: active, count: count)
-        warmContent(at: content)
-        warmVideo(around: active, speculative: warmImages(around: active))
-        // ⚠️ AND THE NEIGHBOURING TEXT PAGES' INTERFACE, the one page whose
-        // content is a whole view controller rather than an image: the page
-        // immediately ahead AND the one behind, now that the feed pages back
-        // (#2059). Two view controllers' memory, no more — the pages past
-        // them are a guess, and what left the window is let go first.
-        // The page being landed on stays in the window: its warm is mounted
-        // after this. A page whose panel is anywhere already — warm, preview,
-        // or the page just left still holding it — is never built twice.
-        let window = [active - 1, active, active + 1].filter { orderedIDs.indices.contains($0) }
-        restingWarm.keep(only: Set(window.map { orderedIDs[$0] }))
-        for index in [active + 1, active - 1] where orderedIDs.indices.contains(index) && !isPageReady(index) {
-            prewarmRestingComments(for: orderedIDs[index])
-        }
-        warmCaptionEmotes(around: active)
-        #if DEBUG
-        // What the settle actually warmed. The window itself is pure and tested
-        // on its own; this is how a test reaches the WIRING — that the settle
-        // asks at all, and asks about the page it settled on.
-        debugLastWarmedWindow = content
-        #endif
-    }
-
     #if DEBUG
-    private(set) var debugLastWarmedWindow: [Int] = []
+    /// What the last settle warmed (`SnapWarmPlanner`), for tests.
+    var debugLastWarmedWindow: [Int] { warmPlanner.debugLastWarmedWindow }
     #endif
-
-    /// ⚠️ THE NEXT CAPTIONS' EMOTES, BEFORE THEY ARRIVE (#1504): the two pages
-    /// ahead of the settled one and the one behind it (#2059), warmed at the
-    /// bucket the caption on screen
-    /// draws at, so a caption swiped in installs its emotes at once — no
-    /// skeleton. What leaves the window is let go.
-    private func warmCaptionEmotes(around active: Int) {
-        guard let side = (lifecycleCell(at: active) as? SnapFeedCell)?.captionEmotePixelSide else { return }
-        // And the one behind: the feed pages back (#2059).
-        let window = [active - 1, active + 1, active + 2]
-        let captions = window.compactMap { index -> String? in
-            guard orderedIDs.indices.contains(index) else { return nil }
-            return modelsByID[orderedIDs[index]]?.caption
-        }
-        emotePrefetch.warm(captions, pixelSide: side)
-    }
 
 }
 
@@ -5215,8 +4180,8 @@ extension SnapFeedViewController: ZoomTransitionDestination {
 
 extension SnapFeedViewController: UICollectionViewDataSourcePrefetching {
     func collectionView(_ collectionView: UICollectionView, prefetchItemsAt indexPaths: [IndexPath]) {
-        warmContent(at: indexPaths.map(\.item))
-        warmPlayers(at: indexPaths.map(\.item))
+        warmPlanner.warmContent(at: indexPaths.map(\.item))
+        warmPlanner.warmPlayers(at: indexPaths.map(\.item))
     }
 
 }
@@ -5336,6 +4301,32 @@ extension SnapFeedViewController: SnapToolbarComposerHost {
 
 extension SnapFeedViewController: SnapAuthorBarHost {}
 
+// MARK: - The boost's host (#2514)
+
+extension SnapFeedViewController: SnapBoostDriveHost {}
+
+// MARK: - The post actions' host (#2514)
+
+extension SnapFeedViewController: SnapPostActionsHost {}
+
+// MARK: - The warm planner's host (#2514)
+
+extension SnapFeedViewController: SnapWarmPlannerHost {}
+
+// MARK: - The chrome theme's host (#2514)
+
+extension SnapFeedViewController: SnapChromeThemeLenderHost {}
+
+// MARK: - The sound sheet's host (#2514)
+
+extension SnapFeedViewController: SnapSoundSheetPresenterHost {}
+
+// MARK: - The QA hooks' host (#2514)
+
+#if DEBUG
+extension SnapFeedViewController: SnapFeedDebugHooksHost {}
+#endif
+
 /// The author pill, answered where the screen's other collaborators ask the
 /// screen for it — the toolbar, the comments, the hero destination
 /// (`SnapAuthorBar`).
@@ -5372,7 +4363,7 @@ extension SnapFeedViewController {
     var commentsContentVC: UIViewController? { commentsCoordinator.commentsContentVC }
     var commentsEngagementIsResting: Bool { commentsCoordinator.commentsEngagementIsResting }
     private var commentsSheet: SnapCommentsSheetSession? { commentsCoordinator.commentsSheet }
-    private var restingWarm: SnapWarmSlots<PostID, UIViewController> { commentsCoordinator.restingWarm }
+    var restingWarm: SnapWarmSlots<PostID, UIViewController> { commentsCoordinator.restingWarm }
     private var previewRestingID: PostID? { commentsCoordinator.previewRestingID }
     private var previewRestingVC: UIViewController? { commentsCoordinator.previewRestingVC }
 

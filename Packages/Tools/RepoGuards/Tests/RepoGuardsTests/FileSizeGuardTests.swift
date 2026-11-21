@@ -62,7 +62,7 @@ struct FileSizeGuardTests {
         "Packages/Features/Feed/Sources/Feed/Snap/SnapCommentsCoordinator.swift": 1097,
         "Packages/Features/Feed/Sources/Feed/Snap/SnapCommentsSheet.swift": 2212,
         "Packages/Features/Feed/Sources/Feed/Snap/SnapFeedCell.swift": 3672,
-        "Packages/Features/Feed/Sources/Feed/Snap/SnapFeedViewController.swift": 5382,
+        "Packages/Features/Feed/Sources/Feed/Snap/SnapFeedViewController.swift": 4373,
         "Packages/Features/Feed/Sources/Feed/Snap/SnapMediaCardView.swift": 1246,
         "Packages/Features/Feed/Sources/Feed/Snap/SnapMediaPageBarView.swift": 1445,
         "Packages/Features/Feed/Sources/Feed/Snap/Sound/SoundSheetViewController.swift": 2477,
