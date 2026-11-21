@@ -296,6 +296,10 @@ final class SnapFeedViewController: UIViewController {
     /// both bars' pill widths and the comments' day (`SnapAuthorBar`). Built
     /// on first use; building it does nothing else.
     private(set) lazy var authorBar = SnapAuthorBar(host: self)
+    /// What the bars and the page's chrome wear for the settled page
+    /// (`SnapSettledPageChrome`). Built on first use; building it does
+    /// nothing else.
+    private(set) lazy var settledPageChrome = SnapSettledPageChrome(host: self, soundState: soundState)
     /// The device's appearance heard on the window, for the text pages built
     /// ahead (`SnapDeviceAppearanceWatch`). Built on first use; building it
     /// does nothing else.
@@ -1239,7 +1243,7 @@ final class SnapFeedViewController: UIViewController {
                     self?.soundPlayback.refreshAudibleSurface()
                     if let self, let index = self.lifecycle.activeIndex,
                        self.orderedIDs.indices.contains(index), self.orderedIDs[index] == id {
-                        self.updateBarChrome(at: index)
+                        self.settledPageChrome.updateBarChrome(at: index)
                     }
                 }
                 // ⚠️ THE DISMISSAL STANDS DOWN FOR A SCRUB.
@@ -1608,7 +1612,7 @@ final class SnapFeedViewController: UIViewController {
             if let active = lifecycle.activeIndex,
                orderedIDs.indices.contains(active),
                changed.contains(orderedIDs[active]) {
-                updateBarChrome(at: active)
+                settledPageChrome.updateBarChrome(at: active)
             }
         }
         // Turned unavailable in place, now that its page is in the items.
@@ -2134,7 +2138,7 @@ final class SnapFeedViewController: UIViewController {
             // Same settle-quantized seam that drives playback: both bar
             // surfaces (identity pill above, media attribution below) follow
             // the active page.
-            updateBarChrome(at: activate)
+            settledPageChrome.updateBarChrome(at: activate)
             // And the comment ticker: activation is what triggers (or
             // re-emits) the page's queue.
             if orderedIDs.indices.contains(activate) {
@@ -2190,71 +2194,6 @@ final class SnapFeedViewController: UIViewController {
                 }
             }
         }
-    }
-
-    private func updateBarChrome(at index: Int) {
-        guard orderedIDs.indices.contains(index),
-              let model = modelsByID[orderedIDs[index]] else { return }
-        // Usually a no-op for the pill: the scroll that brought this page in
-        // already swapped it when the picture changed owner
-        // (`updateViewportPlayback`). A page reached without a scroll (a jump,
-        // a landing) swaps here (#1791).
-        authorBar.showAuthor(model)
-        // The neighbours' faces, so the pill paged to next arrives wearing one.
-        for neighbour in [index - 1, index + 1] where orderedIDs.indices.contains(neighbour) {
-            if let url = modelsByID[orderedIDs[neighbour]]?.avatarURL {
-                SnapAuthorIdentityView.warmFace(url, pipeline: imagePipeline)
-            }
-        }
-        #if DEBUG
-        if LaunchArgument.pillProbe.isPassed() {
-            authorIdentityView.debugProbe("setAuthor \(model.authorName)")
-        }
-        #endif
-        // The neighbours' covers, so the sound bubble paged to next arrives
-        // wearing its own.
-        for neighbour in [index - 1, index + 1] where orderedIDs.indices.contains(neighbour) {
-            if let next = modelsByID[orderedIDs[neighbour]] {
-                SnapMediaAttributionView.warmCover(
-                    for: next, cover: attributionContent(for: next).cover, pipeline: imagePipeline
-                )
-            }
-        }
-        // And where the viewer stands with this author and the neighbours', so
-        // the pill's follow badge is decided before the page is.
-        for neighbour in [index, index - 1, index + 1] where orderedIDs.indices.contains(neighbour) {
-            if let author = modelsByID[orderedIDs[neighbour]]?.authorID {
-                followStore.resolve(for: author)
-            }
-        }
-        // The bars float over the PAGE, so their text has to know what kind
-        // of ground it is floating over. A media page is arbitrary and dark
-        // enough to want white-and-shadowed; a text page follows the system
-        // appearance, where white text on a white ground is just gone.
-        let overMedia = model.mediaURL != nil
-        applyChromeTheme(hasMedia: overMedia)
-        // The SHADOWS are not a theme question: they exist because the bars
-        // float over an arbitrary photo with no background of their own, and
-        // a text page's own ground makes them unnecessary. The colours now
-        // come from the theme above.
-        authorBar.authorOverMedia = overMedia
-        authorIdentityView.setOverMedia(overMedia)
-        toolbarComposer.refreshBookmarkGlyph(for: model.id)
-        toolbarComposer.applyToolbarPostActions(for: model.id)
-        // The page's sound bubble and the panel's rail slot (#671).
-        activeSnapCell?.setSoundFace(soundFace(for: model))
-        activeSnapCell?.setSlotSharesPost(true, holdArmsShare: slotHoldArmsShare(model))
-        // The footer's sound follows the page in place (#1999).
-        toolbarComposer.refreshFooterSound(for: model)
-        applyRailSlot(to: commentsContentVC)
-    }
-
-    /// What the attribution draws for `model`: the sound's line, and a cover
-    /// that is the SOUND's (`SnapSoundState.attribution`).
-    private func attributionContent(
-        for model: FeedItemDisplayModel
-    ) -> (sound: SnapMediaAttributionView.SoundCredit, cover: SnapMediaAttributionView.Cover) {
-        soundState.attribution(for: model)
     }
 
     // MARK: - Sound sheet
@@ -3054,6 +2993,10 @@ extension SnapFeedViewController: SnapToolbarComposerHost {
 // MARK: - The author bar's host (#2387)
 
 extension SnapFeedViewController: SnapAuthorBarHost {}
+
+// MARK: - The settled page chrome's host (#2514)
+
+extension SnapFeedViewController: SnapSettledPageChromeHost {}
 
 // MARK: - The appearance watch's host (#2514)
 
