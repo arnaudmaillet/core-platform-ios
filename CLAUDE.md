@@ -1,3 +1,17 @@
+@AGENTS.md
+
+# Before you code
+
+**Every change follows [`dev/engineering/BEFORE_YOU_CODE.md`](dev/engineering/BEFORE_YOU_CODE.md) before its first line of code** (owner, 2026-11-21, #2519). Read it from `origin/develop`:
+- read the whole issue and its comments;
+- find what exists;
+- **survey the similar and neighbouring code at every layer and factor what it shares** (the same concept under the same rules gets one implementation; a coincidental resemblance stays apart);
+- size the change.
+
+A core or large change (a core service, a new package, a cross-feature contract, more than two pull requests) starts with the `/design-first` skill: research, a design doc, and the owner's approval before any code.
+
+The rules are indexed in [`dev/engineering/README.md`](dev/engineering/README.md). Rules for the layer you edit load from `.claude/rules/`. Pull requests carry the checklist in `.github/pull_request_template.md`.
+
 # Working in this repository (agent sessions)
 
 Several Claude sessions work on this repository at once. These rules keep them
