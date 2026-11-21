@@ -193,7 +193,7 @@ final class SnapFeedViewController: UIViewController {
     /// What is heard, the song, the records' spin, the share of the screen,
     /// Background Play and Picture in Picture (`SnapSoundPlayback`). Built on
     /// first use; building it does nothing else.
-    private lazy var soundPlayback = SnapSoundPlayback(
+    private(set) lazy var soundPlayback = SnapSoundPlayback(
         host: self, videoPlayback: videoPlayback, imagePipeline: imagePipeline, soundState: soundState
     )
     /// Whether the pages' lifecycle counts the screen as watched — what lets
@@ -338,6 +338,13 @@ final class SnapFeedViewController: UIViewController {
     /// both bars' pill widths and the comments' day (`SnapAuthorBar`). Built
     /// on first use; building it does nothing else.
     private(set) lazy var authorBar = SnapAuthorBar(host: self)
+    /// The sound sheet: its sections and tiles, what it covers and pauses,
+    /// and the post a tile brings to the screen (`SnapSoundSheetPresenter`).
+    /// Built on first use; building it does nothing else.
+    private(set) lazy var soundSheetPresenter = SnapSoundSheetPresenter(
+        host: self, soundState: soundState, savedSounds: savedSounds, videoPlayback: videoPlayback,
+        useSound: useSound, openFeedHero: openFeedHero, galleryPost: galleryPost, prewarmPosts: prewarmPosts
+    )
     #if DEBUG
     /// The launch-argument hooks `viewDidAppear` arms (`SnapFeedDebugHooks`).
     /// Built on first use; building it does nothing else.
@@ -922,7 +929,7 @@ final class SnapFeedViewController: UIViewController {
     #if DEBUG
     /// The sound sheet the last `presentSoundSheet` raised, for the hooks
     /// (`SnapFeedDebugHooks`).
-    private(set) weak var debugPresentedSoundSheet: SoundSheetViewController?
+    var debugPresentedSoundSheet: SoundSheetViewController? { soundSheetPresenter.debugPresentedSoundSheet }
     #endif
 
     override func viewWillDisappear(_ animated: Bool) {
@@ -2549,7 +2556,7 @@ final class SnapFeedViewController: UIViewController {
     /// from the one that lost it. Runs on EVERY scroll callback, so it must
     /// stay this cheap: an index, a comparison, and nothing at all when the
     /// answer has not changed.
-    private func updateViewportPlayback() {
+    func updateViewportPlayback() {
         let owner = SnapActiveItemTracker.activeIndex(
             contentOffsetY: collectionView.contentOffset.y,
             pageHeight: collectionView.bounds.height,
@@ -2800,168 +2807,18 @@ final class SnapFeedViewController: UIViewController {
 
     // MARK: - Sound sheet
 
-    /// The attribution's tap: the sound the page is set to, in a sheet.
-    func presentSoundSheet() {
-        guard presentedViewController == nil, let model = activeModel,
-              let inputs = soundState.sheetInputs(for: model)
-        else { return }
-        // The sheet lists EVERY post set to this sound, not only this feed's
-        // (`SnapSoundState.sheetInputs`).
-        let rankings = inputs.rankings
-        let original = inputs.original
-        let current = model.id
-        let content = soundSheetContent(current: current, original: original, rankings: rankings)
-        // The sheet's own track (the owner, 2026-10-31): a clip's original
-        // sound is the clip itself, which the pool opens even where a bare
-        // player cannot (`mock://`) — the sheet resolves it through the pool.
-        var sound = inputs.sound
-        if sound.previewURL == nil, SnapSoundState.isSingleClip(model), let clip = model.mediaURL {
-            sound = PostSound(
-                id: sound.id, title: sound.title, artist: sound.artist,
-                previewURL: clip, artworkURL: sound.artworkURL, duration: sound.duration
-            )
-        }
-        let sheet = SoundSheetViewController(
-            sound: sound,
-            authorHandle: inputs.authorHandle,
-            fallbackArtworkURL: inputs.fallbackArtworkURL,
-            sections: content.sections,
-            tiles: content.tiles,
-            imagePipeline: imagePipeline,
-            savedSounds: savedSounds,
-            bookmarks: bookmarks,
-            // The tiles play on the app's one pool, beside this page (#884).
-            videoPlayback: videoPlayback,
-            // This post: set to the sound, counted, shown nowhere (#1147).
-            watchedPosts: 1
-        )
-        // Only a sound the device HOLDS can go under a new clip.
-        if inputs.offersUseSound, let useSound {
-            sheet.onUseSound = { sound in useSound(sound) }
-        }
-        // The cell that is covered now is the one to uncover, whatever the
-        // feed does meanwhile.
-        weak var covered = activeSnapCell
-        // The record is the sheet's own track (the owner, 2026-10-31): its
-        // preview covers the page while it plays (`onCoverChanged`), and the
-        // page playing again stops it (`refreshCoverSpin`).
-        soundPlayback.soundSheet = sheet
-        sheet.onCoverChanged = { [weak self] covering in
-            covered?.setCoveredBySheet(covering)
-            self?.soundPlayback.yieldAudio(covering)
-        }
-        sheet.onDismissed = { [weak self] in
-            covered?.setCoveredBySheet(false)
-            self?.soundPlayback.yieldAudio(false)
-        }
-        // The expanded sheet pauses the post, and its collapse or its going
-        // plays it again: the sheet declares itself a cover (#1970), and
-        // `viewportShare` hears it — nothing to wire here.
-        sheet.onSelectPost = { [weak self] id in self?.showPost(id) }
-        sheet.openFeedHero = openFeedHero
-        sheet.galleryPost = galleryPost
-        // Inside a navigation controller, for the toolbar its actions live in.
-        present(sheet.wrappedInSheet(), animated: true)
-        // Its posts open full screen: their first comments are warmed, in
-        // the sheet's order, and dropped from the queue when it goes (#2002).
-        postOpenWarm?.warmLater(content.tiles.map(\.postID), owner: sheet)
-        #if DEBUG
-        debugPresentedSoundSheet = sheet
-        #endif
-        // ⚠️ THE SHEET RISES AT ONCE, never after an await: the posts this
-        // feed does not hold are placeholders, filled in when the repository
-        // has loaded them — and a post it cannot load leaves the sheet, since
-        // its tile would lead nowhere; the sections are dealt again without
-        // it.
-        let pending = content.tiles.filter { !$0.isLoaded }.map(\.postID)
-        guard !pending.isEmpty, let prewarmPosts else { return }
-        Task { @MainActor [weak self, weak sheet] in
-            await prewarmPosts(pending)
-            guard let self, let sheet else { return }
-            let loaded = soundSheetContent(
-                current: current, original: original, rankings: rankings, droppingUnknown: true
-            )
-            sheet.update(sections: loaded.sections, tiles: loaded.tiles)
-        }
-    }
+    /// The attribution's tap: the sound the page is set to, in a sheet
+    /// (`SnapSoundSheetPresenter`).
+    func presentSoundSheet() { soundSheetPresenter.presentSoundSheet() }
 
-    /// The sound sheet's sections, and a tile for each post in them, from
-    /// what the feed knows of each post NOW: its own page, else the
-    /// repository's cache (a post shown elsewhere, or loaded for the sheet),
-    /// else nothing yet — a placeholder. `droppingUnknown` leaves out the
-    /// posts still unknown (the loading is over: they could not be loaded),
-    /// the page watched excepted.
-    private func soundSheetContent(
-        current: PostID, original: PostID?, rankings: PostSoundRankings, droppingUnknown: Bool = false
-    ) -> (sections: [SoundSheetSection], tiles: [SoundSheetViewController.Tile]) {
-        let galleryPost = galleryPost
-        typealias Known = (thumbnailURL: URL?, caption: String?, isMedia: Bool, likes: Int64?, video: URL?)
-        let known: (PostID) -> Known? = { [modelsByID] id in
-            if let model = modelsByID[id] {
-                return (
-                    model.thumbnailURL, model.caption, model.mediaURL != nil, model.likeCount,
-                    model.mediaKind == .video ? model.mediaURL : nil
-                )
-            }
-            if let post = galleryPost?(id) {
-                return (
-                    post.thumbnailURL, post.caption.isEmpty ? nil : post.caption,
-                    post.kind != .text, post.reactionCount,
-                    post.hasPlayableVideo ? post.videoURL : nil
-                )
-            }
-            return nil
-        }
-        let everyPost = Set(rankings.popular + rankings.recent + [original].compactMap { $0 })
-        let dropped = Self.soundSheetExclusions(
-            everyPost, current: current, droppingUnknown: droppingUnknown, isMedia: { known($0)?.isMedia }
-        )
-        let dealt = SoundSheetSections.make(
-            rankings: rankings, current: current, original: original,
-            isMedia: { known($0)?.isMedia }, excluding: dropped
-        )
-        var seen = Set<PostID>()
-        let ids = dealt.sections.flatMap(\.all).filter { seen.insert($0).inserted }
-        let tiles = ids.map { id in
-            let post = known(id)
-            return SoundSheetViewController.Tile(
-                postID: id, thumbnailURL: post?.thumbnailURL, caption: post?.caption,
-                isOriginal: id == dealt.original, isLoaded: post != nil,
-                likeCount: post?.likes, videoURL: post?.video,
-                // The post as the repository has it — author included — for
-                // the standard tile's words (#1280).
-                post: galleryPost?(id)
-            )
-        }
-        return (dealt.sections, tiles)
-    }
-
-    /// The posts the sound sheet leaves out:
-    /// - ⚠️ every TEXT post (#1999): a text post has no sound, so none is set
-    ///   to this one, whatever an older post or a server still says;
-    /// - once the loading is over (`droppingUnknown`), every post still
-    ///   unknown, the page watched excepted.
-    /// `isMedia`: nil for a post not known yet.
+    /// The posts the sound sheet leaves out (`SnapSoundSheetPresenter`), for
+    /// tests.
     nonisolated static func soundSheetExclusions(
         _ posts: Set<PostID>, current: PostID, droppingUnknown: Bool, isMedia: (PostID) -> Bool?
     ) -> Set<PostID> {
-        posts.filter { id in
-            switch isMedia(id) {
-            case false?: true
-            case nil: droppingUnknown && id != current
-            case true?: false
-            }
-        }
-    }
-
-    /// Brings `id` to the screen — a tile of the sound sheet.
-    private func showPost(_ id: PostID) {
-        guard let index = orderedIDs.firstIndex(of: id), index != lifecycle.activeIndex else { return }
-        UIView.transition(with: collectionView, duration: 0.25, options: .transitionCrossDissolve) {
-            self.collectionView.scrollToItem(at: IndexPath(item: index, section: 0), at: .top, animated: false)
-        }
-        updateActiveItem()
-        updateViewportPlayback()
+        SnapSoundSheetPresenter.soundSheetExclusions(
+            posts, current: current, droppingUnknown: droppingUnknown, isMedia: isMedia
+        )
     }
 
     /// Puts the SCREEN's bars on the page's theme.
@@ -5054,6 +4911,10 @@ extension SnapFeedViewController: SnapToolbarComposerHost {
 // MARK: - The author bar's host (#2387)
 
 extension SnapFeedViewController: SnapAuthorBarHost {}
+
+// MARK: - The sound sheet's host (#2514)
+
+extension SnapFeedViewController: SnapSoundSheetPresenterHost {}
 
 // MARK: - The QA hooks' host (#2514)
 
