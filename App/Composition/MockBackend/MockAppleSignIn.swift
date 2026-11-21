@@ -1,4 +1,4 @@
-#if DEBUG
+#if MOCK_BACKEND && DEBUG
 import Auth
 import CoreNetworkingMocks
 import Foundation

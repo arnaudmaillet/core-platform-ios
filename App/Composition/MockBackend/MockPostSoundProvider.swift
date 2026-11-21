@@ -1,3 +1,4 @@
+#if MOCK_BACKEND
 import CoreModels
 import CoreNetworkingMocks
 import DesignSystem
@@ -283,3 +284,4 @@ extension MockPostSoundProvider {
         return hash
     }
 }
+#endif

@@ -2,7 +2,9 @@ import Auth
 import AuthInterface
 import Connect
 import CoreContracts
+#if MOCK_BACKEND
 import CoreNetworkingMocks
+#endif
 import Foundation
 import Maps
 import ProfileData
@@ -43,12 +45,14 @@ extension AppContainer {
     @MainActor
     static func makePasskeyAuthorizer(for environment: AppEnvironment) -> any PasskeyAuthorizing {
         switch environment {
+        #if MOCK_BACKEND
         case .mock:
             SimulatedPasskeyAuthorizer(
                 signInCredentialID: Data(base64URL: MockAuthService.seededPasskeyID) ?? Data(),
                 signInUserHandle: Data(MockAuthService.accountID.utf8)
             )
-        case .localFleet:
+        #endif
+        case .remote:
             PlatformPasskeyAuthorizer()
         }
     }
@@ -82,7 +86,7 @@ extension AppContainer {
     /// Sign in with Apple's sheet (#507); `-mock-apple-sign-in <email>` skips
     /// it in DEBUG.
     private func federatedSignIn() -> any FederatedSignInProviding {
-        #if DEBUG
+        #if MOCK_BACKEND && DEBUG
         if let mock = MockAppleSignIn.fromLaunchArguments() { return mock }
         #endif
         return AppleSignInProvider()

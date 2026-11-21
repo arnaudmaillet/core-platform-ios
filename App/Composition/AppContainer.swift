@@ -13,9 +13,13 @@ import MediaCore
 import CoreModels
 import MediaPlayback
 import CoreNetworking
+#if MOCK_BACKEND
 import CoreNetworkingMocks
+#endif
 import CoreRealtime
+#if MOCK_BACKEND
 import CoreRealtimeMocks
+#endif
 import CoreStorage
 import DesignSystem
 import EntityStore
@@ -58,16 +62,20 @@ final class AppContainer {
 
     private init() {}
 
-    /// Selected by launch argument: `.mock` (default) or `.localFleet`.
+    /// The backend factory's choice (#2391): the mock (a mock build's
+    /// default) or a real backend (`-use-local-fleet`; the production build
+    /// always).
     let environment = AppEnvironment.current
 
     /// The transport for Connect RPCs: the in-process mock, or the real
-    /// URLSession client pointed at the Envoy gateway.
+    /// URLSession client pointed at the backend's gateway.
     private lazy var rpcHTTPClient: any HTTPClientInterface = {
         let transport: any HTTPClientInterface
         switch environment {
+        #if MOCK_BACKEND
         case .mock: transport = mockBackend.bff
-        case .localFleet: transport = URLSessionHTTPClient()
+        #endif
+        case .remote: transport = URLSessionHTTPClient()
         }
         #if DEBUG
         // The debug dashboard's network log (#2133): one flag read per call
@@ -78,6 +86,7 @@ final class AppContainer {
         #endif
     }()
 
+    #if MOCK_BACKEND
     /// The whole in-process backend (dataset + stores + fully registered
     /// MockBFF), with network realism read from launch arguments
     /// (`-mock-latency`, `-mock-fail`, `-mock-fail-code`, `-mock-fail-rate`).
@@ -160,6 +169,7 @@ final class AppContainer {
     private(set) lazy var mockNetworkFaults = MockNetworkFaults.fromLaunchArguments()
     private var mockFaultsObserver: NSObjectProtocol?
     private var connectivityBridge: NSObjectProtocol?
+    #endif
 
     /// Starts telling the app whether the network is reachable (#793): the
     /// system path on the fleet, the mock network's switchboard in mock mode
@@ -167,6 +177,7 @@ final class AppContainer {
     @MainActor
     func startConnectivityMonitoring() {
         switch environment {
+        #if MOCK_BACKEND
         case .mock:
             let faults = mockNetworkFaults
             ConnectivityMonitor.shared.report(online: !faults.isOffline)
@@ -175,7 +186,8 @@ final class AppContainer {
             ) { _ in
                 MainActor.assumeIsolated { ConnectivityMonitor.shared.report(online: !faults.isOffline) }
             }
-        case .localFleet:
+        #endif
+        case .remote:
             ConnectivityMonitor.shared.startMonitoringSystemPath()
         }
     }
@@ -201,6 +213,7 @@ final class AppContainer {
     /// requires network.
     static let usesRichMedia = LaunchArgument.richMedia.isPassed()
 
+    #if MOCK_BACKEND
     private(set) lazy var mockRealtimeServer: MockRealtimeServer = {
         let server = MockRealtimeServer()
         // Offline refuses the socket too, and the outage's end lets it back.
@@ -213,6 +226,7 @@ final class AppContainer {
         }
         return server
     }()
+    #endif
 
     /// Whose identity the device-local stores hold (#2376): THE APP'S ONE
     /// SCOPE, handed to every store that keys by profile or account. Not lazy:
@@ -530,10 +544,14 @@ final class AppContainer {
             return cachedRealtimeClient
         }
         let sessionManager = sessionManager
-        let transport: any RealtimeTransport = if let realtimeURL = environment.realtimeURL {
-            URLSessionWebSocketTransport(url: realtimeURL)
-        } else {
-            mockRealtimeServer
+        let transport: any RealtimeTransport
+        switch environment {
+        #if MOCK_BACKEND
+        case .mock:
+            transport = mockRealtimeServer
+        #endif
+        case .remote(let endpoint):
+            transport = endpoint.realtimeURL.map { URLSessionWebSocketTransport(url: $0) } ?? UnavailableRealtimeTransport()
         }
         let client = RealtimeClient(
             transport: transport,

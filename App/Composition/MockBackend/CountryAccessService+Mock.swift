@@ -1,3 +1,4 @@
+#if MOCK_BACKEND
 import CoreLocation
 import CoreNetworkingMocks
 import Foundation
@@ -48,3 +49,4 @@ extension CountryAccessService {
         return activity
     }
 }
+#endif
