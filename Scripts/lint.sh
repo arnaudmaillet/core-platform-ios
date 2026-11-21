@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Runs formatting and lint checks; CI calls this, and so should you before pushing.
+# Runs formatting and lint checks locally; run it before pushing. CI runs SwiftLint
+# on the changed files in its own job (`swiftlint (report-only)` in ci.yml).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
