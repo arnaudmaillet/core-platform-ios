@@ -14,3 +14,4 @@ The navigation bar, the tab bar and its accessory, the toolbars and system sheet
 - Fewer custom states to keep in sync with UIKit across iOS versions.
 - Some transitions show UIKit's own fade or overlap, by choice.
 - Bar items follow the bar contract (`dev/BAR_CONTRACT.md`, `BarContractGuardTests`).
+- The traps met with native chrome on iOS 26 and 27 are in [Platform traps § Bars](../PLATFORM_TRAPS.md#bars-tab-bar-and-glass-ios-2627).

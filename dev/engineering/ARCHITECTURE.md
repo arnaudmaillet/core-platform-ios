@@ -31,6 +31,7 @@ Rules ([ADR 0002](decisions/0002-package-layers-and-feature-interfaces.md)):
 - **Code that two features need goes down to Core**, never into one feature that the other reaches.
 - **Every module a target imports is declared in its own `Package.swift`.** A clean build resolves only declared modules.
 - **Inside one package**, `package` access lets its targets see each other without making anything `public`.
+- **Code moved from the app into a package keeps the app's isolation.** The app target isolates to the main actor by default with approachable concurrency; packages are nonisolated by default, so moved code fails to compile or, worse, compiles with another meaning. The receiving target uses `swift-tools-version: 6.2` with `.defaultIsolation(MainActor.self)`, `NonisolatedNonsendingByDefault` and `InferIsolatedConformances` (as `DebugTools` and `Wallet` do). A new package the app links is added to both app targets ([ADR 0004](decisions/0004-mock-backend-in-debug-and-demo-only.md)).
 
 ### What goes in a feature interface
 
@@ -84,6 +85,7 @@ B never imports A.
 ## Navigation
 
 - **A screen asks the router to go somewhere**: `router.route(to:)`. Only the router and the stack coordinators push, present or pop.
+- **A route lands on the surface it was fired from.** `RouteResolver` resolves the active stack through the presented chain (`MainTabCoordinator.activeNavigationController`), so a route from a presented sheet or feed pushes on that surface, not under it on the covered tab.
 - **Every pushed screen states how it is left**: it is a `StackScreen` (`StackScreenGuardTests`). It closes through `closeScreen()` or `closePresentation()`, never a raw `popViewController(` or `dismiss(animated:` (`StackCloseGuardTests`).
 - **A screen closes the way it opened**: a native push gets a native pop, and a custom opening gets its custom close ([ADR 0006](decisions/0006-screens-close-the-way-they-open.md)).
 - **Native chrome belongs to UIKit**: the navigation bar, the tab bar, the toolbars and system sheets are shown, hidden and animated by UIKit's own API, never by hand ([ADR 0005](decisions/0005-native-chrome-belongs-to-uikit.md)).

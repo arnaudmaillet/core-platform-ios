@@ -41,6 +41,9 @@ Formatting is the formatter's (`swiftformat`) and the linter's (`swiftlint`, `.s
 - **Deferred work.** Prefer a stored `Task` with `try await Task.sleep` over `DispatchQueue.main.asyncAfter`. The task can be cancelled, and tests can wait on it.
 - **Notification observers.** Keep observer tokens in `NotificationTokens` (CoreModels). A `@MainActor` owner's `deinit` may not touch its own tokens, so don't hand-roll another box. `replace(with:)` unregisters the previous tokens.
 - **Nested types that cross tasks** inside a `@MainActor` class are marked `nonisolated` and `Sendable` explicitly.
+- **A superseded load publishes nothing.** Cancelling a task does not stop it from publishing: cancelled network calls can fail rather than throw `CancellationError`. Check a load generation after every `await`, the failure branch included.
+- **Order-sensitive calls run in the task itself**, not in `async let`, whose child tasks may start in either order.
+- **Closures handed to an Objective-C framework** that calls back on its own queue (PhotoKit, MediaPlayer, KVO) are `@Sendable` or built in a `nonisolated` function. Treat an `#ActorIsolatedCall` warning as an error. More in [Platform traps § Swift concurrency](PLATFORM_TRAPS.md#swift-concurrency).
 
 ## Errors
 
