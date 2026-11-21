@@ -1,0 +1,90 @@
+# Components
+
+How code is cut into pieces. **More files, each small and with one job, beat one large file welded to its feature.**
+
+## One responsibility per type
+
+- **A type does one thing**, and its name says which. If the honest description needs "and", it is two types.
+- **A file holds one main type**, and its name is that type's name. Small private helpers of that type may stay in its file.
+- **Split by responsibility, never into numbered parts**: one extension per protocol conformance in its own file, the layout in its own file, the data mapping in its own file. `ProfileViewController+Layout.swift` is a split; `ProfileViewController2.swift` is not.
+- **A view draws, a view model decides.** A view model holds the screen's state and logic and stays free of UIKit when it can. A display model is what a row or a header shows, built from models outside the view.
+- **Prefer composition to inheritance.** Build behaviour from small parts a type holds, not from a base class. Subclass UIKit's classes and the app's few base contracts (`StackScreen`), and nothing deeper.
+
+## Sizes
+
+| What | Should stay under | Must not pass |
+|---|---|---|
+| A source file | 500 lines | 1,000 lines |
+| A type's body | 300 lines | |
+| A function | 60 lines | |
+
+- These are signals, not targets: a 400-line file with three jobs still needs a split.
+- SwiftLint warns at 500 lines a file and 300 lines a type body (`.swiftlint.yml`).
+- **On 2026-11-21, 64 source files pass 1,000 lines** (generated contracts aside). The largest is `SnapFeedViewController` at 5,382. None of them may grow. A change that touches one leaves it smaller or the same size, and moves what it adds into a new type.
+
+## Splitting a large controller: collaborators with a host
+
+A view controller that has grown to thousands of lines is split into **collaborators**, one per responsibility. The Snap feed's split (#2387) set the pattern: `SnapPagerDrive`, `SnapSoundPlayback`, `SnapCommentsCoordinator`, `SnapZoomDestination`, `SnapToolbarComposer`, `SnapAuthorBar`.
+
+- **Each collaborator owns one responsibility** and the state that goes with it. A piece of state has one writer: `SnapToolbarComposer` is the only code that sets `toolbarItems`.
+- **It sees its controller through a narrow protocol**, `<Collaborator>Host`, which lists only what it reads or calls. It never sees the whole controller.
+- **It holds its host `unowned`**, since the controller owns it and outlives it. Closures it hands out capture `[weak self]`.
+- **The controller creates it lazily** (`private(set) lazy var`) and forwards to it in one line where an outside protocol requires the controller itself to answer.
+- **A test pins the forwarding** when the controller must answer for the collaborator (`SnapZoomForwardingTests` checks that every requirement is forwarded).
+
+## Interfaces
+
+A protocol is the seam that lets one side change without the other.
+
+**A protocol is required:**
+- at every boundary between modules (a feature's interface, a Core service seen by a feature);
+- toward every service with side effects: the network, storage, caches, media playback, the clock, the system (permissions, haptics, audio session);
+- wherever a test needs a stand-in;
+- wherever two implementations exist or are planned (mock and real backend, two layouts of one surface).
+
+**A protocol is not needed** for a value type, a private helper, or a concrete type used inside one module by one caller with nothing to replace in tests. Add the protocol the day a second implementation or a test needs it. A protocol with one conformer and no test double costs indirection for nothing.
+
+**Shape:**
+- **Small and named for the role**: `ProfileItemAccess`, `FeedRealtimeSubscribing`, `ToastAnchoring`. A capability reads as `-ing` or `-able`, a role as a noun. Never `…Protocol` or `I…`.
+- **The consumer owns the protocol** when it is a seam for one consumer: the protocol lists what that consumer needs, and the provider conforms (`extension RealtimeClient: FeedRealtimeSubscribing {}`).
+- **Compose small protocols** (`A & B`) rather than growing one large one.
+
+## When to make a component shared
+
+Before a new component, survey the similar and the neighbouring ones ([Before you code § 3](BEFORE_YOU_CODE.md#3-look-at-the-similar-and-the-neighbouring-components)). Then:
+
+- **The same concept under the same rules → one shared component.** A person's face is the same thing in a message bubble, a profile header and a notification row: one picture, one skeleton while it loads, initials without a picture. It is drawn by one component, `AvatarView`, injected everywhere. **A second use is the moment to extract.** Don't copy the first one.
+- **The same look by coincidence → two components.** Two rows that share a height today but answer to different screens will change for different reasons. Factoring them welds those reasons together. Duplication is cheaper than the wrong abstraction.
+- **A single use stays in its feature**, unless it is designed as a core service from the start (a design doc says so).
+- **When unsure**, ask the question "if one changes, must the other change too?". Yes: share. No: keep apart.
+
+**How to extract:**
+1. **Put it in the lowest layer both users can see**: DesignSystem for a pure visual, MediaCore's `MediaUI` for anything that loads media, a Core package for a shared domain surface (`ThreadKit`, `PostGrid`, `HeroPage`), Kit for models.
+2. **Configure it with values, not with its callers' names.** A `Configuration` or a style enum says what varies. A flag named for a caller (`isProfile`, `inChat`) is a leak: replace it with the property it actually changes (`size`, `showsRing`).
+3. **Inject behaviour**: what it shows comes in as a value, what it does goes out through a delegate, a closure or a protocol. The shared component never imports a feature.
+4. **Move the existing use onto it in the same pull request**, so there is never a period with two implementations.
+5. **Guard it** when a hand-made copy is easy to write: a RepoGuards scan that fails on the copy (`HandMadeAvatarGuardTests`, `HandMadeBannerGuardTests`).
+
+## Shared components
+
+Look here before drawing any of these concepts.
+
+| Concept | Component | Where | Guard |
+|---|---|---|---|
+| A person's face | `AvatarView` | MediaCore / `MediaUI` | `HandMadeAvatarGuardTests` |
+| A person in a list | `PersonRowContent`, `PersonListCell` | DesignSystem | |
+| Opening a person (card or profile) | `PersonOpening` | MediaCore / `MediaUI` | `PersonOpeningGuardTests` |
+| A remote picture | `MediaSlot`, `CoverSlot`, `ImageContentView` | MediaCore / `MediaUI` | `BareImageLoadGuardTests`, `DirectPipelineReadGuardTests` |
+| A banner | `HeroBannerView` through `HeroHeaderView` | HeroPage | `HandMadeBannerGuardTests` |
+| A page with a hero header | HeroPage | HeroPage | `HeroPageArithmeticGuardTests` |
+| A card | `Surface.dressCard` | DesignSystem | `CardContractGuardTests` |
+| A toast | `Feedback` | DesignSystem | `ToastGuardTests` |
+| A loading state | `AppLoaderView`, `AppRefreshControl`, skeleton rows | DesignSystem | `StockSpinnerGuardTests`, `LoadingTextGuardTests` |
+| A button | `AppButton`, `AppIconButton` | DesignSystem | |
+| A glyph the app owns | `AppSymbol`, `LikesSymbol`, `SaveStar` | DesignSystem | `OwnedSymbolGuardTests`, `SymbolContractGuardTests` |
+| A colour | `Palette` | DesignSystem | `RawHueGuardTests` |
+| A font | the scaled type scale | DesignSystem | `ScaledFontGuardTests` |
+| A haptic | the haptic roles | DesignSystem | `HapticsGuardTests` |
+| A comment or message input | `CommentsInputBar` | ThreadKit | |
+
+Add a row when you create a shared component.
