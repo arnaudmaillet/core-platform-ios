@@ -258,7 +258,7 @@ extension SnapFeedViewController: UICollectionViewDelegate {
         // and recycles it, its player with it.
         guard !isReplacingItems else { return }
         updateViewportPlayback()
-        updatePagingFooter(for: scrollView)
+        pageLoaders.updatePagingFooter(for: scrollView)
         // The card's crop is in the pager's own space, which its scroll moves.
         if scrollView === collectionView {
             sideList?.pagerDidScroll()
@@ -268,7 +268,7 @@ extension SnapFeedViewController: UICollectionViewDelegate {
 
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
         updateActiveItem()
-        updatePagingFooter(for: scrollView)
+        pageLoaders.updatePagingFooter(for: scrollView)
     }
 
     /// A programmatic animated scroll (the own-post reveal) ends here, never
@@ -276,14 +276,14 @@ extension SnapFeedViewController: UICollectionViewDelegate {
     /// settled.
     func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
         updateActiveItem()
-        updatePagingFooter(for: scrollView)
+        pageLoaders.updatePagingFooter(for: scrollView)
     }
 
     func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
         if !decelerate {
             updateActiveItem()
         }
-        updatePagingFooter(for: scrollView)
+        pageLoaders.updatePagingFooter(for: scrollView)
     }
 }
 

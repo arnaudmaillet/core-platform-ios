@@ -296,6 +296,9 @@ final class SnapFeedViewController: UIViewController {
     /// both bars' pill widths and the comments' day (`SnapAuthorBar`). Built
     /// on first use; building it does nothing else.
     private(set) lazy var authorBar = SnapAuthorBar(host: self)
+    /// The no-post loader and the paging footer (`SnapPageLoaders`). Built on
+    /// first use; building it does nothing else.
+    private(set) lazy var pageLoaders = SnapPageLoaders(host: self)
     /// The text reveal's veil and borrowed author band (`SnapRevealScenery`).
     /// Built on first use; building it does nothing else.
     private(set) lazy var revealScenery = SnapRevealScenery(host: self)
@@ -544,7 +547,7 @@ final class SnapFeedViewController: UIViewController {
             didStartLoading = true
             // The view model says nothing until a page lands: the loader is
             // armed here, for a feed that opens on no post (#1765).
-            if orderedIDs.isEmpty { setFirstPageWaiting(true) }
+            if orderedIDs.isEmpty { pageLoaders.setFirstPageWaiting(true) }
             viewModel.viewDidLoad()
         }
     }
@@ -1626,7 +1629,7 @@ final class SnapFeedViewController: UIViewController {
         // The centred loader while there is no post to show at all (#1765):
         // a first launch on Shots — no page on the device yet — sat on a
         // blank black page until the network answered.
-        setFirstPageWaiting(state.phase == .loading && state.items.isEmpty)
+        pageLoaders.setFirstPageWaiting(state.phase == .loading && state.items.isEmpty)
         switch state.phase {
         case .loading, .content:
             statusView.isHidden = true
@@ -1952,77 +1955,10 @@ final class SnapFeedViewController: UIViewController {
     var debugShowsLoadingPage: Bool { commentsCoordinator.loadingPage != nil }
     #endif
 
-    /// The full-screen rule's loader (the owner, 2026-10-27) for a feed with no
-    /// post yet: at the centre, after `SnapMediaWait.grace`, so a page the
-    /// device already holds never flashes it.
-    private lazy var firstPageLoader: AppLoaderView = {
-        let spinner = AppLoaderView(size: .medium)
-        spinner.hidesWhenStopped = true
-        spinner.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(spinner)
-        NSLayoutConstraint.activate([
-            spinner.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            spinner.centerYAnchor.constraint(equalTo: view.centerYAnchor)
-        ])
-        return spinner
-    }()
-    /// The loader's timing — the kit's (`LoaderGate`, #1768) at the page's grace.
-    private lazy var firstPageGate = LoaderGate(grace: SnapMediaWait.grace) { [weak self] showing in
-        guard let self else { return }
-        if showing {
-            isFirstPageLoaderBuilt = true
-            view.bringSubviewToFront(firstPageLoader)
-            firstPageLoader.startAnimating()
-        } else if isFirstPageLoaderBuilt {
-            firstPageLoader.stopAnimating()
-        }
-    }
-
-    private func setFirstPageWaiting(_ waiting: Bool) {
-        waiting ? firstPageGate.begin() : firstPageGate.end()
-    }
-    /// Built on first need: most feeds open on posts and never show it.
-    private var isFirstPageLoaderBuilt = false
-
     #if DEBUG
-    /// Whether the no-post loader is up.
-    var debugShowsFirstPageLoader: Bool { isFirstPageLoaderBuilt && firstPageLoader.isAnimating }
+    /// Whether the no-post loader is up (`SnapPageLoaders`).
+    var debugShowsFirstPageLoader: Bool { pageLoaders.debugShowsFirstPageLoader }
     #endif
-
-    /// The spinner shown under the last reachable page, exactly as the timeline
-    /// shows one at the end of a loaded batch — because to the viewer it is the
-    /// same situation: there IS more, and it is not here yet.
-    private lazy var pagingFooter: AppLoaderView = {
-        let spinner = AppLoaderView(size: .medium)
-        spinner.hidesWhenStopped = true
-        spinner.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(spinner)
-        NSLayoutConstraint.activate([
-            spinner.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            spinner.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -24)
-        ])
-        return spinner
-    }()
-
-    /// Shows the spinner while the viewer is pulling against the readiness
-    /// ceiling, and only then.
-    ///
-    /// Driven from the scroll rather than from the settle: the whole point is
-    /// to answer the gesture that is happening now — a viewer who drags past
-    /// the last ready page sees why they cannot go further while they are still
-    /// pulling, and a settled feed shows nothing.
-    func updatePagingFooter(for scrollView: UIScrollView) {
-        let page = scrollView.bounds.height
-        guard page > 0, !orderedIDs.isEmpty else { return }
-        let ceiling = CGFloat(reachableCeiling()) * page
-        let atCorpusEnd = reachableCeiling() >= orderedIDs.count - 1
-        let pulling = scrollView.contentOffset.y > ceiling + 1
-        if pulling, !atCorpusEnd {
-            pagingFooter.startAnimating()
-        } else {
-            pagingFooter.stopAnimating()
-        }
-    }
 
     /// The theme the DEVICE is in, which is not always the theme this screen is
     /// in: the feed pins itself dark while a photograph is settled, so anything
@@ -3215,6 +3151,10 @@ extension SnapFeedViewController: SnapToolbarComposerHost {
 // MARK: - The author bar's host (#2387)
 
 extension SnapFeedViewController: SnapAuthorBarHost {}
+
+// MARK: - The loaders' host (#2514)
+
+extension SnapFeedViewController: SnapPageLoadersHost {}
 
 // MARK: - The reveal scenery's host (#2514)
 
