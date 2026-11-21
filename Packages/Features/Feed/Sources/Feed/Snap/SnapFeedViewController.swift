@@ -278,30 +278,10 @@ final class SnapFeedViewController: UIViewController {
     private(set) var swipeArbiter: SwipeStageArbiter?
     /// A pull past either end of the side list closes it (#1580).
     private(set) var sideListEdgePull: SnapSideListEdgePull?
-    /// How far the pages' overlays sit down while the side list is open
-    /// (#1509): the band the bottom toolbar covers, in the page's space.
-    var sideListOverlayOffset: CGFloat = 0
-    /// The lists made so far, by the post they were opened from (#1509).
-    var sideListCache: [PostID: [FeedEntry]] = [:]
-    /// The post the side list was opened from, while it drives the card.
-    var sideListAnchor: PostID?
-    /// The post on show's clip, paused from its side-list tile (#1550);
-    /// nil when none.
-    var sideListPausedPost: PostID?
-    /// The paused clip whose stopped mark the side list's move is carrying
-    /// between the card and its tile (#1580); nil when no move carries one.
-    var sideListMarkCarry: PostID?
     #if DEBUG
     /// Every post activated, in order. Tests.
     var debugActivations: [PostID] = []
     #endif
-    /// ⚠️ THE LIST IS THE SOURCE'S, NOT THE POST ON SHOW'S (#1580, the
-    /// owner 2026-10-22): closed on a post picked in it, the list it was
-    /// picked from — the source post's "similar" posts — stays the one a
-    /// reopening shows, the card on that post, until the feed is taken up
-    /// again (a page change after the close). Nil: the next opening makes
-    /// the post on show's list.
-    private(set) var sideListResume: (anchor: PostID, shown: PostID)?
     /// Whether this screen installs the side list — every vertical feed does
     /// (#1473); a test sets its own before the view loads.
     var installsSideList = true
@@ -336,6 +316,9 @@ final class SnapFeedViewController: UIViewController {
     /// both bars' pill widths and the comments' day (`SnapAuthorBar`). Built
     /// on first use; building it does nothing else.
     private(set) lazy var authorBar = SnapAuthorBar(host: self)
+    /// The side list's session and the swipe chain (`SnapSideListSession`).
+    /// Built on first use; building it does nothing else.
+    private(set) lazy var sideListSession = SnapSideListSession(host: self, videoPlayback: videoPlayback)
     /// The boost on screen: the gate, the theatre, the stake toast and the
     /// boost anchors (`SnapBoostDrive`). Built on first use; building it does
     /// nothing else.
@@ -2483,12 +2466,7 @@ final class SnapFeedViewController: UIViewController {
         // after the change that went missing.
         if let index { commentsCoordinator.reconcileRestingInterface(activeIndex: index) }
         sideList?.activePostDidChange(activePostID)
-        // A clip paused from its tile is left behind by a page change: the
-        // mark goes with it (#1550).
-        if let paused = sideListPausedPost, paused != activePostID {
-            sideListPausedPost = nil
-            sideList?.listView.setPausedMark(false, on: nil)
-        }
+        sideListSession.activePostDidChange()
     }
 
     // MARK: - Viewing history (#1344)
@@ -2767,7 +2745,7 @@ extension SnapFeedViewController: UICollectionViewDelegate {
             snapCell.setPostUnavailable(unavailablePostIDs.contains(id))
         }
         // A page coming on while the side list is open wears its pose (#1509).
-        (cell as? SnapFeedCell)?.setSideListOverlayOffset(sideListOverlayOffset)
+        (cell as? SnapFeedCell)?.setSideListOverlayOffset(sideListSession.sideListOverlayOffset)
         // …and the content freeze's state, frozen or not (#1738).
         if let snapCell = cell as? SnapFeedCell {
             carouselFreeze.display(snapCell) { $0.setCarouselScrollEnabled($1) }
@@ -2952,7 +2930,7 @@ extension SnapFeedViewController: UICollectionViewDelegate {
         // The feed taken up again after a close: the next opening is the
         // post on show's own list (#1580). The viewer's drag, never a settle
         // — the close's own re-settle passes through other posts.
-        if scrollView === collectionView, !viewModel.isInSideListSession { sideListResume = nil }
+        if scrollView === collectionView, !viewModel.isInSideListSession { sideListSession.forgetResume() }
     }
 
     /// ⚠️ THE FLICK STOPS AT THE LAST PAGE THAT IS READY.
@@ -3000,7 +2978,7 @@ extension SnapFeedViewController: UICollectionViewDelegate {
         // The card's crop is in the pager's own space, which its scroll moves.
         if scrollView === collectionView {
             sideList?.pagerDidScroll()
-            updateSideListRing(scrollView)
+            sideListSession.updateSideListRing(scrollView)
         }
     }
 
@@ -3673,196 +3651,55 @@ extension SnapFeedViewController: ZoomTransitionDestination {
 
     // MARK: - Side list (#1425)
 
-    /// Whether a leftward drag born at `origin` (in this view) may open the
-    /// side list: nothing open over the page, nothing under the finger that
-    /// owns its own drags (the rail, an open panel), and a carousel with no
-    /// photo left to turn to — or a drag born in the trailing edge strip,
-    /// which opens it from any photo.
-    func sideListMayOpen(from origin: CGPoint) -> Bool {
-        // ⚠️ THE COMMENTS LAYOUT TOO (#1728, the owner): the open thread no
-        // longer blocks the chain — its list scrolls vertically, the chain is
-        // horizontal, and its composer still keeps its drags (below).
-        guard !collectionView.isDecelerating, !isKeyboardOnScreen, !orderedIDs.isEmpty else { return false }
-        // ⚠️ THE EDGE FIRST (#1592, the owner): the trailing strip — and the
-        // trailing column standing at it — win over everything under them.
-        if isInTrailingEdge(origin) || isOnTrailingColumn(origin) { return true }
-        let point = collectionView.convert(origin, from: view)
-        if let hit = collectionView.hitTest(point, with: nil) {
-            for current in sequence(first: hit, next: { $0.superview }) {
-                if current is SnapShortcutRailView || current is SnapWheelGlassView || current is SnapRailBoostButton || current is CommentsInputBar {
-                    return false
-                }
-            }
-        }
-        return MediaCarouselTouchRouting.dragPassesThroughCarousel(
-            at: point, in: collectionView, towardsPageDelta: 1
-        )
+    /// The side list's session and the swipe chain (`SnapSideListSession`),
+    /// answered where the arbiter, the side list, its edge pull and the tests
+    /// ask the screen.
+    func isInTrailingEdge(_ origin: CGPoint) -> Bool { sideListSession.isInTrailingEdge(origin) }
+
+    func isOnTrailingColumn(_ origin: CGPoint) -> Bool { sideListSession.isOnTrailingColumn(origin) }
+
+    func swipeStage(for direction: SwipeDirection, at origin: CGPoint) -> SwipeStage? {
+        sideListSession.swipeStage(for: direction, at: origin)
     }
 
-    /// Whether `origin` (in this view) lies in the trailing edge strip.
-    func isInTrailingEdge(_ origin: CGPoint) -> Bool {
-        view.bounds.maxX - origin.x <= PagedScreenDismissalPolicy.trailingEdgeZone
-    }
+    func swipePushDidEnd(committed: Bool) { sideListSession.swipePushDidEnd(committed: committed) }
 
-    /// ⚠️ THE TRAILING COLUMN IS THE EDGE (the owner, 2026-10-22): the emote
-    /// rail, the like bubble and the sound bubble stand at the screen's edge,
-    /// so a leftward drag born on one of them is a drag "from the right edge"
-    /// — the author's profile. Nothing of theirs is lost: the rail scrolls on
-    /// VERTICAL drags only (`SnapShortcutRailView.gestureRecognizerShouldBegin`)
-    /// and the bubbles answer taps.
-    func isOnTrailingColumn(_ origin: CGPoint) -> Bool {
-        let point = collectionView.convert(origin, from: view)
-        guard let hit = collectionView.hitTest(point, with: nil) else { return false }
-        return sequence(first: hit, next: { $0.superview }).contains {
-            $0 is SnapShortcutRailView || $0 is SnapWheelGlassView || $0 is SnapRailBoostButton || $0 is SnapSoundBubbleButton
-        }
+    func swipePushWillBegin() { sideListSession.swipePushWillBegin() }
+
+    func sideListCandidates() async -> [FeedEntry] { await sideListSession.sideListCandidates() }
+
+    var isSideListSessionActive: Bool { sideListSession.isSideListSessionActive }
+
+    func beginSideListSessionIfNeeded() { sideListSession.beginSideListSessionIfNeeded() }
+
+    func liveVideoSurface(for id: PostID) -> VideoRenderView? { sideListSession.liveVideoSurface(for: id) }
+
+    func closeSideListForDismissal() { sideListSession.closeSideListForDismissal() }
+
+    var sideListResumeAnchor: PostID? { sideListSession.sideListResumeAnchor }
+
+    func settlePager(onIndex index: Int) { sideListSession.settlePager(onIndex: index) }
+
+    func showSideListEntry(_ entry: FeedEntry) { sideListSession.showSideListEntry(entry) }
+
+    func sideListPoseDidChange(progress: CGFloat) { sideListSession.sideListPoseDidChange(progress: progress) }
+
+    var sideListEdgePulls: SnapSideListEdgePull.Directions { sideListSession.sideListEdgePulls }
+
+    var sideListBars: UIEdgeInsets { sideListSession.sideListBars }
+
+    func setSideListOverlayOffset(_ offset: CGFloat) { sideListSession.setSideListOverlayOffset(offset) }
+
+    func sideListDidSettle(open: Bool) { sideListSession.sideListDidSettle(open: open) }
+
+    var sideListPausedPost: PostID? {
+        get { sideListSession.sideListPausedPost }
+        set { sideListSession.sideListPausedPost = newValue }
     }
 
     // MARK: - The swipe chain (#1525)
 
-    /// ⚠️ THE LEFTWARD SWIPE CHAIN (#1525, the owner 2026-10-21):
-    /// - a **media** post, the list closed: the side list opens (the
-    ///   carousel's own photos first — `sideListMayOpen`);
-    /// - a **text** post: no list (media posts only, the owner) — the
-    ///   author's profile is pushed, following the finger;
-    /// - the list **open**: a leftward drag pushes the author of the post on
-    ///   the CARD (the list's current item, not the anchor); a rightward one
-    ///   closes the list;
-    /// - from the **right edge** or the action column (#1592, the owner
-    ///   2026-10-22): the author's profile at once, skipping the list — except
-    ///   on a **carousel**, where it opens the list (#1720).
-    func swipeStage(for direction: SwipeDirection, at origin: CGPoint) -> SwipeStage? {
-        guard let sideList, !sideList.isSettling else { return nil }
-        if sideList.isOpen {
-            switch direction {
-            case .rightward: return .panel(sideList)
-            case .leftward:
-                // Not from the list itself (its tiles scroll and tap).
-                guard !sideList.listView.frame.contains(origin) else { return nil }
-                return authorPushStage()
-            }
-        }
-        guard direction == .leftward, sideListMayOpen(from: origin) else { return nil }
-        let model = activePostID.flatMap { modelsByID[$0] }
-        if isInTrailingEdge(origin) || isOnTrailingColumn(origin) {
-            // ⚠️ A CAROUSEL'S EDGE OPENS THE LIST (#1720, the owner): its
-            // middle pages through its photos, so the edge is the way to the
-            // similar posts. Any other post's edge pushes the author.
-            if let model, model.isCollection { return .panel(sideList) }
-            return authorPushStage()
-        }
-        guard let model else { return nil }
-        return model.mediaURL != nil ? .panel(sideList) : authorPushStage()
-    }
-
-    /// The push of the shown post's author — made now, so a screen with no
-    /// router (or no author) answers no stage at all.
-    private func authorPushStage() -> SwipeStage? {
-        guard let author = activePostID.flatMap({ modelsByID[$0] })?.authorID,
-              let profile = viewModel.authorProfileDestination(author) else { return nil }
-        return .push { profile }
-    }
-
     var swipeNavigationController: UINavigationController? { navigationController }
-
-    /// ⚠️ BACK FROM THE PROFILE, THE POST IS FULL SCREEN (#1525, the owner):
-    /// a committed push closes the list behind the profile, without
-    /// animation — the post on show stays the current page, placed after
-    /// the anchor (#1509).
-    func swipePushDidEnd(committed: Bool) {
-        // The pager pages again — unless the list, still open after a
-        // cancelled push, keeps it frozen as its own settle does.
-        if !(sideList?.isEngaged ?? false) { setContentScrollEnabled(true) }
-        guard committed, let sideList, sideList.isOpen || sideList.isEngaged else { return }
-        sideList.settle(open: false, animated: false)
-    }
-
-    /// The pager holds still under the finger's push.
-    func swipePushWillBegin() {
-        setContentScrollEnabled(false)
-    }
-
-    /// ⚠️ THE POST ON SHOW, THEN SIMILAR POSTS (#1509): the list is
-    /// `[the post on show] + current posts of the feed's kind (#1421), none
-    /// already in the feed, in a random order` — the "similar" half behind
-    /// one seam (`sideListEntries`), so posts sharing a hashtag replace it as
-    /// a data change. One list per anchor, kept while the screen lives: the
-    /// same post opens on the same list.
-    func sideListCandidates() async -> [FeedEntry] {
-        guard let anchor = activePostID else { return [] }
-        if let cached = sideListCache[anchor] { return cached }
-        async let similar = sideListEntries?() ?? []
-        async let shown = viewModel.entry(for: anchor)
-        let (entries, anchorEntry) = await (similar, shown)
-        let inFeed = Set(orderedIDs)
-        let kind: SnapFeedKindScope? = modelsByID[anchor].map { $0.mediaURL == nil ? .text : .media }
-        var seen: Set<PostID> = [anchor]
-        let others = entries.filter { entry in
-            guard !inFeed.contains(entry.post.id), seen.insert(entry.post.id).inserted else { return false }
-            return kind == nil || SnapFeedKindScope(entry) == kind
-        }.shuffled()
-        let list = (anchorEntry.map { [$0] } ?? []) + others
-        sideListCache[anchor] = list
-        return list
-    }
-
-    /// Whether the side list drives the card now (#1509).
-    var isSideListSessionActive: Bool { viewModel.isInSideListSession }
-
-    /// The list is open and loaded: the card pages through it (#1509) — the
-    /// feed set aside untouched, the pager on the post on show, the list's
-    /// first item.
-    func beginSideListSessionIfNeeded() {
-        guard let sideList, sideList.isOpen, !viewModel.isInSideListSession, let shown = activePostID else { return }
-        let entries = sideList.listView.entries
-        // Reopened on a post picked in the last list: that list again, the
-        // card on the post at its place in it (#1580).
-        let resumed = sideListResume.flatMap { resume in
-            resume.shown == shown && entries.first?.post.id == resume.anchor
-                && entries.contains(where: { $0.post.id == shown }) ? resume.anchor : nil
-        }
-        guard let anchor = resumed ?? (entries.first?.post.id == shown ? shown : nil) else { return }
-        Task { [weak self] in
-            guard let self, await viewModel.beginSideListSession(anchor: anchor, entries: entries) else { return }
-            sideListAnchor = anchor
-            settlePager(onIndex: orderedIDs.firstIndex(of: shown) ?? 0)
-        }
-    }
-
-    /// One context for every still: making one per call is costly.
-    private static let stillContext = CIContext(options: [.useSoftwareRenderer: false])
-
-    /// The frame `surface` is drawing now, as an image (#1581).
-    private static func stillImage(of surface: VideoRenderView) -> UIImage? {
-        guard let buffer = surface.currentFrameBuffer else { return nil }
-        let image = CIImage(cvPixelBuffer: buffer)
-        guard let cg = stillContext.createCGImage(image, from: image.extent) else {
-            return nil
-        }
-        return UIImage(cgImage: cg)
-    }
-
-    /// The surface `id`'s page draws its clip on, while that page is the
-    /// post on show (#1581: the side list's tile mirrors it).
-    func liveVideoSurface(for id: PostID) -> VideoRenderView? {
-        guard activePostID == id else { return nil }
-        return settledSnapCell?.liveVideoSurface
-    }
-
-    /// The list closed, unseen, as the screen leaves (`viewDidDisappear`).
-    func closeSideListForDismissal() {
-        if let sideList, sideList.isEngaged || sideList.isOpen {
-            sideList.settle(open: false, animated: false)
-        }
-        sideListResume = nil
-    }
-
-    /// The source post whose list a reopening keeps, while it holds
-    /// (`sideListResume`).
-    var sideListResumeAnchor: PostID? {
-        guard let resume = sideListResume, resume.shown == activePostID else { return nil }
-        return resume.anchor
-    }
 
     /// ⚠️ THE POST ON SHOW STAYS ON SHOW THROUGH A REORDER (#1580, the
     /// owner's device check): the side list opening or closing swaps the
@@ -3920,162 +3757,9 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         if !cell.isLifecycleActive { cell.willBecomeActive() }
     }
 
-    /// The pager on page `index`, at once, and the page made active.
-    func settlePager(onIndex index: Int) {
-        let page = collectionView.bounds.height
-        guard page > 0, orderedIDs.indices.contains(index) else { return }
-        UIView.performWithoutAnimation {
-            collectionView.setContentOffset(CGPoint(x: 0, y: CGFloat(index) * page), animated: false)
-            collectionView.layoutIfNeeded()
-        }
-        updateActiveItem()
-    }
-
-    /// The list closed (#1509): the feed comes back as it was. The post on
-    /// show STAYS full screen — placed right after the anchor, so a swipe up
-    /// continues the feed from there — however the list closed: rightward,
-    /// or pulled past either end (#1580).
-    private func endSideListSession() {
-        guard viewModel.isInSideListSession, let anchor = sideListAnchor else { return }
-        sideListAnchor = nil
-        sideListResume = activePostID.map { (anchor, $0) }
-        guard let index = viewModel.endSideListSession(anchor: anchor, keeping: activePostID) else { return }
-        settlePager(onIndex: index)
-    }
-
-    /// ⚠️ THE RING FOLLOWS THE CARD'S SCROLL (#1546, the owner 2026-10-21):
-    /// between two posts, the two tiles' rings share the way — half each
-    /// half way — so the ring fades across under the finger and back on a
-    /// cancelled swipe. A jump with no finger (a tile's tap) fades it.
-    private func updateSideListRing(_ scrollView: UIScrollView) {
-        guard let sideList, sideList.isOpen, viewModel.isInSideListSession else { return }
-        let page = scrollView.bounds.height
-        guard page > 0, !orderedIDs.isEmpty else { return }
-        let position = min(max(scrollView.contentOffset.y / page, 0), CGFloat(orderedIDs.count - 1))
-        let lower = Int(position.rounded(.down))
-        let fraction = position - CGFloat(lower)
-        var weights: [PostID: CGFloat] = [:]
-        if orderedIDs.indices.contains(lower) { weights[orderedIDs[lower]] = 1 - fraction }
-        if fraction > 0, orderedIDs.indices.contains(lower + 1) {
-            weights[orderedIDs[lower + 1], default: 0] += fraction
-        }
-        let byFinger = scrollView.isTracking || scrollView.isDecelerating
-        sideList.listView.setRing(weights, animated: !byFinger)
-    }
-
-    /// A post picked in the list: the card moves to it — the list's own
-    /// item, nothing injected into the feed (#1509).
-    ///
-    /// ⚠️ AT ONCE (#1548, the owner 2026-10-21): no scroll through the posts
-    /// in between, the card shows the chosen one in the next frame. The
-    /// pager stays in the list's order, so a swipe from there reaches its
-    /// real neighbours.
-    func showSideListEntry(_ entry: FeedEntry) {
-        // ⚠️ THE POST ON SHOW'S OWN TILE PAUSES IT (#1550): while the list
-        // is open, the card closes the list on a tap, so the clip is paused
-        // and resumed from its tile, which wears the stopped mark.
-        if entry.post.id == activePostID {
-            toggleSideListPlayback()
-            return
-        }
-        guard viewModel.isInSideListSession,
-              let index = orderedIDs.firstIndex(of: entry.post.id) else { return }
-        // ⚠️ THE CARD TAKES THE TILE'S OWN PLAYER (#1581, the owner's
-        // recording): started fresh, even at the tile's second, the card and
-        // the tile both showed the post's cover until a first frame — the
-        // flash on every pick. The tile's player is handed over instead, on
-        // the frame it is showing: the card draws it at once (bound
-        // alongside, then adopted, filed under the post's own scope, its cap
-        // raised to a page's), and the tile goes on drawing it as the
-        // card's mirror. A tile with no player of its own falls back to a
-        // start at its second.
-        let id = entry.post.id
-        let handoff = sideList?.listView.tilePlayhead(for: id)
-        let tileSurface = sideList?.listView.autoplay?.handOver(id)
-        if tileSurface == nil, let handoff {
-            videoPlayback?.prepareStart(of: handoff.url, scope: id.rawValue, at: handoff.seconds)
-        }
-        settlePager(onIndex: index)
-        guard let videoPlayback, let card = liveVideoSurface(for: id) else { return }
-        // The frame the tile is showing, as the card's poster until its own
-        // layer draws (a frame or so): never the post's cover.
-        if let tileSurface, let still = Self.stillImage(of: tileSurface) { card.setPoster(still) }
-        if let tileSurface, card !== tileSurface,
-           videoPlayback.attachSurface(card, alongsideSurface: tileSurface),
-           videoPlayback.adoptSurface(card, replacing: tileSurface) {
-            videoPlayback.rescope(card, to: id.rawValue)
-            videoPlayback.setPeakBitRate(MediaPlaybackPolicy.peakBitRate, in: card)
-            card.revealOnFirstFrame()
-            soundPlayback.refreshAudibleSurface()
-            sideList?.listView.reconcileNow()
-        } else if let handoff, videoPlayback.hasPlayer(in: card) {
-            videoPlayback.seek(toSeconds: handoff.seconds, in: card, toleranceSeconds: 0)
-        }
-    }
-
-    /// Toggles the post on show's clip from the list: the stopped mark on
-    /// its tile, none on the card.
-    private func toggleSideListPlayback() {
-        guard let id = activePostID, let cell = activeSnapCell, cell.canTogglePlayback,
-              let paused = cell.togglePlayback(markOnPage: false) else { return }
-        sideListPausedPost = paused ? id : nil
-        sideList?.listView.setPausedMark(paused, on: id)
-    }
-
-    /// ⚠️ THE MARK CROSSES WITH THE MOVE (#1580, the owner 2026-10-22): a
-    /// paused clip's stopped mark leaves the card for its tile as the list
-    /// opens — 1 − progress on the card, progress on the tile — under the
-    /// finger and on the spring, both ways, rather than jumping at the end.
-    /// `handOverPausedMark` settles who keeps it.
-    func sideListPoseDidChange(progress: CGFloat) {
-        guard let id = activePostID, let cell = settledSnapCell, let list = sideList?.listView else { return }
-        if sideListMarkCarry != id {
-            // Nothing paused, nothing to carry.
-            guard cell.showsPausedMark || sideListPausedPost == id else { return }
-            sideListMarkCarry = id
-            cell.setPausedMarkVisible(true, animated: false)
-            list.setPausedMark(true, on: id, animated: false)
-        }
-        cell.setPausedMarkShare(1 - progress)
-        list.setPausedMarkShare(progress)
-    }
-
-    /// The stopped mark moves between the card and the tile as the list
-    /// opens and closes (#1550); paging to another post takes it down.
-    private func handOverPausedMark(listOpen: Bool) {
-        guard let id = activePostID, let cell = settledSnapCell else { return }
-        // A move carried it: the side it ended on keeps it, whole, the
-        // other lets it go unseen — it is at 0 already.
-        if sideListMarkCarry == id {
-            sideListMarkCarry = nil
-            if listOpen {
-                cell.setPausedMarkVisible(false, animated: false)
-                sideListPausedPost = id
-                sideList?.listView.setPausedMarkShare(1)
-            } else {
-                cell.setPausedMarkShare(1)
-                sideListPausedPost = nil
-                sideList?.listView.setPausedMark(false, on: nil, animated: false)
-            }
-            return
-        }
-        sideListMarkCarry = nil
-        if listOpen {
-            if cell.showsPausedMark {
-                cell.setPausedMarkVisible(false)
-                sideListPausedPost = id
-            }
-            sideList?.listView.setPausedMark(sideListPausedPost == id, on: id)
-        } else {
-            if sideListPausedPost == id { cell.setPausedMarkVisible(true) }
-            sideListPausedPost = nil
-            sideList?.listView.setPausedMark(false, on: nil)
-        }
-    }
-
     /// The settled page's cell — the post on show's, whether or not its
     /// activation has run (the side list's marks ask it at rest).
-    private var settledSnapCell: SnapFeedCell? {
+    var settledSnapCell: SnapFeedCell? {
         collectionView.cellForItem(at: IndexPath(item: settledPageIndex, section: 0)) as? SnapFeedCell
     }
 
@@ -4105,64 +3789,6 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     /// Who owns a downward drag beginning now: the pager or the dismissal.
     var downwardDragOwner: SnapVerticalDragRouter.DownwardOwner {
         SnapVerticalDragRouter.downwardOwner(downwardDragSituation)
-    }
-
-    /// The pulls that close the side list now (#1580): with the list open
-    /// and still, down on its first post, up on its last — where the card
-    /// sits at that end of the pager, with nothing beyond it.
-    var sideListEdgePulls: SnapSideListEdgePull.Directions {
-        guard let sideList, sideList.isOpen, !sideList.isSettling, viewModel.isInSideListSession,
-              let pager = collectionView, !orderedIDs.isEmpty else { return [] }
-        let page = pager.bounds.height
-        guard page > 0 else { return [] }
-        let index = settledPageIndex
-        // At rest on its page, not mid-scroll.
-        guard abs(pager.contentOffset.y - CGFloat(index) * page) < 0.5 else { return [] }
-        var pulls: SnapSideListEdgePull.Directions = []
-        if index == 0 { pulls.insert(.down) }
-        if index == orderedIDs.count - 1 { pulls.insert(.up) }
-        return pulls
-    }
-
-    /// What the bars cover, for the side list's card to fit between them
-    /// (#1509): the top bar's bottom and the bottom toolbar's top, read off
-    /// the bars themselves when they are on screen, the safe area otherwise.
-    var sideListBars: UIEdgeInsets {
-        var top = view.safeAreaInsets.top
-        var bottom = view.safeAreaInsets.bottom
-        if let nav = navigationController {
-            let bar = nav.navigationBar
-            if !nav.isNavigationBarHidden, bar.window != nil, !bar.isHidden {
-                top = max(top, bar.convert(bar.bounds, to: view).maxY)
-            }
-            let toolbar = nav.toolbar!
-            if !nav.isToolbarHidden, toolbar.window != nil, !toolbar.isHidden {
-                bottom = max(bottom, view.bounds.maxY - toolbar.convert(toolbar.bounds, to: view).minY)
-            }
-        }
-        return UIEdgeInsets(top: max(0, top), left: 0, bottom: max(0, bottom), right: 0)
-    }
-
-    /// Moves every page's overlay down by `offset` (the side list's pose).
-    func setSideListOverlayOffset(_ offset: CGFloat) {
-        sideListOverlayOffset = offset
-        for case let cell as SnapFeedCell in collectionView.visibleCells {
-            cell.setSideListOverlayOffset(offset)
-        }
-        // …and the open comments' composer with them (#1730).
-        (commentsContentVC as? PostDetailViewController)?.setOverlayOffset(offset)
-    }
-
-    /// The list settled open or closed. Open, the pager pages back from its
-    /// first post too — the dismissal stands aside (`downwardDragOwner`).
-    func sideListDidSettle(open: Bool) {
-        handOverPausedMark(listOpen: open)
-        if open {
-            beginSideListSessionIfNeeded()
-        } else {
-            endSideListSession()
-        }
-        sideList?.activePostDidChange(activePostID)
     }
 
     /// Whether the viewer is on the list's last post (#628, #761): the settled
@@ -4300,6 +3926,10 @@ extension SnapFeedViewController: SnapToolbarComposerHost {
 // MARK: - The author bar's host (#2387)
 
 extension SnapFeedViewController: SnapAuthorBarHost {}
+
+// MARK: - The side list session's host (#2514)
+
+extension SnapFeedViewController: SnapSideListSessionHost {}
 
 // MARK: - The boost's host (#2514)
 
