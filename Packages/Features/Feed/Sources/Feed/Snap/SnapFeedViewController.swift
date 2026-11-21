@@ -252,12 +252,6 @@ final class SnapFeedViewController: UIViewController {
     /// same class of defect as a stale stand-in.
     public var onMediaPageChanged: ((PostID, Int) -> Void)?
 
-    /// Transition-scoped: covers what a COLLAPSED card has no room for, for
-    /// the length of a reveal. See `installRevealVeil`.
-    private var revealVeil: RevealVeilView?
-    /// The source row's author band, borrowed for a flight — see
-    /// `installRevealAuthorBand`.
-    private var revealAuthorBand: PostAuthorBandView?
     /// The side list (#1425): nil on a screen that opted out.
     private(set) var sideList: SnapSideListController?
     /// The screen's horizontal swipe chain (#1525) — see `swipeStage`.
@@ -302,6 +296,9 @@ final class SnapFeedViewController: UIViewController {
     /// both bars' pill widths and the comments' day (`SnapAuthorBar`). Built
     /// on first use; building it does nothing else.
     private(set) lazy var authorBar = SnapAuthorBar(host: self)
+    /// The text reveal's veil and borrowed author band (`SnapRevealScenery`).
+    /// Built on first use; building it does nothing else.
+    private(set) lazy var revealScenery = SnapRevealScenery(host: self)
     /// The opener's one-shot requests: a carousel's page, the comments open
     /// (`SnapOpeningRequests`). Built on first use; building it does nothing
     /// else.
@@ -2731,96 +2728,22 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         (commentsContentVC as? PostDetailViewController)?.revealCaptionAnchor(in: space)
     }
 
-    /// **THE TEXT REVEAL**. Covers everything below `cut` for the
-    /// length of a reveal, so a page opened from a COLLAPSED card shows no
-    /// more of itself than the card did — see `RevealVeilView`.
-    ///
-    /// Hosted on this screen's own view rather than on the page cell, because
-    /// it has to cover the comment stream and the composer as well, and those
-    /// are not the cell's. `nil` takes it away.
+    /// The text reveal's veil and borrowed author band (`SnapRevealScenery`),
+    /// answered where the reveal's installer and its flight ask the screen.
     public func installRevealVeil(below cut: CGFloat?, tint: UIColor?) {
-        revealVeil?.removeFromSuperview()
-        revealVeil = nil
-        guard let cut, let tint, cut < view.bounds.height else { return }
-        let veil = RevealVeilView(tint: tint)
-        // Hung a band ABOVE the cut, so the gradient reaches solid exactly AT
-        // it. Starting the ramp at the cut is what let the page's next line
-        // ride the whole flight as a grey ghost — see `RevealVeilView`.
-        let top = max(0, cut - RevealVeilView.fadeBand)
-        veil.frame = CGRect(
-            x: 0, y: top, width: view.bounds.width, height: view.bounds.height - top
-        )
-        veil.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        view.addSubview(veil)
-        revealVeil = veil
+        revealScenery.installRevealVeil(below: cut, tint: tint)
     }
 
-    /// Driven inside the flight's animation block, so the page unfolds as the
-    /// window opens and folds back as it closes — and scrubs with the finger
-    /// on a dismissal.
-    public func setRevealVeilOpacity(_ alpha: CGFloat) {
-        revealVeil?.alpha = alpha
-    }
+    public func setRevealVeilOpacity(_ alpha: CGFloat) { revealScenery.setRevealVeilOpacity(alpha) }
 
-    /// **THE TEXT REVEAL**. Puts the SOURCE row's author band into
-    /// this page for the length of a flight, at `top` in this view's own
-    /// coordinates — or takes it away with `nil`.
-    ///
-    /// ## Why the page borrows a header it does not have
-    ///
-    /// A card names its author above its caption; a page names it in the nav
-    /// pill instead, and has nothing in that strip at all. So the window a
-    /// viewer holds showed a blank band where the card shows a header, and the
-    /// card's own header had to fade in at the landing to cover the difference.
-    ///
-    /// A fade is the wrong tool twice over here. It is a fade of something
-    /// against NOTHING, which works — but it is also a fade at exactly the
-    /// moment this transition promises to be invisible, and the strip is the
-    /// one part of the window that never matched.
-    ///
-    /// With the band drawn INTO the page, the window shows what the card shows
-    /// from frame 0, and the swap at the landing is the identity rather than a
-    /// dissolve. It is scenery: no touches, no follow action, gone the moment
-    /// the flight is.
-    ///
-    /// Hosted on this screen's own view rather than on the page cell, for the
-    /// same reason the veil is — and positioned rather than laid out, so the
-    /// page's resting layout never learns it exists.
     public func installRevealAuthorBand(
         in rect: CGRect?, model: PostAuthorBandView.Model?, pipeline: ImagePipeline?
     ) {
-        revealAuthorBand?.removeFromSuperview()
-        revealAuthorBand = nil
-        guard let rect, let model else { return }
-        let band = PostAuthorBandView()
-        band.isUserInteractionEnabled = false
-        band.configure(with: model, imagePipeline: pipeline)
-        // Scenery, but scenery that has to match: the card this lands on wears
-        // a "...", and a control that pops in at the landing is the one frame
-        // the reveal exists to make invisible.
-        band.showMenuControlAsScenery()
-        band.alpha = 0
-        band.translatesAutoresizingMaskIntoConstraints = true
-        // The rect comes from the CAPTION ROW, already inset from the page's
-        // edge, and the band takes the caption's own inset inside it — which is
-        // exactly what the card does. Measuring from this view instead was the
-        // first version, and it put the band 16pt wider on each side than the
-        // card's: the page's caption is inset TWICE, once by the stream's
-        // section and once by the row, and only the second of those is the
-        // card's own.
-        band.frame = rect
-        band.autoresizingMask = [.flexibleWidth]
-        // ABOVE the veil: the veil covers what the page has too much of, and
-        // this is the one thing it has too little of.
-        view.addSubview(band)
-        revealAuthorBand = band
+        revealScenery.installRevealAuthorBand(in: rect, model: model, pipeline: pipeline)
     }
 
-    /// The prop's opacity, driven on the flight's progress — full when the
-    /// window is the card, gone when the page is itself.
-    public func setRevealAuthorBandOpacity(_ alpha: CGFloat) {
-        revealAuthorBand?.alpha = alpha
-    }
+    public func setRevealAuthorBandOpacity(_ alpha: CGFloat) { revealScenery.setRevealAuthorBandOpacity(alpha) }
+
 
     /// **THE TEXT REVEAL**. Lends the active page a ground for the
     /// length of a reveal — see `SnapFeedCell.setRevealGroundTint`.
@@ -3292,6 +3215,10 @@ extension SnapFeedViewController: SnapToolbarComposerHost {
 // MARK: - The author bar's host (#2387)
 
 extension SnapFeedViewController: SnapAuthorBarHost {}
+
+// MARK: - The reveal scenery's host (#2514)
+
+extension SnapFeedViewController: SnapRevealSceneryHost {}
 
 // MARK: - The opening requests' host (#2514)
 
