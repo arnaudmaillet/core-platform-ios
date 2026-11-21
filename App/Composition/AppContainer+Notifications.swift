@@ -4,7 +4,9 @@ import Connect
 import CoreContracts
 import CoreModels
 import CoreNavigation
+#if MOCK_BACKEND
 import CoreNetworkingMocks
+#endif
 import EntityStore
 import FeedInterface
 import Foundation
@@ -35,6 +37,7 @@ extension AppContainer {
     /// directly — notification.v1 carries no clear until backend #971. Nil on
     /// the fleet, where the trash is not offered.
     private var notificationsClear: NotificationsClearing? {
+        #if MOCK_BACKEND
         guard environment == .mock else { return nil }
         let service = mockBackend.notificationService
         return { profileID, bound in
@@ -43,6 +46,9 @@ extension AppContainer {
                 throughMs: Int64(bound.newestCreatedAt.timeIntervalSince1970 * 1_000)
             )
         }
+        #else
+        return nil
+        #endif
     }
 
     func makePushNotifications() -> PushNotifications {
@@ -86,7 +92,7 @@ extension AppContainer {
             localStore: localStore,
             // Pauses past 8 h and "until I turn it back on" (#1575): the mock
             // accepts them; the fleet will once backend #971 lands.
-            allowsLongPushPauses: environment == .mock,
+            allowsLongPushPauses: environment.isMock,
             // The trash (#1574), where the server can clear: the mock, until
             // backend #971.
             allowsClearAll: notificationsClear != nil,

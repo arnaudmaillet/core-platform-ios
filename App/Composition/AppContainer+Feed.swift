@@ -5,7 +5,9 @@ import CoreContracts
 import CoreModels
 import CoreNavigation
 import CoreNetworking
+#if MOCK_BACKEND
 import CoreNetworkingMocks
+#endif
 import CoreRealtime
 import CoreStorage
 import DesignSystem
@@ -172,8 +174,10 @@ extension AppContainer {
 
     private var postSoundProvider: (any PostSoundProviding)? {
         switch environment {
-        case .mock: MockPostSoundProvider(dataset: mockBackend.dataset, counters: mockBackend.counterStore)
-        case .localFleet: nil
+        #if MOCK_BACKEND
+        case .mock: return MockPostSoundProvider(dataset: mockBackend.dataset, counters: mockBackend.counterStore)
+        #endif
+        case .remote: return nil
         }
     }
 }

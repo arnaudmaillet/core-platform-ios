@@ -4,6 +4,11 @@
 <dict>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
+	<!-- The backend a real-backend build talks to (#2391, `BackendEndpoint.configured`): the BFF_HOST and REALTIME_URL build settings. -->
+	<key>BFFHost</key>
+	<string>$(BFF_HOST)</string>
+	<key>RealtimeURL</key>
+	<string>$(REALTIME_URL)</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsLocalNetworking</key>

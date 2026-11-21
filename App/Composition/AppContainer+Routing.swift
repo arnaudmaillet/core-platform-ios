@@ -1,6 +1,8 @@
 import ChatInterface
 import CoreModels
+#if MOCK_BACKEND
 import CoreNetworkingMocks
+#endif
 import CoreStorage
 import FeedInterface
 import Foundation

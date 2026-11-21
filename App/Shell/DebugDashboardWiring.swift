@@ -112,8 +112,8 @@ enum DebugDashboardWiring {
             let network = container.mockNetworkFaults.isOffline
                 ? "offline" : NetworkConditionsMenu.describe(container.mockBackend.bff.simulatedConditions)
             environment = "mock BFF · \(network)"
-        default:
-            environment = "\(container.environment)"
+        case .remote(let endpoint):
+            environment = "backend · \(endpoint.host)"
         }
         let device = UIDevice.current
         let traits = UITraitCollection.current

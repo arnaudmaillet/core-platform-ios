@@ -5,7 +5,9 @@ import Connect
 import CoreContracts
 import CoreModels
 import CoreNetworking
+#if MOCK_BACKEND
 import CoreNetworkingMocks
+#endif
 import FeedInterface
 import Foundation
 import MediaCore
@@ -45,14 +47,16 @@ extension AppContainer {
     /// store. Shared by posts and messages (#681).
     var mediaUploadTransport: any MediaUploadTransport {
         switch environment {
+        #if MOCK_BACKEND
         case .mock:
-            MockMediaUploadTransport(store: mockBackend.blobStore, faults: mockNetworkFaults)
-        case .localFleet:
+            return MockMediaUploadTransport(store: mockBackend.blobStore, faults: mockNetworkFaults)
+        #endif
+        case .remote:
             // The media service presigns object-store URLs against the
             // Docker-internal host (minio:9000), unreachable from the
             // client; rewrite to the published host, preserving the signed
             // Host header. Remove once the fleet presigns a reachable host.
-            URLSessionMediaUploadTransport(
+            return URLSessionMediaUploadTransport(
                 hostRewrite: HostRewrite(from: "minio:9000", to: "localhost:9000")
             )
         }

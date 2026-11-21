@@ -3,7 +3,9 @@ import Connect
 import CoreContracts
 import CoreModels
 import CoreNavigation
+#if MOCK_BACKEND
 import CoreNetworkingMocks
+#endif
 import CoreStorage
 import DesignSystem
 import Feed
@@ -41,9 +43,11 @@ extension AppContainer {
         // Mock mode has no settlement service, so the claim sheet's stake
         // list would open empty on every fresh install. A one-time demo plan
         // stakes on the first mock posts — some active, some settled.
+        #if MOCK_BACKEND
         if environment == .mock {
             store.seedDemoStakesIfNeeded(targetIDs: mockBackend.dataset.posts.prefix(8).map(\.postID))
         }
+        #endif
         return store
     }
 
@@ -143,6 +147,7 @@ extension AppContainer {
     }
 
     func makeProfileItems() -> ProfileItemService? {
+        #if MOCK_BACKEND
         guard environment == .mock else { return nil }
         return ProfileItemService(
             accountID: MockAuthService.accountID,
@@ -151,10 +156,13 @@ extension AppContainer {
             teen: teenProtections,
             isMember: { [unowned self] in self.memberGate.isMember }
         )
+        #else
+        return nil
+        #endif
     }
 
     func makeStakePacks() -> StakePackService? {
-        guard environment == .mock else { return nil }
+        guard environment.isMock else { return nil }
         return StakePackService(wallet: walletStore)
     }
 }
