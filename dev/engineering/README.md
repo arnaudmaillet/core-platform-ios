@@ -9,10 +9,25 @@ The rules every change to this repository follows, whoever writes it: a develope
 | [Components](COMPONENTS.md) | How code is cut: one responsibility per type, sizes, when a component becomes shared, how a large controller is split |
 | [Swift style](SWIFT_STYLE.md) | Naming, API shape, access control, concurrency, errors, comments |
 | [Testing](TESTING.md) | What each layer tests, where test helpers live, what runs where |
+| [Platform traps](PLATFORM_TRAPS.md) | UIKit, bars and glass, Core Animation, gestures, Swift concurrency, AVFoundation, MapKit and text behaviour that cost a bug, and what to do instead |
+| [Test traps](TEST_TRAPS.md) | Why a test went red outside the code under test, or stayed green over a bug: parallel suites, waits, the test host, Xcode 26 on CI |
 | [Design doc template](DESIGN_DOC_TEMPLATE.md) | The document a core or large feature starts from |
 | [Decisions](decisions/README.md) | Architecture decision records: why the code is the way it is |
 
 The process rules (merging, CI, pushing) are in [`CLAUDE.md`](../../CLAUDE.md) at the root.
+
+## Area specifications
+
+Some areas have a specification of their own in `dev/`. These pages link to them rather than repeat them.
+
+| Page | What it specifies |
+|---|---|
+| [Bar contract](../BAR_CONTRACT.md) | Every toolbar and navigation bar: identifiers, kept instances, no "•••" (`BarContractGuardTests`) |
+| [Presentation charter](../PRESENTATION_CHARTER.md) | What a screen owes the transition that brings it on, and what it may cost |
+| [Viewport playback](../VIEWPORT_PLAYBACK.md) | When a clip plays: its screen's share of the display ([ADR 0014](decisions/0014-viewport-share-decides-playback.md)) |
+| [Timeline charter](../TIMELINE_CHARTER.md) | What the editor's timeline must do and cost |
+| [Cache audit](../CACHE_AUDIT.md) | The device cache's measured budgets |
+| [Video capture and upload](../IOS_VIDEO_CAPTURE_UPLOAD.md) | The capture, edit and upload pipeline for video |
 
 ## How the rules are held
 

@@ -6,7 +6,7 @@ One short file per architecturally significant decision: why the code is the way
 - **Never edit a decision to reverse it.** Write a new record that supersedes it, and set the old one's status to `Superseded by NNNN`.
 - **Numbering:** the next free four-digit number. The file name is `NNNN-short-title.md`.
 
-Records 0001 to 0011 were written on 2026-11-21 from decisions already in force; their dates are those of the decisions.
+Records 0001 to 0011, and 0013 to 0015, were written on 2026-11-21 from decisions already in force; their dates are those of the decisions.
 
 | # | Decision | Status |
 |---|---|---|
@@ -22,6 +22,9 @@ Records 0001 to 0011 were written on 2026-11-21 from decisions already in force;
 | [0010](0010-compilation-cache-in-ci-only.md) | Compilation caching in CI only | Accepted |
 | [0011](0011-large-controllers-split-into-collaborators.md) | Large controllers split into collaborators behind host protocols | Accepted |
 | [0012](0012-rules-before-code.md) | Engineering rules and a checklist before any code | Accepted |
+| [0013](0013-a-sound-belongs-to-the-post.md) | A sound belongs to the post, never to one of its media | Accepted |
+| [0014](0014-viewport-share-decides-playback.md) | A clip plays while its screen holds half of the display | Accepted |
+| [0015](0015-map-clustering-computed-by-the-app.md) | Map clustering is computed by the app, not by MapKit | Accepted |
 
 ## Template
 

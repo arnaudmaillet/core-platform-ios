@@ -32,4 +32,16 @@ What each layer tests, and where. What runs locally and what runs in CI is in [`
 ## Timing
 
 - **Never wait a fixed time.** Wait for the condition (`settle`, an expectation on the state). A fixed sleep is slow when it is long and flaky when it is short.
+- **Bound a wait by a budget of looks, never by a clock deadline.** A starved runner freezes the process past any deadline; a budget of looks stretches with it. Assert the wait's result.
+- **Wait for an event, not a passing state.** A state that ends on its own (a short animation, a play loop) can be missed entirely; count the event. Await a low-priority fill's landing instead of polling it.
 - **A test that is flaky is a bug.** Open an issue with the run that failed, and fix it or quarantine it with the issue's number. Don't rerun it until it passes and move on.
+
+## Traps
+
+[Test traps](TEST_TRAPS.md) lists what has turned tests red or kept them falsely green here. The ones to know before writing a test:
+
+- **A red that repeats with the same values on CI is a leak between suites**: a global, a fake keyboard notification, a shared clock. Inject it, or lock it across suites (`.ownsToastClock`, `.exclusiveMediaWork`).
+- **Focus a real field only after `raisesNoKeyboard()`**: CI shows the full system keyboard in every window.
+- **Keep a view model a helper returns alive** to the end of the test.
+- **CI compiles with Xcode 26** and never compiles `UITests/`. Never name a local like the function its initializer calls (`let page = page()`).
+- **Assert on the output of the function under test**, not on a pipeline that repeats its job.

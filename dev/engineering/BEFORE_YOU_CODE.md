@@ -17,6 +17,7 @@ Before writing a type, a helper or a view, look for one that already does the jo
 - [Components § Shared building blocks](COMPONENTS.md#shared-building-blocks) lists the shared piece each concept has, from data and services (pager, caches, entity store, typed ids, launch arguments) to views (avatar, banner, loader, toast, card, media slot).
 - Search the code by **concept**, not only by type name: `rg -i "avatar|face|portrait" Packages App`.
 - Read the [decisions](decisions/README.md) that touch the area. They say why the code is shaped the way it is, and which shapes were already rejected.
+- Read the [platform traps](PLATFORM_TRAPS.md) for the frameworks the change touches, and the [test traps](TEST_TRAPS.md) before writing a test. Each one cost a bug here already.
 
 ## 3. Look at the similar and the neighbouring code
 
