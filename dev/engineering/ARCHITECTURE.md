@@ -72,7 +72,7 @@ B never imports A.
 - **Depend on a protocol at every boundary**: between modules, toward a service (network, storage, cache, media playback, clock), and wherever a test needs a stand-in. Inside one module, a concrete type is fine until a second implementation or a test needs the seam. See [Components § Interfaces](COMPONENTS.md#interfaces).
 - **No new `shared` instance for anything that holds state a viewer or a test cares about.** A store that holds the viewer's data is built once by the composition root and handed to whoever needs it (`ViewerStoreGuardTests`).
   - A process-wide resource with no viewer state may stay shared: a render context, a hardware-bound player, a log. Its declaration says why.
-  - About thirty `shared` instances predate this rule (EmoteKit, VoiceKit, DesignSystem…). They are not a pattern to copy. Inject the instance instead when you touch them.
+  - 49 `shared` instances predate this rule (EmoteKit, VoiceKit, DesignSystem…). They are not a pattern to copy. `SharedInstanceGuardTests` keeps them in a baseline that may only shrink, and fails on a new one unless it is listed as process-wide with its reason. Inject the instance instead when you touch one.
 - **Launch arguments** are read through a declared `LaunchArgument` (Kit/LaunchArguments), never a raw string (`LaunchArgumentReadGuardTests`).
 
 ## State
@@ -99,6 +99,7 @@ Each guard in `Packages/Tools/RepoGuards` holds one rule across the whole reposi
 
 | Area | Guards |
 |---|---|
+| Sizes and injection | `FileSizeGuardTests`, `SharedInstanceGuardTests` |
 | Layers and composition | `LayeringGuardTests`, `CompositionRootGuardTests`, `BuilderDependenciesGuardTests`, `TargetParityGuardTests`, `MockBackendGuardTests`, `DebugToolsGuardTests` |
 | State | `ViewerStoreGuardTests`, `ViewerScopedGuardTests`, `NotificationNameGuardTests`, `LaunchArgumentReadGuardTests` |
 | Navigation | `StackScreenGuardTests`, `StackCloseGuardTests`, `ScreenCoveringGuardTests`, `AppWindowGuardTests`, `PersonOpeningGuardTests` |
