@@ -296,6 +296,10 @@ final class SnapFeedViewController: UIViewController {
     /// both bars' pill widths and the comments' day (`SnapAuthorBar`). Built
     /// on first use; building it does nothing else.
     private(set) lazy var authorBar = SnapAuthorBar(host: self)
+    /// The device's appearance heard on the window, for the text pages built
+    /// ahead (`SnapDeviceAppearanceWatch`). Built on first use; building it
+    /// does nothing else.
+    private(set) lazy var deviceAppearanceWatch = SnapDeviceAppearanceWatch(host: self)
     /// How far the pager may go: page readiness and the ceiling
     /// (`SnapPageReadiness`). Built on first use; building it does nothing
     /// else.
@@ -888,7 +892,7 @@ final class SnapFeedViewController: UIViewController {
         if LaunchArgument.pillProbe.isPassed() { authorIdentityView.debugProbe("didAppear") }
         #endif
         hasAppeared = true
-        observeDeviceAppearance()
+        deviceAppearanceWatch.observeDeviceAppearance()
         // Again now that the toolbar's items are hosted: during a presentation
         // their glass container may not have existed yet (`toolbarGlassHost`).
         if let model = arrivalModel { applyChromeTheme(hasMedia: model.mediaURL != nil) }
@@ -1972,39 +1976,6 @@ final class SnapFeedViewController: UIViewController {
         view.window?.traitCollection.userInterfaceStyle ?? .unspecified
     }
 
-    /// Where the device's appearance is heard, for the one thing this screen
-    /// styles with it explicitly — the text page built ahead of time
-    /// (`prewarmRestingComments`). The pages themselves listen on their own
-    /// (`SnapFeedCell.observeDeviceAppearance`, whose note says why it has to
-    /// be the WINDOW); the bars need nothing, since a text page leaves them
-    /// `.unspecified` and a media page pins them dark whatever the device says.
-    private weak var appearanceWindow: UIWindow?
-    private var appearanceRegistration: (any UITraitChangeRegistration)?
-
-    private func observeDeviceAppearance() {
-        guard appearanceWindow !== view.window else { return }
-        if let registration = appearanceRegistration {
-            appearanceWindow?.unregisterForTraitChanges(registration)
-            appearanceRegistration = nil
-        }
-        appearanceWindow = view.window
-        appearanceRegistration = view.window?.registerForTraitChanges(
-            [UITraitUserInterfaceStyle.self]
-        ) { [weak self] (_: UIWindow, _: UITraitCollection) in
-            self?.deviceAppearanceDidChange()
-        }
-    }
-
-    /// A panel built ahead in the device's old style would otherwise arrive
-    /// in it and turn over at the mount, in front of the viewer — the one
-    /// thing building ahead exists to prevent. A handed-over loading page
-    /// already inherits (`.unspecified`) and is left alone.
-    private func deviceAppearanceDidChange() {
-        for warmed in restingWarm.values where warmed.overrideUserInterfaceStyle != .unspecified {
-            warmed.overrideUserInterfaceStyle = deviceInterfaceStyle
-        }
-    }
-
     /// How far the pager may go (`SnapPageReadiness`), answered where the
     /// page drive, the warm planner, the loaders, the scroll and the tests
     /// ask the screen.
@@ -3083,6 +3054,10 @@ extension SnapFeedViewController: SnapToolbarComposerHost {
 // MARK: - The author bar's host (#2387)
 
 extension SnapFeedViewController: SnapAuthorBarHost {}
+
+// MARK: - The appearance watch's host (#2514)
+
+extension SnapFeedViewController: SnapDeviceAppearanceWatchHost {}
 
 // MARK: - The page readiness's host (#2514)
 
