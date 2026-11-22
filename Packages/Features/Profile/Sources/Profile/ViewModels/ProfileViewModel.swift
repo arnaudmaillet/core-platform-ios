@@ -3,9 +3,7 @@ import CoreNavigation
 import CoreNetworking
 import CoreStorage
 import Foundation
-import LaunchArguments
 import MapsInterface
-import OSLog
 import PostGrid
 import ProfileData
 import ProfileInterface
@@ -13,237 +11,6 @@ import ShareSheet
 
 @MainActor
 public final class ProfileViewModel {
-    public nonisolated enum Phase: Equatable, Sendable {
-        case loading
-        /// Not loaded yet, but the person is known from where they were
-        /// opened (#1859): their identity is drawn, their counters wait.
-        case seeded(ProfileSeedModel)
-        case content(ProfileDisplayModel)
-        case failed(message: String)
-        /// The handle or link named no one (#800). An answer, not a failure:
-        /// there is nothing to try again.
-        case notFound(message: String, detail: String?)
-    }
-
-    /// Whose profile this view model loads.
-    public nonisolated enum Source: Equatable, Sendable {
-        case currentUser
-        case profile(ProfileID)
-        /// A handle or a share token, resolved once the screen is up (#800):
-        /// it becomes `.profile` with the id the lookup answers.
-        case lookup(ProfileReference)
-    }
-
-    /// The header's action button. `hidden` until the relationship is known, so
-    /// the button never flickers a wrong state on first paint.
-    public nonisolated enum FollowButton: Equatable, Sendable {
-        case hidden
-        case edit
-        case follow
-        case following
-        /// A private profile the viewer asked to follow (#396); tapping it
-        /// withdraws the request.
-        case requested
-        /// Someone else's profile the viewer cannot follow (#726): no Follow,
-        /// Message and the menu stay.
-        case unavailable
-
-        /// Someone else's profile, whatever the follow state.
-        var isOtherProfile: Bool {
-            self == .follow || self == .following || self == .requested || self == .unavailable
-        }
-    }
-
-    /// The map-favorite pin (the "Map" submenu).
-    ///
-    /// Carries the RAILS the profile is on rather than a bare on/off, because
-    /// a mutual can be on Friends, on Following, on both, or on neither, and
-    /// the menu that edits that has to show which. `hidden` is a third state
-    /// on purpose: "no button" and "an unfavorited button" are different
-    /// products — the pin is offered ONLY for a profile the viewer follows
-    /// (the map's people rails are a shortcut through the people you already
-    /// keep up with), and only when the app was wired with somewhere to keep
-    /// them.
-    public nonisolated enum MapPinButton: Equatable, Sendable {
-        /// Not offered: own profile, a stranger, an unresolved relationship,
-        /// or no pinning service.
-        case hidden
-        /// Offered. `categories` is what the map currently shows (empty = on
-        /// no rail); `includesFriends` is true for a MUTUAL, the only viewer
-        /// for whom the Friends row exists at all.
-        ///
-        /// The pin always opens the checklist now: with three rails, even
-        /// someone merely followed has two of them (the dock and the Following
-        /// row), and a single toggle could not say which.
-        case shown(categories: Set<MapFavoriteCategory>, includesFriends: Bool)
-
-        /// Whether the pin reads as filled — on ANY rail counts.
-        public var isFavorited: Bool {
-            if case .shown(let categories, _) = self { return !categories.isEmpty }
-            return false
-        }
-
-        public var categories: Set<MapFavoriteCategory> {
-            if case .shown(let categories, _) = self { return categories }
-            return []
-        }
-
-        /// Whether the Friends row belongs in this profile's checklist.
-        public var includesFriends: Bool {
-            if case .shown(_, let includesFriends) = self { return includesFriends }
-            return false
-        }
-    }
-
-    /// One horizontal page of the gallery pager.
-    public nonisolated enum GalleryPageState: Equatable, Sendable {
-        case loading
-        case content([GalleryPost])
-        /// The page's combination has nothing to show; `message` names it so
-        /// the blank grid reads intentional, not broken.
-        case empty(message: String)
-        case failed(message: String)
-        /// A private profile the viewer doesn't follow (guests included): its
-        /// posts are its followers' (#447, backend #691), so the server sends
-        /// none — which is not "nothing here".
-        case restricted(title: String, message: String)
-    }
-
-    /// Every page at once — the pager renders every page (neighbors are
-    /// visible mid-swipe), so the view model always answers for all of them.
-    /// The source filter is a global modifier: it is already applied to each
-    /// page's content here.
-    public nonisolated struct GallerySnapshot: Equatable, Sendable {
-        /// Posts: every post, the list laid out like For You (#631).
-        public var activity: GalleryPageState
-        /// The media among them — the gallery Posts' "View all" pushes.
-        public var media: GalleryPageState
-        /// Whether no further page is coming, under the active source. What
-        /// lets the Posts list settle its tail chunk (`MosaicChunkPlanner`).
-        public var isComplete: Bool = true
-        /// The viewer's saved pile on their own profile; on anyone else's,
-        /// the server's list of what they saved — empty unless its owner
-        /// shows the tab (#837, #411).
-        public var saved: GalleryPageState = .empty(message: "")
-        /// The posts the profile liked (engagement `ListLikesByProfile`,
-        /// #411) — empty for anyone but the owner while the owner hides it.
-        public var reactions: GalleryPageState = .empty(message: "")
-        /// The profile's reposts and the posts that tag it, each its own page
-        /// (#696; your own profile too since #772).
-        public var reposts: GalleryPageState = .empty(message: "")
-        public var tagged: GalleryPageState = .empty(message: "")
-        /// The posts the viewer viewed (#1344), on their own profile only.
-        public var history: GalleryPageState = .empty(message: "")
-        /// History's groups by day, over its posts in order — what the page
-        /// titles (#1344). Empty: one untitled list.
-        public var historyGroups: [HistoryGroup] = []
-        /// When the viewer viewed each History post — written at the end of
-        /// its row's first line (#2170). Keyed by post, so a date stays on
-        /// its row through a removal or a refresh.
-        public var historyViewedAt: [PostID: Date] = [:]
-        /// Whether no further page is coming for Reposts and for Tagged: each
-        /// follows its own corpus, apart from `isComplete`.
-        public var repostsComplete = true
-        public var taggedComplete = true
-        /// Every page with nothing in it says the profile is private
-        /// instead (#447): the server withholds them from the viewer. A page
-        /// that HAS posts (Tagged — other people's) shows them plainly: the
-        /// lock appears only when there is nothing to show (#1445, the
-        /// owner's 2026-10-19 call, replacing #1422's lock line).
-        /// A private profile known not to be followed (#1900): the pages
-        /// the server withholds — every one but Tagged, which holds other
-        /// people's posts (#1445) — are locked while they are still on their
-        /// way, with no bones and no wait. Tagged locks only when empty.
-        mutating func restrictWithheldPages() {
-            let locked = GalleryPageState.restricted(title: ProfileViewModel.restrictedTitle, message: ProfileViewModel.restrictedMessage)
-            for page in [\GallerySnapshot.activity, \.media, \.saved, \.reactions, \.reposts, \.history] {
-                switch self[keyPath: page] {
-                case .loading, .empty: self[keyPath: page] = locked
-                default: break
-                }
-            }
-            if case .empty = tagged { tagged = locked }
-        }
-
-        mutating func restrictEmptyPages() {
-            let locked = GalleryPageState.restricted(title: ProfileViewModel.restrictedTitle, message: ProfileViewModel.restrictedMessage)
-            for page in [\GallerySnapshot.activity, \.media, \.saved, \.reactions, \.reposts, \.tagged, \.history] {
-                if case .empty = self[keyPath: page] { self[keyPath: page] = locked }
-            }
-        }
-
-        public func state(for tab: ProfileTab) -> GalleryPageState {
-            switch tab {
-            case .format(.activity): activity
-            case .format(.media): media
-            // No page since #631: its text posts are cards on Posts.
-            case .format(.short): .empty(message: "")
-            case .saved: saved
-            case .reactions: reactions
-            case .reposts: reposts
-            case .tagged: tagged
-            case .history: history
-            // Not posts (#2232): its page draws the profile's channels,
-            // which `ProfileChannelsViewModel` reads.
-            case .channels: .empty(message: "")
-            }
-        }
-
-        /// Whether `tab`'s list has every page it will get.
-        public func isComplete(for tab: ProfileTab) -> Bool {
-            switch tab {
-            case .reposts: repostsComplete
-            case .tagged: taggedComplete
-            default: isComplete
-            }
-        }
-    }
-
-    /// The outcome of an overflow-menu command, for the view to surface. The
-    /// view model never presents anything itself — it names what happened and
-    /// the controller chooses the alert/toast.
-    public nonisolated enum ActionResult: Equatable, Sendable {
-        /// `profileCount` is how many profiles the block actually covered — 1
-        /// for a profile-scoped block, and for an account-scoped one however
-        /// many aliases were reachable (which can also be 1; see
-        /// `ProfileBlockScope`). Reported rather than assumed, so the
-        /// confirmation can't overstate what happened.
-        case blocked(handle: String, profileCount: Int)
-        case unblocked(handle: String)
-        /// The mute now in force; none means unmuted.
-        case muteChanged(handle: String, scopes: MuteScopes)
-        /// Restricted (#416) or no longer.
-        case restrictChanged(handle: String, restricted: Bool)
-        case reported
-        case failed(message: String)
-        /// A follow change the server refused, already rolled back on the
-        /// button (#802). Not `failed`, which is an alert: the button shows
-        /// the truth again, so there is nothing to dismiss — a failure toast
-        /// says why it flipped back, where a silent rollback read as a glitch.
-        case followFailed(message: String)
-        /// An action shown with Undo (#957) the server refused when its
-        /// countdown ran out: already put back on screen, said in a failure
-        /// toast.
-        case commitFailed(message: String)
-    }
-
-    /// Which follow change failed, for its message.
-    public nonisolated enum FollowAttempt: Sendable {
-        case follow, unfollow, request, withdraw
-    }
-
-    /// The words of a refused follow change (#802) — short, no period, the
-    /// toast's rule.
-    public nonisolated static func followFailureMessage(handle: String?, change: FollowAttempt) -> String {
-        let who = handle ?? "this profile"
-        switch change {
-        case .follow: return "Couldn't follow \(who)"
-        case .unfollow: return "Couldn't unfollow \(who)"
-        case .request: return "Couldn't ask to follow \(who)"
-        case .withdraw: return "Couldn't withdraw your request"
-        }
-    }
-
     public var onPhaseChange: ((Phase) -> Void)?
     public var onFollowButtonChange: ((FollowButton) -> Void)?
     /// Fires once the first relationship read has ANSWERED, whatever it
@@ -301,6 +68,8 @@ public final class ProfileViewModel {
     /// (tests), which simply never seed.
     private let cache: ProfileCache?
     private let shareLinks: (any ShareLinkManaging)?
+    /// Handed to the gallery feed (`ProfileGalleryFeed`).
+    private let postDeleted: (@MainActor (PostID) -> Void)?
     /// The own profile's share token (#412), once fetched. Until then, and
     /// on someone else's profile, the link is the `/@handle` one.
     private var shareToken: String?
@@ -312,49 +81,22 @@ public final class ProfileViewModel {
     private var phase: Phase = .loading {
         didSet { onPhaseChange?(phase) }
     }
-    private var followButton: FollowButton = .hidden {
-        didSet {
-            // ⚠️ AN ANSWER THAT AGREES WITH THE SCREEN SAYS NOTHING. Every
-            // refresh reads the relationship again, and each identical answer
-            // used to re-pose the tray's capsule, cross-dissolve the whole
-            // navigation bar and re-ask the map pin — a landing turn's worth
-            // of work, on a pull-to-refresh, to arrive where it already was.
-            guard followButton != oldValue else { return }
-            onFollowButtonChange?(followButton)
-            // The pin is offered only while the viewer follows, so the two
-            // move together — including the optimistic flip a follow tap makes
-            // before the server has answered. A newly-followed profile has
-            // never been asked about, so ask now.
-            refreshMapPinButton()
-            loadMapPinState()
-        }
-    }
-    public private(set) var mapPinButton: MapPinButton = .hidden {
-        didSet {
-            guard mapPinButton != oldValue else { return }
-            onMapPinButtonChange?(mapPinButton)
-        }
-    }
-    /// Which rails the service last reported (or an optimistic tap set);
-    /// `nil` until it has been asked.
-    ///
-    /// Optional so the button is not shown wearing a guess: resolving the
-    /// never-curated fallbacks can take a round trip, and an outline pin that
-    /// silently fills in is a worse first impression than a button that
-    /// arrives a frame late. Kept apart from `mapPinButton` so the answer
-    /// survives the button being hidden and shown again — unfollowing does NOT
-    /// unfavorite, by product decision, and re-following should not have to
-    /// ask again.
-    private var mapCategories: Set<MapFavoriteCategory>?
-    /// Whether they follow back. Only a mutual may be kept on the Friends
-    /// rail, so only a mutual is offered the choice.
-    private var isMutual = false
-    /// Whether the viewer and the profile follow each other: the bar's
-    /// badge reads friends then (#1451).
-    var isMutualFollow: Bool { isMutual }
-    /// Supersedes an in-flight read when the subject changes, so a slow answer
-    /// about the previous profile cannot land on this one.
-    private var mapPinReadTask: Task<Void, Never>?
+    /// The relationship (`ProfileViewerRelation`, #2522): follow, request, block
+    /// and the read that answers them.
+    private(set) lazy var relation = ProfileViewerRelation(host: self, repository: repository, cache: cache)
+    var followButton: FollowButton { relation.followButton }
+    var isMutual: Bool { relation.isMutual }
+    var isMutualFollow: Bool { relation.isMutualFollow }
+    var isFollowing: Bool { relation.isFollowing }
+    var followInFlight: Bool { relation.followInFlight }
+    public var isBlocked: Bool { relation.isBlocked }
+    var isLoadingRelationship: Bool { relation.isLoadingRelationship }
+    public var isRelationshipSettled: Bool { relation.isRelationshipSettled }
+    public var canMessage: Bool { relation.canMessage }
+    public var canModerate: Bool { relation.canModerate }
+    var isPrivateToViewer: Bool { relation.isPrivateToViewer }
+
+    func viewerFollowDidChange() { galleryFeed.viewerFollowDidChange() }
 
     /// The currently rendered profile — retained so a follow toggle can nudge
     /// its follower count without a full reload.
@@ -366,102 +108,34 @@ public final class ProfileViewModel {
             // nudge rebuilds this value for the same person, and re-asking
             // about their pin state on every count change would be noise.
             guard profile?.id != oldValue?.id else { return }
-            mapCategories = nil
-            refreshMapPinButton()
-            loadMapPinState()
+            mapPin.subjectChanged()
         }
     }
-    private var isFollowing = false {
-        // A private profile's pages lock and unlock with the follow (#447).
-        didSet {
-            guard isFollowing != oldValue else { return }
-            let privateToOthers = profile?.visibility.isPrivate == true && !isOwnProfile
-            // Unfollowed: what the follow let in goes, and the tabs with it
-            // (#1422) — a read still on its way would bring it back.
-            if privateToOthers, !isFollowing {
-                galleryLoad?.cancel()
-                galleryLoad = nil
-                galleryMoreLoad?.cancel()
-                galleryMoreLoad = nil
-                engagementTabsLoad?.cancel()
-                engagementTabsLoad = nil
-                galleryStore.withholdAuthored()
-            }
-            renderGallery()
-            // Followed (a request accepted): the pages the server withheld are
-            // the viewer's now, so they are read again — and the tabs come back
-            // as they fill, without leaving the screen (#1422). A read already
-            // on its way was asked as a stranger: it starts again.
-            if privateToOthers, isFollowing, let profile {
-                galleryLoad?.cancel()
-                galleryLoad = nil
-                loadGallery(for: profile, reset: false)
-            }
-        }
-    }
-    /// Internal for tests: a follow, request or withdrawal still on its way.
-    private(set) var followInFlight = false
-    /// The viewer's outbound block on this profile, from the relationship read
-    /// and kept current by `setBlocked`. Drives which of Block / Unblock the
-    /// overflow menu offers.
-    public private(set) var isBlocked = false
-    private var blockInFlight = false
-    private var reportInFlight = false
-    /// What of this profile the viewer has muted (#403), read beside the
-    /// relationship; the nav bar's bell shows and edits it (#689).
-    public private(set) var muteScopes: MuteScopes = .none {
-        didSet {
-            guard muteScopes != oldValue else { return }
-            onMuteScopesChange?(muteScopes)
-        }
-    }
+    /// Mute, restrict and reports (`ProfileModeration`, #2522).
+    private(set) lazy var moderation = ProfileModeration(host: self, repository: repository, reporting: reporting)
+    public var muteScopes: MuteScopes { moderation.muteScopes }
     /// Fires when `muteScopes` changes — a read landing, a toggle, or its
     /// rollback — so the bell's glyph follows without a re-push.
     public var onMuteScopesChange: ((MuteScopes) -> Void)?
-    private(set) var muteInFlight = false
-    /// Bumped by every mute toggle, so a read that started before one can't
-    /// land after it and put the old scopes back.
-    private var muteGeneration = 0
-    /// Whether this composition can mute at all.
-    public var canMute: Bool { repository is any ProfileMuting }
-    /// Whether the viewer restricts this profile (#416), read beside the mute.
-    public private(set) var isRestricted = false
-    private var restrictInFlight = false
-    /// Same guard as `muteGeneration`, for restrict.
-    private var restrictGeneration = 0
-    public var canRestrict: Bool { repository is any ProfileRestricting }
+    var muteInFlight: Bool { moderation.muteInFlight }
+    public var canMute: Bool { moderation.canMute }
+    public var isRestricted: Bool { moderation.isRestricted }
+    public var canRestrict: Bool { moderation.canRestrict }
+    func readMuteAndRestrict(for id: ProfileID, relationship: ProfileRelationship) async {
+        await moderation.readMuteAndRestrict(for: id, relationship: relationship)
+    }
 
     private var load: Task<Void, Never>?
-    private var relationshipLoad: Task<Void, Never>?
-    /// Whether a relationship read is out — for tests that wait on its answer.
-    var isLoadingRelationship: Bool { relationshipLoad != nil }
-    /// Whether the follow state on screen is an answer rather than a wait:
-    /// a relationship read has come back (or failed), or a cache seeded one.
-    public private(set) var isRelationshipSettled = false {
-        didSet {
-            guard isRelationshipSettled, !oldValue else { return }
-            onRelationshipSettled?()
-            // A private profile not followed locks its pages now (#1900).
-            if isPrivateToViewer { renderGallery() }
-        }
-    }
 
     // MARK: Gallery state
 
-    /// The corpora, their paging and failures, and the pages built from them
-    /// (#846). This view model fetches and publishes; the store decides.
-    private let galleryStore = ProfileGalleryStore()
-    public var galleryFilter: GalleryFilter { galleryStore.filter }
-    private var galleryLoad: Task<Void, Never>?
-    /// Whether the last first-page load came back with a failure (either
-    /// corpus): the fetch that confirms a cache seed then tries the grid
-    /// again instead of trusting the seed's revalidation (#1091).
-    private var galleryLoadFailed = false
-    /// The next page(s) on their way — one round at a time.
-    private var galleryMoreLoad: Task<Void, Never>?
-    /// Pages walked through in a row that add nothing to the tab on screen
-    /// (Short over a run of photos) before waiting for the next approach.
-    static let maxUnchangedGalleryPages = 5
+    /// The gallery's pages, their paging and the tabs' source
+    /// (`ProfileGalleryFeed`, #2522).
+    private(set) lazy var galleryFeed = ProfileGalleryFeed(
+        host: self, gallery: gallery, galleryPreferences: galleryPreferences, cache: cache, postDeleted: postDeleted
+    )
+    var galleryStore: ProfileGalleryStore { galleryFeed.galleryStore }
+    public var galleryFilter: GalleryFilter { galleryFeed.galleryFilter }
 
     public init(
         repository: any ProfileProviding,
@@ -505,54 +179,20 @@ public final class ProfileViewModel {
             galleryStore.filter = GalleryFilter(format: .activity, source: stored.source)
         }
         followSubscription = followEvents?.subscribeOnMain { [weak self] change in
-            self?.followGraphDidChange(change)
+            self?.relation.followGraphDidChange(change)
         }
         requestSubscription = followEvents?.subscribeToRequestsOnMain { [weak self] change in
-            self?.followRequestDidChange(change)
+            self?.relation.followRequestDidChange(change)
         }
     }
 
     private var requestSubscription: FollowGraphSubscription?
-    /// Follow, request and withdraw failures, with the server's code (#1450).
-    private static let logger = Logger(subsystem: "cn.wynn.core-platform-ios", category: "profile")
-
-    /// A request made or withdrawn ANYWHERE — a list row, a suggestion — for
-    /// this profile (#1450): its button reads "Requested" when the viewer
-    /// comes back to it, so its next tap is no refused duplicate. Its own
-    /// request in flight answers for itself.
-    private func followRequestDidChange(_ change: FollowRequestChange) {
-        guard let profile, change.profileID == profile.id, !followInFlight, !isFollowing else { return }
-        if change.isPending, followButton == .follow {
-            showRequested(true)
-        } else if !change.isPending, followButton == .requested {
-            showRequested(false)
-        }
-    }
 
     /// Keeps the Follow button agreeing with a follow accepted ANYWHERE —
     /// the "+" on this person's post in a feed pushed from here, an Unfollow
     /// in a card's menu, a followers list's row — for as long as this profile
     /// lives. See `FollowGraphEvents` for why this is heard, not re-read.
     private var followSubscription: FollowGraphSubscription?
-
-    /// Takes a change about THIS profile the way its own toggle would —
-    /// button, and the follower count nudged by one — unless the button says
-    /// so already (which is how its own accepted toggle comes back), or its
-    /// own toggle is still in flight and about to answer for itself.
-    private func followGraphDidChange(_ change: FollowChange) {
-        guard let profile, change.profileID == profile.id,
-              followButton == .follow || followButton == .following,
-              change.isFollowing != isFollowing, !followInFlight else { return }
-        applyFollow(change.isFollowing, on: profile)
-    }
-
-    /// Whether the "Message" action applies (another user's profile).
-    public var canMessage: Bool { followButton.isOtherProfile }
-
-    /// Whether the moderation actions (Block / Report) apply. False for the
-    /// viewer's own profile, and false until the relationship is known — a
-    /// menu opened mid-load offers sharing only rather than guessing.
-    public var canModerate: Bool { followButton.isOtherProfile }
 
     /// Everything the share sheet renders, resolved together so the QR code,
     /// the card, and the system share sheet's link preview cannot disagree
@@ -716,11 +356,11 @@ public final class ProfileViewModel {
     /// states ride on it. Pull-to-refresh always refetches everything.
     private func revalidateRelationshipOnly() {
         guard let profile else { return }
-        relationshipLoad?.cancel()
-        loadRelationship(for: profile.id)
+        relation.relationshipLoad?.cancel()
+        relation.loadRelationship(for: profile.id)
         // Someone else's Saved is kept nowhere (#411), and Liked's stored copy
         // (#1776) is only the tab's first frame: both are read again now.
-        loadEngagementTabs(for: profile)
+        galleryFeed.loadEngagementTabs(for: profile)
         onLoadSettled?()
     }
 
@@ -758,14 +398,14 @@ public final class ProfileViewModel {
             // Inside the freshness window nothing is fetched: the pages are
             // the answer (#893).
             if let pages = cache?.gallery(for: seedID) {
-                galleryStore.restore(pages)
+                galleryFeed.restore(pages)
                 if fresh {
                     renderGallery()
                 } else {
-                    loadGallery(for: cached, reset: false)
+                    galleryFeed.loadGallery(for: cached, reset: false)
                 }
             } else {
-                loadGallery(for: cached, reset: true)
+                galleryFeed.loadGallery(for: cached, reset: true)
             }
             galleryWasSeeded = !fresh
         }
@@ -773,7 +413,7 @@ public final class ProfileViewModel {
         // a revisit that knew "Following" a minute ago must not open on a
         // placeholder for it. The read in `reload` still runs and corrects.
         if case .profile(let id) = source, let relationship = cache?.relationship(for: id) {
-            apply(relationship)
+            relation.apply(relationship)
         }
         return fresh
     }
@@ -828,7 +468,7 @@ public final class ProfileViewModel {
             phase = .content(ProfileDisplayModel(profile: cached))
             // The grid is per-profile too, so it starts over for the new one —
             // its skeleton is the honest state until those pages land.
-            loadGallery(for: cached, reset: true)
+            galleryFeed.loadGallery(for: cached, reset: true)
             seeded = true
         }
         reload()
@@ -837,186 +477,18 @@ public final class ProfileViewModel {
 
     // MARK: - Map pin
 
-    /// Flips ONE rail, leaving the others exactly as they were — what each row
-    /// of the checklist does.
-    ///
-    /// Optimistic, and deliberately without a rollback: the destination is a
-    /// local list (`MapFavoritesStore`), so there is no server to disagree —
-    /// the write cannot fail in a way the viewer could act on. What it CAN do
-    /// is take a moment, because the very first write to a rail has to
-    /// materialize its never-curated fallback, and the row must not sit inert
-    /// for it.
-    ///
-    /// Independent toggles rather than presets: three rails have eight states,
-    /// and a viewer reading three checkmarks can see all of them and reach any
-    /// in one tap. An earlier menu carried a "Both" row for a state the other
-    /// rows already spelled — a shortcut the checkmarks make redundant, and an
-    /// item whose meaning (add both? clear both?) depended on state the row
-    /// itself could not show.
-    public func toggleMapCategory(_ category: MapFavoriteCategory) {
-        guard case .shown(let categories, _) = mapPinButton else { return }
-        setMapCategories(categories.symmetricDifference([category]))
-    }
+    /// The map-favorite pin (`ProfileMapPin`, #2522).
+    private(set) lazy var mapPin = ProfileMapPin(host: self, mapPinning: mapPinning)
 
-    /// Puts this profile on exactly these rails — what a checklist row
-    /// commits, and what the plain toggle funnels through, so there is one
-    /// write path and one optimistic update.
-    public func setMapCategories(_ categories: Set<MapFavoriteCategory>) {
-        guard mapPinButton != .hidden, let mapPinning, let profile else { return }
-        // A non-mutual cannot be a friend, whatever a caller asks for; the
-        // Friends row is the map's mutuals row. The dock and the Following row
-        // are open to anyone the viewer follows.
-        let allowed = isMutual ? categories : categories.subtracting([.friends])
-        mapCategories = allowed
-        refreshMapPinButton()
-        Task { await mapPinning.setCategories(allowed, for: profile.id) }
-    }
+    public var mapPinButton: MapPinButton { mapPin.mapPinButton }
+    public func toggleMapCategory(_ category: MapFavoriteCategory) { mapPin.toggleMapCategory(category) }
+    public func setMapCategories(_ categories: Set<MapFavoriteCategory>) { mapPin.setMapCategories(categories) }
+    public var isMapPinSettled: Bool { mapPin.isMapPinSettled }
+    func refreshMapPinButton() { mapPin.refreshMapPinButton() }
+    func loadMapPinState() { mapPin.loadMapPinState() }
 
-    /// Re-reads rail membership for the current subject. Called whenever the
-    /// subject or the relationship changes — a profile the viewer does not
-    /// follow is never asked about, so a stranger's profile costs nothing.
-    private func loadMapPinState() {
-        mapPinReadTask?.cancel()
-        guard let mapPinning, let profile, followButton == .following else { return }
-        let id = profile.id
-        mapPinReadTask = Task { [weak self] in
-            let categories = await mapPinning.categories(for: id)
-            guard !Task.isCancelled, let self, self.profile?.id == id else { return }
-            self.mapCategories = categories
-            self.refreshMapPinButton()
-        }
-    }
-
-    /// Whether the pin's answer is in: not offered at all, or offered with
-    /// its rails read. False only while a followed profile's rails are still
-    /// being asked for — the pin would otherwise land beside Message after
-    /// the screen is up and squeeze the tray's capsules to make room.
-    public var isMapPinSettled: Bool {
-        !(mapPinning != nil && profile != nil && followButton == .following && mapCategories == nil)
-    }
-
-    /// The visibility rule, in one place: only a followed profile can be kept
-    /// on a rail, and only when there is somewhere to keep them.
-    private func refreshMapPinButton() {
-        guard mapPinning != nil, profile != nil, followButton == .following,
-              let mapCategories else {
-            mapPinButton = .hidden
-            return
-        }
-        // A mutual gets the Friends row too; everyone else gets the dock and
-        // the Following row.
-        mapPinButton = .shown(categories: mapCategories, includesFriends: isMutual)
-    }
-
-    /// Follow-button tapped. No-op for the viewer's own profile ("Edit"); an
-    /// optimistic toggle otherwise — flip immediately, roll back if the server
-    /// rejects. One mutation in flight at a time.
-    ///
-    /// A private profile is asked rather than followed (#396): Follow turns
-    /// into Requested (no follower count moves), and Requested withdraws the
-    /// request. The server has the last word: a profile that turned public
-    /// meanwhile is followed, one that turned private is asked.
-    ///
-    /// Answers whether the tap turned the follow ON (a request counts): the
-    /// view plays `toggleOn` then (#1886), and nothing for turning it off.
     @discardableResult
-    public func toggleFollow() -> Bool {
-        guard let profile, !followInFlight else { return false }
-        guard followButton.isOtherProfile, followButton != .unavailable else { return false }
-        if let requests = repository as? any FollowRequestSending {
-            switch followButton {
-            case .requested:
-                withdrawRequest(on: profile, through: requests)
-                return false
-            case .follow:
-                follow(profile, through: requests)
-                return true
-            default: break
-            }
-        }
-
-        let target = !isFollowing
-        applyFollow(target, on: profile)
-        followInFlight = true
-
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                try await self.repository.setFollowing(target, for: profile.id)
-            } catch {
-                Self.logger.error("\(target ? "follow" : "unfollow") \(profile.id.rawValue, privacy: .public) failed: \(String(describing: error), privacy: .public)")
-                // Roll back to the pre-tap state — and say so (#802): a button
-                // that flips back on its own reads as a glitch.
-                if let current = self.profile {
-                    self.applyFollow(!target, on: current)
-                }
-                self.onActionResult?(.followFailed(message: Self.followFailureMessage(
-                    handle: self.handle, change: target ? .follow : .unfollow
-                )))
-            }
-            self.followInFlight = false
-        }
-        return target
-    }
-
-    private func follow(_ profile: UserProfile, through requests: any FollowRequestSending) {
-        let asks = profile.visibility == .private
-        if asks { showRequested(true) } else { applyFollow(true, on: profile) }
-        followInFlight = true
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                let outcome = try await requests.follow(profile.id)
-                switch (outcome, asks) {
-                case (.requested, false):
-                    if let current = self.profile { self.applyFollow(false, on: current) }
-                    self.showRequested(true)
-                case (.following, true):
-                    if let current = self.profile { self.applyFollow(true, on: current) }
-                default:
-                    break
-                }
-            } catch {
-                // What the server said (#1450): a device run that failed
-                // could not tell which code came back.
-                Self.logger.error("follow \(profile.id.rawValue, privacy: .public) failed: \(String(describing: error), privacy: .public)")
-                if asks {
-                    self.showRequested(false)
-                } else if let current = self.profile {
-                    self.applyFollow(false, on: current)
-                }
-                self.onActionResult?(.followFailed(message: Self.followFailureMessage(
-                    handle: self.handle, change: asks ? .request : .follow
-                )))
-            }
-            self.followInFlight = false
-        }
-    }
-
-    private func withdrawRequest(on profile: UserProfile, through requests: any FollowRequestSending) {
-        showRequested(false)
-        followInFlight = true
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                try await requests.cancelFollowRequest(to: profile.id)
-            } catch {
-                Self.logger.error("withdraw \(profile.id.rawValue, privacy: .public) failed: \(String(describing: error), privacy: .public)")
-                self.showRequested(true)
-                self.onActionResult?(.followFailed(message: Self.followFailureMessage(
-                    handle: self.handle, change: .withdraw
-                )))
-            }
-            self.followInFlight = false
-        }
-    }
-
-    /// Requested ⇄ Follow. Neither follows, so no count moves.
-    private func showRequested(_ requested: Bool) {
-        isFollowing = false
-        followButton = requested ? .requested : .follow
-        rememberRelationship()
-    }
+    public func toggleFollow() -> Bool { relation.toggleFollow() }
 
     /// "Message" tapped — open a DM with this profile via routing. Profile never
     /// imports Chat; it only emits a route.
@@ -1038,212 +510,15 @@ public final class ProfileViewModel {
 
     // MARK: - Overflow menu
 
-    /// Block this profile, or the whole account behind it.
-    ///
-    /// Unlike follow, this is NOT optimistic: a block is a safety action whose
-    /// UI consequence is leaving the screen, so it must not be shown as done
-    /// and then silently rolled back. The state changes only once the server
-    /// accepts. One mutation in flight at a time.
-    public func block(_ scope: ProfileBlockScope) {
-        guard let profile, canModerate, !blockInFlight, !isBlocked else { return }
-        blockInFlight = true
+    public func block(_ scope: ProfileBlockScope) { relation.block(scope) }
+    public func unblock() { relation.unblock() }
 
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                let count: Int
-                switch scope {
-                case .profile:
-                    try await self.repository.setBlocked(true, for: profile.id)
-                    count = 1
-                case .account:
-                    count = try await self.repository.blockAccount(behind: profile.id).count
-                }
-                self.isBlocked = true
-                // Blocking severs the follow edge server-side; mirror that so
-                // a re-entry before the next relationship read agrees.
-                self.isFollowing = false
-                self.followButton = .follow
-                self.rememberRelationship()
-                // A block hides their posts both ways: no revisit opens on
-                // them (#887).
-                self.cache?.removeGallery(for: profile.id)
-                self.onActionResult?(.blocked(handle: "@" + profile.handle, profileCount: count))
-                self.onDismissRequested?()
-            } catch {
-                self.onActionResult?(.failed(message: "Couldn't block this profile."))
-            }
-            self.blockInFlight = false
-        }
-    }
-
-    /// Lift a block on this profile. Account-scoped blocks are NOT undone as a
-    /// set: the viewer unblocks whichever profile they navigated to, because
-    /// the client can't tell which of the account's profiles were blocked
-    /// together versus individually — and silently unblocking aliases the user
-    /// never asked about is the wrong way to be wrong about a safety action.
-    public func unblock() {
-        guard let profile, canModerate, !blockInFlight, isBlocked else { return }
-        blockInFlight = true
-
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                try await self.repository.setBlocked(false, for: profile.id)
-                self.isBlocked = false
-                self.rememberRelationship()
-                self.cache?.removeGallery(for: profile.id)
-                self.onActionResult?(.unblocked(handle: "@" + profile.handle))
-            } catch {
-                self.onActionResult?(.failed(message: "Couldn't unblock this profile."))
-            }
-            self.blockInFlight = false
-        }
-    }
-
-    /// Switches one mute scope. Optimistic, unlike block: a mute is a quiet
-    /// preference the target never sees, so a rollback costs nothing. The
-    /// toast says what is muted now.
-    public func toggleMute(_ scope: MuteScope) {
-        guard let profile, canModerate, !muteInFlight, let muting = repository as? any ProfileMuting else { return }
-        let before = muteScopes
-        let after = before.toggling(scope)
-        // Muting MORE is shown with Undo (#957), a deferred commit; un-muting
-        // stays the menu's own reverse row and goes out at once.
-        if after.contains(scope), onUndoable != nil {
-            muteScopes = after
-            // A read out from before the toggle must not overwrite it.
-            muteGeneration += 1
-            let handle = "@" + profile.handle
-            let id = profile.id
-            onUndoable?(UndoableAction(
-                message: Self.muteMessage(handle: handle, scopes: after),
-                symbol: "speaker.slash.fill",
-                commit: { [weak self] in
-                    // Superseded on this screen (un-muted from the menu, or a
-                    // later mute that carries this one): not sent. Gone with
-                    // the screen, it still is.
-                    if let self, self.muteScopes != after { return }
-                    Task { @MainActor [weak self] in
-                        do {
-                            try await muting.setMuteScopes(after, for: id)
-                        } catch {
-                            guard let self, self.muteScopes == after else { return }
-                            self.muteScopes = before
-                            self.onActionResult?(.commitFailed(message: "Couldn't mute \(handle)"))
-                        }
-                    }
-                },
-                undo: { [weak self] in
-                    guard let self, self.muteScopes == after else { return }
-                    self.muteScopes = before
-                    self.muteGeneration += 1
-                }
-            ))
-            return
-        }
-        muteScopes = after
-        muteInFlight = true
-        muteGeneration += 1
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                try await muting.setMuteScopes(after, for: profile.id)
-                self.onActionResult?(.muteChanged(handle: "@" + profile.handle, scopes: after))
-            } catch {
-                self.muteScopes = before
-                self.onActionResult?(.failed(message: "Couldn't change what you mute from this profile."))
-            }
-            self.muteInFlight = false
-        }
-    }
-
-    /// Restrict or unrestrict. Optimistic, like mute: the target never sees it.
-    public func toggleRestrict() {
-        guard let profile, canModerate, !restrictInFlight, let restricting = repository as? any ProfileRestricting else { return }
-        let target = !isRestricted
-        // Restricting is shown with Undo (#957), a deferred commit;
-        // unrestricting stays the menu's reverse row and goes out at once.
-        if target, onUndoable != nil {
-            isRestricted = true
-            // A read out from before the toggle must not overwrite it.
-            restrictGeneration += 1
-            let handle = "@" + profile.handle
-            let id = profile.id
-            onUndoable?(UndoableAction(
-                message: "Restricted \(handle)",
-                symbol: "person.crop.circle.badge.minus",
-                commit: { [weak self] in
-                    // Unrestricted from the menu meanwhile: not sent.
-                    if let self, !self.isRestricted { return }
-                    Task { @MainActor [weak self] in
-                        do {
-                            try await restricting.setRestricted(true, for: id)
-                        } catch {
-                            guard let self, self.isRestricted else { return }
-                            self.isRestricted = false
-                            self.onActionResult?(.commitFailed(message: "Couldn't restrict \(handle)"))
-                        }
-                    }
-                },
-                undo: { [weak self] in
-                    self?.isRestricted = false
-                    self?.restrictGeneration += 1
-                }
-            ))
-            return
-        }
-        isRestricted = target
-        restrictInFlight = true
-        restrictGeneration += 1
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                try await restricting.setRestricted(target, for: profile.id)
-                self.onActionResult?(.restrictChanged(handle: "@" + profile.handle, restricted: target))
-            } catch {
-                self.isRestricted = !target
-                self.onActionResult?(.failed(message: target ? "Couldn't restrict this profile." : "Couldn't unrestrict this profile."))
-            }
-            self.restrictInFlight = false
-        }
-    }
-
-    /// "Muted @ada's posts and messages", "Unmuted @ada".
+    public func toggleMute(_ scope: MuteScope) { moderation.toggleMute(scope) }
+    public func toggleRestrict() { moderation.toggleRestrict() }
     public nonisolated static func muteMessage(handle: String, scopes: MuteScopes) -> String {
-        guard !scopes.isEmpty else { return "Unmuted \(handle)" }
-        let names = MuteScope.allCases.filter(scopes.contains).map { $0.title.lowercased() }
-        let list = names.count > 1 ? names.dropLast().joined(separator: ", ") + " and " + names.last! : names[0]
-        return "Muted \(handle)'s \(list)"
+        ProfileModeration.muteMessage(handle: handle, scopes: scopes)
     }
-
-    /// File a moderation report against this profile. Reports are fire-and-
-    /// confirm: the result is reported either way, because a report the user
-    /// believes was filed but wasn't is the worst outcome here.
-    public func report(_ reason: ReportReason) {
-        guard let profile, canModerate, !reportInFlight else { return }
-        guard let reporting else {
-            onActionResult?(.failed(message: "Reporting isn't available right now."))
-            return
-        }
-        reportInFlight = true
-
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                // The surface is a triage signal: the same profile reported
-                // from its own screen and from a post card are different
-                // reports.
-                try await reporting.report(
-                    .profile(profile.id), reason: reason, surface: "ios.profile"
-                )
-                self.onActionResult?(.reported)
-            } catch {
-                self.onActionResult?(.failed(message: "Couldn't send this report. Try again."))
-            }
-            self.reportInFlight = false
-        }
-    }
+    public func report(_ reason: ReportReason) { moderation.report(reason) }
 
     // MARK: - Gallery
 
@@ -1291,606 +566,52 @@ public final class ProfileViewModel {
         router?.route(to: .profileCard(authorID, stub: post.authorIdentityStub))
     }
 
-    /// Whether a gallery row may offer Report.
-    ///
-    /// No seam, no row — a screen that cannot file withholds the action rather
-    /// than showing one that cannot act.
-    ///
-    /// And never for the viewer's OWN post. A report is a complaint about
-    /// someone else's content; offered on your own it reads as a bug, and it is
-    /// the only row this menu has, so the whole "..." disappears with it. The
-    /// Tagged tab is why this is a per-POST question rather than a per-screen
-    /// one: those rows are other people's posts on your own profile.
-    /// Whether a gallery post is the VIEWER's own: on their own profile, a
-    /// post whose author is the profile. Anyone else's post there (the Tagged
-    /// tab) is not, and neither is anything on someone else's profile.
-    public func isViewerPost(by authorID: ProfileID?) -> Bool {
-        guard let authorID, let profile else { return false }
-        return followButton == .edit && authorID == profile.id
-    }
+    public func isViewerPost(by authorID: ProfileID?) -> Bool { galleryFeed.isViewerPost(by: authorID) }
+    public var canDeletePosts: Bool { galleryFeed.canDeletePosts }
+    public func deletePost(_ postID: PostID) { galleryFeed.deletePost(postID) }
 
-    /// Whether the viewer's own posts can be deleted here (#408).
-    public var canDeletePosts: Bool { gallery is any PostTrashManaging }
+    public func canReportPost(by authorID: ProfileID?) -> Bool { moderation.canReportPost(by: authorID) }
+    public func reportPost(_ postID: PostID, reason: ReportReason) { moderation.reportPost(postID, reason: reason) }
 
-    /// A delete the server accepted, told to the app (#896): its
-    /// `EntityStore` drops the post from every feed and from For You.
-    private let postDeleted: (@MainActor (PostID) -> Void)?
-
-    /// Deletes one of the viewer's own posts, with Undo (#957): the tile
-    /// leaves at once, and the delete is sent only when the toast's countdown
-    /// runs out — a DEFERRED commit, so Undo puts the tile back where it was
-    /// with nothing to take back on the server. A refused delete brings the
-    /// tile back and says so. Once deleted it can be restored for 30 days
-    /// from Settings → Your Activity → Recently Deleted.
-    ///
-    /// The app's `EntityStore` hears of it (#896) when the server ACCEPTED it
-    /// — at the commit, whether or not this screen is still there — so an
-    /// Undo, which sends nothing, leaves no tombstone anywhere.
-    public func deletePost(_ postID: PostID) {
-        guard let profile, followButton == .edit, let trash = gallery as? any PostTrashManaging else { return }
-        let author = profile.id
-        let cache = cache
-        let postDeleted = postDeleted
-        galleryStore.hidePendingRemoval(postID)
-        renderGallery()
-        let action = UndoableAction(
-            message: "Post deleted",
-            symbol: "trash.fill",
-            commit: { [weak self] in
-                Task { @MainActor [weak self] in
-                    do {
-                        try await trash.deletePost(postID, author: author)
-                        // Every other screen first: the feeds and For You
-                        // drop it in the same turn as this gallery.
-                        postDeleted?(postID)
-                        guard let self else {
-                            // The screen is gone: its kept gallery still
-                            // holds the post, and the next visit would open
-                            // on it — dropped, so that visit loads afresh.
-                            cache?.removeGallery(for: author)
-                            return
-                        }
-                        self.galleryStore.removeAuthoredPost(postID)
-                        self.galleryStore.unhidePendingRemoval(postID)
-                        // The next visit must not open on the deleted post.
-                        self.rememberGallery(of: author)
-                        self.renderGallery()
-                    } catch {
-                        guard let self else { return }
-                        self.galleryStore.unhidePendingRemoval(postID)
-                        self.renderGallery()
-                        self.onActionResult?(.commitFailed(message: "Couldn't delete this post"))
-                    }
-                }
-            },
-            undo: { [weak self] in
-                self?.galleryStore.unhidePendingRemoval(postID)
-                self?.renderGallery()
-            }
-        )
-        // No screen to offer Undo: sent now — never left hidden and unsent.
-        if let onUndoable { onUndoable(action) } else { action.commit() }
-    }
-
-    public func canReportPost(by authorID: ProfileID?) -> Bool {
-        guard reporting != nil else { return false }
-        // `canModerate` is false exactly on the viewer's own profile, and there
-        // an author matching the profile IS the viewer.
-        return canModerate || authorID != profile?.id
-    }
-
-    /// File a moderation report against one of the gallery's posts. Same
-    /// fire-and-confirm contract as `report(_:)`, and the same reason: a report
-    /// the user believes was filed but wasn't is the worst outcome here.
-    public func reportPost(_ postID: PostID, reason: ReportReason) {
-        guard let reporting else {
-            onActionResult?(.failed(message: "Reporting isn't available right now."))
-            return
-        }
-        Task { [weak self] in
-            do {
-                try await reporting.report(
-                    .post(postID), reason: reason, surface: "ios.profile.gallery"
-                )
-                self?.onActionResult?(.reported)
-            } catch {
-                self?.onActionResult?(.failed(message: "Couldn't send this report. Try again."))
-            }
-        }
-    }
-
-    /// Where the user is — set by a tab tap or a settled swipe. Pure state
-    /// (pages are always computed): the view pages to it, empty messages
-    /// name it, and the choice persists globally for the next profile.
-    public func setGalleryFormat(_ format: GalleryFilter.Format) {
-        galleryStore.filter.format = format
-        galleryPreferences?.filter = galleryStore.filter
-        // A tab the loaded pages leave empty fills itself as it arrives.
-        fillEmptyGalleryTab()
-    }
-
-    /// The page on screen. Format pages set the format (above); the page
-    /// also picks the corpus the paging, "View all" and a feed's continuation
-    /// read (#696) — on your own profile too since #772. Saved and Liked read
-    /// no corpus of the profile's and leave it on Posts.
-    public func setActiveTab(_ tab: ProfileTab) {
-        if let format = tab.format { setGalleryFormat(format) }
-        let source: GalleryFilter.Source = switch tab {
-        case .reposts: .reposts
-        case .tagged: .tagged
-        default: .posts
-        }
-        guard source != galleryStore.pageSource else { return }
-        galleryStore.pageSource = source
-        // The media "View all" shows, and an empty page fills itself.
-        renderGallery()
-    }
-
-    /// The source the page on screen reads.
-    ///
-    /// ⚠️ EVERY PROFILE'S PAGES ARE ITS SOURCES (#696, and your own since
-    /// #772): Posts (its own posts, reposts excluded), Reposts, Tagged. So it
-    /// always opens on Posts. The stored filter's source — the top menu your
-    /// own profile had — is read by nothing any more.
-    var gallerySource: GalleryFilter.Source { galleryStore.pageSource }
-
-    /// Fetches both corpora concurrently once the profile is known (the pager
-    /// shows neighbors mid-swipe, so tagged can't be lazy). Called from the
-    /// profile load path; `reset` makes pull-to-refresh refresh the grid too.
-    private func loadGallery(for profile: UserProfile, reset: Bool) {
-        guard let gallery else { return }
-        if reset {
-            galleryLoad?.cancel()
-            galleryLoad = nil
-            galleryMoreLoad?.cancel()
-            galleryMoreLoad = nil
-            galleryStore.reset()
-        }
-        if reset {
-            // Read for this viewer only (#892): never shown to the next one.
-            engagementTabsLoad?.cancel()
-            engagementTabsLoad = nil
-            galleryStore.reactions = .empty(message: "")
-            galleryStore.othersSaved = .empty(message: "")
-        }
-        guard galleryLoad == nil else { return }
-        loadEngagementTabs(for: profile)
-        galleryStore.resumePaging()
-        renderGallery() // all pages report loading — or, revalidating, what they hold
-        galleryLoad = Task { [weak self] in
-            async let authoredFetch = gallery.authoredPage(for: profile.id, after: nil)
-            async let taggedFetch = gallery.taggedPage(for: profile.id, handle: profile.handle, after: nil)
-
-            // The two fetches fail independently: one page family degrading
-            // must not blank the other. Each keeps WHY it failed (#794).
-            let authored: GalleryPage?, tagged: GalleryPage?
-            var authoredFailure: NetworkFailure?, taggedFailure: NetworkFailure?
-            do { authored = try await authoredFetch } catch {
-                authored = nil
-                authoredFailure = NetworkFailure.of(error)
-            }
-            do { tagged = try await taggedFetch } catch {
-                tagged = nil
-                taggedFailure = NetworkFailure.of(error)
-            }
-            guard let self, !Task.isCancelled else { return }
-
-            self.galleryStore.applyFirstPages(
-                authored: authored, authoredFailure: authoredFailure,
-                tagged: tagged, taggedFailure: taggedFailure
-            )
-            self.rememberGallery(of: profile.id)
-            self.galleryLoadFailed = authoredFailure != nil || taggedFailure != nil
-            self.galleryLoad = nil
-            self.renderGallery()
-        }
-    }
-
-    /// The gallery's Try Again (#797, #1770). After a failure, a refresh.
-    /// Past "taking longer" the first pages are still out, and a refresh
-    /// would wait on that same read (`loadGallery` keeps one in flight):
-    /// the hung read is dropped and asked again.
-    public func retryGallery() {
-        // The page went back to loading on the tap (#1900): it hears an
-        // answer even when it equals the one it had — a page that had
-        // answered long ago was left on "taking longer", its Try Again dead.
-        publishedGallery = nil
-        guard let profile, galleryLoad != nil else {
-            renderGallery()
-            return refresh()
-        }
-        galleryLoad?.cancel()
-        galleryLoad = nil
-        loadGallery(for: profile, reset: false)
-    }
-
-    /// Whether the grid's first pages are on their way, for tests.
-    var isGalleryLoading: Bool { galleryLoad != nil }
-
-    /// The Liked tab, and someone else's Saved tab (#411, #837): the
-    /// server's lists, read with the grid's first pages — beside them, never
-    /// a second grid load. A tab shows only once its list holds something
-    /// (#742), so a hidden tab (the server answers empty) never appears; a
-    /// failed read leaves what was shown.
-    ///
-    /// ⚠️ LIKED IS KEPT WITH THE GRID (#1776), cache first like Posts: it used
-    /// to be kept nowhere, so that a viewer change could not show it to the
-    /// next viewer. The device copy is the viewer's own (the LocalStore's
-    /// viewer scope; `ProfileCache` drops its memory on a viewer change),
-    /// so that rule holds without a cold tab at every visit. Someone else's
-    /// Saved stays out of it.
-    private func loadEngagementTabs(for profile: UserProfile) {
-        guard let gallery else { return }
-        engagementTabsLoad?.cancel()
-        let readsSaved = !isOwnProfile
-        engagementTabsLoad = Task { [weak self] in
-            async let liked = try? gallery.likedPosts(of: profile.id)
-            async let saved = readsSaved ? try? gallery.savedPosts(of: profile.id) : nil
-            let (likedPosts, savedPosts) = await (liked, saved)
-            guard let self, !Task.isCancelled, self.profile?.id ?? profile.id == profile.id else { return }
-            if let likedPosts {
-                galleryStore.reactions = likedPosts.isEmpty ? .empty(message: "") : .content(likedPosts)
-            }
-            if readsSaved, let savedPosts {
-                galleryStore.othersSaved = savedPosts.isEmpty ? .empty(message: "") : .content(savedPosts)
-            }
-            engagementTabsLoad = nil
-            if likedPosts != nil { rememberGallery(of: profile.id) }
-            renderGallery()
-        }
-    }
-
-    /// The Liked / Saved reads on their way.
-    private var engagementTabsLoad: Task<Void, Never>?
-
-    /// The viewer neared the end of the grid on screen: the next page of
-    /// every corpus its source reads, if any has one and none is on its way
-    /// (#634). Appended below what is shown; a failure is retried on the next
-    /// approach.
-    /// The posts after `id` on the tab the viewer is on, for a full-screen
-    /// feed opened from the grid (#638): what the grid holds past it, then
-    /// its next pages, under the same source — the same order the grid
-    /// shows, so a post the feed reaches is a tile the grid also has.
-    ///
-    /// `nil`: nothing follows and the corpora have no more. EMPTY: none yet
-    /// (a page failed, or the first load is still out); the feed asks again
-    /// on its next approach.
-    ///
-    /// `format` is the list the feed was opened from: Posts, or the media
-    /// gallery its "View all" pushes (#631).
+    public func setGalleryFormat(_ format: GalleryFilter.Format) { galleryFeed.setGalleryFormat(format) }
+    public func setActiveTab(_ tab: ProfileTab) { galleryFeed.setActiveTab(tab) }
+    var gallerySource: GalleryFilter.Source { galleryFeed.gallerySource }
+    public func retryGallery() { galleryFeed.retryGallery() }
+    var isGalleryLoading: Bool { galleryFeed.isGalleryLoading }
     public func galleryPostIDs(
         after id: PostID, in format: GalleryFilter.Format = .activity
     ) async -> [PostID]? {
-        for _ in 0..<Self.maxUnchangedGalleryPages {
-            let tiles = galleryStore.tiles(format)
-            guard let index = tiles.firstIndex(where: { $0.id == id }) else { return nil }
-            let following = tiles[(index + 1)...]
-            if !following.isEmpty { return following.prefix(Self.continuationWindow).map(\.id) }
-            guard !galleryStore.isComplete() else { return nil }
-            if galleryMoreLoad == nil { loadMoreGallery() }
-            // Not started: the first load is still out.
-            guard let round = galleryMoreLoad else { return [] }
-            await round.value
-            if galleryStore.isPausedByFailure { return [] }
-        }
-        return []
+        await galleryFeed.galleryPostIDs(after: id, in: format)
     }
+    public func loadMoreGallery() { galleryFeed.loadMoreGallery() }
+    func renderGallery() { galleryFeed.renderGallery() }
+    public var publishedGallery: GallerySnapshot? { galleryFeed.publishedGallery }
 
-    /// How many posts a feed opened from the grid is handed per step.
-    static let continuationWindow = 12
-
-    public func loadMoreGallery() {
-        galleryStore.resumePaging()
-        startGalleryPages()
+    /// Saved and History, the viewer's piles (`ProfileViewerPiles`, #2522).
+    private(set) lazy var viewerPiles = ProfileViewerPiles(
+        host: self, gallery: gallery, bookmarks: bookmarks, viewHistory: viewHistory
+    )
+    func loadSavedPosts() { viewerPiles.loadSavedPosts() }
+    func loadHistory() { viewerPiles.loadHistory() }
+    var holdsHistory: Bool { viewerPiles.holdsHistory }
+    func holdHistory() { viewerPiles.holdHistory() }
+    func releaseHistory() { viewerPiles.releaseHistory() }
+    func refreshHistory() { viewerPiles.refreshHistory() }
+    func removeFromHistory(_ id: PostID) { viewerPiles.removeFromHistory(id) }
+    func removeFromHistory(_ ids: [PostID]) { viewerPiles.removeFromHistory(ids) }
+    func clearHistory() { viewerPiles.clearHistory() }
+    var hasHistory: Bool { viewerPiles.hasHistory }
+    /// The clock History's days are read against (`ProfileViewerPiles.now`). Tests set it.
+    var now: @Sendable () -> Date {
+        get { viewerPiles.now }
+        set { viewerPiles.now = newValue }
     }
-
-    /// A tab on screen that the loaded pages leave empty has no tile to come
-    /// on screen and ask for more: it asks here — unless the last round
-    /// failed, which waits for the viewer.
-    private func fillEmptyGalleryTab() {
-        guard !galleryStore.isPausedByFailure, galleryStore.tiles(galleryFilter.format).isEmpty else { return }
-        startGalleryPages()
-    }
-
-    private func startGalleryPages() {
-        guard let gallery, let profile, galleryLoad == nil, galleryMoreLoad == nil,
-              !galleryStore.isComplete()
-        else { return }
-        galleryMoreLoad = Task { [weak self] in
-            await self?.appendGalleryPages(from: gallery, for: profile)
-        }
-    }
-
-    private func appendGalleryPages(from gallery: any ProfileGalleryProviding, for profile: UserProfile) async {
-        for _ in 0..<Self.maxUnchangedGalleryPages {
-            let tokens = galleryStore.tokensToFollow()
-            guard tokens != (nil, nil) else { break }
-            let before = galleryStore.tiles(galleryFilter.format).count
-            async let authoredFetch = Self.page(of: tokens.authored) { token in
-                try await gallery.authoredPage(for: profile.id, after: token)
-            }
-            async let taggedFetch = Self.page(of: tokens.tagged) { token in
-                try await gallery.taggedPage(for: profile.id, handle: profile.handle, after: token)
-            }
-            let (authored, tagged) = await (authoredFetch, taggedFetch)
-            // A reset since — another profile, a pull that started over —
-            // owns the grid now, and the slot with it.
-            guard !Task.isCancelled, self.profile?.id == profile.id else { return }
-            let failed = galleryStore.applyNextPages(tokens: tokens, authored: authored, tagged: tagged)
-            rememberGallery(of: profile.id)
-            // The tab on screen gained tiles: they come on screen and ask
-            // again. It gained none (Short over a run of photos): no tile will
-            // ask, so the next page is asked now — within a bound.
-            if failed || galleryStore.tiles(galleryFilter.format).count > before { break }
-        }
-        // ⚠️ THE SLOT FREES BEFORE THE TILES RENDER: a page that lands wholly
-        // on screen asks for the next one while it renders (#596).
-        galleryMoreLoad = nil
-        renderGallery()
-    }
-
-    /// The page after `token`, or why it failed (#794: it used to be `try?`,
-    /// and the failed tab could not tell offline from a refusal). Nil when
-    /// there is no token to follow.
-    private static func page(
-        of token: String?, _ fetch: @Sendable (String) async throws -> GalleryPage
-    ) async -> Result<GalleryPage, any Error>? {
-        guard let token else { return nil }
-        do {
-            return .success(try await fetch(token))
-        } catch {
-            return .failure(error)
-        }
-    }
-
-    /// Keeps the pages loaded so far beside the cached profile, for the next
-    /// visit's first frame (#887). Every change to the corpora calls it, so
-    /// the cache never holds a post this screen has already let go of.
-    private func rememberGallery(of id: ProfileID) {
-        // A page landing after a block is not kept: the block dropped it.
-        guard let cache, !isBlocked, let corpora = galleryStore.corpora else { return }
-        cache.store(corpora, for: id)
-    }
-
-    /// Recomputes the snapshot — Posts, Reposts, Tagged, the media of the page
-    /// on screen, Saved — from the caches. Every data landing and page change
-    /// funnels here.
-    private func renderGallery() {
-        guard gallery != nil else { return }
-        var snapshot = galleryStore.snapshot(isOwnProfile: isOwnProfile)
-        // Known private and not followed: locked from the first frame
-        // (#1900). While the relationship is a wait, only what came back
-        // empty locks.
-        if isPrivateToViewer {
-            if isRelationshipSettled { snapshot.restrictWithheldPages() } else { snapshot.restrictEmptyPages() }
-        }
-        fillEmptyGalleryTab()
-        // The same pages again is no news: a revalidation that agrees with
-        // the screen must cost the screen nothing.
-        guard snapshot != publishedGallery else { return }
-        publishedGallery = snapshot
-        onGalleryChange?(snapshot)
-    }
-
-    /// The pages last handed to the view — what `renderGallery` compares a
-    /// new answer against.
-    /// The pages last published — what a screen bound after the gallery
-    /// landed renders first (#742: its tabs follow what the sources hold).
-    public private(set) var publishedGallery: GallerySnapshot?
-
-    /// Rebuilds the Saved page from the pile the viewer has curated, then
-    /// from the server's list (#837) when it brings anything new.
-    ///
-    /// ⚠️ Reads the ids EVERY time rather than caching them. The pile is
-    /// mutable from outside this screen — the feed's bookmark button writes to
-    /// the same store — so the ids are the store's answer at the moment of
-    /// asking, not a copy taken when the profile opened.
-    ///
-    /// The pile shows first: it is what the device knew, offline included.
-    /// The server's list replaces it once read (`PostSaveSyncing`), which is
-    /// how saves made on another device arrive — and how a new device, whose
-    /// pile is empty, shows anything at all.
-    ///
-    /// A post that no longer resolves simply drops out, the same way a tile
-    /// that fails to hydrate does everywhere else: the list can outlive what
-    /// it points at.
-    func loadSavedPosts() {
-        guard let bookmarks, gallery != nil else { return }
-        let sync = bookmarks.sync.flatMap { $0.readsServer ? $0 : nil }
-        showSavedPosts(bookmarks.savedPostIDs, awaitingServer: sync != nil)
-        guard let sync else { return }
-        savedRefresh?.cancel()
-        savedRefresh = Task { [weak self] in
-            await sync.refreshFromServer()
-            guard let self, !Task.isCancelled else { return }
-            let fresh = bookmarks.savedPostIDs
-            // The same list again costs the page nothing.
-            if fresh != shownSavedIDs || isAwaitingSavedList {
-                showSavedPosts(fresh, awaitingServer: false)
-            }
-        }
-    }
-
-    /// The ids the Saved page last asked to show.
-    private var shownSavedIDs: [String]?
-    /// Whether the page shows bones until the server's list arrives: an
-    /// empty pile on a device that has not heard the list yet.
-    private var isAwaitingSavedList = false
-    /// The server's list on its way (`loadSavedPosts`).
-    private var savedRefresh: Task<Void, Never>?
-    /// Bumped by every `showSavedPosts`: a hydration that lands after a newer
-    /// one started is dropped.
-    private var savedGeneration = 0
-
-    private func showSavedPosts(_ ids: [String], awaitingServer: Bool) {
-        guard let gallery else { return }
-        shownSavedIDs = ids
-        savedGeneration += 1
-        let generation = savedGeneration
-        guard !ids.isEmpty else {
-            // Nothing on the device yet may be everything on the server: the
-            // page waits for it rather than saying "nothing saved" first —
-            // bones, or the tiles it already shows (never bones over tiles,
-            // see below), until the list answers.
-            isAwaitingSavedList = awaitingServer
-            if !awaitingServer {
-                galleryStore.saved = .empty(message: "")
-            } else if case .content = galleryStore.saved {
-                return
-            } else {
-                galleryStore.saved = .loading
-            }
-            renderGallery()
-            return
-        }
-        isAwaitingSavedList = false
-        // ⚠️ SKELETONS ONLY FOR A PAGE WITH NOTHING TO SHOW. This runs on
-        // every appearance, including the one a closing post delivers, and a
-        // `.loading` over shown tiles reloaded the grid as bones mid-dismissal:
-        // the card had no tile to land on and collapsed to the fallback rect.
-        // A page already showing its tiles keeps them while the refresh runs.
-        if case .content = galleryStore.saved {} else {
-            galleryStore.saved = .loading
-            renderGallery()
-        }
-        Task { [weak self] in
-            let tiles = (try? await gallery.posts(ids: ids)) ?? []
-            guard let self, generation == savedGeneration else { return }
-            galleryStore.saved = tiles.isEmpty
-                ? .empty(message: "Nothing saved yet.")
-                : .content(tiles)
-            renderGallery()
-        }
-    }
-
-    // MARK: - History (#1344)
-
-    /// The History page from the device's pile, newest first — on every
-    /// appearance and on every change. Like Saved: a post that no longer
-    /// resolves drops out, and a page already showing tiles keeps them while
-    /// the refresh runs.
-    func loadHistory() {
-        guard let viewHistory, let gallery else { return }
-        // Undated views (recorded before the times were kept) last, under
-        // "Earlier". While History is held (`holdHistory`), the pile it
-        // showed, less what has left the store since.
-        let pile = Self.heldOrLive(held: heldHistory, live: viewHistory.views)
-        let views = pile.filter { $0.viewedAt != nil } + pile.filter { $0.viewedAt == nil }
-        let ids = views.map(\.postID)
-        // The day is part of what is shown: "Today" is yesterday's by now.
-        let shown = HistoryShown(views: views, day: Calendar.current.startOfDay(for: now()))
-        guard shown != shownHistory || !hasShownHistory else { return }
-        shownHistory = shown
-        historyGeneration += 1
-        let generation = historyGeneration
-        guard !ids.isEmpty else {
-            hasShownHistory = true
-            galleryStore.history = .empty(message: "")
-            galleryStore.historyGroups = []
-            galleryStore.historyViewedAt = [:]
-            renderGallery()
-            return
-        }
-        if case .content = galleryStore.history {} else {
-            galleryStore.history = .loading
-            renderGallery()
-        }
-        Task { [weak self] in
-            let tiles = (try? await gallery.posts(ids: ids)) ?? []
-            guard let self, generation == historyGeneration else { return }
-            hasShownHistory = true
-            let viewedAt = Dictionary(views.map { ($0.postID, $0.viewedAt) }, uniquingKeysWith: { first, _ in first })
-            galleryStore.history = tiles.isEmpty ? .empty(message: "") : .content(tiles)
-            galleryStore.historyGroups = HistoryDayGroups.groups(
-                for: tiles.map { viewedAt[$0.id.rawValue] ?? nil }, now: now()
-            )
-            galleryStore.historyViewedAt = tiles.reduce(into: [:]) { dates, tile in
-                if let date = viewedAt[tile.id.rawValue] ?? nil { dates[tile.id] = date }
-            }
-            renderGallery()
-        }
-    }
-
-    /// ⚠️ **HISTORY HOLDS STILL WHILE THE VIEWER IS ON IT** (the owner,
-    /// 2026-11-07). A post opened from History, and every post paged to
-    /// after it, is recorded at once (`PostViewHistoryStore`), but the page
-    /// keeps the posts it showed, in their order and with their times, until
-    /// the viewer leaves the History page or the profile (`releaseHistory`):
-    /// closing the post lands on the row it left, which has not moved to the
-    /// top. A removal (the menu, VoiceOver, Clear History) still applies.
-    private var heldHistory: [PostViewHistoryStore.View]?
-
-    /// Whether History is held now.
-    var holdsHistory: Bool { heldHistory != nil }
-
-    /// Holds History as it is shown — the viewer opened a post from it.
-    func holdHistory() {
-        guard heldHistory == nil, let viewHistory else { return }
-        heldHistory = shownHistory?.views ?? viewHistory.views
-    }
-
-    /// The viewer left the History page: it takes in every view since.
-    func releaseHistory() {
-        guard heldHistory != nil else { return }
-        heldHistory = nil
-        loadHistory()
-    }
-
-    /// A pull on the profile (the owner, 2026-11-07): History takes in
-    /// every view since, held or not.
-    func refreshHistory() {
-        heldHistory = nil
-        loadHistory()
-    }
-
-    /// The pile History shows: `live`, or `held` less what left `live`.
-    static func heldOrLive(
-        held: [PostViewHistoryStore.View]?, live: [PostViewHistoryStore.View]
-    ) -> [PostViewHistoryStore.View] {
-        guard let held else { return live }
-        let kept = Set(live.map(\.postID))
-        return held.filter { kept.contains($0.postID) }
-    }
-
-    /// Takes one post out of the history (its menu's "Remove from History").
-    func removeFromHistory(_ id: PostID) {
-        removeFromHistory([id])
-    }
-
-    /// Takes several posts out of the history at once — the History page's
-    /// select mode (the owner, 2026-11-08): one reload, one animation.
-    func removeFromHistory(_ ids: [PostID]) {
-        guard !ids.isEmpty else { return }
-        for id in ids { viewHistory?.remove(id.rawValue) }
-        loadHistory()
-    }
-
-    /// Empties the history (the profile menu's "Clear History").
-    func clearHistory() {
-        viewHistory?.clear()
-        loadHistory()
-    }
-
-    /// Whether there is any history to clear.
-    var hasHistory: Bool { !(viewHistory?.postIDs.isEmpty ?? true) }
-
-    /// The clock History's days are read against. Tests set it.
-    var now: @Sendable () -> Date = Date.init
-
-    /// What the History page was last built from.
-    private struct HistoryShown: Equatable {
-        var views: [PostViewHistoryStore.View]
-        var day: Date
-    }
-    private var shownHistory: HistoryShown?
-    private var hasShownHistory = false
-    private var historyGeneration = 0
 
     // MARK: - Loading
 
     private func reload(galleryRevalidates: Bool = false) {
         load?.cancel()
-        relationshipLoad?.cancel()
+        relation.relationshipLoad?.cancel()
         if case .lookup(let reference) = source {
             resolve(reference)
             return
@@ -1907,7 +628,7 @@ public final class ProfileViewModel {
         // viewer's own profile, whose id the fetch resolves, still chains.
         let readsRelationshipUpFront: Bool
         if case .profile(let id) = source {
-            loadRelationship(for: id)
+            relation.loadRelationship(for: id)
             readsRelationshipUpFront = true
         } else {
             readsRelationshipUpFront = false
@@ -1929,7 +650,7 @@ public final class ProfileViewModel {
                     self.phase = .content(ProfileDisplayModel(profile: profile))
                 }
                 if !readsRelationshipUpFront {
-                    self.loadRelationship(for: profile.id)
+                    self.relation.loadRelationship(for: profile.id)
                 }
                 // Every (re)load refreshes the grid too: the caches reset so
                 // pull-to-refresh picks up new posts alongside the header —
@@ -1942,9 +663,9 @@ public final class ProfileViewModel {
                 // flight. When the grid answered BEFORE the header, it no
                 // longer was, and a second first-page fetch went out for
                 // nothing. Only a seed load that failed is tried again.
-                let seedRevalidated = self.galleryWasSeeded && !galleryRevalidates && !self.galleryLoadFailed
+                let seedRevalidated = self.galleryWasSeeded && !galleryRevalidates && !self.galleryFeed.galleryLoadFailed
                 if !seedRevalidated {
-                    self.loadGallery(for: profile, reset: !self.galleryWasSeeded && !galleryRevalidates)
+                    self.galleryFeed.loadGallery(for: profile, reset: !self.galleryWasSeeded && !galleryRevalidates)
                 }
                 self.galleryWasSeeded = false
             } catch is CancellationError {
@@ -2007,12 +728,6 @@ public final class ProfileViewModel {
         }
     }
 
-    /// Someone else's private profile the viewer doesn't follow — what a
-    /// guest always is (#447). Its pages come back empty from the server.
-    var isPrivateToViewer: Bool {
-        !isOwnProfile && profile?.visibility.isPrivate == true && !isFollowing
-    }
-
     nonisolated static let restrictedTitle = "This Account Is Private"
     nonisolated static let restrictedMessage = "Follow this account to see their posts."
 
@@ -2044,99 +759,10 @@ public final class ProfileViewModel {
         }
     }
 
-    /// The relationship is best-effort: if it can't be read, the button simply
-    /// stays hidden rather than failing the whole screen.
-    private func loadRelationship(for id: ProfileID) {
-        relationshipLoad = Task { [weak self] in
-            guard let self else { return }
-            #if DEBUG
-            // Dev convenience: `-profile-relationship-delay` holds the
-            // relationship answer for a few seconds, making the nav-bar
-            // skeleton capsule and its cross-fade to Follow/Following
-            // observable (the mock otherwise answers mid-push).
-            if LaunchArgument.profileRelationshipDelay.isPassed() {
-                try? await Task.sleep(for: .seconds(3))
-            }
-            #endif
-            let relationship: ProfileRelationship
-            do {
-                relationship = try await self.repository.relationship(for: id)
-            } catch {
-                // Superseded by a newer read: that one answers. Otherwise a
-                // failure is still an answer — the button stays as it is.
-                guard !Task.isCancelled else { return }
-                self.isRelationshipSettled = true
-                self.relationshipLoad = nil
-                return
-            }
-            guard !Task.isCancelled else { return }
-            self.apply(relationship)
-            self.cache?.store(relationship, for: id)
-            self.relationshipLoad = nil
-            // The mute rides beside the relationship; only someone else's
-            // profile can be muted.
-            // A toggle made while a read was out wins: the read is from before.
-            let muteAsked = self.muteGeneration
-            if relationship != .me, let muting = self.repository as? any ProfileMuting,
-               let scopes = try? await muting.muteScopes(for: id),
-               !self.muteInFlight, self.muteGeneration == muteAsked {
-                self.muteScopes = scopes
-            }
-            let restrictAsked = self.restrictGeneration
-            if relationship != .me, let restricting = self.repository as? any ProfileRestricting,
-               let restricted = try? await restricting.isRestricted(id),
-               !self.restrictInFlight, self.restrictGeneration == restrictAsked {
-                self.isRestricted = restricted
-            }
-        }
-    }
-
-    /// Puts a relationship on screen — the read's answer or the cache's.
-    private func apply(_ relationship: ProfileRelationship) {
-        switch relationship {
-        case .me:
-            isFollowing = false
-            isBlocked = false
-            followButton = .edit
-        case .other(let following, let mutual, let blocked):
-            isFollowing = following
-            isMutual = mutual
-            isBlocked = blocked
-            followButton = following ? .following : .follow
-        case .requested:
-            isFollowing = false
-            isMutual = false
-            isBlocked = false
-            followButton = .requested
-        case .cannotFollow:
-            isFollowing = false
-            isMutual = false
-            isBlocked = false
-            followButton = .unavailable
-        }
-        isRelationshipSettled = true
-    }
-
-    /// The relationship as this screen now holds it, for the cache — so the
-    /// next visit opens on what the viewer last saw here, including a follow
-    /// they just made.
-    private func rememberRelationship() {
-        guard let id = profile?.id, followButton.isOtherProfile else { return }
-        let relationship: ProfileRelationship = switch followButton {
-        case .requested: .requested
-        case .unavailable: .cannotFollow
-        default: .other(isFollowing: isFollowing, isMutual: isMutual, isBlocked: isBlocked)
-        }
-        cache?.store(relationship, for: id)
-    }
-
-    /// Applies a follow state everywhere it shows: the button and the
-    /// optimistic follower count on the rendered profile.
-    private func applyFollow(_ following: Bool, on profile: UserProfile) {
-        isFollowing = following
-        followButton = following ? .following : .follow
-        defer { rememberRelationship() }
-
+    /// The optimistic follower count on the rendered profile, for a follow
+    /// change (`ProfileViewerRelation.applyFollow`): the view model stays the one
+    /// writer of `profile` and `phase`.
+    func nudgeFollowerCount(_ following: Bool, on profile: UserProfile) {
         let updated = UserProfile(
             id: profile.id,
             handle: profile.handle,
@@ -2166,3 +792,13 @@ public final class ProfileViewModel {
         phase = .content(ProfileDisplayModel(profile: updated))
     }
 }
+
+extension ProfileViewModel: ProfileMapPinHost {}
+
+extension ProfileViewModel: ProfileModerationHost {}
+
+extension ProfileViewModel: ProfileViewerRelationHost {}
+
+extension ProfileViewModel: ProfileGalleryFeedHost {}
+
+extension ProfileViewModel: ProfileViewerPilesHost {}
