@@ -30,9 +30,12 @@ final class PostDetailViewController: UIViewController {
     /// open underneath — and for a change of viewer. Nil (tests): neither is
     /// heard.
     private let viewerEvents: ViewerEvents?
-    /// The two subscriptions to `viewerEvents`, for this controller's
-    /// lifetime: they end with it.
-    private var viewerSubscriptions: [ViewerEventSubscription] = []
+    /// The composer avatar's profile switcher and the viewer channel's two
+    /// subscriptions (`PostDetailViewerSwitch`). Built on first use;
+    /// building it does nothing else.
+    private(set) lazy var viewerSwitch = PostDetailViewerSwitch(
+        host: self, profileSwitcher: profileSwitcher, viewerEvents: viewerEvents
+    )
 
     // MARK: - The two streams (#2007)
 
@@ -561,7 +564,7 @@ final class PostDetailViewController: UIViewController {
             let notice = Self.reviewFailureNotice(approve: approve)
             self?.presentNotice(notice.title, notice.message)
         }
-        configureProfileSwitcher()
+        viewerSwitch.configureProfileSwitcher()
         // The empty page's floor is its block's own height, which the text
         // size changes — see `refitEmptyPage`.
         registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) {
@@ -577,56 +580,6 @@ final class PostDetailViewController: UIViewController {
         render(.loading)
         viewModel.viewDidLoad()
         if showsPopular { viewModel.loadPopularIfNeeded() }
-    }
-
-    /// Arms the composer avatar's profile switcher.
-    ///
-    /// Two independent halves, and the observer is the one that matters:
-    ///
-    ///  • The MENU is built from the switcher's pre-formatted rows, which
-    ///    need one async `reload()` first. `makeMenu` is then synchronous, so
-    ///    the menu opens fully rendered on its first frame.
-    ///  • The OBSERVER adopts whatever profile becomes active, whether the
-    ///    switch came from this menu or from the profile header with the
-    ///    comments still open. Listening to the broadcast rather than to the
-    ///    menu's own callback is what keeps the composer's face and the
-    ///    identity that posts the comment from drifting apart.
-    private func configureProfileSwitcher() {
-        viewerSubscriptions = [
-            viewerEvents?.onActiveProfileChange { [weak self] id in
-                self?.viewModel.adoptActiveViewer(id)
-            },
-            // Someone else is here now — most often a guest who just signed
-            // up from this composer's button: the face and the name re-read,
-            // and so does the menu of profiles to switch between.
-            viewerEvents?.onViewerChange { [weak self] in
-                self?.viewModel.reloadViewerIdentity()
-                self?.refreshProfileMenu()
-            },
-        ].compactMap { $0 }
-
-        refreshProfileMenu()
-    }
-
-    /// Reloads the switcher's profiles and counts, and arms the avatar to
-    /// open the app's one switcher (#2034) — switch-only: adding a profile is
-    /// the Profile feature's flow and this composer has no route to it.
-    private func refreshProfileMenu() {
-        guard let profileSwitcher else { return }
-        Task { [weak self] in
-            await profileSwitcher.reload()
-            guard let self else { return }
-            composeBar.setProfileSwitch { [weak self] source in
-                guard let self else { return }
-                profileSwitcher.present(
-                    from: .view(source), over: self, includesAddProfile: false,
-                    // The switch itself lands through the subscription above;
-                    // the reload here re-marks the active row for next time.
-                    onSwitch: { [weak self] in self?.refreshProfileMenu() },
-                    onAddProfile: {}
-                )
-            }
-        }
     }
 
     @objc func handleStreamTap() {
