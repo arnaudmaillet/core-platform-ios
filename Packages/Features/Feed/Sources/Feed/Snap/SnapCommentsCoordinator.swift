@@ -427,7 +427,7 @@ final class SnapCommentsCoordinator {
     /// The stand-in, for the flight's duration (charter PR 5b).
     func installRestingPlaceholder(for id: PostID, model: FeedItemDisplayModel, host cell: SnapFeedCell) {
         if let current = deferredResting {
-            cell.removeRestingPlaceholder(current.placeholder)
+            cell.commentsEngagement.removeRestingPlaceholder(current.placeholder)
         }
         let placeholder = RestingCommentsPlaceholderView(
             model: model, imagePipeline: host.imagePipeline, safeAreaTop: host.view.safeAreaInsets.top,
@@ -436,7 +436,7 @@ final class SnapCommentsCoordinator {
             // The caption's face wears what the panel's will (#2300).
             authorMark: host.followStore.badge(for: model.authorID)
         )
-        cell.installRestingPlaceholder(placeholder)
+        cell.commentsEngagement.installRestingPlaceholder(placeholder)
         deferredResting = (id, cell, placeholder)
         #if DEBUG
         print("[defer-resting] placeholder installed for \(id.rawValue) bounds=\(placeholder.bounds) container=\(placeholder.superview?.frame ?? .zero) hidden=\(placeholder.superview?.isHidden ?? true) alpha=\(placeholder.superview?.alpha ?? -1)")
@@ -470,7 +470,7 @@ final class SnapCommentsCoordinator {
             #if DEBUG
             print("[defer-resting] mount skipped: window=\(deferred.cell.window != nil) known=\(host.orderedIDs.contains(deferred.id))")
             #endif
-            deferred.cell.removeRestingPlaceholder(deferred.placeholder)
+            deferred.cell.commentsEngagement.removeRestingPlaceholder(deferred.placeholder)
             return
         }
         // `installRestingPanel` takes the placeholder down as it mounts; the
@@ -482,7 +482,7 @@ final class SnapCommentsCoordinator {
         print("[defer-resting] mounted engaged=\(commentsEngagedID?.rawValue ?? "none") content=\(commentsContentVC != nil) preview=\(previewRestingID?.rawValue ?? "none")")
         #endif
         deferredResting = nil
-        deferred.cell.removeRestingPlaceholder(deferred.placeholder, animated: false)
+        deferred.cell.commentsEngagement.removeRestingPlaceholder(deferred.placeholder, animated: false)
     }
 
     func presentRestingComments(for id: PostID, host cell: SnapFeedCell) {
@@ -589,7 +589,7 @@ final class SnapCommentsCoordinator {
             content.view.removeFromSuperview()
             content.removeFromParent()
             previewRestingCell?.setCommentsEngaged(false)
-            previewRestingCell?.clearComments()
+            previewRestingCell?.commentsEngagement.clearComments()
             if let id = previewRestingID { keepAsNeighbourWarm(content, for: id) }
         }
         previewRestingVC = nil
@@ -630,7 +630,7 @@ final class SnapCommentsCoordinator {
         let replacesStandIn = deferredResting?.cell === cell
         if let deferred = deferredResting, deferred.cell === cell {
             deferredResting = nil
-            cell.removeRestingPlaceholder(deferred.placeholder, animated: false)
+            cell.commentsEngagement.removeRestingPlaceholder(deferred.placeholder, animated: false)
         }
         content.view.backgroundColor = .clear
         // Inherited, exactly like the media panel — the cell decides.
@@ -979,7 +979,7 @@ final class SnapCommentsCoordinator {
             content.view.removeFromSuperview()
             content.removeFromParent()
         }
-        cell?.clearComments()
+        cell?.commentsEngagement.clearComments()
         // A panel kept for the next engagement starts back in place (#1730).
         (commentsContentVC as? PostDetailViewController)?.setOverlayOffset(0)
         // ⚠️ THE PAGE JUST LEFT KEEPS ITS PANEL (#2059): the feed pages back
