@@ -68,8 +68,8 @@ Columns: area | screen | element | gesture | response | handler (async note) | h
 ### For You → Shots / snap feed (`F/Feed/Sources/Feed/Snap/SnapFeedViewController.swift` unless noted)
 Reach with `-open-feed` and `-snap-start-index N` (`:1125`); the Shots tab went with For You (#2453). `-snap-start-paused` pauses. Pushed variant: `-open-post <id>`.
 
-- snap | SnapFeedCell | media | tap | play/pause | `handleBackgroundTap` `SnapFeedCell.swift:2868` → `togglePlayback` `:3108` | –
-- snap | SnapFeedCell | media | long press | hold (pause / speed) | `handleMediaHold` `SnapFeedCell.swift:2934` | –
+- snap | SnapFeedCell | media | tap | play/pause | `handleBackgroundTap` `SnapFeedCell.swift:992` → `togglePlayback` `:1134` | –
+- snap | SnapFeedCell | media | long press | hold (pause / speed) | `handleMediaHold` `SnapFeedCell.swift:996` | –
 - snap | SnapFeedCollectionView | pager | vertical swipe | next/previous post | collection paging | `-snap-fling [n]`, `-snap-scroll-demo`, `-snap-page-demo`
 - snap | SnapChromeView | caption | tap | expand caption | `captionTapped` `SnapChromeView.swift:379` | –
 - snap | SnapMediaPageBarView | carousel / scrub bar | tap / drag | page change / seek + scrub preview | `handleScrubGesture` `SnapMediaPageBarView.swift:916` | `-strip-browse`, `-strip-browse-release`
