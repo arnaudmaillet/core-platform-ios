@@ -131,7 +131,7 @@ final class SnapChromeView: UIView {
     /// Present on every MEDIA page and no text page — set from `configure`,
     /// never from the stream (see there for why the band's hidden state is
     /// the wrong authority for it).
-    private let boostButton = SnapRailBoostButton()
+    let boostButton = SnapRailBoostButton()
     /// The post's like count on the like button's corner (#668) — or, in the
     /// like pill (#669), under its heart.
     /// The post's like count — `configure`'s, then the live one
@@ -1959,6 +1959,9 @@ final class SnapChromeView: UIView {
 
     // MARK: - Boost feedback
 
+    /// The like pill's receipts for a spend (#2521).
+    private(set) lazy var boostReceipts = SnapBoostReceipts(host: self)
+
     /// The viewer's cumulative spend on the represented post — turns the like
     /// heart red (#668); the count moves through the store
     /// (`setPostLikeCount`). Owned by the cell's configurator (the chrome has
@@ -2022,100 +2025,6 @@ final class SnapChromeView: UIView {
     func setBoostContext(balance: Int, undoable: Int, stakeShots: Int = 0) {
         boostButton.setWalletContext(balance: balance, undoableAmount: undoable, stakeShots: stakeShots)
     }
-
-    /// The spend's visible receipt: a gold "+N" born on the boost anchor
-    /// that rises and dissolves; the anchor itself moves only by the glass's
-    /// own press. Pure theatre over state that already changed — the wallet
-    /// debited synchronously before this runs, so the animation can be
-    /// dropped (hidden anchor, mid-reuse) without the count going wrong.
-    func playBoostConfirmation(amount: Int) {
-        guard !boostButton.isHidden, boostButton.bounds.width > 0 else { return }
-
-        let label = UILabel()
-        label.text = "+\(amount)"
-        label.font = .scaledMonospacedDigitSystemFont(
-            ofSize: 17, weight: .heavy, relativeTo: .headline, maximumPointSize: 24
-        )
-        label.textColor = .systemYellow
-        // The scrim under it is a gradient, not a guarantee — the same
-        // legibility shadow the nav glyphs wear over live media.
-        label.layer.shadowColor = UIColor.black.cgColor
-        label.layer.shadowOpacity = 0.5
-        label.layer.shadowRadius = 3
-        label.layer.shadowOffset = .zero
-        label.sizeToFit()
-        label.center = CGPoint(x: boostButton.center.x, y: boostButton.frame.minY - Spacing.md)
-        label.alpha = 0
-        label.isUserInteractionEnabled = false
-        addSubview(label)
-
-        UIView.animateKeyframes(withDuration: 0.9, delay: 0, options: [.calculationModeCubic]) {
-            UIView.addKeyframe(withRelativeStartTime: 0, relativeDuration: 0.2) {
-                label.alpha = 1
-                label.center.y -= 18
-            }
-            UIView.addKeyframe(withRelativeStartTime: 0.2, relativeDuration: 0.55) {
-                label.center.y -= 26
-            }
-            UIView.addKeyframe(withRelativeStartTime: 0.55, relativeDuration: 0.45) {
-                label.alpha = 0
-            }
-        } completion: { _ in
-            label.removeFromSuperview()
-        }
-
-        // ⚠️ NO DIP OF ITS OWN (#1186): the pill is a glass button, whose
-        // native press already acknowledges the tap. A spring scale here ran
-        // on top of it and read as a tremble (the owner, on a device).
-    }
-
-    /// The refund's receipt: a cool "−N" that sinks and dissolves — the
-    /// confirmation float mirrored, in the direction money leaves the post.
-    /// White, not gold: gold is the earning color, and an undo is not a
-    /// payout.
-    func playBoostRefund(amount: Int) {
-        guard !boostButton.isHidden, boostButton.bounds.width > 0 else { return }
-        let label = UILabel()
-        label.text = "−\(amount)"
-        label.font = .scaledMonospacedDigitSystemFont(
-            ofSize: 17, weight: .heavy, relativeTo: .headline, maximumPointSize: 24
-        )
-        label.textColor = UIColor.white.withAlphaComponent(0.9)
-        label.layer.shadowColor = UIColor.black.cgColor
-        label.layer.shadowOpacity = 0.5
-        label.layer.shadowRadius = 3
-        label.layer.shadowOffset = .zero
-        label.sizeToFit()
-        label.center = CGPoint(x: boostButton.center.x, y: boostButton.frame.minY - Spacing.md)
-        label.alpha = 0
-        label.isUserInteractionEnabled = false
-        addSubview(label)
-        UIView.animateKeyframes(withDuration: 0.9, delay: 0, options: [.calculationModeCubic]) {
-            UIView.addKeyframe(withRelativeStartTime: 0, relativeDuration: 0.2) {
-                label.alpha = 1
-                label.center.y += 14
-            }
-            UIView.addKeyframe(withRelativeStartTime: 0.2, relativeDuration: 0.55) {
-                label.center.y += 20
-            }
-            UIView.addKeyframe(withRelativeStartTime: 0.55, relativeDuration: 0.45) {
-                label.alpha = 0
-            }
-        } completion: { _ in
-            label.removeFromSuperview()
-        }
-    }
-
-    /// The refusal: a horizontal head-shake on the anchor — the wallet
-    /// couldn't cover the spend, and nothing changed. Paired with the
-    /// error haptic the owner fires; deliberately no floating label (a
-    /// "-0" would read as a payout).
-    func playBoostDenied() {
-        guard !boostButton.isHidden else { return }
-        let shake = CAKeyframeAnimation(keyPath: "transform.translation.x")
-        shake.values = [0, -7, 6, -4, 3, -1, 0]
-        shake.duration = 0.4
-        shake.timingFunction = CAMediaTimingFunction(name: .easeOut)
-        boostButton.layer.add(shake, forKey: "boost.denied")
-    }
 }
+
+extension SnapChromeView: SnapBoostReceiptsHost {}
