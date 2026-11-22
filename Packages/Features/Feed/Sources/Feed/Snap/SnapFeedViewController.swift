@@ -41,9 +41,6 @@ final class SnapFeedViewController: UIViewController {
     /// item while a thread that has the tabs holds the engaged chrome — bound
     /// to that thread's panel.
     let commentTabs = CommentTabsSelector()
-    /// The nav bar's two trailing items, held so comment mode can add the
-    /// sort selector beside the author pill and take it away again.
-    private var sortItem = UIBarButtonItem()
     /// The back chevron's and the comments exit's identities (#1679): two
     /// items for UIKit, so the swap is its morph between them.
     static let backItemIdentifier = "feed.snap.back"
@@ -55,7 +52,6 @@ final class SnapFeedViewController: UIViewController {
     /// instance) and re-renders. Built only when a wallet is injected; a
     /// nil-wallet feed keeps its historical author-only run.
     let walletBadge = WalletBadgeButton()
-    private(set) var walletBadgeItem: UIBarButtonItem?
     /// The nav bar's LEADING item at rest: the back arrow, when the feed was
     /// opened onto a stack it can leave (never on the tab root). Built on
     /// first appearance, when the stack relationship is finally knowable.
@@ -134,13 +130,13 @@ final class SnapFeedViewController: UIViewController {
     private var lifecycleActiveID: PostID?
     /// The items are being swapped under the post on show (`render`): the
     /// pager's index means nothing until it is re-placed on that post.
-    private var isReplacingItems = false
+    private(set) var isReplacingItems = false
     /// The post on show and the surface its clip drew on as the items were
     /// swapped — for the page that shows it next to adopt (#1580).
-    private var reorderHeld: (id: PostID, surface: VideoRenderView?)?
+    private(set) var reorderHeld: (id: PostID, surface: VideoRenderView?)?
     /// The cell that showed the post on show as the items were swapped: it
     /// kept its comment surfaces running for it (#1798).
-    private weak var reorderHeldCell: SnapFeedCell?
+    weak var reorderHeldCell: SnapFeedCell?
     /// The flight flags, and what derives from them (`SnapFlightPhase`):
     /// re-stated on every present, because this controller is reused.
     var flight = SnapFlightPhase() {
@@ -202,9 +198,6 @@ final class SnapFeedViewController: UIViewController {
     /// Unregisters its notification tokens when this VC (and thus the bag) is
     /// released — a nonisolated deinit can't touch the VC's main-actor state.
     private let appObservers = NotificationTokens()
-    /// The wallet's changes, heard for this controller's lifetime.
-    private var walletObservation: StoreObservation?
-
     /// Builds the comments panel's content (the comments-only detail) for a
     /// post — injected by the feature builder so this VC needs none of the
     /// detail's dependencies. Nil disables the comments engagement.
@@ -259,49 +252,16 @@ final class SnapFeedViewController: UIViewController {
     /// same class of defect as a stale stand-in.
     public var onMediaPageChanged: ((PostID, Int) -> Void)?
 
-    /// The post whose carousel still owes an opening page — see
-    /// `openMediaPage(_:for:)`. Stored on the class because an extension
-    /// cannot hold state, which is where the seam it belongs to lives.
-    private var pendingMediaPage: (id: PostID, page: Int)?
-    /// The post that must open ALREADY SHOWING its comments — see
-    /// `openComments(for:)`.
-    private(set) var pendingCommentsID: PostID?
-    /// Transition-scoped: covers what a COLLAPSED card has no room for, for
-    /// the length of a reveal. See `installRevealVeil`.
-    private var revealVeil: RevealVeilView?
-    /// The source row's author band, borrowed for a flight — see
-    /// `installRevealAuthorBand`.
-    private var revealAuthorBand: PostAuthorBandView?
     /// The side list (#1425): nil on a screen that opted out.
     private(set) var sideList: SnapSideListController?
     /// The screen's horizontal swipe chain (#1525) — see `swipeStage`.
     private(set) var swipeArbiter: SwipeStageArbiter?
     /// A pull past either end of the side list closes it (#1580).
     private(set) var sideListEdgePull: SnapSideListEdgePull?
-    /// How far the pages' overlays sit down while the side list is open
-    /// (#1509): the band the bottom toolbar covers, in the page's space.
-    var sideListOverlayOffset: CGFloat = 0
-    /// The lists made so far, by the post they were opened from (#1509).
-    var sideListCache: [PostID: [FeedEntry]] = [:]
-    /// The post the side list was opened from, while it drives the card.
-    var sideListAnchor: PostID?
-    /// The post on show's clip, paused from its side-list tile (#1550);
-    /// nil when none.
-    var sideListPausedPost: PostID?
-    /// The paused clip whose stopped mark the side list's move is carrying
-    /// between the card and its tile (#1580); nil when no move carries one.
-    var sideListMarkCarry: PostID?
     #if DEBUG
     /// Every post activated, in order. Tests.
     var debugActivations: [PostID] = []
     #endif
-    /// ⚠️ THE LIST IS THE SOURCE'S, NOT THE POST ON SHOW'S (#1580, the
-    /// owner 2026-10-22): closed on a post picked in it, the list it was
-    /// picked from — the source post's "similar" posts — stays the one a
-    /// reopening shows, the card on that post, until the feed is taken up
-    /// again (a page change after the close). Nil: the next opening makes
-    /// the post on show's list.
-    private(set) var sideListResume: (anchor: PostID, shown: PostID)?
     /// Whether this screen installs the side list — every vertical feed does
     /// (#1473); a test sets its own before the view loads.
     var installsSideList = true
@@ -336,6 +296,38 @@ final class SnapFeedViewController: UIViewController {
     /// both bars' pill widths and the comments' day (`SnapAuthorBar`). Built
     /// on first use; building it does nothing else.
     private(set) lazy var authorBar = SnapAuthorBar(host: self)
+    /// What the bars and the page's chrome wear for the settled page
+    /// (`SnapSettledPageChrome`). Built on first use; building it does
+    /// nothing else.
+    private(set) lazy var settledPageChrome = SnapSettledPageChrome(host: self, soundState: soundState)
+    /// The device's appearance heard on the window, for the text pages built
+    /// ahead (`SnapDeviceAppearanceWatch`). Built on first use; building it
+    /// does nothing else.
+    private(set) lazy var deviceAppearanceWatch = SnapDeviceAppearanceWatch(host: self)
+    /// How far the pager may go: page readiness and the ceiling
+    /// (`SnapPageReadiness`). Built on first use; building it does nothing
+    /// else.
+    private(set) lazy var pageReadiness = SnapPageReadiness(host: self)
+    /// The no-post loader and the paging footer (`SnapPageLoaders`). Built on
+    /// first use; building it does nothing else.
+    private(set) lazy var pageLoaders = SnapPageLoaders(host: self)
+    /// The text reveal's veil and borrowed author band (`SnapRevealScenery`).
+    /// Built on first use; building it does nothing else.
+    private(set) lazy var revealScenery = SnapRevealScenery(host: self)
+    /// The opener's one-shot requests: a carousel's page, the comments open
+    /// (`SnapOpeningRequests`). Built on first use; building it does nothing
+    /// else.
+    private(set) lazy var openingRequests = SnapOpeningRequests(host: self)
+    /// The navigation bar: its appearance, both runs, the engaged chrome's
+    /// switch and the sort's availability (`SnapNavigationBarComposer`), the
+    /// only writer of the navigation items. Built on first use; building it
+    /// does nothing else.
+    private(set) lazy var navigationBarComposer = SnapNavigationBarComposer(
+        host: self, wallet: wallet, showsBalance: showsBalance
+    )
+    /// The side list's session and the swipe chain (`SnapSideListSession`).
+    /// Built on first use; building it does nothing else.
+    private(set) lazy var sideListSession = SnapSideListSession(host: self, videoPlayback: videoPlayback)
     /// The boost on screen: the gate, the theatre, the stake toast and the
     /// boost anchors (`SnapBoostDrive`). Built on first use; building it does
     /// nothing else.
@@ -493,7 +485,7 @@ final class SnapFeedViewController: UIViewController {
             edgePull.install(in: view, pager: collectionView)
             sideListEdgePull = edgePull
         }
-        configureNavigationItem()
+        navigationBarComposer.configureNavigationItem()
         toolbarComposer.configureToolbarItems()
         configureStatusLabel()
         observeAppLifecycle()
@@ -567,7 +559,7 @@ final class SnapFeedViewController: UIViewController {
             didStartLoading = true
             // The view model says nothing until a page lands: the loader is
             // armed here, for a feed that opens on no post (#1765).
-            if orderedIDs.isEmpty { setFirstPageWaiting(true) }
+            if orderedIDs.isEmpty { pageLoaders.setFirstPageWaiting(true) }
             viewModel.viewDidLoad()
         }
     }
@@ -779,7 +771,7 @@ final class SnapFeedViewController: UIViewController {
         }
         // Install through the same resolver the engagement uses, so
         // re-appearing under a text page's engagement keeps its sort.
-        applyLeadingNavItem(engaged: commentsEngagedID != nil, hasMedia: false, animated: false)
+        navigationBarComposer.applyLeadingNavItem(engaged: commentsEngagedID != nil, hasMedia: false, animated: false)
         toolbarComposer.presentToolbar()
         // Re-borrow the bars for whatever page is settled: they are shared,
         // and anything pushed on top has since reset them.
@@ -904,7 +896,7 @@ final class SnapFeedViewController: UIViewController {
         if LaunchArgument.pillProbe.isPassed() { authorIdentityView.debugProbe("didAppear") }
         #endif
         hasAppeared = true
-        observeDeviceAppearance()
+        deviceAppearanceWatch.observeDeviceAppearance()
         // Again now that the toolbar's items are hosted: during a presentation
         // their glass container may not have existed yet (`toolbarGlassHost`).
         if let model = arrivalModel { applyChromeTheme(hasMedia: model.mediaURL != nil) }
@@ -1251,7 +1243,7 @@ final class SnapFeedViewController: UIViewController {
                     self?.soundPlayback.refreshAudibleSurface()
                     if let self, let index = self.lifecycle.activeIndex,
                        self.orderedIDs.indices.contains(index), self.orderedIDs[index] == id {
-                        self.updateBarChrome(at: index)
+                        self.settledPageChrome.updateBarChrome(at: index)
                     }
                 }
                 // ⚠️ THE DISMISSAL STANDS DOWN FOR A SCRUB.
@@ -1337,7 +1329,7 @@ final class SnapFeedViewController: UIViewController {
                 // The sound bubble (#671): its face, and its tap. No hold since
                 // #1931: the sound follows the device.
                 cell.setSoundFace(self.soundFace(for: model))
-                cell.setSlotSharesPost(self.slotSharesPost(model), holdArmsShare: self.slotHoldArmsShare(model))
+                cell.setSlotSharesPost(true, holdArmsShare: self.slotHoldArmsShare(model))
                 cell.onRequestSoundSheet = { [weak self] in self?.presentSoundSheet() }
                 // Its way back, while the comments are scrolled away (#1929).
                 cell.onRequestSoundReturn = { [weak self, weak cell] in
@@ -1353,62 +1345,37 @@ final class SnapFeedViewController: UIViewController {
         }
     }
 
-    /// Puts the screen chrome into (or out of) comment mode, both bars at
-    /// once — they are one state, and splitting them across call sites is
-    /// how a half-engaged bar happens.
-    ///
-    ///   resting          NAV [‹ back] … [🪙 solde] [author pill]
-    ///   comments (media) NAV [✕]      … [🪙 solde] [Popular | Recent] [author pill]
-    ///   comments (text)  NAV [‹ back] … [🪙 solde] [Popular | Recent] [author pill]
-    ///   TOOLBAR          [♫ attribution] … [🔖 ⬆︎] [⋯]   — in every state
-    ///
-    /// (The wallet badge appears only when a wallet is injected; a
-    /// nil-wallet feed keeps the historical runs without it.)
-    ///
-    /// `hasMedia` no longer changes the bar: it picked the leading slot for
-    /// the first comments space's ✕, gone with it (#2087) — a media post's
-    /// comments are a sheet with a bar of its own.
-    ///
-    /// Internal, not private, so the bar contracts are unit-testable without
-    /// driving a whole engagement — which needs a live cell, a hosted child,
-    /// and a spring to settle.
+    /// The navigation bar (`SnapNavigationBarComposer`), answered where the
+    /// author bar, the comments, the page drive and the tests ask the screen.
     func setEngagedChrome(_ engaged: Bool, hasMedia: Bool, animated: Bool) {
-        engagedChromeOnBar = engaged
-        engagedChromeHasMedia = hasMedia
-        // The bar pills' widths for the bars as they stand
-        // (`applyBarPillWidths`), in this same turn, under the bar's own item
-        // animation.
-        authorBar.applyBarPillWidths()
-
-        // ⚠️ READ RIGHT TO LEFT: `rightBarButtonItems[0]` is the one nearest
-        // the screen edge. The author pill is the toolbar's (#671), so this
-        // run holds the ✕ while a media post's thread is open — the way back
-        // to the picture — and the balance. A TEXT post's comments ARE the
-        // page: there is nothing to close.
-        //
-        // SET, don't ASSIGN (`applyTrailingNavItems`): the animated setter is
-        // the one that hands the change to the bar's own item animator. The
-        // fixed space keeps two pills apart — iOS 26 groups ADJACENT bar
-        // items into one shared glass platter.
-        applyTrailingNavItems(engagedTrailingItems(), animated: animated)
-
-        applyLeadingNavItem(engaged: engaged, hasMedia: hasMedia, animated: animated)
+        navigationBarComposer.setEngagedChrome(engaged, hasMedia: hasMedia, animated: animated)
     }
 
-    /// The trailing run as the bars stand, right to left: the ✕ while a media
-    /// post's thread is open, the points, and — engaged under Recent, once a
-    /// day chip has gone under the header — the day (#757).
-    func engagedTrailingItems() -> [UIBarButtonItem] {
-        guard engagedChromeOnBar else { return restingTrailingItems() }
-        // The comments' ✕ is the LEADING button now (#1192), not a trailing
-        // item.
-        var items: [UIBarButtonItem] = []
-        // The fixed spaces keep the pills apart: iOS 26 groups ADJACENT bar
-        // items into one shared glass platter.
-        for item in [walletBadgeItem, authorBar.commentsDayItem].compactMap({ $0 }) {
-            items += items.isEmpty ? [item] : [.fixedSpace(Spacing.sm), item]
-        }
-        return items
+    func engagedTrailingItems() -> [UIBarButtonItem] { navigationBarComposer.engagedTrailingItems() }
+
+    func applyTrailingNavItems(_ items: [UIBarButtonItem], animated: Bool) {
+        navigationBarComposer.applyTrailingNavItems(items, animated: animated)
+    }
+
+    var walletBadgeItem: UIBarButtonItem? { navigationBarComposer.walletBadgeItem }
+
+    var isCommentSortAvailable: Bool { navigationBarComposer.isCommentSortAvailable }
+
+    var engagedChromeOnBar: Bool {
+        get { navigationBarComposer.engagedChromeOnBar }
+        set { navigationBarComposer.engagedChromeOnBar = newValue }
+    }
+
+    var engagedChromeHasMedia: Bool { navigationBarComposer.engagedChromeHasMedia }
+
+    func setCommentTabsAvailable(_ available: Bool, animated: Bool = false) {
+        navigationBarComposer.setCommentTabsAvailable(available, animated: animated)
+    }
+
+    func syncCommentSortAvailability() { navigationBarComposer.syncCommentSortAvailability() }
+
+    func observeCommentCount(of detail: PostDetailViewController?) {
+        navigationBarComposer.observeCommentCount(of: detail)
     }
 
     /// The day pill on the bar, if any. Tests.
@@ -1416,121 +1383,9 @@ final class SnapFeedViewController: UIViewController {
     /// The trailing run as it stands. Tests.
     var debugTrailingItems: [UIBarButtonItem] { navigationItem.rightBarButtonItems ?? [] }
 
-    /// The resting run's items: the author pill alone (no wallet), or the
-    /// pill with the badge to its left, spacer-separated so iOS 26 never
-    /// fuses them into one platter.
-    private func restingTrailingItems() -> [UIBarButtonItem] {
-        // The pill is the toolbar's (#671): the nav bar holds the points alone.
-        return walletBadgeItem.map { [$0] } ?? []
-    }
-
     #if DEBUG
     var debugBackItem: UIBarButtonItem? { backItem }
     #endif
-
-    /// The leading slot's two faces:
-    ///
-    ///   media comments open → ✕ (collapse to the media layout)
-    ///   anything else       → the back arrow, if there is one
-    ///
-    /// TEXT POSTS KEEP THE BACK ARROW. Their engagement is the page's
-    /// permanent resting state, so a ✕ would promise a media layout that
-    /// does not exist — the same asymmetry that used to live in the
-    /// toolbar's trailing slot, now expressed in the slot where it reads as
-    /// a navigation choice instead of an action.
-    ///
-    /// A tab-root feed has no back arrow at rest, and gains a ✕ all the
-    /// same: the two answer different questions (leave the screen vs. leave
-    /// the layout), and only the second is always available.
-    ///
-    /// SET, don't ASSIGN — same reason as the trailing items: the animated
-    /// form hands the change to the bar's own item animator, so the ✕ morphs
-    /// into the arrow's place instead of popping over it.
-    /// ⚠️ THE ARROW STAYS, in every state.
-    ///
-    /// The comments exit used to take this slot on a media post, on the reading
-    /// that it means the same kind of thing one level in — leave what is open.
-    /// It cost the screen its way OUT while the layout was open: the arrow was
-    /// gone, so leaving the post meant closing the comments first and then
-    /// going back, two gestures for one intention. The exit lives at the other
-    /// end now, in the TRAILING nav slot the author pill holds at rest — so the
-    /// two ways out of a post are one at each end of the same bar, and neither
-    /// costs the other.
-    ///
-    /// ⚠️ SUPERSEDED (#1192, the owner 2026-10-15): while a MEDIA post's
-    /// comments are open, the ✕ item TAKES the arrow's place at the edge, and
-    /// the trailing ✕ is gone. Two items swapped through the animated setter,
-    /// so UIKit draws the change as it does every other bar change (#1197:
-    /// a symbol replace inside one button was not the bar's own transition).
-    private func applyLeadingNavItem(engaged: Bool, hasMedia: Bool, animated: Bool) {
-        // ⚠️ LEFT TO RIGHT here, unlike the trailing run: `leftBarButtonItems[0]`
-        // is the one nearest the screen edge. So this reads [‹ back] [Popular | Recent],
-        // the sort just inboard of the arrow, with the fixed space that keeps
-        // them two pills rather than one shared platter.
-        //
-        // The sort belongs at this end: it is a control over the thread, and
-        // this is the end that carries what the screen is DOING. The trailing
-        // end carries who the post is by.
-        var items = [backItem].compactMap { $0 }
-        if engaged, isCommentSortAvailable {
-            items += items.isEmpty ? [sortItem] : [leadingSortSpacer, sortItem]
-        }
-        // ⚠️ THE SPACES ARE KEPT TOO (#2331): fresh ones made every run look
-        // changed, and the bar was handed the same items again.
-        guard navigationItem.leftBarButtonItems ?? [] != items else { return }
-        navigationItem.setLeftBarButtonItems(items, animated: animated)
-    }
-
-    /// The leading run's space, kept as its items are (#2331).
-    private let leadingSortSpacer = UIBarButtonItem.fixedSpace(Spacing.sm)
-
-    /// Whether the engaged thread is long enough to be worth sorting — see
-    /// `CommentSortPolicy`. Until it is, the sort is not in the bar at all, and
-    /// the author pill has its width.
-    private(set) var isCommentSortAvailable = false
-
-    /// Whether the bar is WEARING the engaged chrome, which is not the same as
-    /// an engagement holding the slot: a text page mounts its engagement while
-    /// it is still being scrolled in, and a closing thread keeps its slot until
-    /// the animation's teardown — the bar is resting in both. A count arriving
-    /// then is kept for the next engaged chrome, not drawn onto a resting bar.
-    var engagedChromeOnBar = false
-    private(set) var engagedChromeHasMedia = false
-
-    /// Offers or withdraws the sort. Fed by the ENGAGED panel's comment count,
-    /// so a thread that reaches the threshold while it is open — the viewer's
-    /// own tenth comment — brings the sort in through the bar's own animation.
-    /// Internal for tests, which have no panel to count.
-    func setCommentTabsAvailable(_ available: Bool, animated: Bool = false) {
-        guard available != isCommentSortAvailable else { return }
-        isCommentSortAvailable = available
-        guard engagedChromeOnBar else { return }
-        // The widths first: the sort's word is decided before it is handed over.
-        authorBar.applyBarPillWidths()
-        applyLeadingNavItem(engaged: true, hasMedia: engagedChromeHasMedia, animated: animated)
-    }
-
-    /// Reads the answer off the panel about to own the engagement — BEFORE the
-    /// engaged chrome is built, so the bar comes up right the first time.
-    func syncCommentSortAvailability() {
-        isCommentSortAvailable = (commentsContentVC as? PostDetailViewController)?.showsPopular ?? false
-    }
-
-    /// The count, as it changes, from a panel that holds the engagement. A
-    /// panel that does not (a warm, a preview) is heard at its promotion
-    /// instead, through `syncCommentSortAvailability`.
-    func observeCommentCount(of detail: PostDetailViewController?) {
-        detail?.onCommentCountChange = { [weak self, weak detail] _ in
-            guard let self, let detail, self.commentsContentVC === detail else { return }
-            self.setCommentTabsAvailable(detail.showsPopular, animated: true)
-        }
-    }
-
-    func applyTrailingNavItems(_ items: [UIBarButtonItem], animated: Bool) {
-        // The screen's own items, through the toasts' door (#1420, #1679).
-        guard ownTrailingBarItems != items else { return }
-        setOwnTrailingBarItems(items, animated: animated)
-    }
 
     /// Whether a bar-item change may animate now: on screen, and not inside a
     /// presentation's transition, whose own bar animation already owns the
@@ -1539,81 +1394,6 @@ final class SnapFeedViewController: UIViewController {
         view.window != nil && transitionCoordinator == nil && !flight.isAwaitingAnyFlight
     }
 
-
-    private func configureNavigationItem() {
-        // Fully transparent bar over the full-bleed media, identical for every
-        // bar state so no scroll-edge transition ever fires. Set per-item (not
-        // on the bar) so pushed screens keep their normal bars with zero
-        // restore choreography.
-        let appearance = UINavigationBarAppearance()
-        appearance.configureWithTransparentBackground()
-        navigationItem.standardAppearance = appearance
-        navigationItem.scrollEdgeAppearance = appearance
-        navigationItem.compactAppearance = appearance
-
-        // The author identity rides the toolbar's leading item (#671), not
-        // the centered titleView: a pill per author, in an item under the
-        // author's identifier, so a new author is UIKit's item replacement
-        // (`showAuthor`, #1791). The feed's chrome stays identical on every
-        // entry path (menu push and pin flight), so nothing else may install
-        // items, here or from outside.
-        authorBar.wireAuthorIdentityView(authorIdentityView)
-        // No badge until the graph has answered for an author.
-        authorIdentityView.setFollowBadge(.none)
-        toolbarComposer.authorItem = toolbarComposer.makeAuthorItem()
-        sortItem = BarItems.container(id: "feed.snap.commentTabs", view: commentTabs.tabBar)
-        if wallet != nil {
-            // Tappable exactly when a sheet is wired: the badge opens the
-            // same claim sheet the map's does, from any post. Without one
-            // it stays display-only and must not swallow taps meant for
-            // the page.
-            walletBadge.isUserInteractionEnabled = makeWalletSheet != nil
-            if makeWalletSheet != nil {
-                walletBadge.addAction(
-                    UIAction { [weak self] _ in self?.presentWalletSheet() },
-                    for: .primaryActionTriggered
-                )
-            }
-            if showsBalance { walletBadgeItem = BarItems.container(id: BarItems.SharedID.walletBalance, view: walletBadge) }
-            // A grown count needs a re-measured wrapper, and the wrapper
-            // belongs to the ITEM: re-adding the same item hands the bar
-            // the same wrapper with the same frozen size (measured in-sim).
-            // A FRESH item is the only thing the bar measures anew.
-            walletBadge.onFittedWidthChange = { [weak self] in
-                guard let self, let old = self.walletBadgeItem,
-                      case var items = self.ownTrailingBarItems,
-                      let index = items.firstIndex(of: old) else { return }
-                let fresh = BarItems.container(id: BarItems.SharedID.walletBalance, view: self.walletBadge)
-                self.walletBadgeItem = fresh
-                items[index] = fresh
-                // The badge is the run's PRIORITY member: when it grows,
-                // the author's width shrinks by the same points — before the
-                // run is handed over, or it overflows into a `•••` on narrow
-                // bars. One of the few things that moves the pill's width.
-                self.authorBar.applyBarPillWidths()
-                self.setOwnTrailingBarItems(items, animated: false)
-            }
-            refreshWalletBadge()
-            // The badge (and every visible boost control) re-renders on
-            // every store change — a rail spend, a comments-bar spend, or a
-            // claim taken on the map while this screen sits in the stack
-            // below.
-            walletObservation = wallet?.changes.observeOnMain { [weak self] in
-                guard let self else { return }
-                self.refreshWalletBadge()
-                self.boostDrive.refreshVisibleBoostControls()
-            }
-        }
-        // Both pills' widths BEFORE their items are handed over: the bar reads
-        // a custom view's size at hand-over (memory `bar-item-wrapper-drift`).
-        authorBar.applyBarPillWidths()
-        setOwnTrailingBarItems(restingTrailingItems(), animated: false)
-
-
-        // Keep `title` (it feeds pushed screens' back labels) but suppress its
-        // centered rendering — the bar's center stays empty by design.
-        navigationItem.titleView = UIView()
-    }
 
     #if DEBUG
     /// The save glyph as drawn: its symbol and its spoken label.
@@ -1703,7 +1483,7 @@ final class SnapFeedViewController: UIViewController {
 
     // MARK: - Rendering
 
-    private func render(_ state: FeedViewModel.RenderState) {
+    func render(_ state: FeedViewModel.RenderState) {
         lastRenderState = state
         let previousModels = modelsByID
         // The post on show, to keep on show through a reorder (#1580) — the
@@ -1832,7 +1612,7 @@ final class SnapFeedViewController: UIViewController {
             if let active = lifecycle.activeIndex,
                orderedIDs.indices.contains(active),
                changed.contains(orderedIDs[active]) {
-                updateBarChrome(at: active)
+                settledPageChrome.updateBarChrome(at: active)
             }
         }
         // Turned unavailable in place, now that its page is in the items.
@@ -1861,7 +1641,7 @@ final class SnapFeedViewController: UIViewController {
         // The centred loader while there is no post to show at all (#1765):
         // a first launch on Shots — no page on the device yet — sat on a
         // blank black page until the network answered.
-        setFirstPageWaiting(state.phase == .loading && state.items.isEmpty)
+        pageLoaders.setFirstPageWaiting(state.phase == .loading && state.items.isEmpty)
         switch state.phase {
         case .loading, .content:
             statusView.isHidden = true
@@ -2030,17 +1810,11 @@ final class SnapFeedViewController: UIViewController {
                   let model = modelsByID[orderedIDs[indexPath.item]],
                   let cell = collectionView.cellForItem(at: indexPath) as? SnapFeedCell else { continue }
             cell.setSoundFace(soundFace(for: model))
-            cell.setSlotSharesPost(slotSharesPost(model), holdArmsShare: slotHoldArmsShare(model))
+            cell.setSlotSharesPost(true, holdArmsShare: slotHoldArmsShare(model))
         }
         if let model = activeModel { toolbarComposer.refreshFooterSound(for: model) }
         applyRailSlot(to: commentsContentVC)
         applyRailSlot(to: previewRestingVC)
-    }
-
-    /// Whether `model`'s slot is its Share (#1999): every page — a text post
-    /// has no sound, and a media post's moves to the footer.
-    func slotSharesPost(_ model: FeedItemDisplayModel) -> Bool {
-        true
     }
 
     /// Whether the way back's hold over Share arms it (#1999): a media
@@ -2073,12 +1847,8 @@ final class SnapFeedViewController: UIViewController {
         //     a media page's sound moves to the footer's trailing item;
         //   - scrolled away, any: the way back (#1929), the panel's call.
         let face = soundFace(for: model)
-        let sharesInSlot = slotSharesPost(model)
-        detail.setRailShare(
-            sharesInSlot ? { [weak self] in self?.presentShareSheet(for: id) } : nil,
-            holdArms: slotHoldArmsShare(model)
-        )
-        detail.setRailSoundFace(face, keepsSlot: face != nil || sharesInSlot)
+        detail.setRailShare({ [weak self] in self?.presentShareSheet(for: id) }, holdArms: slotHoldArmsShare(model))
+        detail.setRailSoundFace(face)
         // The composer on the page's breath (#1716, #1722).
         detail.setComposerLift(SnapActionColumn.bottomBreath)
         // A remote cover loads in the rail's own slot (#1772).
@@ -2197,77 +1967,10 @@ final class SnapFeedViewController: UIViewController {
     var debugShowsLoadingPage: Bool { commentsCoordinator.loadingPage != nil }
     #endif
 
-    /// The full-screen rule's loader (the owner, 2026-10-27) for a feed with no
-    /// post yet: at the centre, after `SnapMediaWait.grace`, so a page the
-    /// device already holds never flashes it.
-    private lazy var firstPageLoader: AppLoaderView = {
-        let spinner = AppLoaderView(size: .medium)
-        spinner.hidesWhenStopped = true
-        spinner.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(spinner)
-        NSLayoutConstraint.activate([
-            spinner.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            spinner.centerYAnchor.constraint(equalTo: view.centerYAnchor)
-        ])
-        return spinner
-    }()
-    /// The loader's timing — the kit's (`LoaderGate`, #1768) at the page's grace.
-    private lazy var firstPageGate = LoaderGate(grace: SnapMediaWait.grace) { [weak self] showing in
-        guard let self else { return }
-        if showing {
-            isFirstPageLoaderBuilt = true
-            view.bringSubviewToFront(firstPageLoader)
-            firstPageLoader.startAnimating()
-        } else if isFirstPageLoaderBuilt {
-            firstPageLoader.stopAnimating()
-        }
-    }
-
-    private func setFirstPageWaiting(_ waiting: Bool) {
-        waiting ? firstPageGate.begin() : firstPageGate.end()
-    }
-    /// Built on first need: most feeds open on posts and never show it.
-    private var isFirstPageLoaderBuilt = false
-
     #if DEBUG
-    /// Whether the no-post loader is up.
-    var debugShowsFirstPageLoader: Bool { isFirstPageLoaderBuilt && firstPageLoader.isAnimating }
+    /// Whether the no-post loader is up (`SnapPageLoaders`).
+    var debugShowsFirstPageLoader: Bool { pageLoaders.debugShowsFirstPageLoader }
     #endif
-
-    /// The spinner shown under the last reachable page, exactly as the timeline
-    /// shows one at the end of a loaded batch — because to the viewer it is the
-    /// same situation: there IS more, and it is not here yet.
-    private lazy var pagingFooter: AppLoaderView = {
-        let spinner = AppLoaderView(size: .medium)
-        spinner.hidesWhenStopped = true
-        spinner.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(spinner)
-        NSLayoutConstraint.activate([
-            spinner.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            spinner.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -24)
-        ])
-        return spinner
-    }()
-
-    /// Shows the spinner while the viewer is pulling against the readiness
-    /// ceiling, and only then.
-    ///
-    /// Driven from the scroll rather than from the settle: the whole point is
-    /// to answer the gesture that is happening now — a viewer who drags past
-    /// the last ready page sees why they cannot go further while they are still
-    /// pulling, and a settled feed shows nothing.
-    private func updatePagingFooter(for scrollView: UIScrollView) {
-        let page = scrollView.bounds.height
-        guard page > 0, !orderedIDs.isEmpty else { return }
-        let ceiling = CGFloat(reachableCeiling()) * page
-        let atCorpusEnd = reachableCeiling() >= orderedIDs.count - 1
-        let pulling = scrollView.contentOffset.y > ceiling + 1
-        if pulling, !atCorpusEnd {
-            pagingFooter.startAnimating()
-        } else {
-            pagingFooter.stopAnimating()
-        }
-    }
 
     /// The theme the DEVICE is in, which is not always the theme this screen is
     /// in: the feed pins itself dark while a photograph is settled, so anything
@@ -2277,119 +1980,14 @@ final class SnapFeedViewController: UIViewController {
         view.window?.traitCollection.userInterfaceStyle ?? .unspecified
     }
 
-    /// Where the device's appearance is heard, for the one thing this screen
-    /// styles with it explicitly — the text page built ahead of time
-    /// (`prewarmRestingComments`). The pages themselves listen on their own
-    /// (`SnapFeedCell.observeDeviceAppearance`, whose note says why it has to
-    /// be the WINDOW); the bars need nothing, since a text page leaves them
-    /// `.unspecified` and a media page pins them dark whatever the device says.
-    private weak var appearanceWindow: UIWindow?
-    private var appearanceRegistration: (any UITraitChangeRegistration)?
+    /// How far the pager may go (`SnapPageReadiness`), answered where the
+    /// page drive, the warm planner, the loaders, the scroll and the tests
+    /// ask the screen.
+    func isPageReady(_ index: Int) -> Bool { pageReadiness.isPageReady(index) }
 
-    private func observeDeviceAppearance() {
-        guard appearanceWindow !== view.window else { return }
-        if let registration = appearanceRegistration {
-            appearanceWindow?.unregisterForTraitChanges(registration)
-            appearanceRegistration = nil
-        }
-        appearanceWindow = view.window
-        appearanceRegistration = view.window?.registerForTraitChanges(
-            [UITraitUserInterfaceStyle.self]
-        ) { [weak self] (_: UIWindow, _: UITraitCollection) in
-            self?.deviceAppearanceDidChange()
-        }
-    }
+    var lastReachablePage: Int { pageReadiness.lastReachablePage }
 
-    /// A panel built ahead in the device's old style would otherwise arrive
-    /// in it and turn over at the mount, in front of the viewer — the one
-    /// thing building ahead exists to prevent. A handed-over loading page
-    /// already inherits (`.unspecified`) and is left alone.
-    private func deviceAppearanceDidChange() {
-        for warmed in restingWarm.values where warmed.overrideUserInterfaceStyle != .unspecified {
-            warmed.overrideUserInterfaceStyle = deviceInterfaceStyle
-        }
-    }
-
-    /// Whether a page can be shown without the viewer watching it assemble.
-    ///
-    /// A MEDIA page is ready as soon as its model is: the cover arrives into a
-    /// laid-out card and the page is legible without it. A TEXT page is not —
-    /// what a text page IS is its comments panel, so until that panel is built
-    /// the page is a black rectangle, and showing it is the defect this answers.
-    ///
-    /// ⚠️ A HOST WITH NO PANEL FACTORY HAS READY TEXT PAGES BY DEFINITION.
-    /// Without that line every text post would be permanently unreachable on
-    /// any surface that does not supply one — a far worse failure than the
-    /// pop-in, and silent.
-    func isPageReady(_ index: Int) -> Bool {
-        guard orderedIDs.indices.contains(index),
-              let model = modelsByID[orderedIDs[index]] else { return false }
-        guard model.mediaURL == nil, makeCommentsPanelContent != nil else { return true }
-        // ⚠️ ALL THREE PLACES A PANEL CAN BE, and leaving one out strands the
-        // viewer.
-        //
-        // A panel is built ahead (`restingWarm`), then MOUNTED into the
-        // incoming cell as a preview — which consumes the warm — and only later
-        // promoted to the engagement. Counting the first and the last but not
-        // the middle meant a page that was already on screen, fully drawn, read
-        // as "not ready": the ceiling stopped short of it and the pager refused
-        // to advance. Two text posts in a row could not be paged through at
-        // all, and the console showed only the hero grab correctly declining an
-        // upward drag — nothing about the page that was quietly unreachable.
-        return restingWarm.contains(model.id)
-            || previewRestingID == model.id
-            || commentsEngagedID == model.id
-    }
-
-    /// The furthest page the viewer may reach right now.
-    ///
-    /// Scans forward from where they are and stops at the first page that is
-    /// not ready — which for a run of text posts is one at a time, since only
-    /// the page immediately ahead is ever built. That is the intent: a page the
-    /// viewer cannot reach yet reads exactly like the end of the feed, which is
-    /// a state this app already has an answer for, rather than like a post that
-    /// renders itself while they look at it.
-    ///
-    /// Never behind the page they are on: a corpus that changes under a settled
-    /// viewer must not push them backwards.
-    var lastReachablePage: Int {
-        let last = max(0, orderedIDs.count - 1)
-        var index = min(settledPageIndex, last)
-        while index < last, isPageReady(index + 1) { index += 1 }
-        return index
-    }
-
-    /// The ceiling the pager actually uses: PREPARE, then allow.
-    ///
-    /// ⚠️ A GATE THAT CAN STRAND IS WORSE THAN THE POP-IN IT PREVENTS, and this
-    /// one stranded twice — each time on a state nobody had thought to count as
-    /// "ready", each time reported as the scroll simply not working, with
-    /// nothing in the trace to say why. That is the failure mode of asking a
-    /// question that can be wrong in a direction with no recovery.
-    ///
-    /// So the answer is not "is it ready" but "make it ready": the panel is
-    /// built synchronously, here, at the moment the viewer asks to move. A page
-    /// that can be prepared is reachable BECAUSE it was just prepared, and a
-    /// page that cannot be — no factory, no model yet — is reachable anyway,
-    /// because being stuck is not an outcome any viewer can act on.
-    ///
-    /// What remains gated is the only thing a viewer can understand: a page
-    /// whose data has not arrived. That is the end of the list, and the loader
-    /// says so.
-    func reachableCeiling() -> Int {
-        let last = max(0, orderedIDs.count - 1)
-        let settled = min(settledPageIndex, last)
-        guard settled < last, modelsByID[orderedIDs[settled + 1]] != nil else { return settled }
-        // ⚠️ THE NEXT PAGE ONLY, because the warm holds the window around the
-        // settled page (#2059) and one page forward is all a gesture can
-        // reach. Walking the run forward would push the
-        // previous page's panel out for a guess.
-        if !isPageReady(settled + 1) { prewarmRestingComments(for: orderedIDs[settled + 1]) }
-        // Past it, the only question left is whether the data has arrived.
-        var ceiling = settled + 1
-        while ceiling < last, modelsByID[orderedIDs[ceiling + 1]] != nil { ceiling += 1 }
-        return ceiling
-    }
+    func reachableCeiling() -> Int { pageReadiness.reachableCeiling() }
 
     // MARK: - Active-item lifecycle
 
@@ -2483,12 +2081,7 @@ final class SnapFeedViewController: UIViewController {
         // after the change that went missing.
         if let index { commentsCoordinator.reconcileRestingInterface(activeIndex: index) }
         sideList?.activePostDidChange(activePostID)
-        // A clip paused from its tile is left behind by a page change: the
-        // mark goes with it (#1550).
-        if let paused = sideListPausedPost, paused != activePostID {
-            sideListPausedPost = nil
-            sideList?.listView.setPausedMark(false, on: nil)
-        }
+        sideListSession.activePostDidChange()
     }
 
     // MARK: - Viewing history (#1344)
@@ -2503,7 +2096,7 @@ final class SnapFeedViewController: UIViewController {
     /// comments layout, which resigned the page before the dwell ran out.
     var viewHistory: PostViewHistoryStore?
 
-    private func apply(_ transition: SnapLifecycleDispatcher.Transition) {
+    func apply(_ transition: SnapLifecycleDispatcher.Transition) {
         if let resign = transition.resign {
             // Paging within the feed: the page stays alive and a swipe away, so
             // it keeps its player and simply stops advancing.
@@ -2545,7 +2138,7 @@ final class SnapFeedViewController: UIViewController {
             // Same settle-quantized seam that drives playback: both bar
             // surfaces (identity pill above, media attribution below) follow
             // the active page.
-            updateBarChrome(at: activate)
+            settledPageChrome.updateBarChrome(at: activate)
             // And the comment ticker: activation is what triggers (or
             // re-emits) the page's queue.
             if orderedIDs.indices.contains(activate) {
@@ -2601,71 +2194,6 @@ final class SnapFeedViewController: UIViewController {
                 }
             }
         }
-    }
-
-    private func updateBarChrome(at index: Int) {
-        guard orderedIDs.indices.contains(index),
-              let model = modelsByID[orderedIDs[index]] else { return }
-        // Usually a no-op for the pill: the scroll that brought this page in
-        // already swapped it when the picture changed owner
-        // (`updateViewportPlayback`). A page reached without a scroll (a jump,
-        // a landing) swaps here (#1791).
-        authorBar.showAuthor(model)
-        // The neighbours' faces, so the pill paged to next arrives wearing one.
-        for neighbour in [index - 1, index + 1] where orderedIDs.indices.contains(neighbour) {
-            if let url = modelsByID[orderedIDs[neighbour]]?.avatarURL {
-                SnapAuthorIdentityView.warmFace(url, pipeline: imagePipeline)
-            }
-        }
-        #if DEBUG
-        if LaunchArgument.pillProbe.isPassed() {
-            authorIdentityView.debugProbe("setAuthor \(model.authorName)")
-        }
-        #endif
-        // The neighbours' covers, so the sound bubble paged to next arrives
-        // wearing its own.
-        for neighbour in [index - 1, index + 1] where orderedIDs.indices.contains(neighbour) {
-            if let next = modelsByID[orderedIDs[neighbour]] {
-                SnapMediaAttributionView.warmCover(
-                    for: next, cover: attributionContent(for: next).cover, pipeline: imagePipeline
-                )
-            }
-        }
-        // And where the viewer stands with this author and the neighbours', so
-        // the pill's follow badge is decided before the page is.
-        for neighbour in [index, index - 1, index + 1] where orderedIDs.indices.contains(neighbour) {
-            if let author = modelsByID[orderedIDs[neighbour]]?.authorID {
-                followStore.resolve(for: author)
-            }
-        }
-        // The bars float over the PAGE, so their text has to know what kind
-        // of ground it is floating over. A media page is arbitrary and dark
-        // enough to want white-and-shadowed; a text page follows the system
-        // appearance, where white text on a white ground is just gone.
-        let overMedia = model.mediaURL != nil
-        applyChromeTheme(hasMedia: overMedia)
-        // The SHADOWS are not a theme question: they exist because the bars
-        // float over an arbitrary photo with no background of their own, and
-        // a text page's own ground makes them unnecessary. The colours now
-        // come from the theme above.
-        authorBar.authorOverMedia = overMedia
-        authorIdentityView.setOverMedia(overMedia)
-        toolbarComposer.refreshBookmarkGlyph(for: model.id)
-        toolbarComposer.applyToolbarPostActions(for: model.id)
-        // The page's sound bubble and the panel's rail slot (#671).
-        activeSnapCell?.setSoundFace(soundFace(for: model))
-        activeSnapCell?.setSlotSharesPost(slotSharesPost(model), holdArmsShare: slotHoldArmsShare(model))
-        // The footer's sound follows the page in place (#1999).
-        toolbarComposer.refreshFooterSound(for: model)
-        applyRailSlot(to: commentsContentVC)
-    }
-
-    /// What the attribution draws for `model`: the sound's line, and a cover
-    /// that is the SOUND's (`SnapSoundState.attribution`).
-    private func attributionContent(
-        for model: FeedItemDisplayModel
-    ) -> (sound: SnapMediaAttributionView.SoundCredit, cover: SnapMediaAttributionView.Cover) {
-        soundState.attribution(for: model)
     }
 
     // MARK: - Sound sheet
@@ -2754,323 +2282,6 @@ final class SnapFeedViewController: UIViewController {
     var debugLastWarmedWindow: [Int] { warmPlanner.debugLastWarmedWindow }
     #endif
 
-}
-
-// MARK: - Delegates
-
-extension SnapFeedViewController: UICollectionViewDelegate {
-    func collectionView(_ collectionView: UICollectionView, willDisplay cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
-        // Before any activation below: a page learnt unavailable (#1409)
-        // after its cell was configured — prefetched, off screen — is told
-        // now, so nothing of it starts.
-        if let snapCell = cell as? SnapFeedCell, let id = snapCell.representedPostID {
-            snapCell.setPostUnavailable(unavailablePostIDs.contains(id))
-        }
-        // A page coming on while the side list is open wears its pose (#1509).
-        (cell as? SnapFeedCell)?.setSideListOverlayOffset(sideListOverlayOffset)
-        // …and the content freeze's state, frozen or not (#1738).
-        if let snapCell = cell as? SnapFeedCell {
-            carouselFreeze.display(snapCell) { $0.setCarouselScrollEnabled($1) }
-        }
-        viewModel.willDisplayItem(at: indexPath.item)
-        // Recompute the active index (a new page may have become active), then —
-        // crucially — activate THIS cell if it's the active one. The dispatcher
-        // records the active index the instant a scroll settles or content
-        // loads, which can be before the cell exists; without this net that
-        // activation would be lost, since the index never changes again.
-        updateActiveItem()
-        // Stamp the flight deferral BEFORE any activation on this path. There
-        // are two activation sites — the settle-quantized one in `apply` and
-        // this net for cells that did not exist at settle time — and a present
-        // leg always takes THIS one, because the cell is realized by the very
-        // layout pass the presentation triggers. Stamping only in `apply` left
-        // the flag false exactly when it mattered.
-        (cell as? SnapFeedCell)?.defersPlaybackForFlight = flight.defersPlaybackForStagingFlight
-        if let snapCell = cell as? SnapFeedCell { zoomDestination.stampFlightMediaStart(on: snapCell) }
-        // The same net, for the picture: a page can be handed the screen while
-        // it is still being realized, and the hand-over reaches nothing. The
-        // page that owns the viewport is a fact about the SCROLL, so it is
-        // re-stated to every cell as it appears.
-        (cell as? SnapFeedCell)?.setOwnsViewport(playbackOwner == indexPath.item)
-        // And the sound follows the picture's owner, for the same reason.
-        if playbackOwner == indexPath.item { soundPlayback.refreshAudibleSurface(ownerCell: cell as? SnapFeedCell) }
-        if lifecycle.activeIndex == indexPath.item {
-            // ⚠️ THE HOLD, TOO, IS STAMPED HERE — `zoomTransitionWillBegin`
-            // held `activeSnapCell`, and on a finger's tap that cell does not
-            // exist yet (traced 25 September 2026: `setActive Y … held=N
-            // window=N`, then a pre-fill of nine bubbles into a band that
-            // was not in any window). Unheld, the ticker laid its train
-            // during the flight, and the page landed on an empty band with
-            // bubbles arriving from the right and no fade. Only the page
-            // that will be active is held: a neighbour realised during the
-            // flight would never be released.
-            if flight.isAwaitingZoomPresentation { (cell as? SnapFeedCell)?.setChromeHeldForFlight(true) }
-            (cell as? SnapCellLifecycle)?.willBecomeActive()
-        }
-        // A text page's resting interface PRE-RENDERS on visibility (not
-        // the settle-quantized active seam): the instant its cell begins
-        // displaying — while it is still scrolling in — its full engaged
-        // layout is mounted, so it slides into the viewport already
-        // formed instead of popping in at rest. This is the same
-        // visibility doctrine the ticker/subtitle surfaces below follow;
-        // the pager lock alone waits for settle (`lockRestingEngagement`).
-        // Slot-guarded (one engagement at a time), model presence REQUIRED
-        // (a missing model reads as "unknown", never "text-only").
-        if let snapCell = cell as? SnapFeedCell, orderedIDs.indices.contains(indexPath.item) {
-            let id = orderedIDs[indexPath.item]
-            // ⚠️ NOT GATED ON THE SLOT BEING FREE, and that gate is what made
-            // the arriving page blank.
-            //
-            // It reads as a guard against mounting twice, and it was — until
-            // the page being left began keeping its interface until its last
-            // pixel has gone. From then on the slot is ALWAYS held while the
-            // next page scrolls in, so this declined every time and the one
-            // path that mounts a preview was unreachable from the only place
-            // that calls it.
-            //
-            // What arrives is a text page with no panel: on a text post the
-            // caption lives INSIDE the panel, so the page is not merely
-            // undecorated, it is empty — white, no caption, no comments, just
-            // chrome. `presentRestingComments` makes this decision properly:
-            // engagement if the slot is free, preview if it is not.
-            if let model = modelsByID[id], model.mediaURL == nil {
-                if Self.defersRestingCommentsForFlight, flight.isAwaitingAnyFlight,
-                   commentsEngagedID == nil, commentsContentVC == nil {
-                    commentsCoordinator.installRestingPlaceholder(for: id, model: model, host: snapCell)
-                } else {
-                    commentsCoordinator.presentRestingComments(for: id, host: snapCell)
-                }
-            }
-            // PHASE 2, when this cell is ALREADY the active page.
-            //
-            // The settle path normally applies the lock, and normally it
-            // runs after the cell exists. A programmatic jump inverts that:
-            // `-snap-start-index` scrolls and settles in one turn, so the
-            // activation lands before the layout has realized the cell, the
-            // settle path finds nothing to mount, and the pre-render above
-            // arrives here afterwards — with no further activation coming,
-            // because the dispatcher is already on this page. The page kept
-            // the RESTING chrome for its whole life: no sort pill, and a
-            // caption cell measured under bars it no longer had.
-            //
-            // The active-index test is what keeps this phase 2 and not a
-            // second pre-render: a cell scrolling in normally is not the
-            // active page yet, so it falls through to the settle path
-            // exactly as before, and the pager is never locked mid-scroll.
-            // (Same test the `willBecomeActive` call above uses.)
-            if lifecycle.activeIndex == indexPath.item,
-               commentsEngagedID == id, commentsEngagementIsResting {
-                commentsCoordinator.lockRestingEngagement()
-            }
-            // And a MEDIA page warms its comments panel here for the same
-            // reason the lock above lands here: on a programmatic jump the
-            // settle runs before the layout has realized the cell, so the
-            // settle's own warm found nothing to host. Gated on being the
-            // ACTIVE page, so a page merely scrolling past never pays for a
-            // panel it will not open.
-            if lifecycle.activeIndex == indexPath.item,
-               let model = modelsByID[id], model.mediaURL != nil {
-                commentsCoordinator.prewarmComments(for: id, host: snapCell)
-            }
-        }
-        // Re-pull the cached streams BEFORE raising the visibility gate: a
-        // cell configured while the prefetch load was still in flight
-        // pulled `.empty` at dequeue, and the async push only reaches
-        // visible cells — this cell missed it. Synchronous on a cache hit,
-        // so the surfaces own their content when activation lands and the
-        // subtitle zone takes its INSTANT entrance (riding the swipe like
-        // static chrome) instead of the content-arrival fade after settle.
-        // (`updateCommentStreams` no-ops on identical content; still-
-        // uncached posts stay empty here and fade in when the push lands.)
-        if let snapCell = cell as? SnapFeedCell, orderedIDs.indices.contains(indexPath.item) {
-            snapCell.updateCommentStreams(viewModel.commentStreams(for: orderedIDs[indexPath.item]))
-        }
-        // Both comment surfaces render on VISIBILITY, not on the settle-
-        // quantized active seam: a page dragged partway in must already
-        // show its band flowing and its subtitle pill pinned, not pop them
-        // in at rest. (Video stays settle-gated — an AVPlayer per
-        // half-visible page is real cost; text layers aren't.)
-        (cell as? SnapFeedCell)?.setTickerStreaming(true)
-    }
-
-    func collectionView(_ collectionView: UICollectionView, didEndDisplaying cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
-        // Paged away: a voice post's voice stops where it is (#2207).
-        if let snapCell = cell as? SnapFeedCell, let id = snapCell.representedPostID {
-            VoicePlaybackHub.shared.stop(VoicePosts.playbackID(id))
-        }
-        // Belt-and-suspenders release: a cell scrolled fully off is never active,
-        // and this guarantees the resign even if it's recycled before a settle.
-        // Fully off screen: the loan goes back, because the grid behind is
-        // waiting for it and nothing here is going to draw again.
-        // ⚠️ EXCEPT the post on show's page recycled by the items' swap
-        // (#1580): its clip goes on, for the page that shows the post next to
-        // adopt (`handOverReorderedPlayback`).
-        if isReplacingItems, let snapCell = cell as? SnapFeedCell, let held = reorderHeld,
-           snapCell.representedPostID == held.id {
-            snapCell.resignKeepingPlayback()
-            // Its band and pill keep running through the swap (#1798).
-            reorderHeldCell = snapCell
-        } else {
-            (cell as? SnapCellLifecycle)?.didResignActive(releasingPlayback: true)
-            // The resign above no-ops for a cell that was displayed but never
-            // became active (a swiped-past page); its ticker must still stop.
-            (cell as? SnapFeedCell)?.setTickerStreaming(false)
-        }
-        // Free the resting engagement's slot when its pre-rendered cell
-        // leaves WITHOUT settling — a text page scrolled in (pre-rendered
-        // on visibility) then scrolled back out never activates, so the
-        // `apply` resign leg never fires for it; without this the slot
-        // stays stuck on an off-screen cell and the next text page can't
-        // pre-render. Never tears down the SETTLED engaged page (it stays
-        // put until a real page change).
-        if let engagedID = commentsEngagedID, commentsEngagementIsResting,
-           orderedIDs.indices.contains(indexPath.item),
-           orderedIDs[indexPath.item] == engagedID,
-           lifecycle.activeIndex != indexPath.item,
-           // UIKit calls this when the cell leaves the MODEL's viewport, which
-           // during a settle is a moment too early — see `isPostOnScreen`.
-           !commentsCoordinator.isPostOnScreen(engagedID) {
-            commentsCoordinator.finishCommentsDisengagement()
-            // The slot is free at last — and the page that is now active may
-            // have been showing a PREVIEW since it scrolled in, waiting for
-            // exactly this. Promoting is a field assignment; without it the
-            // preview would stay one for ever and its page would never own its
-            // own pager lock.
-            if let active = activePostID { commentsCoordinator.promoteRestingPreview(for: active) }
-        }
-    }
-
-    // A full-cell tap toggles play/pause (handled by the cell's own gesture),
-    // not navigation — so there is no `didSelectItemAt` routing. Comments open
-    // via the toolbar's more menu; the identity pill opens the profile.
-
-    func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
-        // A landing cover still waiting for the page's picture is an inert
-        // still of the post that opened; the viewer is now moving the pages
-        // under it, so it goes, and adopts nothing (`ZoomLandingLeftovers`).
-        if scrollView === collectionView { ZoomLandingLeftovers.clear(over: view) }
-        // The feed taken up again after a close: the next opening is the
-        // post on show's own list (#1580). The viewer's drag, never a settle
-        // — the close's own re-settle passes through other posts.
-        if scrollView === collectionView, !viewModel.isInSideListSession { sideListResume = nil }
-    }
-
-    /// ⚠️ THE FLICK STOPS AT THE LAST PAGE THAT IS READY.
-    ///
-    /// The pager's own paging is what carries a media page, and it will happily
-    /// land on a post whose interface has not been built — which is the black
-    /// rectangle that fills itself in. Clamping the TARGET rather than the live
-    /// offset keeps the drag itself free: the viewer can pull the next page
-    /// into view and see the loader under it, and the release settles back.
-    ///
-    /// A page that is not ready reads as the end of the feed, because that is
-    /// what it is for the moment: more is coming and it is not here yet.
-    func scrollViewWillEndDragging(
-        _ scrollView: UIScrollView,
-        withVelocity velocity: CGPoint,
-        targetContentOffset: UnsafeMutablePointer<CGPoint>
-    ) {
-        let page = scrollView.bounds.height
-        guard page > 0 else { return }
-        let ceiling = CGFloat(reachableCeiling()) * page
-        if targetContentOffset.pointee.y > ceiling {
-            targetContentOffset.pointee.y = ceiling
-        }
-    }
-
-    func scrollViewDidScroll(_ scrollView: UIScrollView) {
-        // ⚠️ NO ACTIVATION HERE. Activating at the halfway mark was tried, to
-        // start a video as soon as its page owned most of the screen, and it
-        // moved the SCROLL: activation runs the settle's whole choreography —
-        // which includes bringing the active page clear of the chrome — so the
-        // feed jumped to the next page in the middle of the gesture. Reported
-        // as worse than the delay it was meant to fix, and it was.
-        //
-        // Starting playback early has to be a playback-only path, not a second
-        // caller of the seam that owns everything else — which is exactly what
-        // `updateViewportPlayback` is: it moves the picture and touches
-        // nothing else on the screen.
-        // The items are being swapped under the post on show (#1580):
-        // nothing reads the visible cells now — asking forces a layout of the
-        // OLD items at the NEW offset, which takes the post's cell off screen
-        // and recycles it, its player with it.
-        guard !isReplacingItems else { return }
-        updateViewportPlayback()
-        updatePagingFooter(for: scrollView)
-        // The card's crop is in the pager's own space, which its scroll moves.
-        if scrollView === collectionView {
-            sideList?.pagerDidScroll()
-            updateSideListRing(scrollView)
-        }
-    }
-
-    func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
-        updateActiveItem()
-        updatePagingFooter(for: scrollView)
-    }
-
-    /// A programmatic animated scroll (the own-post reveal) ends here, never
-    /// in the drag callbacks — without it the page it lands on is never
-    /// settled.
-    func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
-        updateActiveItem()
-        updatePagingFooter(for: scrollView)
-    }
-
-    func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
-        if !decelerate {
-            updateActiveItem()
-        }
-        updatePagingFooter(for: scrollView)
-    }
-}
-
-// MARK: - SnapFeedSettleReporting
-
-/// Where the viewer stopped, published to presenters outside this package.
-///
-/// `activePostID` is already the answer every close inside Feed uses; the
-/// conformance simply lets the MAP ask the same question. It has to: the map
-/// stages its flight home when the dismissal begins, and the post it is flying
-/// away FROM is whatever the viewer paged to, which the map has no other way to
-/// learn — it handed over a list of ids and got back a `UIViewController`.
-extension SnapFeedViewController: SnapFeedSettleReporting {
-    public var settledPostID: PostID? { activePostID }
-
-    /// ⚠️ The SETTLED page's cell, not `activeSnapCell`. That one is gated on
-    /// visibility, which is the right gate for playback and the wrong one here:
-    /// by the time a dismissal asks, this screen is already reporting itself
-    /// invisible, so the visibility-gated cell answers about the wrong post or
-    /// about none at all.
-    /// The cell for the page the viewer stopped on.
-    ///
-    /// ⚠️ Not `activeSnapCell`, for the reason `settledCoverImage` states at
-    /// length: that one is gated on visibility, which is the right gate for
-    /// playback and the wrong one at a dismissal.
-    private var settledCell: SnapFeedCell? {
-        let index = settledPageIndex
-        guard orderedIDs.indices.contains(index) else { return nil }
-        return collectionView.cellForItem(at: IndexPath(item: index, section: 0)) as? SnapFeedCell
-    }
-
-    public var settledCoverImage: UIImage? {
-        let index = settledPageIndex
-        guard orderedIDs.indices.contains(index) else { return nil }
-        let cell = settledCell
-        let still = cell?.currentPageCover
-        #if DEBUG
-        // `-zoom-blend-log`: WHY there is no picture, which is the only part of
-        // this a caller cannot see. An inert blend has three quite different
-        // causes — an unrealized cell, a text page, a video with neither a
-        // decoded frame nor a poster — and they are the same nil.
-        if LaunchArgument.zoomBlendLog.isPassed(), still == nil {
-            print("[zoom-blend] no still at page \(index):"
-                + " cell=\(cell == nil ? "unrealized" : "realized")"
-                + " media=\(modelsByID[orderedIDs[index]]?.mediaURL?.lastPathComponent ?? "none")")
-        }
-        #endif
-        return still
-    }
 }
 
 // MARK: - ZoomTransitionDestination
@@ -3218,152 +2429,20 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         return models.filter { ($0.mediaURL != nil) == isMedia }
     }
 
-    /// Opens one post's carousel on a page other than its first.
-    ///
-    /// A ONE-SHOT instruction rather than a stored preference, and the
-    /// distinction matters on a feed the viewer scrolls: it applies to the
-    /// first configure of that post and is then forgotten, so paging back to
-    /// the post later — or a cell recycling onto it — starts where a fresh open
-    /// starts. A remembered page would make the same post open differently
-    /// depending on history nobody can see.
-    public func openMediaPage(_ page: Int, for id: PostID) {
-        pendingMediaPage = (id, page)
-        // ⚠️ AND APPLIED NOW IF THERE IS ANYTHING TO APPLY IT TO.
-        //
-        // The pending value is consumed by the data source's cell provider,
-        // which only runs when a cell is CONFIGURED. That covers the first
-        // open and nothing else: this screen is reused, so opening the same
-        // post again reaches a cell that is already built and still sitting on
-        // the page the viewer left it on. The instruction was then recorded and
-        // never read.
-        //
-        // What that looked like, measured with the page traced at activation:
-        // `card asked page=9` immediately followed by `cell activate page=4
-        // url=trailer.mp4`. The page displayed page 9 while warming page FOUR's
-        // clip — so it arrived showing page 9's poster, and the dismissal
-        // donated the surface it had warmed, sending the card home carrying the
-        // PREVIOUS clip. Reported precisely: "B arrives on the thumbnail, and
-        // the dismiss shows A".
-        //
-        // Cleared on success so the configure path cannot apply it a second
-        // time, and left pending when the cell is not realized yet — which is
-        // the first-open case the provider already handles.
-        guard let index = orderedIDs.firstIndex(of: id),
-              let cell = collectionView.cellForItem(at: IndexPath(item: index, section: 0))
-                  as? SnapFeedCell
-        else { return }
-        cell.showMediaPage(page)
-        pendingMediaPage = nil
-    }
+    /// The opening's one-shot requests (`SnapOpeningRequests`), answered
+    /// where the builder, the landing, the cell provider and the tests ask.
+    public func openMediaPage(_ page: Int, for id: PostID) { openingRequests.openMediaPage(page, for: id) }
 
-    /// Opens a post with its comments already engaged.
-    ///
-    /// A ONE-SHOT instruction, on the same terms as `openMediaPage(_:for:)` and
-    /// for the same reason: the feed is scrolled, and a remembered preference
-    /// would make paging back to this post — or a cell recycling onto it —
-    /// behave differently from a fresh open, on history nobody can see.
-    ///
-    /// ⚠️ APPLIED ON LANDING, never at push time. The engagement is ~115ms of
-    /// layout, and the flight is the one stretch of this screen's life where
-    /// that cost is visible: `prewarmComments` refuses to run during a
-    /// transition for exactly this reason, having measured the present leg's
-    /// first layout go from 36–64ms to 139–145ms. So the post arrives, and then
-    /// its comments come up — which is also the honest reading of the gesture,
-    /// since the card the viewer pressed is what the flight is carrying.
-    ///
-    /// `rect` fed the masked opening of the first comments space; the sheet
-    /// rises on its own, and it is ignored (#2087).
     public func openComments(for id: PostID, revealingFrom rect: CGRect? = nil) {
-        pendingCommentsID = id
-        // ⚠️ NOW, IF THERE IS ANYTHING TO DO IT TO — before the push, not after
-        // the landing.
-        //
-        // Applied on landing, the viewer watched the post arrive in its ordinary
-        // layout and THEN rearrange itself into the thread: two screens for one
-        // press. The engagement has to be the state the page is already in when
-        // it becomes visible, which means it has to happen before the flight
-        // starts, because during the flight is the one window this screen
-        // refuses to spend layout in.
-        //
-        // The cost is real and it moves rather than disappears: the delay now
-        // sits between the finger lifting and the card leaving, where it reads
-        // as latency, instead of inside the animation, where it reads as jank.
-        // Of the two that is the one to take — and there is nothing to animate
-        // yet, so the engagement is applied UNANIMATED and simply is the layout
-        // the page opens in.
-        loadViewIfNeeded()
-        // One layout pass, to give the request a cell to engage.
-        //
-        // ⚠️ WHERE THIS OPENING'S COST ACTUALLY IS, because two plausible
-        // answers were measured and are both wrong.
-        //
-        // Filmed against the same post opened the ordinary way: 350ms
-        // tap-to-settled, against 650–800ms here. The extra is NOT this call
-        // (57ms) and NOT an unresolved layout — a second `layoutIfNeeded` after
-        // the engagement measures 0.02ms, so `presentComments` has already
-        // resolved the tree. It is a stall of ~270–300ms at the LANDING, which
-        // shows up as the flight card sitting at full size for a quarter of a
-        // second before the thread appears under it.
-        //
-        // `syncEngagementAfterAppearance` is where that work is: at
-        // `viewDidAppear` it re-seats the composer and re-materializes its
-        // frost, saying in as many words that the window guard makes every
-        // earlier call a no-op and "the didAppear pass the one that lands".
-        // Moving the header frost AND the composer's into
-        // `zoomTransitionWillBegin` — the first moment there is a window and
-        // the last one where the card still hides everything — did not move the
-        // number, so the cost is not the materials alone. Both attempts were
-        // reverted rather than kept on a story.
-        view.layoutIfNeeded()
-        #if DEBUG
-        let __engaged = CACurrentMediaTime()
-        #endif
-        applyPendingComments(animated: false)
-        #if DEBUG
-        if LaunchArgument.engageProfile.isPassed() {
-            print(String(format: "[engage] pre-push engage %6.2f ms",
-                         (CACurrentMediaTime() - __engaged) * 1000))
-        }
-        #endif
+        openingRequests.openComments(for: id, revealingFrom: rect)
     }
 
-    /// Engages the comments a card asked for, once there is a page to engage
-    /// them on. Reading the request clears it, so a dismissal and a second open
-    /// start from nothing.
-    ///
-    /// Silent when the post has no cell yet — a feed pushed cold has no pages
-    /// until its first render, and the landing seam is what picks the request up
-    /// then. Which is why the request is only cleared once it is USED.
-    func applyPendingComments(animated: Bool) {
-        guard let id = pendingCommentsID else { return }
-        commentsCoordinator.presentComments(for: id, animated: animated)
-        // ⚠️ CONSUMED ONLY IF IT LANDED, and the difference is a whole defect.
-        //
-        // `presentComments` needs a REALIZED CELL, not just a row in the data
-        // source — and before the push this screen has been laid out at
-        // whatever size it was born with, so on the first open of a process
-        // there is often no cell yet. The request was cleared anyway, the
-        // engagement bailed silently, and the post opened in its ordinary
-        // layout. The SECOND open worked, because the feed controller is
-        // reused and by then has both.
-        //
-        // "I asked" and "it happened" are different facts, and only the second
-        // one may clear a one-shot.
-        //
-        // ⚠️ THE SHEET TOO (#2087): a media post's comments open in a sheet,
-        // which never takes `commentsEngagedID`; the request stayed armed,
-        // and the next appearance or landing opened the sheet again after the
-        // viewer had closed it.
-        if commentsEngagedID == id || commentsSheet?.postID == id { pendingCommentsID = nil }
-    }
+    func applyPendingComments(animated: Bool) { openingRequests.applyPendingComments(animated: animated) }
 
-    /// Takes the pending page for `id`, if there is one. Reading it clears it —
-    /// see `openMediaPage`.
-    func consumeInitialMediaPage(for id: PostID) -> Int? {
-        guard let pending = pendingMediaPage, pending.id == id else { return nil }
-        pendingMediaPage = nil
-        return pending.page
-    }
+    func consumeInitialMediaPage(for id: PostID) -> Int? { openingRequests.consumeInitialMediaPage(for: id) }
+
+    var pendingCommentsID: PostID? { openingRequests.pendingCommentsID }
+
 
     /// **THE TEXT REVEAL**. Where the active TEXT page draws its
     /// caption bubble, in `space` — the anchor a clip-window reveal matches to
@@ -3379,96 +2458,22 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         (commentsContentVC as? PostDetailViewController)?.revealCaptionAnchor(in: space)
     }
 
-    /// **THE TEXT REVEAL**. Covers everything below `cut` for the
-    /// length of a reveal, so a page opened from a COLLAPSED card shows no
-    /// more of itself than the card did — see `RevealVeilView`.
-    ///
-    /// Hosted on this screen's own view rather than on the page cell, because
-    /// it has to cover the comment stream and the composer as well, and those
-    /// are not the cell's. `nil` takes it away.
+    /// The text reveal's veil and borrowed author band (`SnapRevealScenery`),
+    /// answered where the reveal's installer and its flight ask the screen.
     public func installRevealVeil(below cut: CGFloat?, tint: UIColor?) {
-        revealVeil?.removeFromSuperview()
-        revealVeil = nil
-        guard let cut, let tint, cut < view.bounds.height else { return }
-        let veil = RevealVeilView(tint: tint)
-        // Hung a band ABOVE the cut, so the gradient reaches solid exactly AT
-        // it. Starting the ramp at the cut is what let the page's next line
-        // ride the whole flight as a grey ghost — see `RevealVeilView`.
-        let top = max(0, cut - RevealVeilView.fadeBand)
-        veil.frame = CGRect(
-            x: 0, y: top, width: view.bounds.width, height: view.bounds.height - top
-        )
-        veil.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        view.addSubview(veil)
-        revealVeil = veil
+        revealScenery.installRevealVeil(below: cut, tint: tint)
     }
 
-    /// Driven inside the flight's animation block, so the page unfolds as the
-    /// window opens and folds back as it closes — and scrubs with the finger
-    /// on a dismissal.
-    public func setRevealVeilOpacity(_ alpha: CGFloat) {
-        revealVeil?.alpha = alpha
-    }
+    public func setRevealVeilOpacity(_ alpha: CGFloat) { revealScenery.setRevealVeilOpacity(alpha) }
 
-    /// **THE TEXT REVEAL**. Puts the SOURCE row's author band into
-    /// this page for the length of a flight, at `top` in this view's own
-    /// coordinates — or takes it away with `nil`.
-    ///
-    /// ## Why the page borrows a header it does not have
-    ///
-    /// A card names its author above its caption; a page names it in the nav
-    /// pill instead, and has nothing in that strip at all. So the window a
-    /// viewer holds showed a blank band where the card shows a header, and the
-    /// card's own header had to fade in at the landing to cover the difference.
-    ///
-    /// A fade is the wrong tool twice over here. It is a fade of something
-    /// against NOTHING, which works — but it is also a fade at exactly the
-    /// moment this transition promises to be invisible, and the strip is the
-    /// one part of the window that never matched.
-    ///
-    /// With the band drawn INTO the page, the window shows what the card shows
-    /// from frame 0, and the swap at the landing is the identity rather than a
-    /// dissolve. It is scenery: no touches, no follow action, gone the moment
-    /// the flight is.
-    ///
-    /// Hosted on this screen's own view rather than on the page cell, for the
-    /// same reason the veil is — and positioned rather than laid out, so the
-    /// page's resting layout never learns it exists.
     public func installRevealAuthorBand(
         in rect: CGRect?, model: PostAuthorBandView.Model?, pipeline: ImagePipeline?
     ) {
-        revealAuthorBand?.removeFromSuperview()
-        revealAuthorBand = nil
-        guard let rect, let model else { return }
-        let band = PostAuthorBandView()
-        band.isUserInteractionEnabled = false
-        band.configure(with: model, imagePipeline: pipeline)
-        // Scenery, but scenery that has to match: the card this lands on wears
-        // a "...", and a control that pops in at the landing is the one frame
-        // the reveal exists to make invisible.
-        band.showMenuControlAsScenery()
-        band.alpha = 0
-        band.translatesAutoresizingMaskIntoConstraints = true
-        // The rect comes from the CAPTION ROW, already inset from the page's
-        // edge, and the band takes the caption's own inset inside it — which is
-        // exactly what the card does. Measuring from this view instead was the
-        // first version, and it put the band 16pt wider on each side than the
-        // card's: the page's caption is inset TWICE, once by the stream's
-        // section and once by the row, and only the second of those is the
-        // card's own.
-        band.frame = rect
-        band.autoresizingMask = [.flexibleWidth]
-        // ABOVE the veil: the veil covers what the page has too much of, and
-        // this is the one thing it has too little of.
-        view.addSubview(band)
-        revealAuthorBand = band
+        revealScenery.installRevealAuthorBand(in: rect, model: model, pipeline: pipeline)
     }
 
-    /// The prop's opacity, driven on the flight's progress — full when the
-    /// window is the card, gone when the page is itself.
-    public func setRevealAuthorBandOpacity(_ alpha: CGFloat) {
-        revealAuthorBand?.alpha = alpha
-    }
+    public func setRevealAuthorBandOpacity(_ alpha: CGFloat) { revealScenery.setRevealAuthorBandOpacity(alpha) }
+
 
     /// **THE TEXT REVEAL**. Lends the active page a ground for the
     /// length of a reveal — see `SnapFeedCell.setRevealGroundTint`.
@@ -3673,196 +2678,55 @@ extension SnapFeedViewController: ZoomTransitionDestination {
 
     // MARK: - Side list (#1425)
 
-    /// Whether a leftward drag born at `origin` (in this view) may open the
-    /// side list: nothing open over the page, nothing under the finger that
-    /// owns its own drags (the rail, an open panel), and a carousel with no
-    /// photo left to turn to — or a drag born in the trailing edge strip,
-    /// which opens it from any photo.
-    func sideListMayOpen(from origin: CGPoint) -> Bool {
-        // ⚠️ THE COMMENTS LAYOUT TOO (#1728, the owner): the open thread no
-        // longer blocks the chain — its list scrolls vertically, the chain is
-        // horizontal, and its composer still keeps its drags (below).
-        guard !collectionView.isDecelerating, !isKeyboardOnScreen, !orderedIDs.isEmpty else { return false }
-        // ⚠️ THE EDGE FIRST (#1592, the owner): the trailing strip — and the
-        // trailing column standing at it — win over everything under them.
-        if isInTrailingEdge(origin) || isOnTrailingColumn(origin) { return true }
-        let point = collectionView.convert(origin, from: view)
-        if let hit = collectionView.hitTest(point, with: nil) {
-            for current in sequence(first: hit, next: { $0.superview }) {
-                if current is SnapShortcutRailView || current is SnapWheelGlassView || current is SnapRailBoostButton || current is CommentsInputBar {
-                    return false
-                }
-            }
-        }
-        return MediaCarouselTouchRouting.dragPassesThroughCarousel(
-            at: point, in: collectionView, towardsPageDelta: 1
-        )
+    /// The side list's session and the swipe chain (`SnapSideListSession`),
+    /// answered where the arbiter, the side list, its edge pull and the tests
+    /// ask the screen.
+    func isInTrailingEdge(_ origin: CGPoint) -> Bool { sideListSession.isInTrailingEdge(origin) }
+
+    func isOnTrailingColumn(_ origin: CGPoint) -> Bool { sideListSession.isOnTrailingColumn(origin) }
+
+    func swipeStage(for direction: SwipeDirection, at origin: CGPoint) -> SwipeStage? {
+        sideListSession.swipeStage(for: direction, at: origin)
     }
 
-    /// Whether `origin` (in this view) lies in the trailing edge strip.
-    func isInTrailingEdge(_ origin: CGPoint) -> Bool {
-        view.bounds.maxX - origin.x <= PagedScreenDismissalPolicy.trailingEdgeZone
-    }
+    func swipePushDidEnd(committed: Bool) { sideListSession.swipePushDidEnd(committed: committed) }
 
-    /// ⚠️ THE TRAILING COLUMN IS THE EDGE (the owner, 2026-10-22): the emote
-    /// rail, the like bubble and the sound bubble stand at the screen's edge,
-    /// so a leftward drag born on one of them is a drag "from the right edge"
-    /// — the author's profile. Nothing of theirs is lost: the rail scrolls on
-    /// VERTICAL drags only (`SnapShortcutRailView.gestureRecognizerShouldBegin`)
-    /// and the bubbles answer taps.
-    func isOnTrailingColumn(_ origin: CGPoint) -> Bool {
-        let point = collectionView.convert(origin, from: view)
-        guard let hit = collectionView.hitTest(point, with: nil) else { return false }
-        return sequence(first: hit, next: { $0.superview }).contains {
-            $0 is SnapShortcutRailView || $0 is SnapWheelGlassView || $0 is SnapRailBoostButton || $0 is SnapSoundBubbleButton
-        }
+    func swipePushWillBegin() { sideListSession.swipePushWillBegin() }
+
+    func sideListCandidates() async -> [FeedEntry] { await sideListSession.sideListCandidates() }
+
+    var isSideListSessionActive: Bool { sideListSession.isSideListSessionActive }
+
+    func beginSideListSessionIfNeeded() { sideListSession.beginSideListSessionIfNeeded() }
+
+    func liveVideoSurface(for id: PostID) -> VideoRenderView? { sideListSession.liveVideoSurface(for: id) }
+
+    func closeSideListForDismissal() { sideListSession.closeSideListForDismissal() }
+
+    var sideListResumeAnchor: PostID? { sideListSession.sideListResumeAnchor }
+
+    func settlePager(onIndex index: Int) { sideListSession.settlePager(onIndex: index) }
+
+    func showSideListEntry(_ entry: FeedEntry) { sideListSession.showSideListEntry(entry) }
+
+    func sideListPoseDidChange(progress: CGFloat) { sideListSession.sideListPoseDidChange(progress: progress) }
+
+    var sideListEdgePulls: SnapSideListEdgePull.Directions { sideListSession.sideListEdgePulls }
+
+    var sideListBars: UIEdgeInsets { sideListSession.sideListBars }
+
+    func setSideListOverlayOffset(_ offset: CGFloat) { sideListSession.setSideListOverlayOffset(offset) }
+
+    func sideListDidSettle(open: Bool) { sideListSession.sideListDidSettle(open: open) }
+
+    var sideListPausedPost: PostID? {
+        get { sideListSession.sideListPausedPost }
+        set { sideListSession.sideListPausedPost = newValue }
     }
 
     // MARK: - The swipe chain (#1525)
 
-    /// ⚠️ THE LEFTWARD SWIPE CHAIN (#1525, the owner 2026-10-21):
-    /// - a **media** post, the list closed: the side list opens (the
-    ///   carousel's own photos first — `sideListMayOpen`);
-    /// - a **text** post: no list (media posts only, the owner) — the
-    ///   author's profile is pushed, following the finger;
-    /// - the list **open**: a leftward drag pushes the author of the post on
-    ///   the CARD (the list's current item, not the anchor); a rightward one
-    ///   closes the list;
-    /// - from the **right edge** or the action column (#1592, the owner
-    ///   2026-10-22): the author's profile at once, skipping the list — except
-    ///   on a **carousel**, where it opens the list (#1720).
-    func swipeStage(for direction: SwipeDirection, at origin: CGPoint) -> SwipeStage? {
-        guard let sideList, !sideList.isSettling else { return nil }
-        if sideList.isOpen {
-            switch direction {
-            case .rightward: return .panel(sideList)
-            case .leftward:
-                // Not from the list itself (its tiles scroll and tap).
-                guard !sideList.listView.frame.contains(origin) else { return nil }
-                return authorPushStage()
-            }
-        }
-        guard direction == .leftward, sideListMayOpen(from: origin) else { return nil }
-        let model = activePostID.flatMap { modelsByID[$0] }
-        if isInTrailingEdge(origin) || isOnTrailingColumn(origin) {
-            // ⚠️ A CAROUSEL'S EDGE OPENS THE LIST (#1720, the owner): its
-            // middle pages through its photos, so the edge is the way to the
-            // similar posts. Any other post's edge pushes the author.
-            if let model, model.isCollection { return .panel(sideList) }
-            return authorPushStage()
-        }
-        guard let model else { return nil }
-        return model.mediaURL != nil ? .panel(sideList) : authorPushStage()
-    }
-
-    /// The push of the shown post's author — made now, so a screen with no
-    /// router (or no author) answers no stage at all.
-    private func authorPushStage() -> SwipeStage? {
-        guard let author = activePostID.flatMap({ modelsByID[$0] })?.authorID,
-              let profile = viewModel.authorProfileDestination(author) else { return nil }
-        return .push { profile }
-    }
-
     var swipeNavigationController: UINavigationController? { navigationController }
-
-    /// ⚠️ BACK FROM THE PROFILE, THE POST IS FULL SCREEN (#1525, the owner):
-    /// a committed push closes the list behind the profile, without
-    /// animation — the post on show stays the current page, placed after
-    /// the anchor (#1509).
-    func swipePushDidEnd(committed: Bool) {
-        // The pager pages again — unless the list, still open after a
-        // cancelled push, keeps it frozen as its own settle does.
-        if !(sideList?.isEngaged ?? false) { setContentScrollEnabled(true) }
-        guard committed, let sideList, sideList.isOpen || sideList.isEngaged else { return }
-        sideList.settle(open: false, animated: false)
-    }
-
-    /// The pager holds still under the finger's push.
-    func swipePushWillBegin() {
-        setContentScrollEnabled(false)
-    }
-
-    /// ⚠️ THE POST ON SHOW, THEN SIMILAR POSTS (#1509): the list is
-    /// `[the post on show] + current posts of the feed's kind (#1421), none
-    /// already in the feed, in a random order` — the "similar" half behind
-    /// one seam (`sideListEntries`), so posts sharing a hashtag replace it as
-    /// a data change. One list per anchor, kept while the screen lives: the
-    /// same post opens on the same list.
-    func sideListCandidates() async -> [FeedEntry] {
-        guard let anchor = activePostID else { return [] }
-        if let cached = sideListCache[anchor] { return cached }
-        async let similar = sideListEntries?() ?? []
-        async let shown = viewModel.entry(for: anchor)
-        let (entries, anchorEntry) = await (similar, shown)
-        let inFeed = Set(orderedIDs)
-        let kind: SnapFeedKindScope? = modelsByID[anchor].map { $0.mediaURL == nil ? .text : .media }
-        var seen: Set<PostID> = [anchor]
-        let others = entries.filter { entry in
-            guard !inFeed.contains(entry.post.id), seen.insert(entry.post.id).inserted else { return false }
-            return kind == nil || SnapFeedKindScope(entry) == kind
-        }.shuffled()
-        let list = (anchorEntry.map { [$0] } ?? []) + others
-        sideListCache[anchor] = list
-        return list
-    }
-
-    /// Whether the side list drives the card now (#1509).
-    var isSideListSessionActive: Bool { viewModel.isInSideListSession }
-
-    /// The list is open and loaded: the card pages through it (#1509) — the
-    /// feed set aside untouched, the pager on the post on show, the list's
-    /// first item.
-    func beginSideListSessionIfNeeded() {
-        guard let sideList, sideList.isOpen, !viewModel.isInSideListSession, let shown = activePostID else { return }
-        let entries = sideList.listView.entries
-        // Reopened on a post picked in the last list: that list again, the
-        // card on the post at its place in it (#1580).
-        let resumed = sideListResume.flatMap { resume in
-            resume.shown == shown && entries.first?.post.id == resume.anchor
-                && entries.contains(where: { $0.post.id == shown }) ? resume.anchor : nil
-        }
-        guard let anchor = resumed ?? (entries.first?.post.id == shown ? shown : nil) else { return }
-        Task { [weak self] in
-            guard let self, await viewModel.beginSideListSession(anchor: anchor, entries: entries) else { return }
-            sideListAnchor = anchor
-            settlePager(onIndex: orderedIDs.firstIndex(of: shown) ?? 0)
-        }
-    }
-
-    /// One context for every still: making one per call is costly.
-    private static let stillContext = CIContext(options: [.useSoftwareRenderer: false])
-
-    /// The frame `surface` is drawing now, as an image (#1581).
-    private static func stillImage(of surface: VideoRenderView) -> UIImage? {
-        guard let buffer = surface.currentFrameBuffer else { return nil }
-        let image = CIImage(cvPixelBuffer: buffer)
-        guard let cg = stillContext.createCGImage(image, from: image.extent) else {
-            return nil
-        }
-        return UIImage(cgImage: cg)
-    }
-
-    /// The surface `id`'s page draws its clip on, while that page is the
-    /// post on show (#1581: the side list's tile mirrors it).
-    func liveVideoSurface(for id: PostID) -> VideoRenderView? {
-        guard activePostID == id else { return nil }
-        return settledSnapCell?.liveVideoSurface
-    }
-
-    /// The list closed, unseen, as the screen leaves (`viewDidDisappear`).
-    func closeSideListForDismissal() {
-        if let sideList, sideList.isEngaged || sideList.isOpen {
-            sideList.settle(open: false, animated: false)
-        }
-        sideListResume = nil
-    }
-
-    /// The source post whose list a reopening keeps, while it holds
-    /// (`sideListResume`).
-    var sideListResumeAnchor: PostID? {
-        guard let resume = sideListResume, resume.shown == activePostID else { return nil }
-        return resume.anchor
-    }
 
     /// ⚠️ THE POST ON SHOW STAYS ON SHOW THROUGH A REORDER (#1580, the
     /// owner's device check): the side list opening or closing swaps the
@@ -3893,7 +2757,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     /// departing page keeps its clip (`resignKeepingPlayback`) and the
     /// arriving one takes the same player over — bound alongside, then
     /// adopted — so the clip never stops.
-    private func handOverReorderedPlayback() {
+    func handOverReorderedPlayback() {
         let keptSurfaces = reorderHeldCell
         defer {
             reorderHeld = nil
@@ -3920,162 +2784,9 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         if !cell.isLifecycleActive { cell.willBecomeActive() }
     }
 
-    /// The pager on page `index`, at once, and the page made active.
-    func settlePager(onIndex index: Int) {
-        let page = collectionView.bounds.height
-        guard page > 0, orderedIDs.indices.contains(index) else { return }
-        UIView.performWithoutAnimation {
-            collectionView.setContentOffset(CGPoint(x: 0, y: CGFloat(index) * page), animated: false)
-            collectionView.layoutIfNeeded()
-        }
-        updateActiveItem()
-    }
-
-    /// The list closed (#1509): the feed comes back as it was. The post on
-    /// show STAYS full screen — placed right after the anchor, so a swipe up
-    /// continues the feed from there — however the list closed: rightward,
-    /// or pulled past either end (#1580).
-    private func endSideListSession() {
-        guard viewModel.isInSideListSession, let anchor = sideListAnchor else { return }
-        sideListAnchor = nil
-        sideListResume = activePostID.map { (anchor, $0) }
-        guard let index = viewModel.endSideListSession(anchor: anchor, keeping: activePostID) else { return }
-        settlePager(onIndex: index)
-    }
-
-    /// ⚠️ THE RING FOLLOWS THE CARD'S SCROLL (#1546, the owner 2026-10-21):
-    /// between two posts, the two tiles' rings share the way — half each
-    /// half way — so the ring fades across under the finger and back on a
-    /// cancelled swipe. A jump with no finger (a tile's tap) fades it.
-    private func updateSideListRing(_ scrollView: UIScrollView) {
-        guard let sideList, sideList.isOpen, viewModel.isInSideListSession else { return }
-        let page = scrollView.bounds.height
-        guard page > 0, !orderedIDs.isEmpty else { return }
-        let position = min(max(scrollView.contentOffset.y / page, 0), CGFloat(orderedIDs.count - 1))
-        let lower = Int(position.rounded(.down))
-        let fraction = position - CGFloat(lower)
-        var weights: [PostID: CGFloat] = [:]
-        if orderedIDs.indices.contains(lower) { weights[orderedIDs[lower]] = 1 - fraction }
-        if fraction > 0, orderedIDs.indices.contains(lower + 1) {
-            weights[orderedIDs[lower + 1], default: 0] += fraction
-        }
-        let byFinger = scrollView.isTracking || scrollView.isDecelerating
-        sideList.listView.setRing(weights, animated: !byFinger)
-    }
-
-    /// A post picked in the list: the card moves to it — the list's own
-    /// item, nothing injected into the feed (#1509).
-    ///
-    /// ⚠️ AT ONCE (#1548, the owner 2026-10-21): no scroll through the posts
-    /// in between, the card shows the chosen one in the next frame. The
-    /// pager stays in the list's order, so a swipe from there reaches its
-    /// real neighbours.
-    func showSideListEntry(_ entry: FeedEntry) {
-        // ⚠️ THE POST ON SHOW'S OWN TILE PAUSES IT (#1550): while the list
-        // is open, the card closes the list on a tap, so the clip is paused
-        // and resumed from its tile, which wears the stopped mark.
-        if entry.post.id == activePostID {
-            toggleSideListPlayback()
-            return
-        }
-        guard viewModel.isInSideListSession,
-              let index = orderedIDs.firstIndex(of: entry.post.id) else { return }
-        // ⚠️ THE CARD TAKES THE TILE'S OWN PLAYER (#1581, the owner's
-        // recording): started fresh, even at the tile's second, the card and
-        // the tile both showed the post's cover until a first frame — the
-        // flash on every pick. The tile's player is handed over instead, on
-        // the frame it is showing: the card draws it at once (bound
-        // alongside, then adopted, filed under the post's own scope, its cap
-        // raised to a page's), and the tile goes on drawing it as the
-        // card's mirror. A tile with no player of its own falls back to a
-        // start at its second.
-        let id = entry.post.id
-        let handoff = sideList?.listView.tilePlayhead(for: id)
-        let tileSurface = sideList?.listView.autoplay?.handOver(id)
-        if tileSurface == nil, let handoff {
-            videoPlayback?.prepareStart(of: handoff.url, scope: id.rawValue, at: handoff.seconds)
-        }
-        settlePager(onIndex: index)
-        guard let videoPlayback, let card = liveVideoSurface(for: id) else { return }
-        // The frame the tile is showing, as the card's poster until its own
-        // layer draws (a frame or so): never the post's cover.
-        if let tileSurface, let still = Self.stillImage(of: tileSurface) { card.setPoster(still) }
-        if let tileSurface, card !== tileSurface,
-           videoPlayback.attachSurface(card, alongsideSurface: tileSurface),
-           videoPlayback.adoptSurface(card, replacing: tileSurface) {
-            videoPlayback.rescope(card, to: id.rawValue)
-            videoPlayback.setPeakBitRate(MediaPlaybackPolicy.peakBitRate, in: card)
-            card.revealOnFirstFrame()
-            soundPlayback.refreshAudibleSurface()
-            sideList?.listView.reconcileNow()
-        } else if let handoff, videoPlayback.hasPlayer(in: card) {
-            videoPlayback.seek(toSeconds: handoff.seconds, in: card, toleranceSeconds: 0)
-        }
-    }
-
-    /// Toggles the post on show's clip from the list: the stopped mark on
-    /// its tile, none on the card.
-    private func toggleSideListPlayback() {
-        guard let id = activePostID, let cell = activeSnapCell, cell.canTogglePlayback,
-              let paused = cell.togglePlayback(markOnPage: false) else { return }
-        sideListPausedPost = paused ? id : nil
-        sideList?.listView.setPausedMark(paused, on: id)
-    }
-
-    /// ⚠️ THE MARK CROSSES WITH THE MOVE (#1580, the owner 2026-10-22): a
-    /// paused clip's stopped mark leaves the card for its tile as the list
-    /// opens — 1 − progress on the card, progress on the tile — under the
-    /// finger and on the spring, both ways, rather than jumping at the end.
-    /// `handOverPausedMark` settles who keeps it.
-    func sideListPoseDidChange(progress: CGFloat) {
-        guard let id = activePostID, let cell = settledSnapCell, let list = sideList?.listView else { return }
-        if sideListMarkCarry != id {
-            // Nothing paused, nothing to carry.
-            guard cell.showsPausedMark || sideListPausedPost == id else { return }
-            sideListMarkCarry = id
-            cell.setPausedMarkVisible(true, animated: false)
-            list.setPausedMark(true, on: id, animated: false)
-        }
-        cell.setPausedMarkShare(1 - progress)
-        list.setPausedMarkShare(progress)
-    }
-
-    /// The stopped mark moves between the card and the tile as the list
-    /// opens and closes (#1550); paging to another post takes it down.
-    private func handOverPausedMark(listOpen: Bool) {
-        guard let id = activePostID, let cell = settledSnapCell else { return }
-        // A move carried it: the side it ended on keeps it, whole, the
-        // other lets it go unseen — it is at 0 already.
-        if sideListMarkCarry == id {
-            sideListMarkCarry = nil
-            if listOpen {
-                cell.setPausedMarkVisible(false, animated: false)
-                sideListPausedPost = id
-                sideList?.listView.setPausedMarkShare(1)
-            } else {
-                cell.setPausedMarkShare(1)
-                sideListPausedPost = nil
-                sideList?.listView.setPausedMark(false, on: nil, animated: false)
-            }
-            return
-        }
-        sideListMarkCarry = nil
-        if listOpen {
-            if cell.showsPausedMark {
-                cell.setPausedMarkVisible(false)
-                sideListPausedPost = id
-            }
-            sideList?.listView.setPausedMark(sideListPausedPost == id, on: id)
-        } else {
-            if sideListPausedPost == id { cell.setPausedMarkVisible(true) }
-            sideListPausedPost = nil
-            sideList?.listView.setPausedMark(false, on: nil)
-        }
-    }
-
     /// The settled page's cell — the post on show's, whether or not its
     /// activation has run (the side list's marks ask it at rest).
-    private var settledSnapCell: SnapFeedCell? {
+    var settledSnapCell: SnapFeedCell? {
         collectionView.cellForItem(at: IndexPath(item: settledPageIndex, section: 0)) as? SnapFeedCell
     }
 
@@ -4107,64 +2818,6 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         SnapVerticalDragRouter.downwardOwner(downwardDragSituation)
     }
 
-    /// The pulls that close the side list now (#1580): with the list open
-    /// and still, down on its first post, up on its last — where the card
-    /// sits at that end of the pager, with nothing beyond it.
-    var sideListEdgePulls: SnapSideListEdgePull.Directions {
-        guard let sideList, sideList.isOpen, !sideList.isSettling, viewModel.isInSideListSession,
-              let pager = collectionView, !orderedIDs.isEmpty else { return [] }
-        let page = pager.bounds.height
-        guard page > 0 else { return [] }
-        let index = settledPageIndex
-        // At rest on its page, not mid-scroll.
-        guard abs(pager.contentOffset.y - CGFloat(index) * page) < 0.5 else { return [] }
-        var pulls: SnapSideListEdgePull.Directions = []
-        if index == 0 { pulls.insert(.down) }
-        if index == orderedIDs.count - 1 { pulls.insert(.up) }
-        return pulls
-    }
-
-    /// What the bars cover, for the side list's card to fit between them
-    /// (#1509): the top bar's bottom and the bottom toolbar's top, read off
-    /// the bars themselves when they are on screen, the safe area otherwise.
-    var sideListBars: UIEdgeInsets {
-        var top = view.safeAreaInsets.top
-        var bottom = view.safeAreaInsets.bottom
-        if let nav = navigationController {
-            let bar = nav.navigationBar
-            if !nav.isNavigationBarHidden, bar.window != nil, !bar.isHidden {
-                top = max(top, bar.convert(bar.bounds, to: view).maxY)
-            }
-            let toolbar = nav.toolbar!
-            if !nav.isToolbarHidden, toolbar.window != nil, !toolbar.isHidden {
-                bottom = max(bottom, view.bounds.maxY - toolbar.convert(toolbar.bounds, to: view).minY)
-            }
-        }
-        return UIEdgeInsets(top: max(0, top), left: 0, bottom: max(0, bottom), right: 0)
-    }
-
-    /// Moves every page's overlay down by `offset` (the side list's pose).
-    func setSideListOverlayOffset(_ offset: CGFloat) {
-        sideListOverlayOffset = offset
-        for case let cell as SnapFeedCell in collectionView.visibleCells {
-            cell.setSideListOverlayOffset(offset)
-        }
-        // …and the open comments' composer with them (#1730).
-        (commentsContentVC as? PostDetailViewController)?.setOverlayOffset(offset)
-    }
-
-    /// The list settled open or closed. Open, the pager pages back from its
-    /// first post too — the dismissal stands aside (`downwardDragOwner`).
-    func sideListDidSettle(open: Bool) {
-        handOverPausedMark(listOpen: open)
-        if open {
-            beginSideListSessionIfNeeded()
-        } else {
-            endSideListSession()
-        }
-        sideList?.activePostDidChange(activePostID)
-    }
-
     /// Whether the viewer is on the list's last post (#628, #761): the settled
     /// page is the last one loaded, and no page is on its way.
     ///
@@ -4176,14 +2829,6 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     var isAtEndOfSource: Bool {
         !viewModel.isLoadingNextPage && !orderedIDs.isEmpty && settledPageIndex == orderedIDs.count - 1
     }
-}
-
-extension SnapFeedViewController: UICollectionViewDataSourcePrefetching {
-    func collectionView(_ collectionView: UICollectionView, prefetchItemsAt indexPaths: [IndexPath]) {
-        warmPlanner.warmContent(at: indexPaths.map(\.item))
-        warmPlanner.warmPlayers(at: indexPaths.map(\.item))
-    }
-
 }
 
 #if DEBUG
@@ -4301,6 +2946,38 @@ extension SnapFeedViewController: SnapToolbarComposerHost {
 
 extension SnapFeedViewController: SnapAuthorBarHost {}
 
+// MARK: - The settled page chrome's host (#2514)
+
+extension SnapFeedViewController: SnapSettledPageChromeHost {}
+
+// MARK: - The appearance watch's host (#2514)
+
+extension SnapFeedViewController: SnapDeviceAppearanceWatchHost {}
+
+// MARK: - The page readiness's host (#2514)
+
+extension SnapFeedViewController: SnapPageReadinessHost {}
+
+// MARK: - The loaders' host (#2514)
+
+extension SnapFeedViewController: SnapPageLoadersHost {}
+
+// MARK: - The reveal scenery's host (#2514)
+
+extension SnapFeedViewController: SnapRevealSceneryHost {}
+
+// MARK: - The opening requests' host (#2514)
+
+extension SnapFeedViewController: SnapOpeningRequestsHost {}
+
+// MARK: - The navigation bar's host (#2514)
+
+extension SnapFeedViewController: SnapNavigationBarComposerHost {}
+
+// MARK: - The side list session's host (#2514)
+
+extension SnapFeedViewController: SnapSideListSessionHost {}
+
 // MARK: - The boost's host (#2514)
 
 extension SnapFeedViewController: SnapBoostDriveHost {}
@@ -4362,9 +3039,9 @@ extension SnapFeedViewController {
     /// hosts its view while engaged.
     var commentsContentVC: UIViewController? { commentsCoordinator.commentsContentVC }
     var commentsEngagementIsResting: Bool { commentsCoordinator.commentsEngagementIsResting }
-    private var commentsSheet: SnapCommentsSheetSession? { commentsCoordinator.commentsSheet }
+    var commentsSheet: SnapCommentsSheetSession? { commentsCoordinator.commentsSheet }
     var restingWarm: SnapWarmSlots<PostID, UIViewController> { commentsCoordinator.restingWarm }
-    private var previewRestingID: PostID? { commentsCoordinator.previewRestingID }
+    var previewRestingID: PostID? { commentsCoordinator.previewRestingID }
     private var previewRestingVC: UIViewController? { commentsCoordinator.previewRestingVC }
 
     func prewarmRestingComments(for id: PostID) {

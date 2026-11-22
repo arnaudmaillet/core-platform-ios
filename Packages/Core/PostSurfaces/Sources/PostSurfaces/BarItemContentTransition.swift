@@ -317,7 +317,7 @@ final public class BarItemContentTransition {
 ///
 /// ⚠️ THE TOOLBAR'S GLASS IS NOT IN `UIToolbar` on iOS 26/27: its platters are
 /// hosted in a floating-bar container directly under the navigation
-/// controller's view (see `SnapFeedViewController.toolbarGlassHost`). So the
+/// controller's view (see `SnapChromeThemeLender.toolbarGlassHost`). So the
 /// walk stops at a bar, or else at the ancestor whose superview is a view
 /// controller's root view — public API only, no private class names.
 @MainActor
