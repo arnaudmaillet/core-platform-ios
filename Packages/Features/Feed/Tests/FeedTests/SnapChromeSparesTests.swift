@@ -10,16 +10,16 @@ import UIKit
 @Suite(.serialized)
 struct SnapChromeSparesTests {
     @Test func aTakeUsesASpareAndAnEmptyStockStillBuilds() {
-        SnapChromeView.debugRestock()
-        #expect(SnapChromeView.debugSpareCount == SnapChromeView.spareCapacity)
+        SnapChromeSpares.debugRestock()
+        #expect(SnapChromeSpares.debugSpareCount == SnapChromeSpares.spareCapacity)
 
         let first = SnapChromeView.make()
-        #expect(SnapChromeView.debugSpareCount == SnapChromeView.spareCapacity - 1, "the take built its own")
+        #expect(SnapChromeSpares.debugSpareCount == SnapChromeSpares.spareCapacity - 1, "the take built its own")
         #expect(first.superview == nil && first.window == nil)
 
         // Drained: the next takes build their own, synchronously.
-        for _ in 0..<SnapChromeView.spareCapacity { _ = SnapChromeView.make() }
-        #expect(SnapChromeView.debugSpareCount == 0)
+        for _ in 0..<SnapChromeSpares.spareCapacity { _ = SnapChromeView.make() }
+        #expect(SnapChromeSpares.debugSpareCount == 0)
         let built = SnapChromeView.make()
         #expect(built.superview == nil)
     }
@@ -27,8 +27,8 @@ struct SnapChromeSparesTests {
     /// The page's cell takes from the stock (the replica's take is pinned
     /// in `SnapDeviceRound2Tests`).
     @Test func theCellTakesASpare() {
-        SnapChromeView.debugRestock()
+        SnapChromeSpares.debugRestock()
         _ = SnapFeedCell(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
-        #expect(SnapChromeView.debugSpareCount == SnapChromeView.spareCapacity - 1, "the cell built its own chrome")
+        #expect(SnapChromeSpares.debugSpareCount == SnapChromeSpares.spareCapacity - 1, "the cell built its own chrome")
     }
 }
