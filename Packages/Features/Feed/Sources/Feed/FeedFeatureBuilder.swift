@@ -166,23 +166,12 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     }
 
     private let repository: any FeedProviding
-    private let engagementProvider: (any EngagementProviding)?
-    private let commentsProvider: (any CommentsProviding)?
     /// Every surface's warm of a post's first comments, before it is opened
     /// (#2002): one instance, so nothing is asked twice across surfaces.
     /// A class, so every copy of this builder shares it.
     /// Shared with the place page (#2381).
     public let postOpenWarm: PostOpenWarm?
-    private let router: any Router
-    private let imagePipeline: ImagePipeline
     private let videoPlayback: VideoPlaybackController?
-    private let makeProfileSwitcher: @MainActor () -> (any ProfileSwitcherPresenting)?
-    private let wallet: (any WalletStaking)?
-    private let makeWalletSheet: (@MainActor () -> UIViewController)?
-    private let showsBalance: @MainActor () -> Bool
-    /// The wallet a screen's BADGE reads: none for a guest.
-    private var balanceWallet: (any WalletStaking)? { showsBalance() ? wallet : nil }
-    private let entities: any EntityReading & EntityWriting
 
     /// The lists' author bands' relation mark and "+" (#2300): ONE binding
     /// for every surface this root builds — For You, the place page, a post
@@ -192,17 +181,12 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     public let authorMarks: PostAuthorMarks
     /// The posts the app holds, and their loads (#1862, #1863).
     private let heldPosts: FeedHeldPosts
-    /// The comments panel every snap page and the text post screen embed.
-    private let comments: PostCommentsAssembly
     /// The Snap feed: its construction and its openings.
     private let snapFeed: SnapFeedAssembly
     /// The grids the builder lends to Profile, Chat and Search.
     private let grids: PostGridsAssembly
-    private let unavailablePosts: UnavailablePosts
-    private let bookmarks: PostBookmarkStore
-    /// The Text Post page's drafts. The app hands in its one store (built
-    /// once in `AppContainer`, charter P4); a test hands in one of its own.
-    private let postDrafts: PostDraftStore
+    /// The "+" menu's Text Post and a channel's "Share as a Post".
+    private let textPost: TextPostAssembly
     /// The keys For You's content contexts were stored under (#1423): the
     /// feature is gone, and so is the stored choice — no device keeps a dead
     /// value. A second launch finds nothing to remove.
@@ -213,19 +197,12 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     }
 
     public init(dependencies: Dependencies) {
-        bookmarks = dependencies.bookmarks
-        unavailablePosts = dependencies.unavailablePosts
-        entities = dependencies.entities
-        postDrafts = dependencies.postDrafts
         postCounters = dependencies.postCounters
         authorMarks = PostAuthorMarks(
             writer: dependencies.socialGraph, reader: dependencies.followRelations, entities: dependencies.entities,
             followEvents: dependencies.followEvents, viewer: dependencies.viewerProfile
         )
-        makeProfileSwitcher = dependencies.makeProfileSwitcher
         repository = dependencies.repository
-        engagementProvider = dependencies.engagementProvider
-        commentsProvider = dependencies.commentsProvider
         postOpenWarm = dependencies.commentsProvider.map { provider in
             PostOpenWarm(
                 prefetch: { id in await provider.prefetchTopComments(for: id) },
@@ -234,13 +211,9 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                 previews: { ids in await provider.prefetchPreviews(for: ids) }
             )
         }
-        router = dependencies.router
-        imagePipeline = dependencies.imagePipeline
         videoPlayback = dependencies.videoPlayback
-        wallet = dependencies.wallet
-        makeWalletSheet = dependencies.makeWalletSheet
         heldPosts = FeedHeldPosts(dependencies: dependencies)
-        comments = PostCommentsAssembly(dependencies: dependencies)
+        let comments = PostCommentsAssembly(dependencies: dependencies)
         snapFeed = SnapFeedAssembly(
             dependencies: dependencies, postOpenWarm: postOpenWarm, comments: comments, heldPosts: heldPosts
         )
@@ -248,8 +221,8 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             dependencies: dependencies, postOpenWarm: postOpenWarm, authorMarks: authorMarks,
             snapFeed: snapFeed, heldPosts: heldPosts
         )
+        textPost = TextPostAssembly(dependencies: dependencies)
         Self.forgetRetiredForYouModes(in: .standard)
-        showsBalance = dependencies.showsBalance
         // Every grid's tiles follow the feed's playback policy — Autoplay,
         // the network, Low Power Mode — For You's and a profile's alike (#580).
         GridVideoPlaybackCoordinator.allowsAutoplay = { MediaPlaybackPolicy.autoplays }
@@ -503,112 +476,23 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         return members
     }
 
-    /// The "+" menu's Text Post: a text post's own page, born empty, in an
-    /// expandable sheet — the content of an empty page is one invitation, and
-    /// a full screen of it was mostly air.
-    ///
-    /// ⚠️ THE PANEL IS THE TEXT PAGE'S REAL ONE, built by `makeCommentsPanel`
-    /// like every page's, over a DRAFT: no post, nothing fetched, and a first
-    /// send that publishes the post instead of commenting on one. Everything
-    /// the published page reads is primed before the panel turns into it — the
-    /// entry held so it is never fetched back, its empty first page of
-    /// comments — and from then on the sheet is that post's.
+    // The text post screen: `TextPostAssembly`.
     public func makeTextPostScreen(publisher: any TextPostPublishing) -> UIViewController {
-        makeTextPostScreen(publisher: publisher, bookmarks: bookmarks)
+        textPost.makeTextPostScreen(publisher: publisher)
     }
 
-    /// A channel's "Share as a Post" (#2216): the same screen, its card
-    /// attached above the composer — removable — with an optional place.
-    /// Opened at its full height: the card and the words need the room the
-    /// keyboard would ask for anyway. Without `-channels`, the plain screen.
     public func makeTextPostScreen(publisher: any TextPostPublishing, attaching embed: PostEmbed) -> UIViewController {
-        makeTextPostScreen(publisher: publisher, bookmarks: bookmarks, attaching: embed)
+        textPost.makeTextPostScreen(publisher: publisher, attaching: embed)
     }
 
-    /// The same, over `bookmarks` — the app's one pile outside tests.
-    /// `showsEmbeds`: whether a card can be attached (`-channels`);
-    /// `recordsVoice`: whether the first message can be a voice
-    /// (`-voice-posts`).
     func makeTextPostScreen(
         publisher: any TextPostPublishing, bookmarks: PostBookmarkStore, attaching embed: PostEmbed? = nil,
         showsEmbeds: Bool = PostEmbeds.areDrawn, recordsVoice: Bool = VoicePosts.areDrawn
     ) -> UIViewController {
-        let repository = repository
-        let commentsProvider = commentsProvider
-        // A showcase (#2216): the same priming as a text post's; none
-        // without `-channels`.
-        let publishShowcase: (@Sendable (String, PostEmbed, TextPostPlace?, AuthorSummary?) async throws -> FeedEntry)?
-        if showsEmbeds {
-            publishShowcase = { text, embed, place, author in
-                let entry = try await publisher.publishTextPost(text, embed: embed, place: place, as: author)
-                await repository.remember(entry)
-                commentsProvider?.seedTopComments([], for: entry.post.id)
-                return entry
-            }
-        } else {
-            publishShowcase = nil
-        }
-        let attached: PostEmbed? = showsEmbeds ? embed : nil
-        // A voice post (#2209): the same priming as a text post's; none
-        // without `-voice-posts`.
-        let publishVoice: (@Sendable (String, TextPostVoice, AuthorSummary?) async throws -> FeedEntry)?
-        if recordsVoice {
-            publishVoice = { text, voice, author in
-                let entry = try await publisher.publishTextPost(text, voice: voice, as: author)
-                await repository.remember(entry)
-                commentsProvider?.seedTopComments([], for: entry.post.id)
-                return entry
-            }
-        } else {
-            publishVoice = nil
-        }
-        let draft = PostDetailDraft(publish: { text, author in
-            let entry = try await publisher.publishTextPost(text, as: author)
-            await repository.remember(entry)
-            commentsProvider?.seedTopComments([], for: entry.post.id)
-            return entry
-        }, publishVoice: publishVoice, publishShowcase: publishShowcase)
-        let panel = PostCommentsAssembly.makeCommentsPanel(
-            viewModel: PostDetailViewModel(
-                draft: draft,
-                repository: repository,
-                engagementProvider: engagementProvider,
-                commentsProvider: commentsProvider,
-                router: router,
-                entities: entities
-            ),
-            threadChrome: true,
-            imagePipeline: imagePipeline,
-            makeProfileSwitcher: makeProfileSwitcher,
-            wallet: wallet,
-            viewerEvents: unavailablePosts.viewerEvents
+        textPost.makeTextPostScreen(
+            publisher: publisher, bookmarks: bookmarks, attaching: embed,
+            showsEmbeds: showsEmbeds, recordsVoice: recordsVoice
         )
-        let composer = TextPostComposerViewController(
-            panel: panel,
-            drafts: postDrafts,
-            imagePipeline: imagePipeline,
-            router: router,
-            // The composer's wallet is its badge alone: none for a guest.
-            wallet: balanceWallet,
-            makeWalletSheet: makeWalletSheet,
-            // A save made elsewhere while the page shows the post (#1067).
-            entities: entities,
-            bookmarks: bookmarks,
-            attaching: attached
-        )
-        let navigation = UINavigationController(rootViewController: composer)
-        navigation.modalPresentationStyle = .pageSheet
-        if let sheet = navigation.sheetPresentationController {
-            // Half height for an empty page — taller only when the invitation
-            // cannot show whole there — and the whole screen for a thread and
-            // for the keyboard, which the composer grows the sheet for.
-            sheet.detents = [composer.makeRestingDetent(), .large()]
-            sheet.prefersGrabberVisible = true
-            // A showcase opens full height (#2216): its card is taller than
-            // the invitation it stands in for.
-            if attached != nil { sheet.selectedDetentIdentifier = .large }
-        }
-        return navigation
     }
 
 }

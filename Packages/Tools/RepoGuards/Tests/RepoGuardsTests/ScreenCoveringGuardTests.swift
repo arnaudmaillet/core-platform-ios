@@ -20,7 +20,7 @@ struct ScreenCoveringGuardTests {
         "ContentFittingNavigationController.swift":
             "one detent per stack, chosen before it presents (#1908): the default reads it",
         "UploadFeatureBuilder+Send.swift": "one detent, large, selected before it presents",
-        "FeedFeatureBuilder.swift": "the text post composer's detents: TextPostComposerViewController declares",
+        "TextPostAssembly.swift": "the text post composer's detents: TextPostComposerViewController declares",
         "MediaEditorOverlayMode.swift": "the sticker picker's detents: MediaStickerPickerViewController declares",
     ]
 
