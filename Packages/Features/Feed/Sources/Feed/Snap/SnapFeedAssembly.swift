@@ -206,7 +206,7 @@ struct SnapFeedAssembly {
             // link to a post held on the device opens on the post.
             let cached = postIDs.compactMap { heldPosts.heldEntry($0) }
             #if DEBUG
-            let maySeed = !FeedFeatureBuilder.isColdOpenForced
+            let maySeed = !FeedPlaybackWarms.isColdOpenForced
             #else
             let maySeed = true
             #endif

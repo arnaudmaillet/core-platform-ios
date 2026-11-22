@@ -308,7 +308,7 @@ public actor FeedRepository: FeedProviding {
     /// the pre-cache path. Isolated so `loadPost` can wrap it with the cache.
     private func hydratePost(_ id: PostID) async throws -> FeedEntry {
         #if DEBUG
-        // `-feed-cold-open [ms]` — see `FeedFeatureBuilder.isColdOpenForced`.
+        // `-feed-cold-open [ms]` — see `FeedPlaybackWarms.isColdOpenForced`.
         // On the FETCH, deliberately, and not on the transport: the map's tile
         // query has to stay fast or the pin under test never appears.
         if LaunchArgument.feedColdOpen.isPassed() {
