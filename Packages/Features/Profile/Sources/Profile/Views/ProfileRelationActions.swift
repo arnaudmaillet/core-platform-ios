@@ -19,13 +19,21 @@ protocol ProfileRelationActionsHost: UIViewController {
     var followButtonState: ProfileViewModel.FollowButton { get }
     var imagePipeline: ImagePipeline { get }
     var shareTargeting: (any ProfileShareTargeting)? { get }
+    /// What the sheets and popovers anchor on: the header's "…" on the
+    /// page, the card's view on the card.
+    var actionAnchor: UIView { get }
+    /// Where a block's toast is shown from — the screen that stays once
+    /// the blocked profile has left: the page's stack, the card's
+    /// presenter.
+    var blockToastSource: UIViewController { get }
 }
 
 /// The profile's relation row and what it does, out of
 /// `ProfileViewController` (#2522): the header's bell and its Mute menu, the
 /// "…" menu and the map rails' rows, share, copy link, block, report, the
 /// gallery rows' menus, the outcome of each command, the Undo toast, and
-/// leaving after a block.
+/// leaving after a block. The profile card uses it too, for share, copy
+/// link, report, block, the outcomes and the Undo toast.
 @MainActor
 final class ProfileRelationActions {
     private unowned let host: any ProfileRelationActionsHost
@@ -239,7 +247,7 @@ final class ProfileRelationActions {
     private func presentActivitySheet(for card: ProfileViewModel.ShareCard, image: UIImage) {
         let source = ProfileShareItemSource(card: card, icon: image)
         let activity = UIActivityViewController(activityItems: [source, image], applicationActivities: nil)
-        activity.popoverPresentationController?.sourceView = host.headerView.moreButtonAnchor
+        activity.popoverPresentationController?.sourceView = host.actionAnchor
         host.present(activity, animated: true)
     }
 
@@ -262,7 +270,7 @@ final class ProfileRelationActions {
     /// handle can leave the same person reaching the viewer from an alias.
     /// Two destructive options read as a scope choice; an alert's OK/Cancel
     /// shape would have to hide one of them behind a second step.
-    private func confirmBlock() {
+    func confirmBlock() {
         let handle = host.viewModel.handle ?? "this user"
         let sheet = UIAlertController(
             title: "Block \(handle)?",
@@ -278,7 +286,7 @@ final class ProfileRelationActions {
             self?.host.viewModel.block(.account)
         })
         sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        sheet.popoverPresentationController?.sourceView = host.headerView.moreButtonAnchor
+        sheet.popoverPresentationController?.sourceView = host.actionAnchor
         host.present(sheet, animated: true)
     }
 
@@ -317,11 +325,11 @@ final class ProfileRelationActions {
         }
     }
 
-    private func presentReportReasons() {
+    func presentReportReasons() {
         ReportReasonSheet.present(
             from: host,
             subject: host.viewModel.handle ?? "this profile",
-            sourceView: host.headerView.moreButtonAnchor
+            sourceView: host.actionAnchor
         ) { [weak self] reason in
             self?.host.viewModel.report(reason)
         }
@@ -344,7 +352,7 @@ final class ProfileRelationActions {
             // Sourced from the navigation controller, not this screen: the
             // block pops this view controller in the same turn, and a toast
             // parented here would leave with it.
-            Feedback.success(message, symbol: "hand.raised.fill", from: host.navigationController ?? host)
+            Feedback.success(message, symbol: "hand.raised.fill", from: host.blockToastSource)
         case .unblocked(let handle):
             Feedback.success("Unblocked \(handle)", symbol: "hand.raised.slash.fill", from: host)
             // Unblocked, the "+" is back (#2014): the button never moved.

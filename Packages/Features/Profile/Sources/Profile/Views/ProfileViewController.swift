@@ -765,6 +765,8 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     /// The header's relation row, the menus and the actions' outcomes
     /// (`ProfileRelationActions`, #2522).
     private(set) lazy var relationActions = ProfileRelationActions(host: self)
+    var actionAnchor: UIView { headerView.moreButtonAnchor }
+    var blockToastSource: UIViewController { navigationController ?? self }
     private func applyHeaderAction() { relationActions.applyHeaderAction() }
     private func applyRelationMark() { relationActions.applyRelationMark() }
     func presentShareSheet() { relationActions.presentShareSheet() }

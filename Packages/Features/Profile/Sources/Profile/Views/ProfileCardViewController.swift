@@ -46,8 +46,8 @@ final class ProfileCardViewController: UIViewController {
     static let detent = UISheetPresentationController.Detent.Identifier("profile.card")
 
     let viewModel: ProfileViewModel
-    private let imagePipeline: ImagePipeline
-    private let shareTargeting: (any ProfileShareTargeting)?
+    let imagePipeline: ImagePipeline
+    let shareTargeting: (any ProfileShareTargeting)?
     private let makeRelationshipsViewController: (
         (ProfileRelationshipsViewModel.Subject, RelationshipDirection) -> UIViewController
     )?
@@ -301,11 +301,8 @@ final class ProfileCardViewController: UIViewController {
             self?.applyRelationMark()
         }
         viewModel.onMuteScopesChange = { [weak self] _ in self?.applyBars() }
-        viewModel.onActionResult = { [weak self] result in self?.render(result) }
-        viewModel.onUndoable = { [weak self] action in
-            guard let self else { return }
-            Feedback.undoable(action.message, symbol: action.symbol, from: self, commit: action.commit, undo: action.undo)
-        }
+        viewModel.onActionResult = { [weak self] result in self?.relationActions.render(result) }
+        viewModel.onUndoable = { [weak self] action in self?.relationActions.presentUndoable(action) }
         // A block leaves the card: there is no one left to show.
         viewModel.onDismissRequested = { [weak self] in self?.close() }
     }
@@ -352,35 +349,14 @@ final class ProfileCardViewController: UIViewController {
     var debugShowsStatus: Bool { !statusView.isHidden }
     #endif
 
-    private func render(_ result: ProfileViewModel.ActionResult) {
-        switch result {
-        case .blocked(let handle, let profileCount):
-            let message = profileCount > 1 ? "Blocked \(handle) and \(profileCount - 1) more" : "Blocked \(handle)"
-            Feedback.success(message, symbol: "hand.raised.fill", from: presentingViewController ?? self)
-        case .unblocked(let handle):
-            Feedback.success("Unblocked \(handle)", symbol: "hand.raised.slash.fill", from: self)
-            applyRelationMark()
-        case .muteChanged(let handle, let scopes):
-            Feedback.success(
-                ProfileViewModel.muteMessage(handle: handle, scopes: scopes),
-                symbol: scopes.isEmpty ? "speaker.wave.2.fill" : "speaker.slash.fill", from: self
-            )
-        case .restrictChanged(let handle, let restricted):
-            Feedback.success(
-                restricted ? "Restricted \(handle)" : "Unrestricted \(handle)",
-                symbol: restricted ? "person.crop.circle.badge.minus" : "person.crop.circle.badge.checkmark",
-                from: self
-            )
-        case .commitFailed(let message), .followFailed(let message):
-            Feedback.failure(message, from: self)
-        case .reported:
-            Feedback.success("Report sent", symbol: "flag.fill", from: self)
-        case .failed(let message):
-            let alert = UIAlertController(title: nil, message: message, preferredStyle: .alert)
-            alert.addAction(UIAlertAction(title: "OK", style: .default))
-            present(alert, animated: true)
-        }
-    }
+    // MARK: - Share, report, block and the outcomes
+
+    /// The page's own (`ProfileRelationActions`, #2522): share, copy link,
+    /// report, block, the commands' outcomes and the Undo toast, anchored on
+    /// this card's view and toasting a block from its presenter.
+    private(set) lazy var relationActions = ProfileRelationActions(host: self)
+    var actionAnchor: UIView { view }
+    var blockToastSource: UIViewController { presentingViewController ?? self }
 
     // MARK: - The bars
 
@@ -594,7 +570,7 @@ final class ProfileCardViewController: UIViewController {
         case .qr:
             return toolbarStore.item(id) {
                 BarItems.icon(id: id, image: UIImage(systemName: "qrcode"), label: "QR Code") { [weak self] in
-                    self?.presentShareSheet()
+                    self?.relationActions.presentShareSheet()
                 }
             }
         case .openProfile:
@@ -663,13 +639,13 @@ final class ProfileCardViewController: UIViewController {
                 isFollowing: followButtonState == .following
             ),
             handlers: ProfileMenuBuilder.MoreMenuHandlers(
-                share: { [weak self] in self?.presentShareSheet() },
-                copyLink: { [weak self] in self?.copyProfileLink() },
+                share: { [weak self] in self?.relationActions.presentShareSheet() },
+                copyLink: { [weak self] in self?.relationActions.copyProfileLink() },
                 toggleMapCategory: { [weak self] category in self?.viewModel.toggleMapCategory(category) },
-                report: { [weak self] in self?.presentReportReasons() },
+                report: { [weak self] in self?.relationActions.presentReportReasons() },
                 toggleRestrict: { [weak self] in self?.viewModel.toggleRestrict() },
                 unblock: { [weak self] in self?.viewModel.unblock() },
-                confirmBlock: { [weak self] in self?.confirmBlock() },
+                confirmBlock: { [weak self] in self?.relationActions.confirmBlock() },
                 clearHistory: {},
                 unfollow: { [weak self] in
                     // Only while still followed: a menu opened before a
@@ -682,13 +658,8 @@ final class ProfileCardViewController: UIViewController {
     }
 
     /// Wears the relationship on the header's avatar (#2014): the
-    /// profile's own mapping (`ProfileHeaderView.avatarMark`).
-    private func applyRelationMark() {
-        headerView.configureRelationMark(
-            followButtonState, mutual: viewModel.isMutualFollow, blocked: viewModel.isBlocked,
-            isOwnProfile: viewModel.isOwnProfile
-        )
-    }
+    /// profile's own mapping (`ProfileRelationActions.applyRelationMark`).
+    private func applyRelationMark() { relationActions.applyRelationMark() }
 
     // MARK: - Actions
 
@@ -735,62 +706,6 @@ final class ProfileCardViewController: UIViewController {
         // Once: a second tap while the card leaves runs nothing (#1144).
         closePresentation(completion: body)
     }
-
-    private func presentShareSheet() {
-        guard let card = viewModel.shareCard else { return }
-        let sheet = ProfileShareViewController(
-            card: card,
-            imagePipeline: imagePipeline,
-            targeting: shareTargeting,
-            deviceCornerRadius: ScreenGeometry.cornerRadius(behind: view),
-            fallbackWidth: view.bounds.width
-        )
-        sheet.onSystemShare = { [weak self] card, image in
-            guard let self else { return }
-            let source = ProfileShareItemSource(card: card, icon: image)
-            let activity = UIActivityViewController(activityItems: [source, image], applicationActivities: nil)
-            activity.popoverPresentationController?.sourceView = view
-            present(activity, animated: true)
-        }
-        sheet.onSendToTarget = { [weak self] target, card in
-            self?.viewModel.sendProfile(card, to: target)
-        }
-        present(sheet, animated: true)
-    }
-
-    private func copyProfileLink() {
-        guard let link = viewModel.shareLink else { return }
-        UIPasteboard.general.url = link
-        UIPasteboard.general.string = link.absoluteString
-        Feedback.success("Link copied", symbol: "link", from: self)
-    }
-
-    private func presentReportReasons() {
-        ReportReasonSheet.present(
-            from: self, subject: viewModel.handle ?? "this profile", sourceView: view
-        ) { [weak self] reason in
-            self?.viewModel.report(reason)
-        }
-    }
-
-    /// The profile's question, in its words (`ProfileViewController.confirmBlock`).
-    private func confirmBlock() {
-        let handle = viewModel.handle ?? "this user"
-        let sheet = UIAlertController(
-            title: "Block \(handle)?",
-            message: "They won't be able to find your profile or message you, and you'll stop seeing their posts. They aren't notified.\n\nBlocking the account also blocks any other profiles it owns.",
-            preferredStyle: .actionSheet
-        )
-        sheet.addAction(UIAlertAction(title: "Block \(handle)", style: .destructive) { [weak self] _ in
-            self?.viewModel.block(.profile)
-        })
-        sheet.addAction(UIAlertAction(title: "Block Account & All Profiles", style: .destructive) { [weak self] _ in
-            self?.viewModel.block(.account)
-        })
-        sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        sheet.popoverPresentationController?.sourceView = view
-        present(sheet, animated: true)
-    }
 }
 
 extension ProfileCardViewController: UIGestureRecognizerDelegate {
@@ -811,3 +726,5 @@ extension ProfileCardViewController: UIGestureRecognizerDelegate {
         return false
     }
 }
+
+extension ProfileCardViewController: ProfileRelationActionsHost {}
