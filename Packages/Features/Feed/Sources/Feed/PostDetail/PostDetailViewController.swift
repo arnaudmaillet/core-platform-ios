@@ -525,7 +525,7 @@ final class PostDetailViewController: UIViewController {
         title = "Comments"
         view.backgroundColor = .systemBackground
         configureViews()
-        installRailWayBack()
+        rail.installRailWayBack()
         // The snap feed's comments panel stands its stake bubble on the media
         // layout's like button: the same heart, badge and menu (#668).
         composeBar.usesLikeFace = true
@@ -772,7 +772,7 @@ final class PostDetailViewController: UIViewController {
         composeBar.defaultPlaceholder = nil
         composeBar.sendAccessibilityLabel = nil
         composeBar.visibilityMenu = nil
-        composeBar.railFace = publishedRailFace
+        rail.applyPublishedFace()
         boost.refreshBoostTotal()
         onPostPublished?(entry)
         // A post now: it has its two tabs and opens on Popular, the caption
@@ -812,9 +812,7 @@ final class PostDetailViewController: UIViewController {
     }
 
     private func configureComposeBar() {
-        // A post's rail slot wears its sound (`publishedRailFace`). A draft
-        // is not a post: its slot stays empty until it is.
-        composeBar.railFace = viewModel.isDraft ? .empty : publishedRailFace
+        rail.applyOpeningFace()
         // The Liquid Glass composer (Private Messages' recipe): a floating
         // capsule field, no opaque bar, no separator — the glass carries
         // its own boundary against whatever is behind it.
@@ -1343,19 +1341,6 @@ final class PostDetailViewController: UIViewController {
     /// The post this panel is about — nil on a draft.
     var postID: PostID? { viewModel.postID }
 
-    /// What a published post's rail slot wears: Share on a pushed text page
-    /// (`setRailShare`, #1999), else the sound's cover the snap feed hands
-    /// over (`setRailSoundFace`, #671) — nothing for a post with neither.
-    private var publishedRailFace: CommentsInputBar.RailFace {
-        guard railKeepsSlot else { return .noSlot }
-        guard railShareAction != nil || railSoundFace != nil else { return .empty }
-        // The way back (#1929), on a slot this composer draws; under a page's
-        // column the page's own bubble wears it (`onScrollAwayChange`).
-        if stream.showsScrollAwayReturn, composeBar.hostsActionColumn { return .returnTo(down: stream.returnsDown) }
-        if railShareAction != nil { return .share }
-        return railSoundFace.map { .sound($0) } ?? .empty
-    }
-
     // MARK: The way back (#1929)
 
     /// The way back came or went — for a host whose page draws the sound
@@ -1365,97 +1350,19 @@ final class PostDetailViewController: UIViewController {
     var showsScrollAwayReturn: Bool { stream.showsScrollAwayReturn }
     /// Whether it points down: Recent's start is its newest (#2007).
     var scrollAwayReturnsDown: Bool { stream.returnsDown }
-    /// The sound's tap action, the host's (`setRailSoundActions`).
-    private var soundTapAction: (() -> Void)?
-    /// The way back's hold on the composer's own slot.
-    private var railSoundHold: HoldToArmPresenter?
-    /// Whether the host asked the slot's record to turn, kept while the way
-    /// back hides it (#692).
-    private var railSpinning = false
-
-    /// The composer's slot as the way back stands.
-    func applyRailWayBack() {
-        if !viewModel.isDraft { composeBar.railFace = publishedRailFace }
-        let returns = composeBar.railFace == .returnTo(down: stream.returnsDown)
-        if !returns { composeBar.setRailSpinning(railSpinning) }
-        // Over Share (#1999) the hold arms Share on a media page — the
-        // slot's own action — and nothing on a text page.
-        let armsSheet = returns && railShareAction == nil && soundTapAction != nil
-            && railSoundFace?.isAvailable == true
-        let armsShare = returns && railShareAction != nil && railShareHoldArms
-        railSoundHold?.isEnabled = armsSheet || armsShare
-        // What the slot stood for stays reachable with the chevron up:
-        // VoiceOver's road — the sound, or Share.
-        if armsSheet {
-            composeBar.railHoldTarget.accessibilityCustomActions = [
-                UIAccessibilityCustomAction(name: "Sound") { [weak self] _ in
-                    self?.soundTapAction?()
-                    return true
-                },
-            ]
-        } else if returns, railShareAction != nil {
-            composeBar.railHoldTarget.accessibilityCustomActions = [
-                UIAccessibilityCustomAction(name: "Share") { [weak self] _ in
-                    self?.railShareAction?()
-                    return true
-                },
-            ]
-        } else {
-            composeBar.railHoldTarget.accessibilityCustomActions = nil
-        }
-    }
-
-    private func installRailWayBack() {
-        composeBar.onRailAction = { [weak self] in
-            guard let self else { return }
-            if case .returnTo = composeBar.railFace { return scrollToStart(animated: true) }
-            if composeBar.railFace == .share {
-                railShareAction?()
-            } else {
-                soundTapAction?()
-            }
-        }
-        let hold = HoldToArmPresenter(view: composeBar.railHoldTarget) { [weak self] in
-            guard let self else { return .picture(nil) }
-            return railShareAction != nil ? .symbol(CommentsInputBar.shareRailSymbol) : .picture(composeBar.railCoverImage)
-        }
-        hold.onFire = { [weak self] in
-            guard let self else { return }
-            if let railShareAction { railShareAction() } else { soundTapAction?() }
-        }
-        hold.isEnabled = false
-        railSoundHold = hold
-    }
-
-    private var railSoundFace: SnapSoundFace?
-    /// False for a text post with nothing in its slot (#1790, #1999): the
-    /// composer has no slot, its field widens into it.
-    private var railKeepsSlot = true
-    /// The post's Share, when the slot wears it (#1999): a pushed page.
-    private var railShareAction: (() -> Void)?
-    /// Whether the way back's hold arms Share (#1999): a media page's.
-    private var railShareHoldArms = false
-
-    /// Share in the slot (#1999), the toolbar's old action, on a pushed page:
-    /// a text page's (a text post has no sound) and a media page's (its sound
-    /// moves to the footer). `holdArms`: the way back's hold arms Share — a
-    /// media page's. Nil gives the slot back to the sound.
-    func setRailShare(_ action: (() -> Void)?, holdArms: Bool = false) {
-        railShareAction = action
-        railShareHoldArms = action != nil && holdArms
-        if action != nil { railKeepsSlot = true }
-        guard !viewModel.isDraft else { return }
-        applyRailWayBack()
-    }
-
-    /// The snap feed's sound bubble face, for the rail slot that stands on it
-    /// (#671); `keepsSlot` false takes the slot away (#1790).
+    /// The composer's rail slot: its face, the way back, Share and the
+    /// sound's gestures (`PostDetailRailSlot`), the only writer of
+    /// `composeBar.railFace`. Built on first use; building it does nothing
+    /// else.
+    private(set) lazy var rail = PostDetailRailSlot(host: self)
+    /// The composer's slot as the way back stands (`PostDetailRailSlot`).
+    func applyRailWayBack() { rail.applyRailWayBack() }
+    func setRailShare(_ action: (() -> Void)?, holdArms: Bool = false) { rail.setRailShare(action, holdArms: holdArms) }
     func setRailSoundFace(_ face: SnapSoundFace?, keepsSlot: Bool = true) {
-        railSoundFace = face
-        railKeepsSlot = keepsSlot
-        guard !viewModel.isDraft else { return }
-        composeBar.railFace = publishedRailFace
+        rail.setRailSoundFace(face, keepsSlot: keepsSlot)
     }
+    func setRailSoundSpinning(_ spinning: Bool) { rail.setRailSoundSpinning(spinning) }
+    func setRailSoundActions(tap: (() -> Void)?, hold: (() -> Void)?) { rail.setRailSoundActions(tap: tap, hold: hold) }
 
     /// The post turned out unavailable to the viewer (#447) — said once, as
     /// this panel takes its own actions away (#1404). For a host that draws
@@ -1473,9 +1380,7 @@ final class PostDetailViewController: UIViewController {
         sheet.voice = commentsVoice
         composeBar.configuration = sheet
         composeBar.hostsActionColumn = true
-        railShareAction = nil
-        railShareHoldArms = false
-        setRailSoundFace(nil, keepsSlot: false)
+        rail.clearForBareComposer()
     }
 
     /// The snap feed's page draws the action column above this panel (#695):
@@ -1513,7 +1418,7 @@ final class PostDetailViewController: UIViewController {
     var debugComposerOverlayOffset: CGFloat { composeBar.transform.ty }
     /// The way back (#1929), for tests.
     var debugRailFace: CommentsInputBar.RailFace { composeBar.railFace }
-    var debugRailSoundHold: HoldToArmPresenter? { railSoundHold }
+    var debugRailSoundHold: HoldToArmPresenter? { rail.railSoundHold }
     /// What VoiceOver offers on the slot while the way back shows (#1999).
     var debugRailCustomActions: [UIAccessibilityCustomAction]? {
         composeBar.railHoldTarget.accessibilityCustomActions
@@ -1526,21 +1431,6 @@ final class PostDetailViewController: UIViewController {
     }
     var debugStreamOffset: CGFloat { stream.collectionView.contentOffset.y }
     var debugStreamTopOffset: CGFloat { -stream.collectionView.adjustedContentInset.top }
-
-    /// The slot's cover turns while the post plays aloud (#692).
-    func setRailSoundSpinning(_ spinning: Bool) {
-        railSpinning = spinning
-        composeBar.setRailSpinning(spinning)
-    }
-
-    /// The slot's sound actions: `tap` is what the sound does (the sheet);
-    /// while the way back shows, a tap goes back to the top and a hold arms
-    /// `tap` (#1929).
-    func setRailSoundActions(tap: (() -> Void)?, hold: (() -> Void)?) {
-        soundTapAction = tap
-        composeBar.onRailLongPress = hold
-        applyRailWayBack()
-    }
 
     /// The stake bubble's like badge reads the caption row's count — one
     /// number on one panel.
