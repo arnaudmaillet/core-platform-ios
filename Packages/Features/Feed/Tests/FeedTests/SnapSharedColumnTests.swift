@@ -35,7 +35,7 @@ struct SnapSharedColumnTests {
         let chrome = SnapChromeView(frame: Layout.screen)
         chrome.setFixedInsets(Layout.insets)
         host.addSubview(chrome)
-        chrome.installActionColumn(in: host)
+        chrome.actionColumn.installActionColumn(in: host)
         chrome.configure(with: model)
         chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true))
         host.layoutIfNeeded()
@@ -99,9 +99,9 @@ struct SnapSharedColumnTests {
         let (chrome, _, window) = Self.mounted()
         defer { window.isHidden = true }
         chrome.setCommentsEngaged(true)
-        chrome.setColumnHeld(true)
+        chrome.actionColumn.setColumnHeld(true)
         #expect(!Self.isDrawn(chrome.debugBoostButton))
-        chrome.setColumnHeld(false)
+        chrome.actionColumn.setColumnHeld(false)
         #expect(Self.isDrawn(chrome.debugBoostButton), "the engaged column did not come back after the flight")
     }
 

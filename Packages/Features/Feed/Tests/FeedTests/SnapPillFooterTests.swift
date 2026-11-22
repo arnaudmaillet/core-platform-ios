@@ -107,7 +107,7 @@ struct SnapPillFooterTests {
             #expect(bubble.isHidden, "a bubble with no face")
 
             var sheets = 0
-            chrome.onSoundSheetRequested = { sheets += 1 }
+            chrome.actionColumn.onSoundSheetRequested = { sheets += 1 }
             chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true))
             chrome.layoutIfNeeded()
             #expect(!bubble.isHidden)

@@ -624,7 +624,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         guard unavailable != isPostUnavailable else { return }
         isPostUnavailable = unavailable
         chrome.isHidden = unavailable
-        chrome.setActionColumnShown(!unavailable)
+        chrome.actionColumn.setActionColumnShown(!unavailable)
         if unavailable {
             // What was playing stops where it stands, and nothing starts it
             // again: every start asks `isPostUnavailable`, and a resume a hold
@@ -672,7 +672,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         chrome.setSlotSharesPost(shares, holdArmsShare: holdArmsShare)
     }
     /// Turns the sound bubble's cover while the post plays (#671).
-    func setSoundSpinning(_ spinning: Bool) { chrome.setSoundSpinning(spinning) }
+    func setSoundSpinning(_ spinning: Bool) { chrome.actionColumn.setSoundSpinning(spinning) }
     /// The sound bubble was tapped: the screen opens the sound sheet (#671).
     var onRequestSoundSheet: (() -> Void)?
     /// The sound bubble's way back (#1929): shown while the comments are
@@ -683,14 +683,14 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
 
     /// A text page's like stands in the screen's footer (#1924): no pill
     /// in its column.
-    func setLikeInFooter(_ inFooter: Bool) { chrome.likeInFooter = inFooter }
+    func setLikeInFooter(_ inFooter: Bool) { chrome.actionColumn.likeInFooter = inFooter }
     /// The sound bubble wears the post's Share (#1999) and was tapped: the
     /// screen opens the share sheet.
     var onRequestShare: (() -> Void)?
     /// The anchor's wallet context (affordability + undoable tally) —
     /// pushed at configure and on every wallet change.
     func setBoostContext(balance: Int, undoable: Int, stakeShots: Int = 0) {
-        chrome.setBoostContext(balance: balance, undoable: undoable, stakeShots: stakeShots)
+        chrome.actionColumn.setBoostContext(balance: balance, undoable: undoable, stakeShots: stakeShots)
     }
     /// pager INTERACTIVELY — the strip-side mirror of the composer bar's
     /// page-swipe. The cell forwards each pan phase with the raw vertical
@@ -1041,7 +1041,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // In the stage's twin, so it moves with the page (#1917).
         columnStage.frame = contentView.bounds
         contentView.addSubview(columnStage)
-        chrome.installActionColumn(in: columnStage)
+        chrome.actionColumn.installActionColumn(in: columnStage)
 
         // NOTE: no pause glyph is installed here. The mark that says a clip is
         // stopped belongs to the PICTURE — `SnapMediaCardView` holds it for a
@@ -1606,7 +1606,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // …which glides down to the composer's line on the same share, and
         // back up as the interface comes back (#2326): the sheet's own
         // movement is the clock, a drag that cancels included.
-        chrome.setCommentsSheetShare(hidden)
+        chrome.actionColumn.setCommentsSheetShare(hidden)
         guard let stage = mediaCard.superview else { return }
         let mediaRegion = stage.convert(mediaRegion, from: nil)
         guard mediaRegion.width > 0, mediaRegion.height > 0 else { return }
@@ -1859,7 +1859,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         commentsSheetMediaFade = 1
         chrome.alpha = 1
         columnStage.alpha = 1
-        chrome.setCommentsSheetShare(0)
+        chrome.actionColumn.setCommentsSheetShare(0)
         mediaCard.transform = .identity
         // Back to the page before the mask goes: the spread's sides never
         // show.
@@ -1981,9 +1981,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             guard let self, let id = self.representedID else { return }
             self.onRequestBoostUndo?(id)
         }
-        chrome.onSoundSheetRequested = { [weak self] in self?.onRequestSoundSheet?() }
-        chrome.onSoundReturnRequested = { [weak self] in self?.onRequestSoundReturn?() }
-        chrome.onShareRequested = { [weak self] in self?.onRequestShare?() }
+        chrome.actionColumn.onSoundSheetRequested = { [weak self] in self?.onRequestSoundSheet?() }
+        chrome.actionColumn.onSoundReturnRequested = { [weak self] in self?.onRequestSoundReturn?() }
+        chrome.actionColumn.onShareRequested = { [weak self] in self?.onRequestShare?() }
         #if DEBUG
         // Which projection fields are present the moment the page is
         // configured. Everything listed here is supposed to render at 0ms from
@@ -3088,7 +3088,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         chrome.commentSurfaces.setTickerHeldForFlight(held)
         // The column leaves and returns with the hold, engaged or not: the
         // replica flies its own (#695).
-        chrome.setColumnHeld(held)
+        chrome.actionColumn.setColumnHeld(held)
         if held {
             chrome.alpha = 0
             return
@@ -3535,7 +3535,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // leaves the hold un-released — and the next post to use this cell would
         // arrive with no chrome at all and nothing on the way to bring it back.
         chrome.alpha = 1
-        chrome.setColumnHeld(false)
+        chrome.actionColumn.setColumnHeld(false)
         // The next post to land here is told whether it is still available.
         setPostUnavailable(false)
         cancelPrewarming()
