@@ -161,7 +161,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     }
     /// The viewer's hand on the clip and the playhead fed to the media bar —
     /// see `SnapCellPlayback`. Always on the watched surface, asked each time.
-    private lazy var playback = SnapCellPlayback(
+    private(set) lazy var playback = SnapCellPlayback(
         surface: { [weak self] in self?.mediaCard.renderView },
         isActive: { [weak self] in self?.isActive ?? false }
     )
@@ -197,63 +197,15 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
 
     // MARK: Unavailable post (#1409)
 
-    /// Whether the represented post is one the server shows the viewer no
-    /// more (#447) — taken down, deleted, withheld. Its page then reads
-    /// "This post isn't available" over the page's ground, with nothing to
-    /// act on: the chrome (caption, streams, reactions rail, the comments'
-    /// entry points) and the like / sound column stand down, and no clip
-    /// plays. The screen says so — at configure, from what it has learnt,
-    /// so paging away and back keeps it; in place, the moment it learns it.
-    private(set) var isPostUnavailable = false
+    /// The "This post isn't available" block and its state (#1409, #2521).
+    private(set) lazy var unavailablePost = SnapUnavailableBlock(host: self)
+    /// Whether the represented post is one the server shows the viewer no more.
+    var isPostUnavailable: Bool { unavailablePost.isPostUnavailable }
 
-    /// The block, over everything the page draws. Opaque and touchable, so
-    /// the picture under it takes no tap; the pager's own pan still pages.
-    private lazy var unavailableBlock: UIView = {
-        let ground = UIView()
-        ground.backgroundColor = .systemBackground
-        let block = EmptyStateView()
-        block.configure(symbolName: "eye.slash", title: PostDetailViewModel.unavailableMessage)
-        block.pin(to: ground)
-        // VoiceOver reads the block, never the post under it.
-        ground.accessibilityViewIsModal = true
-        ground.isHidden = true
-        contentView.addSubview(ground)
-        ground.pin(to: contentView)
-        return ground
-    }()
-
-    func setPostUnavailable(_ unavailable: Bool) {
-        guard unavailable != isPostUnavailable else { return }
-        isPostUnavailable = unavailable
-        chrome.isHidden = unavailable
-        chrome.actionColumn.setActionColumnShown(!unavailable)
-        if unavailable {
-            // What was playing stops where it stands, and nothing starts it
-            // again: every start asks `isPostUnavailable`, and a resume a hold
-            // or a sheet still owed is void. The player stays the page's,
-            // released by the usual doors (resign, reuse).
-            videoPlayback?.setPaused(true, in: mediaCard.renderView)
-            if mediaCard.showsCollection, let surface = mediaCard.currentPageSurface {
-                videoPlayback?.setPaused(true, in: surface)
-            }
-            playback.forgetOwedResumes()
-            setPauseGlyphVisible(false)
-            // The clip bar's feed, the occlusion and the comment streams
-            // stand down with it.
-            updatePlayheadFeed()
-            chrome.commentSurfaces.setTickerActive(false)
-            chrome.setSubtitlesActive(false)
-            // A media page's ground is dark whatever the system says; a text
-            // page's follows it.
-            unavailableBlock.overrideUserInterfaceStyle = pageHasMedia ? .dark : .unspecified
-            contentView.bringSubviewToFront(unavailableBlock)
-        }
-        unavailableBlock.isHidden = !unavailable
-    }
+    func setPostUnavailable(_ unavailable: Bool) { unavailablePost.setPostUnavailable(unavailable) }
 
     #if DEBUG
-    /// Whether the page shows "This post isn't available", for a test.
-    var debugShowsUnavailableBlock: Bool { isPostUnavailable && !unavailableBlock.isHidden }
+    var debugShowsUnavailableBlock: Bool { unavailablePost.debugShowsUnavailableBlock }
     #endif
 
     /// Boost feedback pass-throughs — the chrome owns the anchor and its
@@ -2205,7 +2157,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// Keeps the page strip's clip bar fed while there is one to feed: the
     /// page is active and the clip under the viewer is a video. The feed
     /// itself (a display link) is `SnapCellPlayback.startPlayheadFeed`.
-    private func updatePlayheadFeed() {
+    func updatePlayheadFeed() {
         let wanted = isActive && playsVideo && !isPostUnavailable
         defer { refreshPersonOcclusion() }
         guard wanted else {
@@ -2574,7 +2526,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// the device's style is knowable: a cell dequeued in `cellForItemAt` has no
     /// window yet, and a text page that resolved its theme before then took the
     /// screen's pin instead.
-    private var pageHasMedia = false
+    private(set) var pageHasMedia = false
     /// The one-pixel seam between one full-screen page and the next — see the
     /// note where they are added.
     private let pageSeparatorTop = UIView()
@@ -2817,3 +2769,5 @@ extension SnapFeedCell: SnapCommentsSheetPoseHost {}
 extension SnapFeedCell: SnapCarouselPlaybackHost {}
 
 extension SnapFeedCell: SnapBrowseMirrorHost {}
+
+extension SnapFeedCell: SnapUnavailableBlockHost {}
