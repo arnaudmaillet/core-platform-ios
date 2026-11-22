@@ -37,7 +37,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     /// Handed the profile this screen holds, so the editor opens on it
     /// instead of fetching it again (charter P7).
     private let makeEditViewController: ((UserProfile?, @escaping () -> Void) -> UIViewController)?
-    /// The origin said this profile is the viewer's own (`presumesOtherProfile`).
+    /// The origin said this profile is the viewer's own.
     private let identityStubIsSelf: Bool
     /// Builds the account settings screen (own profile only, the gear's
     /// destination). Nil for other users.
@@ -103,16 +103,6 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     /// The strip's toolbar item, on a pushed profile (#728) — the search
     /// results' too (#881). Internal for tests.
     var selectorItem: UIBarButtonItem? { selector.item }
-    /// First-load guarantee: while the skeleton screen is up, the scroll
-    /// content must fill the viewport, so the gallery's shimmer rows reach
-    /// the screen bottom from the very first layout pass. The pager's own
-    /// fitted-height pin sits at `.defaultHigh` (750); this inequality
-    /// outranks it, and the pager is the only stretchable link in the
-    /// content chain — so it, not the header, absorbs the remainder. Without
-    /// this, the first frames of a push can catch the pager at its floor
-    /// (the fitted height converges only after the collection's first
-    /// real-width pass), cropping the skeleton to a row and a half.
-    private var skeletonViewportFill: NSLayoutConstraint?
     private var didSubordinatePagerToPop = false
     #if DEBUG
     /// Launch-argument hooks are one-shot; see `viewDidAppear`.
@@ -237,36 +227,6 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     private let viewerEvents: ViewerEvents?
     /// The switch subscription, for this screen's lifetime: it ends with it.
     private var activeProfileSubscription: ViewerEventSubscription?
-
-    private enum Metrics {
-        /// Between the identity block and the selector.
-        ///
-        /// Deliberately TIGHTER than the gap below it. The selector belongs to
-        /// the profile it sits under — same margins, same column — and what it
-        /// needs separating from is the content it filters. Equal gaps made it
-        /// read as a third thing floating between two others.
-        static let selectorTopGap: CGFloat = 10
-        /// How long the hand-over between the two selectors takes.
-        ///
-        /// Short enough to feel like a state change rather than a performance —
-        /// this fires mid-scroll, with the viewer's attention on the content
-        /// coming up, not on the chrome.
-        static let dockTransition: TimeInterval = 0.26
-        /// How small the leaving selector shrinks to, and how small the arriving
-        /// one starts.
-        ///
-        /// Shallow on purpose. A deep zoom reads as an object flying towards the
-        /// viewer; this is one control changing places, and at 0.88 the scale is
-        /// felt as crispness rather than seen as travel.
-        static let dockZoomScale: CGFloat = 0.88
-        /// How long the outgoing profile takes to dissolve into the new one.
-        static let switchCrossfade: TimeInterval = 0.28
-        /// The bottom tray's own height.
-        static let inlineTrayHeight = InlineFilterTrayView.height
-        /// Between the tray and the bar beneath it, so the two glass rows read
-        /// as separate objects rather than one stack.
-        static let inlineTraySpacing = InlineFilterTrayView.spacingBelow
-    }
 
     init(
         viewModel: ProfileViewModel,
@@ -1357,12 +1317,6 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     /// The keys the router's repeat filter asks about (#800).
     var profileRouteKeys: Set<ProfileRouteKey> { viewModel.profileRouteKeys }
 
-    /// A profile reached by id that is not the viewer's own, as far as frame 0
-    /// can tell: no self stub, no Edit wiring.
-    private var presumesOtherProfile: Bool {
-        !viewModel.isOwnProfile && !identityStubIsSelf && makeEditViewController == nil
-    }
-
     /// Resolved when it opens, so the checkmarks are the current scopes.
     private func makeMuteMenu() -> UIMenu {
         UIMenu(children: [UIDeferredMenuElement.uncached { [weak self] completion in
@@ -1914,23 +1868,6 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         reloadSwitcherMenu()
     }
 
-    /// Runs `changes` as a cross-dissolve while a switch is in flight, and
-    /// plainly otherwise. Used for both halves of the incoming profile — the
-    /// header and the gallery arrive on separate callbacks, and each dissolves
-    /// over whatever it is replacing.
-    private func applySwitchable(on target: UIView, _ changes: @escaping () -> Void) {
-        guard isSwitchingProfile, view.window != nil else {
-            changes()
-            return
-        }
-        UIView.transition(
-            with: target,
-            duration: Metrics.switchCrossfade,
-            options: [.transitionCrossDissolve, .allowUserInteraction, .beginFromCurrentState],
-            animations: changes
-        )
-    }
-
     private func presentAddProfilePlaceholder() {
         let alert = UIAlertController(
             title: "Add Profile",
@@ -2329,12 +2266,6 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         )
     }
 
-    /// Whether the header's action tray is out of sight: under the
-    /// navigation bar, by the header's coming position (`travelled` — the
-    /// constraint moves it on the next layout pass), or faded with the
-    /// identity block. The header stops climbing once its selector docks, so
-    /// the tray's foot can rest at the bar's edge; by then the identity fade
-    /// (`applyIdentityFade`, run first) has taken it out.
     /// Wires the selector and the source filter, and puts the selector in its
     /// inline slot: a format tab records the selection and pages the gallery; a
     /// source pick re-filters every page in place.
@@ -2367,16 +2298,6 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         adoptTab(tab)
         galleryPager.setActivePage(tab, animated: selector.bar.animatesPageChanges)
     }
-
-    /// Arms the full-width dismissal, once, and only for a PUSHED profile.
-    ///
-    /// The gate is asked per gesture rather than re-installed per tab: a
-    /// recognizer added and removed as the viewer pages is one that will
-    /// eventually be missing when a thumb arrives.
-    ///
-    /// Ordering the pager behind it is safe on every tab precisely because
-    /// the gate decides. Past the first tab the dismissal pan never begins,
-    /// fails immediately, and the pager pages exactly as it always did.
 
     /// Records the choice.
     ///
@@ -2539,13 +2460,6 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         galleryPager.setActivePage(tabs[index], animated: false)
     }
 
-    /// Puts both selectors on the same segment.
-    ///
-    /// ⚠️ There is deliberately no silent `select` on `PagedTabBar` — choosing
-    /// a segment announces itself, by design, so that a scripted selection
-    /// drives the same path a finger does. That makes mirroring re-entrant, and
-    /// the flag rather than a silent setter is what closes the loop: the echo
-    /// arrives, sees the flag, and stops.
     /// Puts the strip on a selection the pager reached by itself.
     ///
     /// ⚠️ THE RE-ENTRANCY LATCH WENT WITH THE SECOND COPY. It existed because
@@ -2554,26 +2468,6 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     private func mirrorSelection(to index: Int) {
         selector.select(index)
     }
-
-    /// Puts one selector in the page's column and the other in the navigation
-    /// bar's title slot, and leaves them there.
-    ///
-    /// ⚠️ A title view is positioned by FRAME, so the docked bar keeps
-    /// autoresizing on and states its size through `sizeToFit`. The inline one
-    /// is laid out by constraints. Nothing is re-parented after this, which is
-    /// the point: the hand-over is two animations, not a move.
-    /// Puts the docked selector's item into the leading group, or takes it out.
-    ///
-    /// ⚠️ **MEMBERSHIP, not `isHidden`.** Hiding the item looked right and left
-    /// the selector unhosted for good: an item that is hidden when the bar lays
-    /// out never has its custom view added, and un-hiding it later does not bring
-    /// it back — measured as `isHidden=false`, `alpha=1`, `isBarDocked=true`,
-    /// `intrinsicW=325` and a host frame of exactly zero, on the one surface of
-    /// the four whose item starts hidden. Adding the item hosts it; removing it
-    /// takes UIKit's glass capsule with it, which is the other thing `isHidden`
-    /// was there for.
-
-
 
     /// Puts the selector at the foot of the screen, in a `UITabAccessory` —
     /// on BOTH profiles.
@@ -2840,7 +2734,6 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
             // unknown until the fetch lands and bones are the honest answer.
             headerView.render(phase, profileKnown: viewModel.profile != nil, switching: isSwitchingProfile, animated: false)
             if viewModel.hasGallery {
-                skeletonViewportFill?.isActive = true
                 galleryPager.render(ProfileViewModel.GallerySnapshot(
                     activity: .loading, media: .loading, isComplete: false,
                     reposts: .loading, tagged: .loading,
@@ -2857,7 +2750,6 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
             if currentHandle == nil { currentHandle = seed.handle ?? seed.displayName }
             headerView.render(phase, profileKnown: false, switching: false, animated: false)
             if viewModel.hasGallery {
-                skeletonViewportFill?.isActive = true
                 galleryPager.render(ProfileViewModel.GallerySnapshot(
                     activity: .loading, media: .loading, isComplete: false,
                     reposts: .loading, tagged: .loading,
@@ -2869,9 +2761,6 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
             pullIndicator.endRefreshing()
             statusView.isHidden = true
             galleryPager.isHidden = false
-            // Content owns its height again; the release rides the same
-            // layout pass as the (dissolve-masked) gallery height snap.
-            skeletonViewportFill?.isActive = false
             // Instagram-style: the @handle is the screen's title (the header
             // shows the bold display name). "Profile" only until first load.
             // Content usually lands mid-push; rebind inside the transition
@@ -2900,7 +2789,6 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
             pullIndicator.endRefreshing()
             // Never leave the previous profile held over an error.
             galleryPager.isHidden = true
-            skeletonViewportFill?.isActive = false
             // Nothing ever loaded (an offline handle tap, #800): no header
             // around the block (`ProfileHeaderView.render`).
             headerView.render(phase, profileKnown: viewModel.profile != nil, animated: false)
@@ -2928,7 +2816,6 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
             // button.
             pullIndicator.endRefreshing()
             galleryPager.isHidden = true
-            skeletonViewportFill?.isActive = false
             headerView.render(phase, profileKnown: viewModel.profile != nil, animated: false)
             statusView.configure(
                 symbolName: "person.crop.circle.badge.questionmark", title: message, subtitle: detail
@@ -3018,10 +2905,6 @@ extension ProfileViewController {
         print(String(format: "[profile-ready] +%.0fms ", ms) + state)
     }
 }
-
-#endif
-
-#if DEBUG
 
 #endif
 
