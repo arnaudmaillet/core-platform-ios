@@ -6,7 +6,9 @@ import Testing
 /// `= nil` DEFAULTS (#2375, epic #2366).
 ///
 /// A feature's entry point (`*FeatureBuilder`, `*Assembly` under
-/// `Packages/Features`) takes its collaborators as a typed `Dependencies`.
+/// `Packages/Features`, and their extension files `*FeatureBuilder+*.swift`
+/// and `*Assembly+*.swift`, #2523) takes its collaborators as a typed
+/// `Dependencies`.
 /// A builder that asked a repository at run time what else it could do
 /// (`repository as? any GroupChatServicing`) compiled when the composition
 /// root handed one that couldn't, and the feature quietly went missing; a
@@ -28,7 +30,8 @@ struct BuilderDependenciesGuardTests {
         "ZoomTransitionDestination", "SnapFeedSettleReporting", "FeedBeneathLanding"
     ]
 
-    /// Every feature entry point, as a path under `Packages/Features`.
+    /// Every feature entry point and its extension files, as a path under
+    /// `Packages/Features`.
     static func builderFiles() throws -> [String] {
         let features = RepoRoot.url.appendingPathComponent("Packages/Features")
         guard let enumerator = FileManager.default.enumerator(atPath: features.path) else {
@@ -37,7 +40,12 @@ struct BuilderDependenciesGuardTests {
         return enumerator
             .compactMap { $0 as? String }
             .filter { $0.contains("/Sources/") }
-            .filter { $0.hasSuffix("FeatureBuilder.swift") || $0.hasSuffix("Assembly.swift") }
+            .filter { $0.hasSuffix(".swift") }
+            .filter { path in
+                let name = (path as NSString).lastPathComponent
+                return name.hasSuffix("FeatureBuilder.swift") || name.hasSuffix("Assembly.swift")
+                    || name.contains("FeatureBuilder+") || name.contains("Assembly+")
+            }
             .sorted()
     }
 
@@ -119,7 +127,8 @@ struct BuilderDependenciesGuardTests {
         #expect(Set(names).isSuperset(of: [
             "AuthFeatureBuilder.swift", "ChatFeatureBuilder.swift", "FeedFeatureBuilder.swift",
             "MapsFeatureBuilder.swift", "NotificationsFeatureBuilder.swift", "PlaceFeatureBuilder.swift",
-            "ProfileFeatureBuilder.swift", "SearchFeatureBuilder.swift", "SettingsAssembly.swift"
+            "ProfileFeatureBuilder.swift", "SearchFeatureBuilder.swift", "SettingsAssembly.swift",
+            "UploadFeatureBuilder+Send.swift"
         ]), "read \(names)")
         let sample = """
         public init(
