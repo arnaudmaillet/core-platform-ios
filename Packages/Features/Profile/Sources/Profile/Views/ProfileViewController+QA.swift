@@ -16,13 +16,13 @@ import UIKit
 
 // MARK: - QA hooks
 //
-// The frame steppers and drives the launch-argument hooks call, the probes,
+// The frame steppers and drives the launch-argument hooks call
+// (`ProfileDebugHooks`), the probes,
 // and the `debug*` accessors that read nothing private beyond the stored
 // members widened for them. Private methods stay private: this file reaches
 // them through thin `debug*` wrappers in the main file
 // (`debugMapFavoriteMenuActions`, `debugGalleryMenuActions`). Left in `ProfileViewController.swift` because they read
-// more of this screen's private state: the launch-argument hooks themselves
-// (the tail of `viewDidAppear`), the bar and menu accessors, the refresh and
+// more of this screen's private state: the bar and menu accessors, the refresh and
 // header-height accessors, `traceReadiness` and the
 // `DebugInteractivelyDismissible` conformance. Stored DEBUG properties stay
 // with the type.

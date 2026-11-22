@@ -78,7 +78,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     /// everyone else's does not, because neither pile is anybody else's to see.
     /// The tabs on show: Posts, and each other source once it has
     /// something in it (#742). One tab is no selector at all.
-    private var tabs: [ProfileTab]
+    private(set) var tabs: [ProfileTab]
     /// Every tab this profile can have.
     private let allTabs: [ProfileTab]
     /// The Channels tab's model (#2232): the channels this profile owns,
@@ -105,14 +105,14 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     var selectorItem: UIBarButtonItem? { selector.item }
     private var didSubordinatePagerToPop = false
     #if DEBUG
-    /// Launch-argument hooks are one-shot; see `viewDidAppear`.
-    private var hasArmedDebugHooks = false
+    /// The launch-argument hooks (`ProfileDebugHooks`, #2522), armed once
+    /// from `viewDidAppear`.
+    private(set) lazy var debugHooks = ProfileDebugHooks(host: self)
+    /// Whether this profile has an editor, and settings: the viewer's own.
+    var hasEditor: Bool { makeEditViewController != nil }
+    var hasSettings: Bool { makeSettingsViewController != nil }
     #endif
     #if DEBUG
-    /// Latches the `-profile-map-pin-demo` tap to a single firing.
-    private var didTapMapPinForQA = false
-    /// Latches the `-profile-relationships` QA push to a single firing.
-    private var didPushRelationshipsForQA = false
     /// Mute-change toasts shown (#1951): their ARRIVAL, which a test cannot
     /// miss, where their presence on the bar lasts only a few seconds.
     private(set) var debugMuteToastsShown = 0
@@ -755,477 +755,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
             }
         }
         #if DEBUG
-        // ARMED ONCE. `viewDidAppear` runs again when a pushed post is dismissed,
-        // and re-running these drove a second scroll on top of the background
-        // reveal, undoing it moments before any check could look. Every "the
-        // reveal was reverted" reading traced back to here, not to the product.
-        defer { hasArmedDebugHooks = true }
-        if hasArmedDebugHooks { return }
-        // Dev convenience: `-profile-overscroll` parks the scroll view in the
-        // pulled-down region (no touch injection in the sim), so the banner's
-        // stretch-over-overscroll behavior can be screenshotted.
-        if LaunchArgument.profileOverscroll.isPassed() {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-                self?.galleryPager.debugOverscroll(by: 140)
-            }
-        }
-        // Dev convenience: `-profile-layout-audit` prints the resolved header
-        // view tree (frames included) once content has settled — numeric
-        // spacing audits without pixel-measuring screenshots.
-        if LaunchArgument.profileLayoutAudit.isPassed() {
-            // The 1.5s is kept as a floor (the settle beat the audit was
-            // calibrated on), but the print now WAITS FOR THE PROFILE: on a slow
-            // run the fixed delay dumped the redacted skeleton header and the
-            // spacing audit measured bones, reading like a real layout.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-                QAWait.until("profile-layout-audit", { [weak self] in
-                    self?.viewModel.profile != nil
-                }) { [weak self] in
-                    guard let self else { return }
-                    // The content render lands in THIS turn's layout pass at
-                    // the earliest; flush it so the frames are the loaded ones.
-                    self.view.layoutIfNeeded()
-                    let description = self.headerView
-                        .perform(Selector(("recursiveDescription")))?
-                        .takeUnretainedValue()
-                    print("PROFILE-LAYOUT-AUDIT\n\(description.map(String.init(describing:)) ?? "unavailable")")
-                }
-            }
-        }
-        // Dev convenience: `-profile-ink-audit` prints the WCAG contrast of
-        // the name and the handle against the pixels actually rendered behind
-        // them (see `ProfileHeaderView.debugIdentityContrast`) — once the
-        // profile AND its banner picture are in, since the picture decides
-        // both the shape and what the type stands on.
-        if LaunchArgument.profileInkAudit.isPassed() {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-                QAWait.until("profile-ink-audit", { [weak self] in
-                    guard let self, self.viewModel.profile != nil else { return false }
-                    return self.headerView.bannerFormat == .none || self.headerView.debugBannerHasPicture
-                }) { [weak self] in
-                    guard let self else { return }
-                    // Past the banner's 0.25s dissolve.
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                        guard let self else { return }
-                        self.view.layoutIfNeeded()
-                        let style = self.traitCollection.userInterfaceStyle == .dark ? "dark" : "light"
-                        guard let contrast = self.headerView.debugIdentityContrast() else {
-                            print("PROFILE-INK-AUDIT unavailable")
-                            return
-                        }
-                        print(
-                            "PROFILE-INK-AUDIT format=\(self.headerView.bannerFormat) style=\(style) "
-                                + "tones=\(self.headerView.debugInkTones) "
-                                + "name=[\(contrast.name)] handle=[\(contrast.handle)] "
-                                + String(format: "blur-bake=%.1fms %dKB", self.headerView.debugBlurBakeMilliseconds,
-                                         self.headerView.debugBlurBakeBytes / 1024)
-                                + " " + (self.headerView.debugBodyContrast() ?? [])
-                                    .map { "\($0.0)=[\($0.1)]" }.joined(separator: " ")
-                        )
-                    }
-                }
-            }
-        }
-        // Dev convenience: `-profile-menu-audit` prints the "..." menu the
-        // current state resolves to, and fires the copy action so the toast is
-        // screenshottable. The menu is the one thing on this screen no launch
-        // argument can otherwise reach — it opens on a tap, and the sim has no
-        // touch injection.
-        if LaunchArgument.profileMenuAudit.isPassed() {
-            // Waits for the RELATIONSHIP READ, not just the clock: the menu's
-            // moderation group and its Block/Unblock title are both decided by
-            // it, and with `-profile-relationship-delay` (3s) the fixed 1.5s
-            // printed `canModerate=false isBlocked=false` — the pre-read menu,
-            // reported as the answer. The read is in when this is someone
-            // else's profile we can moderate, or the subject is known to be the
-            // viewer (own profile, or a routed one the read said is self).
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-                QAWait.until("profile-menu-audit", { [weak self] in
-                    guard let self else { return false }
-                    return self.viewModel.canModerate
-                        || self.viewModel.relationshipsSubject?.isSelf == true
-                }) { [weak self] in
-                    guard let self else { return }
-                    let titles = self.moreMenuElements().flatMap { element -> [String] in
-                        guard let group = element as? UIMenu else { return [element.title] }
-                        return ["—"] + group.children.map(\.title)
-                    }
-                    print("PROFILE-MENU-AUDIT canModerate=\(self.viewModel.canModerate) "
-                        + "isBlocked=\(self.viewModel.isBlocked) items=\(titles)")
-                    self.copyProfileLink()
-                }
-            }
-        }
-        let arguments = ProcessInfo.processInfo.arguments
-        // Dev convenience: `-profile-follow-tap` fires the nav-bar Follow /
-        // Following item through its own primary action ~2s in, and prints the
-        // state either side. A bar item takes no simulated touch, so this is
-        // how the item's wiring is verified at all.
-        // Dev convenience: `-profile-edit-privacy` pushes the editor and then
-        // its Privacy row, which sits behind two taps the simulator can't
-        // deliver.
-        if LaunchArgument.profileEditPrivacy.isPassed(in: arguments) {
-            // Each step waits for the state the next one reads. The push needs
-            // a loaded profile (the editor is built from it) and a stack at
-            // rest with this screen on top; the Privacy row needs the editor
-            // to have LANDED. The fixed 1s between them used to reach for
-            // `topViewController as? EditProfileViewController` while the
-            // push was still in flight — or had never started — and no-op.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-                guard let self else { return }
-                guard makeEditViewController != nil else {
-                    QAWait.fail("profile-edit-privacy", "this profile has no editor (not the viewer's own)")
-                    return
-                }
-                QAWait.until("profile-edit-privacy push", { [weak self] in
-                    guard let self, let navigation = self.navigationController else { return false }
-                    return self.viewModel.profile != nil
-                        && navigation.topViewController === self
-                        && navigation.transitionCoordinator == nil
-                }) { [weak self] in
-                    guard let self else { return }
-                    self.pushEditProfile()
-                    QAWait.until("profile-edit-privacy open", { [weak self] in
-                        guard let navigation = self?.navigationController else { return false }
-                        return navigation.topViewController is EditProfileViewController
-                            && navigation.transitionCoordinator == nil
-                    }) { [weak self] in
-                        self?.qaOpenPrivacy()
-                    }
-                }
-            }
-        }
-        if LaunchArgument.profileFollowTap.isPassed(in: arguments) {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-                self?.qaTapFollowItem()
-            }
-        }
-        // Dev convenience: `-open-settings [section]` pushes Settings once this
-        // screen is at rest on top, then the named section (a
-        // `SettingsSection` raw value: account, security, privacy, legal…).
-        // The gear is a bar item, which takes no simulated touch.
-        if LaunchArgument.openSettings.isPassed(in: arguments) {
-            let sectionName = LaunchArgument.openSettings.value(in: arguments).flatMap { $0.hasPrefix("-") ? nil : $0 }
-            QAWait.until("open-settings push", { [weak self] in
-                guard let self, let navigation = self.navigationController else { return false }
-                return navigation.topViewController === self && navigation.transitionCoordinator == nil
-            }) { [weak self] in
-                guard let self else { return }
-                guard self.makeSettingsViewController != nil else {
-                    QAWait.fail("open-settings", "this profile has no settings (not the viewer's own)")
-                    return
-                }
-                self.pushSettings()
-                guard let sectionName else { return }
-                QAWait.until("open-settings section", { [weak self] in
-                    guard let navigation = self?.navigationController else { return false }
-                    return navigation.topViewController is any SettingsSectionOpening
-                        && navigation.transitionCoordinator == nil
-                }) { [weak self] in
-                    let settings = self?.navigationController?.topViewController as? any SettingsSectionOpening
-                    if settings?.openSection(named: sectionName) == false {
-                        QAWait.fail("open-settings", "unknown section \(sectionName)")
-                    }
-                }
-            }
-        }
-        // Dev convenience: `-profile-relationships [following]` opens the
-        // followers / following screen once the profile has loaded — it lives
-        // behind a tap on the counter row, which the simulator can't deliver.
-        // Combine with `-profile-relationships-tab` / `-...-action` (read by
-        // the destination) to drive the tab switch and a row's button.
-        // Once per screen, not once per appearance: `viewDidAppear` fires again
-        // when the relationships screen pops back, and re-pushing there made
-        // the QA run loop between the two forever.
-        // `-profile-map-pin-demo`: taps the map-pin bubble once the button has
-        // actually appeared, which needs BOTH the relationship read and the
-        // pin read to land — the simulator delivers no taps, and a fixed delay
-        // here would fire into a hidden button on a slow run. Pair with
-        // `-open-profile <id>` for a profile the viewer follows.
-        if LaunchArgument.profileMapPinDemo.isPassed(in: arguments), !didTapMapPinForQA {
-            didTapMapPinForQA = true
-            pollForMapPinButton()
-        }
-        if LaunchArgument.profileRelationships.isPassed(in: arguments), !didPushRelationshipsForQA {
-            didPushRelationshipsForQA = true
-            let direction: RelationshipDirection =
-                LaunchArgument.profileRelationships.value(in: arguments) == "following" ? .following : .followers
-            // Polled, not a single fixed delay: the push needs a loaded
-            // profile (it hands the subject's privacy state over), and under
-            // `-mock-latency` — the very flag you'd combine this with to
-            // screenshot the destination's skeleton — the profile isn't loaded
-            // a second and a half in, so a one-shot attempt silently no-ops.
-            func attempt(_ remaining: Int) {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                    guard let self else { return }
-                    // Retry rather than bail on a transient miss: this used to
-                    // `return` whenever the profile wasn't topmost at that exact
-                    // instant, which killed the whole chain if the tick landed
-                    // mid-transition — an intermittently empty recording.
-                    let isTop = self.navigationController?.topViewController === self
-                    if isTop, self.viewModel.relationshipsSubject != nil {
-                        self.pushRelationships(direction)
-                    } else if remaining > 0 {
-                        attempt(remaining - 1)
-                    }
-                }
-            }
-            attempt(30)
-        }
-        // `-profile-tab <posts|saved|liked>` selects a tab on the viewer's own
-        // profile, `<posts|reposts|tagged>` on someone else's (#696).
-        if let wanted = LaunchArgument.profileTab.value(in: arguments) {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
-                guard let self,
-                      let index = tabs.firstIndex(where: { $0.title.lowercased() == wanted })
-                else { return }
-                selectTab(at: index)
-            }
-        }
-        // `-profile-view-all [seconds]`: pushes the media gallery a chunk's
-        // "View all" opens (#631), once the posts have had time to land.
-        if LaunchArgument.profileViewAll.isPassed(in: arguments) {
-            let delay = LaunchArgument.profileViewAll.doubleValue(in: arguments) ?? 2
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-                self?.pushMediaGallery()
-            }
-        }
-        // `-header-dock-demo`: docks and undocks the selector on a timer, ANIMATED,
-        // so the hand-over can be recorded. A bar item's system capsule is not
-        // ours to fade, so whether the pill pops or crossfades is a question only
-        // frames can answer.
-        // `-profile-probe-item`: a PLAIN 80x36 view as a leading bar item. If even
-        // this is not hosted, the fault is this surface's leading group and not
-        // anything about the selector's host.
-        if LaunchArgument.profileProbeItem.isPassed(in: arguments) {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
-                guard let self else { return }
-                let swatch = UIView(frame: CGRect(x: 0, y: 0, width: 80, height: 36))
-                swatch.backgroundColor = .systemRed
-                swatch.translatesAutoresizingMaskIntoConstraints = true
-                let probeItem = BarItems.container(id: "profile.debug.dock-probe", view: swatch)
-                var leading = navigationItem.leftBarButtonItems ?? []
-                leading.append(probeItem)
-                navigationItem.leftBarButtonItems = leading
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                    print("[dock] PROBE plainItemHosted=\(swatch.window != nil) "
-                        + "frame=\(swatch.frame) leftCount=\(self.navigationItem.leftBarButtonItems?.count ?? -1)")
-                }
-            }
-        }
-        // `-profile-scroll <points>` scrolls the active page before anything
-        // else, so a tile can be driven while it is tucked UNDER the header —
-        // at rest nothing is, since the content starts below it, and that is
-        // the only state the header-alignment bug appears in.
-        if let points = LaunchArgument.profileScroll.doubleValue(in: arguments) {
-            // Polls: a fixed delay clamps to the top while the page is still
-            // loading and the run then tests a tile at rest, which is the
-            // one state the alignment bug cannot appear in.
-            //
-            // Through `QAWait` now, so running out of attempts PRINTS — it
-            // used to fall off the end of the loop silently. What counts as
-            // done is `debugSetVerticalOffset`'s to say: the requested offset,
-            // or the end of a page whose content has actually loaded (see there
-            // for why a loading page's clamp used to pass on the first try).
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
-                QAWait.until("profile-scroll \(points)", timeout: 15, interval: 0.25, { [weak self] in
-                    self?.galleryPager.debugSetVerticalOffset(CGFloat(points)) ?? false
-                }) { [weak self] in
-                    guard let self else { return }
-                    print("[qa] profile-scroll settled requested=\(points) "
-                        + "offset=\(galleryPager.verticalOffset)")
-                }
-            }
-        }
-        // `-profile-scroll-sweep`: scrolls the page from the top to 240pt and
-        // back, frame by frame, 3s each way (after 2.5s) — the header's fade
-        // and parallax filmed without touch injection — and says what each
-        // frame cost (`HeroScrollFrameProbe`: `HERO-SCROLL profile …` on
-        // standard error).
-        if LaunchArgument.profileScrollSweep.isPassed(in: arguments) {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
-                guard let self else { return }
-                debugSweepStep(began: CACurrentMediaTime(), probe: HeroScrollFrameProbe(name: "profile", root: headerView))
-            }
-        }
-        // `-profile-stretch-sweep`: once the profile and its picture are in,
-        // pulls the page down past its top — the banner stretching — to
-        // `HeroStretchSweep.depth`, holds, lets go through the refresh a
-        // finger's pull would start (#2235), and settles at rest while it lands
-        // (`HERO-SCROLL profile-stretch/<phase> …` on standard error, see
-        // `HeroScrollFrameProbe`).
-        if LaunchArgument.profileStretchSweep.isPassed(in: arguments) {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-                QAWait.until("-profile-stretch-sweep", { [weak self] in
-                    guard let self else { return false }
-                    return viewModel.profile != nil && headerView.debugBannerHasPicture
-                }) { [weak self] in
-                    // The bake lands a beat after the picture.
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-                        guard let self else { return }
-                        debugStretchStep(
-                            began: CACurrentMediaTime(),
-                            probe: HeroScrollFrameProbe(name: "profile-stretch", root: headerView), phase: nil
-                        )
-                    }
-                }
-            }
-        }
-        // `-profile-bar-tree`: the navigation bar's real subview tree. The own
-        // profile reports a bar that is in a window, not hidden, at alpha 1, with
-        // items in its arrays — and renders none of them. Only the tree can say
-        // whether UIKit built wrappers for them at all.
-        if LaunchArgument.profileBarTree.isPassed(in: arguments) {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 8.0) { [weak self] in
-                guard let bar = self?.navigationController?.navigationBar else { return }
-                func walk(_ view: UIView, depth: Int) {
-                    let pad = String(repeating: "  ", count: depth)
-                    print(String(format: "[bar-tree] %@%@ frame=%.0f,%.0f %.0fx%.0f alpha=%.2f hidden=%@ subs=%d",
-                                 pad, String(describing: type(of: view)),
-                                 view.frame.minX, view.frame.minY, view.frame.width, view.frame.height,
-                                 view.alpha, view.isHidden ? "Y" : "N", view.subviews.count))
-                    guard depth < 6 else { return }
-                    for sub in view.subviews { walk(sub, depth: depth + 1) }
-                }
-                walk(bar, depth: 0)
-            }
-        }
-        // `-profile-dock`: drives the header all the way to DOCKED, and says so.
-        //
-        // ⚠️ **A scroll that lands is not a dock.** `-profile-scroll <points>`
-        // stops when the offset applies — which happens while a page is still
-        // loading and clamps short of the dock line — so runs meant to exercise
-        // the docked selector quietly never docked, the bar had nothing to host,
-        // and the audit reported "no selector on this bar". That was read as a
-        // hosting failure twice, and two fixes were judged against it.
-        //
-        // This polls on the STATE the test is about, retries the scroll each
-        // time, and prints either SETTLED or GAVE UP — so a run can never be
-        // silently meaningless.
-        if LaunchArgument.profileDock.isPassed(in: arguments) {
-            var attempts = 0
-            func attempt() {
-                attempts += 1
-                // Far past any dock line; the page clamps to whatever it has.
-                _ = galleryPager.debugSetVerticalOffset(3_000)
-                // ⚠️ THE SUCCESS EXIT THIS LOOP NEVER HAD. It re-forced the
-                // offset for the full 40s and then printed GAVE UP on every run,
-                // docked or not — so the promised SETTLED line did not exist and
-                // the only verdict it could give was a failure. Docked is the
-                // header's own definition: the active page has travelled at
-                // least `headerTravel`, the line `applyHeaderOffset` stops the
-                // header at and the identity fade finishes on. A zero travel
-                // means the header has not laid out, which is not a dock.
-                let dockLine = headerTravel
-                let offset = galleryPager.verticalOffset
-                if dockLine > 0, offset >= dockLine - 0.5 {
-                    print("[dock] SETTLED docked=true attempts=\(attempts) "
-                        + "offset=\(offset) dockLine=\(dockLine) "
-                        + "offsets=\(galleryPager.debugVerticalOffsets)")
-                    return
-                }
-                if attempts < 160 {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: attempt)
-                } else {
-                    print("[dock] GAVE UP docked=false attempts=\(attempts) "
-                        + "offsets=\(galleryPager.debugVerticalOffsets) "
-                        + "hasGallery=\(viewModel.hasGallery)")
-                    // The shared GAVE UP line too, so one grep covers every hook.
-                    QAWait.fail("profile-dock", "offset=\(offset) dockLine=\(dockLine)")
-                }
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: attempt)
-        }
-        // `-profile-open-post <index>` taps a gallery tile once the gallery has
-        // content. The sim injects no touches, and a tile tap is the only way
-        // to reach either the open destination or the background reveal.
-        if let index = LaunchArgument.profileOpenPost.intValue(in: arguments) {
-            var attempts = 0
-            func attempt() {
-                attempts += 1
-                // Polls rather than firing on a fixed delay: the gallery's
-                // first page has to land, and a fixed delay silently no-ops
-                // under `-mock-latency`.
-                if galleryPager.debugSelectItem(at: index) { return }
-                if attempts < 60 {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: attempt)
-                }
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: attempt)
-        }
-        // Dev convenience: `-profile-share-demo [activity]` opens the QR share sheet once
-        // the profile has loaded — the sheet is behind a tap on the header's
-        // QR bubble, which the sim can't deliver.
-        if LaunchArgument.profileShareDemo.isPassed(in: arguments) {
-            // `activity` chains into the system share sheet and `send` into a
-            // DM with the first quick-send target — both go through the real
-            // dismiss-then-hand-off path, so the handoff itself is what gets
-            // screenshotted, not a shortcut around it.
-            let chained = LaunchArgument.profileShareDemo.value(in: arguments)
-            // Both steps are gated on state now. `presentShareSheet` returns
-            // without a word until `shareCard` exists (a loaded profile), and a
-            // stack mid-transition refuses the presentation — so the fixed 2s
-            // opened nothing on a slow run, and the chained step then optional-
-            // chained every call onto a nil sheet: a whole scripted sequence
-            // that exercised nothing and printed nothing.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-                QAWait.until("profile-share-demo present", { [weak self] in
-                    guard let self, let navigation = self.navigationController else { return false }
-                    return self.viewModel.shareCard != nil
-                        && navigation.topViewController === self
-                        && navigation.transitionCoordinator == nil
-                        && self.presentedViewController == nil
-                }) { [weak self] in
-                    self?.presentShareSheet()
-                    let chainedActions = [
-                        "activity", "send", "search", "search-empty", "search-cancel",
-                        "search-send", "search-scroll", "search-lower"
-                    ]
-                    guard chainedActions.contains(chained ?? "") else { return }
-                    // Waits for the sheet to have FINISHED presenting (the 2s
-                    // stood in for that) rather than for the clock.
-                    QAWait.until("profile-share-demo \(chained ?? "")", { [weak self] in
-                        guard let sheet = self?.presentedViewController as? ProfileShareViewController
-                        else { return false }
-                        return !sheet.isBeingPresented && sheet.transitionCoordinator == nil
-                    }) { [weak self] in
-                        self?.qaRunShareChain(chained)
-                    }
-                }
-            }
-        }
-        // Dev convenience: `-profile-block-demo [account]` runs the block
-        // command for real (mock `social_graph.v1/Block`, then the
-        // confirmation toast and the pop), skipping only the confirmation
-        // sheet — which needs a tap the simulator can't deliver. Pass
-        // `account` to exercise the account-wide fan-out.
-        if LaunchArgument.profileBlockDemo.isPassed(in: arguments) {
-            let scope: ProfileBlockScope =
-                LaunchArgument.profileBlockDemo.value(in: arguments) == "account" ? .account : .profile
-            // `block` returns without a word unless the profile has loaded AND
-            // the relationship read has made it moderatable — so the fixed 2s
-            // blocked nothing on a slow run and the run still looked done.
-            // Waits for the read to settle either way (moderatable, or known to
-            // be the viewer), then says why when it cannot block.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-                QAWait.until("profile-block-demo", { [weak self] in
-                    guard let self else { return false }
-                    return self.viewModel.canModerate
-                        || self.viewModel.relationshipsSubject?.isSelf == true
-                }) { [weak self] in
-                    guard let self else { return }
-                    guard viewModel.canModerate else {
-                        QAWait.fail("profile-block-demo", "this is the viewer's own profile")
-                        return
-                    }
-                    guard !viewModel.isBlocked else {
-                        QAWait.fail("profile-block-demo", "the profile is already blocked")
-                        return
-                    }
-                    viewModel.block(scope)
-                }
-            }
-        }
+        debugHooks.armOnce()
         #endif
     }
 
@@ -1236,7 +766,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     /// navigation (the rows inside it do route — each one opens someone else's
     /// profile). Gated on a loaded profile, because the subject it hands over
     /// carries the privacy state.
-    private func pushRelationships(_ direction: RelationshipDirection) {
+    func pushRelationships(_ direction: RelationshipDirection) {
         guard let makeRelationshipsViewController,
               let subject = viewModel.relationshipsSubject
         else { return }
@@ -1262,7 +792,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         }
     }
 
-    private func pushEditProfile() {
+    func pushEditProfile() {
         guard let makeEditViewController else { return }
         // Pushed onto the profile's own stack, not presented: back / edge-swipe
         // returns here. Edits are per-field (each pushes its own screen), so a
@@ -1456,7 +986,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         ]))
     }
 
-    private func moreMenuElements() -> [UIMenuElement] {
+    func moreMenuElements() -> [UIMenuElement] {
         ProfileMenuBuilder.moreMenuElements(
             ProfileMenuBuilder.MoreMenuState(
                 canShare: viewModel.shareCard != nil,
@@ -1510,7 +1040,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     /// straight to the system share sheet. Both the header's QR bubble and the
     /// menu's Share land here, so there is exactly one answer to "share this
     /// profile"; the system sheet is reachable from inside it.
-    private func presentShareSheet() {
+    func presentShareSheet() {
         guard let card = viewModel.shareCard else { return }
         let sheet = ProfileShareViewController(
             card: card,
@@ -1548,7 +1078,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         present(activity, animated: true)
     }
 
-    private func copyProfileLink() {
+    func copyProfileLink() {
         guard let link = viewModel.shareLink else { return }
         // Both slots: `.url` is what other apps paste as a rich link, `.string`
         // is what plain-text fields read. Setting only the former leaves a
@@ -1878,7 +1408,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         present(alert, animated: true)
     }
 
-    private func pushSettings() {
+    func pushSettings() {
         guard let settingsViewController = makeSettingsViewController?() else { return }
         navigationController?.pushViewController(settingsViewController, animated: true)
     }
@@ -3061,3 +2591,7 @@ extension ProfileViewController: ContentPopGating {
 extension ProfileViewController: StackScreen {
     var leaving: ScreenLeaving { .nativeBack }
 }
+
+#if DEBUG
+extension ProfileViewController: ProfileDebugHooksHost {}
+#endif
