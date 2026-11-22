@@ -3455,21 +3455,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// OWN traits never hear the device while the screen is pinned. The
     /// window is the one place the device's style arrives unpinned, so the
     /// page listens there.
-    private weak var appearanceWindow: UIWindow?
-    private var appearanceRegistration: (any UITraitChangeRegistration)?
+    private lazy var deviceAppearance = SnapWindowAppearanceWatch { [weak self] in self?.applyPageTheme() }
 
     private func observeDeviceAppearance() {
-        guard appearanceWindow !== window else { return }
-        if let registration = appearanceRegistration {
-            appearanceWindow?.unregisterForTraitChanges(registration)
-            appearanceRegistration = nil
-        }
-        appearanceWindow = window
-        appearanceRegistration = window?.registerForTraitChanges(
-            [UITraitUserInterfaceStyle.self]
-        ) { [weak self] (_: UIWindow, _: UITraitCollection) in
-            self?.applyPageTheme()
-        }
+        deviceAppearance.observe(window)
     }
 
     /// The side list's pose (#1509): the page's overlay — caption, ticker,

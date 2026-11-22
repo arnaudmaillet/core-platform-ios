@@ -30,21 +30,12 @@ final class SnapDeviceAppearanceWatch {
     /// (`SnapFeedCell.observeDeviceAppearance`, whose note says why it has to
     /// be the WINDOW); the bars need nothing, since a text page leaves them
     /// `.unspecified` and a media page pins them dark whatever the device says.
-    private weak var appearanceWindow: UIWindow?
-    private var appearanceRegistration: (any UITraitChangeRegistration)?
+    private lazy var deviceAppearance = SnapWindowAppearanceWatch { [weak self] in
+        self?.deviceAppearanceDidChange()
+    }
 
     func observeDeviceAppearance() {
-        guard appearanceWindow !== host.view.window else { return }
-        if let registration = appearanceRegistration {
-            appearanceWindow?.unregisterForTraitChanges(registration)
-            appearanceRegistration = nil
-        }
-        appearanceWindow = host.view.window
-        appearanceRegistration = host.view.window?.registerForTraitChanges(
-            [UITraitUserInterfaceStyle.self]
-        ) { [weak self] (_: UIWindow, _: UITraitCollection) in
-            self?.deviceAppearanceDidChange()
-        }
+        deviceAppearance.observe(host.view.window)
     }
 
     /// A panel built ahead in the device's old style would otherwise arrive
