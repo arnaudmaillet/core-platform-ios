@@ -54,13 +54,13 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
 
     /// Retained for the share sheet, which builds its own QR card (and a
     /// throwaway one to rasterize) and needs the same avatar cache.
-    private let imagePipeline: ImagePipeline
+    let imagePipeline: ImagePipeline
     /// The player pool, kept for the media gallery "View all" pushes (#631).
     private let videoPlayback: VideoPlaybackController?
     /// That gallery while it is up, so the pages landing reach it.
     private weak var mediaGallery: ProfileMediaGalleryViewController?
     /// Supplies the share sheet's quick-send row; nil hides it.
-    private let shareTargeting: (any ProfileShareTargeting)?
+    let shareTargeting: (any ProfileShareTargeting)?
     /// Internal (not private) only for the +QA hooks.
     let headerView: ProfileHeaderView
     /// Internal (not private) only for the +QA hooks.
@@ -111,16 +111,6 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     /// Whether this profile has an editor, and settings: the viewer's own.
     var hasEditor: Bool { makeEditViewController != nil }
     var hasSettings: Bool { makeSettingsViewController != nil }
-    #endif
-    #if DEBUG
-    /// Mute-change toasts shown (#1951): their ARRIVAL, which a test cannot
-    /// miss, where their presence on the bar lasts only a few seconds.
-    private(set) var debugMuteToastsShown = 0
-    /// The Undo toasts this screen has shown, and the latest — counted at
-    /// their arrival: on a starved runner one can come and go between two
-    /// looks (#1951). Tests.
-    private(set) var debugUndoToastsShown = 0
-    private(set) weak var debugLastUndoToast: ToastView?
     #endif
 
     /// The own-profile settings gear; pushes Settings (`SettingsFeatureBuilding`).
@@ -407,7 +397,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
             HeroScreenCost.measure("landing.mapPin") {
                 // The rails' rows keep the menu open (`.keepsMenuPresented`):
                 // their checkmarks follow in place.
-                self?.refreshVisibleMapRows()
+                self?.relationActions.refreshVisibleMapRows()
                 self?.noteLandingMilestone()
             }
         }
@@ -417,7 +407,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
             self?.applyHeaderAction()
         }
         // The tray's bell opens the scoped Mute menu (#689, #2302).
-        headerView.setBellMenu(makeMuteMenu())
+        headerView.setBellMenu(relationActions.makeMuteMenu())
         headerView.onFollowTapped = { [weak self] in
             guard let self else { return }
             MemberGates.perform(.follow(handle: viewModel.profile?.handle), from: self) { [weak self] in
@@ -443,27 +433,17 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         headerView.onRelationshipsTapped = { [weak self] direction in
             self?.pushRelationships(direction)
         }
-        configureMoreMenu()
+        relationActions.configureMoreMenu()
         viewModel.onActionResult = { [weak self] result in
-            self?.render(result)
+            self?.relationActions.render(result)
         }
         // Deleting a post, muting, restricting: done at once on screen, with
         // Undo in the toast; sent when its countdown runs out (#957).
         viewModel.onUndoable = { [weak self] action in
-            guard let self else { return }
-            let toast = Feedback.undoable(
-                action.message, symbol: action.symbol, from: self,
-                commit: action.commit, undo: action.undo
-            )
-            #if DEBUG
-            debugUndoToastsShown += 1
-            debugLastUndoToast = toast
-            #else
-            _ = toast
-            #endif
+            self?.relationActions.presentUndoable(action)
         }
         viewModel.onDismissRequested = { [weak self] in
-            self?.leaveAfterBlock()
+            self?.relationActions.leaveAfterBlock()
         }
         viewModel.onLoadSettled = { [weak self] in
             HeroScreenCost.measure("landing.settled") {
@@ -520,7 +500,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         galleryPager.onViewAllTapped = { [weak self] in self?.pushMediaGallery() }
         galleryPager.authorMenuActions = { [weak self] context, tab in
             guard let self else { return [] }
-            var actions = galleryMenuActions(for: context)
+            var actions = relationActions.galleryMenuActions(for: context)
             // History's own row (#1344): out of the history, not the post.
             if tab == .history {
                 let id = context.post.id
@@ -775,23 +755,6 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         )
     }
 
-    /// Ticks the rail rows of the open see-more menu to the current state:
-    /// a row keeps the menu open, and its mark must follow
-    /// (`ProfileMenuBuilder.retickingMapRows`).
-    private func refreshVisibleMapRows() {
-        let current = viewModel.mapPinButton.categories
-        headerView.updateVisibleMoreMenu { menu in
-            ProfileMenuBuilder.retickingMapRows(in: menu, to: current)
-        }
-    }
-
-    /// The map rails' rows for the current state (`ProfileMenuBuilder`).
-    private func mapFavoriteMenuActions() -> [UIAction] {
-        ProfileMenuBuilder.mapFavoriteMenuActions(viewModel.mapPinButton) { [weak self] category in
-            self?.viewModel.toggleMapCategory(category)
-        }
-    }
-
     func pushEditProfile() {
         guard let makeEditViewController else { return }
         // Pushed onto the profile's own stack, not presented: back / edge-swipe
@@ -804,62 +767,24 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         navigationController?.pushViewController(editViewController, animated: true)
     }
 
-    // MARK: - Mute bell
+    // MARK: - Relation actions
 
-    /// Whether the bell stands — in the header's row, where Follow was, since
-    /// #2302 (the owner, 2026-11-11; it stood in the bar's corner before):
-    /// a profile the viewer FOLLOWS, in a composition that can mute, for a
-    /// member — the card's rule (`ProfileRelationControl.showsMuteBell`). The
-    /// same rule the see-more menu's Mute submenu had (#689): a guest has no
-    /// account to mute from.
-    ///
-    /// ⚠️ NO BELL UNTIL THE READ SAYS FOLLOWING (the owner, 2026-10-18,
-    /// #1398). It used to be presumed from frame 0 on someone else's profile
-    /// (#778) and taken away once the read said "not followed" — so every
-    /// profile the viewer does not follow showed a bell for the whole push,
-    /// then lost it. There is nothing of theirs to mute until they are
-    /// followed (2026-10-15), and an unknown relationship is not "followed".
-    private var showsMuteBell: Bool {
-        guard !viewModel.namesNoOne else { return false }
-        return ProfileRelationControl.showsMuteBell(
-            followButton: followButtonState, canMute: viewModel.canMute,
-            isGuest: MemberGates.gate(from: self)?.isMember == false
-        )
-    }
-
-    /// The header's row for the relationship (#2302): Follow or Requested,
-    /// the bell once followed — its glyph, its enabling — or Message alone.
-    /// On every change of the relationship, the scopes (on the tap, a
-    /// refusal, an Undo, #2143), and the lookup's answer.
-    private func applyHeaderAction() {
-        let bell = showsMuteBell
-            ? ProfileHeaderView.Bell(scopes: viewModel.muteScopes, isEnabled: isMuteBellEnabled)
-            : nil
-        headerView.configureAction(followButtonState, bell: bell)
-    }
-
-    /// Whether the bell can be used yet: a handle or link route has no one to
-    /// mute until the relationship read says the lookup found someone else.
-    private var isMuteBellEnabled: Bool {
-        !viewModel.wasOpenedByReference || viewModel.canModerate
-    }
+    /// The header's relation row, the menus and the actions' outcomes
+    /// (`ProfileRelationActions`, #2522).
+    private(set) lazy var relationActions = ProfileRelationActions(host: self)
+    private func applyHeaderAction() { relationActions.applyHeaderAction() }
+    private func applyRelationMark() { relationActions.applyRelationMark() }
+    func presentShareSheet() { relationActions.presentShareSheet() }
+    func copyProfileLink() { relationActions.copyProfileLink() }
+    func moreMenuElements() -> [UIMenuElement] { relationActions.moreMenuElements() }
+    #if DEBUG
+    var debugMuteToastsShown: Int { relationActions.debugMuteToastsShown }
+    var debugUndoToastsShown: Int { relationActions.debugUndoToastsShown }
+    var debugLastUndoToast: ToastView? { relationActions.debugLastUndoToast }
+    #endif
 
     /// The keys the router's repeat filter asks about (#800).
     var profileRouteKeys: Set<ProfileRouteKey> { viewModel.profileRouteKeys }
-
-    /// Resolved when it opens, so the checkmarks are the current scopes.
-    private func makeMuteMenu() -> UIMenu {
-        UIMenu(children: [UIDeferredMenuElement.uncached { [weak self] completion in
-            completion(self?.muteMenuElements() ?? [])
-        }])
-    }
-
-    /// The scoped Mute menu for the current scopes (`ProfileMenuBuilder`).
-    private func muteMenuElements() -> [UIMenuElement] {
-        ProfileMenuBuilder.muteMenuElements(viewModel.muteScopes) { [weak self] scope in
-            self?.viewModel.toggleMute(scope)
-        }
-    }
 
     // MARK: - Follow in the corner (#2248)
 
@@ -959,273 +884,17 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     var debugMuteBell: AppButton? { headerView.debugBell }
     /// What picking the bell menu's `scope` does. Tests.
     func debugToggleMute(_ scope: MuteScope) { viewModel.toggleMute(scope) }
-    func debugMuteMenuElements() -> [UIMenuElement] { muteMenuElements() }
+    func debugMuteMenuElements() -> [UIMenuElement] { relationActions.muteMenuElements() }
     func debugMoreMenuElements() -> [UIMenuElement] { moreMenuElements() }
     /// The map pin's rows, for `-profile-map-pin-audit` (+QA).
-    func debugMapFavoriteMenuActions() -> [UIAction] { mapFavoriteMenuActions() }
+    func debugMapFavoriteMenuActions() -> [UIAction] { relationActions.mapFavoriteMenuActions() }
     /// A gallery card's "..." rows, for `-post-menu-audit` (+QA).
     func debugGalleryMenuActions(
         for context: PostGridAuthorMenuContext
     ) -> [PostCardMenuAction] {
-        galleryMenuActions(for: context)
+        relationActions.galleryMenuActions(for: context)
     }
     #endif
-
-    // MARK: - Overflow menu
-
-    /// Installs the see-more bubble's menu. The children are built at OPEN
-    /// time through an uncached deferred element (the feed's "..." precedent),
-    /// not at wiring time: whether the moderation group belongs, and whether it
-    /// reads Block or Unblock, depends on a relationship that usually resolves
-    /// after this runs and can change while the screen is up.
-    private func configureMoreMenu() {
-        headerView.setMoreMenu(UIMenu(children: [
-            UIDeferredMenuElement.uncached { [weak self] completion in
-                completion(self?.moreMenuElements() ?? [])
-            }
-        ]))
-    }
-
-    func moreMenuElements() -> [UIMenuElement] {
-        ProfileMenuBuilder.moreMenuElements(
-            ProfileMenuBuilder.MoreMenuState(
-                canShare: viewModel.shareCard != nil,
-                mapPin: viewModel.mapPinButton,
-                canModerate: viewModel.canModerate,
-                isGuest: MemberGates.gate(from: self)?.isMember == false,
-                canRestrict: viewModel.canRestrict,
-                isRestricted: viewModel.isRestricted,
-                isBlocked: viewModel.isBlocked,
-                canClearHistory: viewModel.isOwnProfile && viewModel.hasHistory,
-                isFollowing: followButtonState == .following && !viewModel.namesNoOne
-            ),
-            handlers: ProfileMenuBuilder.MoreMenuHandlers(
-                share: { [weak self] in self?.presentShareSheet() },
-                copyLink: { [weak self] in self?.copyProfileLink() },
-                toggleMapCategory: { [weak self] category in self?.viewModel.toggleMapCategory(category) },
-                report: { [weak self] in self?.presentReportReasons() },
-                toggleRestrict: { [weak self] in self?.viewModel.toggleRestrict() },
-                unblock: { [weak self] in self?.viewModel.unblock() },
-                confirmBlock: { [weak self] in self?.confirmBlock() },
-                clearHistory: { [weak self] in self?.confirmClearHistory() },
-                unfollow: { [weak self] in self?.unfollowTapped() }
-            )
-        )
-    }
-
-    /// The "…" menu's Unfollow (#2302): the tray's own path — the member
-    /// gate, the optimistic flip, the silent off (#1886) — only while the
-    /// viewer still follows: a menu opened before a change must not follow
-    /// back.
-    private func unfollowTapped() {
-        guard followButtonState == .following else { return }
-        headerView.onFollowTapped?()
-    }
-
-    /// "Clear History" asks once (#1344): the list cannot be brought back.
-    private func confirmClearHistory() {
-        let alert = UIAlertController(
-            title: "Clear History?",
-            message: "Posts you watched will no longer appear in History.",
-            preferredStyle: .actionSheet
-        )
-        alert.addAction(UIAlertAction(title: "Clear History", style: .destructive) { [weak self] _ in
-            self?.viewModel.clearHistory()
-        })
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        present(alert, animated: true)
-    }
-
-    /// Opens the unified share surface — the QR sheet — rather than jumping
-    /// straight to the system share sheet. Both the header's QR bubble and the
-    /// menu's Share land here, so there is exactly one answer to "share this
-    /// profile"; the system sheet is reachable from inside it.
-    func presentShareSheet() {
-        guard let card = viewModel.shareCard else { return }
-        let sheet = ProfileShareViewController(
-            card: card,
-            imagePipeline: imagePipeline,
-            targeting: shareTargeting,
-            // Read HERE, where there is a window: the sheet has none until it
-            // is already on screen, and reading it there made the corners snap
-            // after the presentation animation instead of riding it.
-            deviceCornerRadius: ScreenGeometry.cornerRadius(behind: view),
-            // The sheet is full-width on iPhone, so this is its width for the
-            // frames before it has been laid out.
-            fallbackWidth: view.bounds.width
-        )
-        // Both escape hatches come back HERE, after the sheet has dismissed
-        // itself: the system sheet would otherwise stack on top of this one,
-        // and a pushed thread would land behind it.
-        sheet.onSystemShare = { [weak self] card, image in
-            self?.presentActivitySheet(for: card, image: image)
-        }
-        sheet.onSendToTarget = { [weak self] target, card in
-            self?.viewModel.sendProfile(card, to: target)
-        }
-        present(sheet, animated: true)
-    }
-
-    /// The system share sheet, opened once the QR sheet is gone. Two items:
-    /// the link (carrying the metadata that gives the sheet a branded header)
-    /// and the rendered card — the image is what makes Save Image and image
-    /// targets work, which is why this feature needs no photo-library
-    /// permission of its own.
-    private func presentActivitySheet(for card: ProfileViewModel.ShareCard, image: UIImage) {
-        let source = ProfileShareItemSource(card: card, icon: image)
-        let activity = UIActivityViewController(activityItems: [source, image], applicationActivities: nil)
-        activity.popoverPresentationController?.sourceView = headerView.moreButtonAnchor
-        present(activity, animated: true)
-    }
-
-    func copyProfileLink() {
-        guard let link = viewModel.shareLink else { return }
-        // Both slots: `.url` is what other apps paste as a rich link, `.string`
-        // is what plain-text fields read. Setting only the former leaves a
-        // Notes paste empty.
-        UIPasteboard.general.url = link
-        UIPasteboard.general.string = link.absoluteString
-        Feedback.success("Link copied", symbol: "link", from: self)
-    }
-
-    /// Block is destructive and, here, one-way out of the screen — so it asks
-    /// first. Named with the handle so it can't be answered on autopilot.
-    ///
-    /// An action sheet rather than an alert, because the question is not
-    /// yes/no but *how far*: this app treats one account as owning several
-    /// profiles (the switcher is a first-class affordance), so blocking one
-    /// handle can leave the same person reaching the viewer from an alias.
-    /// Two destructive options read as a scope choice; an alert's OK/Cancel
-    /// shape would have to hide one of them behind a second step.
-    private func confirmBlock() {
-        let handle = viewModel.handle ?? "this user"
-        let sheet = UIAlertController(
-            title: "Block \(handle)?",
-            message: "They won't be able to find your profile or message you, and you'll stop seeing their posts. They aren't notified.\n\nBlocking the account also blocks any other profiles it owns.",
-            preferredStyle: .actionSheet
-        )
-        // The narrow, predictable action leads: it is what "Block" meant
-        // before this choice existed, and it is the one that can't overreach.
-        sheet.addAction(UIAlertAction(title: "Block \(handle)", style: .destructive) { [weak self] _ in
-            self?.viewModel.block(.profile)
-        })
-        sheet.addAction(UIAlertAction(title: "Block Account & All Profiles", style: .destructive) { [weak self] _ in
-            self?.viewModel.block(.account)
-        })
-        sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        sheet.popoverPresentationController?.sourceView = headerView.moreButtonAnchor
-        present(sheet, animated: true)
-    }
-
-    /// `moderation.v1.OpenCase` carries a policy category, so the report asks
-    /// for one rather than filing everything as "other" — a category-less
-    /// report is near-useless to the moderation queue.
-    ///
-    /// The picker itself now lives in `PostGrid`, beside the post card's "..."
-    /// that raises the same question: two screens asking a viewer to classify
-    /// a report must ask it in the same words, and the second copy would have
-    /// been written the day the card grew a Report row.
-    /// Report only — or, on the viewer's own post, Edit and Delete
-    /// (`ProfileMenuBuilder.galleryMenuActions`).
-    private func galleryMenuActions(
-        for context: PostGridAuthorMenuContext
-    ) -> [PostCardMenuAction] {
-        ProfileMenuBuilder.galleryMenuActions(
-            isViewerPost: viewModel.isViewerPost(by: context.authorID),
-            canReport: viewModel.canReportPost(by: context.authorID),
-            // At once, with Undo in the toast (#957) — no confirmation sheet.
-            onDelete: { [weak self] in self?.viewModel.deletePost(context.post.id) },
-            onReport: { [weak self] in self?.presentPostReportReasons(for: context) }
-        )
-    }
-
-    /// The same question, asked of a post instead of the profile — and asked by
-    /// the same picker, anchored on the row's own "..." rather than on the
-    /// header's.
-    private func presentPostReportReasons(
-        for context: PostGridAuthorMenuContext
-    ) {
-        ReportReasonSheet.present(
-            from: self, subject: "this post", sourceView: context.anchor
-        ) { [weak self] reason in
-            self?.viewModel.reportPost(context.post.id, reason: reason)
-        }
-    }
-
-    private func presentReportReasons() {
-        ReportReasonSheet.present(
-            from: self,
-            subject: viewModel.handle ?? "this profile",
-            sourceView: headerView.moreButtonAnchor
-        ) { [weak self] reason in
-            self?.viewModel.report(reason)
-        }
-    }
-
-    /// Reports the outcome of a menu command. Confirmations are toasts (the
-    /// action is already done — an alert would only demand a second tap);
-    /// failures are alerts, because a failed block or report is something the
-    /// user must know to retry.
-    private func render(_ result: ProfileViewModel.ActionResult) {
-        switch result {
-        case .blocked(let handle, let profileCount):
-            // Says what was actually blocked, not what was asked for: an
-            // account-scoped block can only reach the aliases the fleet let us
-            // see, so claiming "and all their profiles" would be a promise the
-            // client can't keep (see `ProfileBlockScope`).
-            let message = profileCount > 1
-                ? "Blocked \(handle) and \(profileCount - 1) more"
-                : "Blocked \(handle)"
-            // Sourced from the navigation controller, not this screen: the
-            // block pops this view controller in the same turn, and a toast
-            // parented here would leave with it.
-            Feedback.success(message, symbol: "hand.raised.fill", from: navigationController ?? self)
-        case .unblocked(let handle):
-            Feedback.success("Unblocked \(handle)", symbol: "hand.raised.slash.fill", from: self)
-            // Unblocked, the "+" is back (#2014): the button never moved.
-            applyRelationMark()
-        case .muteChanged(let handle, let scopes):
-            #if DEBUG
-            debugMuteToastsShown += 1
-            #endif
-            Feedback.success(
-                ProfileViewModel.muteMessage(handle: handle, scopes: scopes),
-                symbol: scopes.isEmpty ? "speaker.wave.2.fill" : "speaker.slash.fill",
-                from: self
-            )
-        case .restrictChanged(let handle, let restricted):
-            Feedback.success(
-                restricted ? "Restricted \(handle)" : "Unrestricted \(handle)",
-                symbol: restricted ? "person.crop.circle.badge.minus" : "person.crop.circle.badge.checkmark",
-                from: self
-            )
-        case .commitFailed(let message):
-            // Already put back on screen (#957): say why it came back.
-            Feedback.failure(message, from: self)
-        case .reported:
-            Feedback.success("Report sent", symbol: "flag.fill", from: self)
-        case .followFailed(let message):
-            // A toast, not the alert below: the button has already flipped
-            // back, so there is nothing to decide — only why it moved (#802).
-            Feedback.failure(message, from: self)
-        case .failed(let message):
-            let alert = UIAlertController(title: nil, message: message, preferredStyle: .alert)
-            alert.addAction(UIAlertAction(title: "OK", style: .default))
-            present(alert, animated: true)
-        }
-    }
-
-    /// Leaves the blocked profile: pop when pushed (the common case — a profile
-    /// reached by routing), dismiss when presented. A tab-root profile is left
-    /// standing, but it can't get here: own profiles can't be blocked.
-    private func leaveAfterBlock() {
-        // An open menu-spawned alert would otherwise ride out the pop.
-        if let alert = presentedViewController { dismiss(presented: alert, animated: false) }
-        // THIS profile, wherever it is now (#1144): the block answered after
-        // an `await`, and the viewer may have gone back or pushed on since —
-        // a plain pop would have closed that other screen.
-        closeScreen()
-    }
 
     // MARK: - Setup
 
@@ -1786,14 +1455,6 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
             sectionBinding.trailingItems = items
             sectionBinding.placeNow(animated: animated)
         }
-    }
-
-    /// Wears the relationship on the header's avatar (#2014).
-    private func applyRelationMark() {
-        headerView.configureRelationMark(
-            followButtonState, mutual: viewModel.isMutualFollow, blocked: viewModel.isBlocked,
-            isOwnProfile: viewModel.isOwnProfile
-        )
     }
 
     /// Wires the selector and the source filter, and puts the selector in its
@@ -2595,3 +2256,5 @@ extension ProfileViewController: StackScreen {
 #if DEBUG
 extension ProfileViewController: ProfileDebugHooksHost {}
 #endif
+
+extension ProfileViewController: ProfileRelationActionsHost {}
