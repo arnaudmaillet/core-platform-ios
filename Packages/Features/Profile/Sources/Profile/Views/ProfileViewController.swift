@@ -74,19 +74,17 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     var staking: PostCardStaking? {
         didSet { galleryPager.staking = staking }
     }
-    /// Which pages this profile has. The viewer's own carries Saved and Liked;
-    /// everyone else's does not, because neither pile is anybody else's to see.
-    /// The tabs on show: Posts, and each other source once it has
-    /// something in it (#742). One tab is no selector at all.
-    private(set) var tabs: [ProfileTab]
+    /// The tabs on show at construction — Posts alone; `ProfileTabPages`
+    /// owns them from there.
+    private let initialTabs: [ProfileTab]
     /// Every tab this profile can have.
-    private let allTabs: [ProfileTab]
+    let allTabs: [ProfileTab]
     /// The Channels tab's model (#2232): the channels this profile owns,
     /// read through Chat's seam. Nil with the channels off — no tab at all.
     /// Internal for tests.
     let channels: ProfileChannelsViewModel?
     /// The new channel's sheet, for the own tab's "Create a Channel" (#2232).
-    private let makeChannelCreation: (@MainActor () -> UIViewController?)?
+    let makeChannelCreation: (@MainActor () -> UIViewController?)?
     /// The strip's home when the tab bar is under this screen. Nil on a pushed
     /// profile, where the bottom toolbar carries it instead.
     ///
@@ -197,7 +195,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     /// The phase last rendered.
     private var renderedPhase: ProfileViewModel.Phase = .loading
     /// The gallery as last rendered.
-    private var lastGallerySnapshot: ProfileViewModel.GallerySnapshot?
+    private(set) var lastGallerySnapshot: ProfileViewModel.GallerySnapshot?
     #if DEBUG
     private var hasLoggedFirstFrame = false
     fileprivate var lastTracedReadiness = ""
@@ -267,7 +265,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         // Posts alone until the other sources answer (#742): a source shows
         // up only with something in it.
         let shown = allTabs.filter { $0 == .format(.activity) }
-        self.tabs = shown
+        self.initialTabs = shown
         let savesPosts = viewModel.bookmarks != nil
         // A tab's page is built the first time it is shown (#2125).
         // The Channels page draws its model (#2232); "Create a Channel" asks
@@ -457,12 +455,12 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         // A gallery that landed before this screen bound: its tabs now.
         if let landed = viewModel.publishedGallery {
             lastGallerySnapshot = landed
-            showTabs(for: landed)
+            tabPages.showTabs(for: landed)
         }
         viewModel.onGalleryChange = { [weak self] snapshot in
             self?.lastGallerySnapshot = snapshot
             self?.historyChanged()
-            self?.showTabs(for: snapshot)
+            self?.tabPages.showTabs(for: snapshot)
             HeroScreenCost.measure("landing.gallery") { self?.galleryPager.render(snapshot) }
             // The media gallery "View all" pushed, if it is up, grows with
             // the pages as they land (#631).
@@ -472,7 +470,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
             self?.auditPostMenu(snapshot)
             #endif
         }
-        bindChannels()
+        tabPages.bindChannels()
         galleryPager.onItemTapped = { [weak self] post, stream in
             self?.openGalleryPost(post, stream: stream, showingComments: false)
         }
@@ -512,12 +510,12 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         // selectors; a tab tap records it and pages.
         galleryPager.onPageSettled = { [weak self] tab in
             guard let self else { return }
-            self.adoptTab(tab)
+            self.tabPages.adoptTab(tab)
             if let index = self.tabs.firstIndex(of: tab) {
-                self.mirrorSelection(to: index)
+                self.tabPages.mirrorSelection(to: index)
             }
         }
-        configureFilterTray()
+        tabPages.configureFilterTray()
         // Mirror the (possibly stub-seeded) relationship into the header's
         // tray, so Message visibility agrees with the toolbar from the start.
         applyHeaderAction()
@@ -1088,7 +1086,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     /// places: viewDidLoad (initial composition), viewWillAppear (synchronous
     /// pre-transition bind), and the async data callbacks (via
     /// `alongsideTransition`).
-    private func applyNavigationState(animated: Bool = false) {
+    func applyNavigationState(animated: Bool = false) {
         // ⚠️ **AND THE CHEVRON KEEPS ITS SILENCE.** A titled root gives every
         // screen pushed from it a WORDED back button, and two pushed bars were
         // budgeted against a bare 44pt chevron: `SearchResultsViewController`
@@ -1457,62 +1455,10 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         }
     }
 
-    /// Wires the selector and the source filter, and puts the selector in its
-    /// inline slot: a format tab records the selection and pages the gallery; a
-    /// source pick re-filters every page in place.
-    private func configureFilterTray() {
-        guard viewModel.hasGallery else { return }
-
-        // Both ways (`HeroPageSelector.bind`): the lens tracks the pages, the
-        // pill scrubs them, a reselect goes back to the top of the tab.
-        selector.bind(to: galleryPager) { [weak self] index in self?.barSelectionChanged(index) }
-
-        placeSelectors()
-
-        // Land on the user's global preference: tab selection and pager page
-        // adopt the (possibly stored) filter before first layout, so the
-        // screen OPENS there — no visible jump. The preference names a FORMAT,
-        // so it can only ever land on one of the three every profile has.
-        let tab = ProfileTab.format(viewModel.galleryFilter.format)
-        if let index = tabs.firstIndex(of: tab) {
-            mirrorSelection(to: index)
-        }
-        galleryPager.setActivePage(tab, animated: false)
-
-    }
-
-    /// A tap on either selector: record the format, page the gallery, and carry
-    /// the choice to the other bar so the hand-over has nothing to reconcile.
-    private func barSelectionChanged(_ index: Int) {
-        mirrorSelection(to: index)
-        let tab = tabs[index]
-        adoptTab(tab)
-        galleryPager.setActivePage(tab, animated: selector.bar.animatesPageChanges)
-    }
-
-    /// Records the choice.
-    ///
-    /// ⚠️ Only a FORMAT page is a filter preference. Saved and Liked are
-    /// corpora, not formats, and writing one into the stored filter would mean
-    /// re-opening the profile on a tab the next profile may not even have.
-    private func adoptTab(_ tab: ProfileTab) {
-        let changed = shownTab != tab
-        shownTab = tab
-        viewModel.setActiveTab(tab)
-        // Off the History page: it takes in what was viewed (#2170), and its
-        // select mode ends.
-        if tab != .history {
-            viewModel.releaseHistory()
-            setSelectingHistory(false)
-        }
-        // History's Select stands in the gear's place, and only there (#2307):
-        // leaving History with the tray away puts the gear back, coming back
-        // brings Select.
-        if changed { applyNavigationState(animated: view.window != nil) }
-    }
-
-    /// The page on screen, as last adopted.
-    private var shownTab: ProfileTab?
+    /// The tabs, their selector and the Channels tab (`ProfileTabPages`, #2522).
+    private(set) lazy var tabPages = ProfileTabPages(host: self, tabs: initialTabs)
+    var tabs: [ProfileTab] { tabPages.tabs }
+    var shownTab: ProfileTab? { tabPages.shownTab }
 
     // MARK: - History's select mode (the owner, 2026-11-08)
 
@@ -1641,220 +1587,22 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     /// screen is back.
     private var isShowingHistoryPost = false
 
-    /// Selects a tab the way a selector tap does — the shared path behind the
-    /// debug hook and the tests, so neither exercises a shortcut around the
-    /// real one.
-    func selectTab(at index: Int) {
-        guard tabs.indices.contains(index) else { return }
-        mirrorSelection(to: index)
-        adoptTab(tabs[index])
-        galleryPager.setActivePage(tabs[index], animated: false)
-    }
+    func selectTab(at index: Int) { tabPages.selectTab(at: index) }
 
-    /// Puts the strip on a selection the pager reached by itself.
-    ///
-    /// ⚠️ THE RE-ENTRANCY LATCH WENT WITH THE SECOND COPY. It existed because
-    /// `select` fires `.valueChanged`, whose action mirrored into the other
-    /// bar, which selected again. With one strip the guard below is all of it.
-    private func mirrorSelection(to index: Int) {
-        selector.select(index)
-    }
-
-    /// Puts the selector at the foot of the screen, in a `UITabAccessory` —
-    /// on BOTH profiles.
-    ///
-    /// ⚠️ **A PUSHED SCREEN CAN HOST ONE, AND THE COMMIT THAT SAID OTHERWISE
-    /// WAS WRONG.** "A pushed screen has no tab bar to hang an accessory from"
-    /// is the sentence that sent this branch to the toolbar; the search
-    /// results — which also sets `hidesBottomBarWhenPushed` — then measured the
-    /// opposite: `env=regular`, a 360x48 container at the foot, laid out
-    /// exactly as on a tab root. `UITabAccessory.h` says so too, defining
-    /// `.regular` as "above the bottom tab bar when it is visible; **or, at the
-    /// bottom of the UITabBarController's view**".
-    ///
-    /// ⚠️ **`trayPlacement` IS THE ONLY THING THAT CAN ANSWER THIS, and it is
-    /// injected for that reason.** Its own note says why: "the host knows, and
-    /// the screen cannot work it out for itself (a nav root inside a tab bar
-    /// and a pushed screen look identical from in here)". Two other questions
-    /// look like this one and are not it — `onLogout != nil` is whether this is
-    /// the canonical account entry point, and `viewModel.isOwnProfile` is
-    /// whether it is the viewer. A ROUTED self profile is own-profile, wears
-    /// five tabs and an Edit button, and is PUSHED: choosing by
-    /// `isOwnProfile` would hang a shell-lifetime accessory on a screen with
-    /// `hidesBottomBarWhenPushed = true`, which is the measured leak the
-    /// accessory's install/remove bracket exists to prevent.
-    ///
-    /// ⚠️ ONE PAGE, NO SELECTOR (#631). Anyone else's profile has only Posts,
-    /// and a strip with one segment is a label pretending to be a control.
-    ///
-    ///
-    /// ⚠️ **TWO HOMES, BY WHERE THE PROFILE IS (#728, the owner's call
-    /// 2026-10-09).** #718 floated the strip in this view at its intrinsic
-    /// width on both; that was not the ask.
-    /// - The Profile **tab root** keeps it in the tab bar's `UITabAccessory`,
-    ///   as it always had.
-    /// - A **pushed** profile hosts it as a toolbar item at the bottom leading
-    ///   corner, at its intrinsic width — the relations screen's arrangement:
-    ///   the item's platter is the glass, so the strip draws none
-    ///   (`.platter`).
-    private func placeSelectors() {
-        guard viewModel.hasGallery, tabs.count > 1 else { return }
-        selector.place(on: self)
-    }
-
-    /// Takes the selector away when one tab is left (#742).
-    private func removeSelectors() {
-        selector.remove(from: self)
-    }
-
-    /// The tabs whose source is still loading and which had posts the last
-    /// time this profile was seen (`SectionPresenceStore`, #1773).
     static func rememberedTabs(
         _ tabs: [ProfileTab], in snapshot: ProfileViewModel.GallerySnapshot,
         screen: String?, presence: SectionPresenceStore
     ) -> [ProfileTab] {
-        guard let screen else { return [] }
-        return tabs.filter { tab in
-            snapshot.state(for: tab) == .loading
-                && (presence.count(screen: screen, section: String(describing: tab)) ?? 0) > 0
-        }
+        ProfileTabPages.rememberedTabs(tabs, in: snapshot, screen: screen, presence: presence)
     }
-
-    /// ⚠️ NO TAB FOR A SOURCE WITH NOTHING IN IT (#742, the owner's call
-    /// 2026-10-09) — Posts included since #1422 (owner, 2026-10-19). A tab
-    /// shows once its source holds something; a source still loading waits,
-    /// rather than showing a tab that might leave. Two exceptions:
-    /// - the viewer's OWN Posts stays even empty: it is where the invitation
-    ///   to post belongs;
-    /// - with nothing shown at all, Posts is the one page — loading, "No
-    ///   Posts Yet", or the lock of a private profile — so the area under
-    ///   the header is never blank, which reads as still loading.
-    ///
-    /// A private profile the viewer does not follow thus shows Tagged alone
-    /// when it has posts, plainly — no lock line (#1445) — and the lock alone
-    /// when it has none; following it brings the tabs back as their sources
-    /// fill. One tab left is no selector at all, in the tab
-    /// bar's accessory as in a pushed profile's toolbar.
-    private func showTabs(for snapshot: ProfileViewModel.GallerySnapshot) {
-        var shown = Self.shownTabs(
-            allTabs, in: snapshot, isOwnProfile: viewModel.isOwnProfile, hasChannels: showsChannelsTab
-        )
-        // ⚠️ SECTIONS BY PRESENCE (#1773): a source still loading whose tab
-        // had posts last time keeps its tab from the first frame — it does
-        // not pop in when its source answers.
-        let remembered = Self.rememberedTabs(
-            allTabs, in: snapshot, screen: viewModel.presenceScreen, presence: galleryPager.presence
-        )
-        shown = allTabs.filter { shown.contains($0) || remembered.contains($0) }
-        shown = Self.withPostsBesideChannels(shown)
-        if shown.isEmpty { shown = [.format(.activity)] }
-        guard shown != tabs else { return }
-        let active = tabs.indices.contains(galleryPager.activePageIndex) ? tabs[galleryPager.activePageIndex] : nil
-        tabs = shown
-        galleryPager.setVisibleTabs(shown)
-        selectorBar.setTitles(shown.map(\.title))
-        let index = active.flatMap { shown.firstIndex(of: $0) } ?? 0
-        mirrorSelection(to: index)
-        // ⚠️ THE PAGE ON SCREEN IS ADOPTED WHEN ITS TAB WENT (#772). An account
-        // switch on Reposts or Tagged cuts the tabs to Posts while every source
-        // reloads; the strip clamps quietly and the pager settles nothing, so
-        // the source stayed on the tab that left — Posts then paged and pushed
-        // "View all" from the wrong corpus.
-        if active != shown[index] { adoptTab(shown[index]) }
-        if shown.count > 1 {
-            let wasPlaced = selector.isPlaced
-            placeSelectors()
-            // ⚠️ ON SCREEN, NOT IN A WINDOW. A tab that arrives while a pushed
-            // screen (Settings) is covering this one found the view still in
-            // the window mid-push, installed the band, and nothing ever took
-            // it down: this screen's `viewWillDisappear` had already run with
-            // no band to remove. The next `viewWillAppear` puts it up.
-            guard !wasPlaced, isShownOnScreen else { return }
-            // Arrived while on screen: up now, not at the next appearance.
-            selector.install(on: self, alongside: nil)
-            if navigationController?.topViewController === self {
-                selector.showToolbar(for: self, animated: true)
-            }
-        } else {
-            removeSelectors()
-        }
-    }
-
-    /// The tabs `snapshot` gives something to show, in `all`'s order (#742,
-    /// #1422): those whose source holds posts, and the viewer's own Posts.
-    /// Empty when nothing has posts yet — `showTabs` then shows Posts alone.
-    ///
-    /// Channels (#2232) is no source of posts: it shows when the profile
-    /// owns a channel the viewer may see (`hasChannels`), like any tab only
-    /// with something in it.
     static func shownTabs(
         _ all: [ProfileTab], in snapshot: ProfileViewModel.GallerySnapshot, isOwnProfile: Bool,
         hasChannels: Bool = false
     ) -> [ProfileTab] {
-        all.filter { tab in
-            if tab == .channels { return hasChannels }
-            if tab == .format(.activity), isOwnProfile { return true }
-            if case .content(let posts) = snapshot.state(for: tab) { return !posts.isEmpty }
-            return false
-        }
+        ProfileTabPages.shownTabs(all, in: snapshot, isOwnProfile: isOwnProfile, hasChannels: hasChannels)
     }
-
-    /// ⚠️ CHANNELS NEVER STANDS ALONE (#2232): a profile with channels and
-    /// no post yet — or a private one the viewer doesn't follow — keeps
-    /// Posts first, so its "No Posts Yet" or its lock stays where the viewer
-    /// looks for it, and the channels are the second tab. Pure, for tests.
     static func withPostsBesideChannels(_ shown: [ProfileTab]) -> [ProfileTab] {
-        shown == [.channels] ? [.format(.activity), .channels] : shown
-    }
-
-    /// Whether Channels is a tab now (#2232): with a channel listed, or
-    /// while its read is on its way for a profile that had one last time
-    /// (sections by presence, #1773) — so it doesn't pop in under the
-    /// viewer when the answer lands.
-    private var showsChannelsTab: Bool {
-        guard let channels else { return false }
-        if channels.hasChannels { return true }
-        guard channels.phase == .loading, let screen = viewModel.presenceScreen else { return false }
-        return (galleryPager.presence.count(screen: screen, section: Self.channelsPresenceSection) ?? 0) > 0
-    }
-
-    /// The key Channels' presence is remembered under (#1773).
-    private static let channelsPresenceSection = String(describing: ProfileTab.channels)
-
-    /// Follows the Channels model (#2232): its tab comes and goes with its
-    /// channels, its page redraws, a refused write shakes its row's button,
-    /// and "Create a Channel" presents the new channel's sheet.
-    private func bindChannels() {
-        guard let channels else { return }
-        channels.onChange = { [weak self] in self?.channelsDidChange() }
-        channels.onActionFailed = { [weak self] id in self?.channelsPage?.showFailure(for: id) }
-        channels.onCreate = { [weak self] in self?.presentChannelCreation() }
-    }
-
-    /// The Channels page, once its tab has been shown.
-    private var channelsPage: ProfileChannelsPage? {
-        galleryPager.builtPage(for: .channels) as? ProfileChannelsPage
-    }
-
-    private func channelsDidChange() {
-        guard let channels else { return }
-        if channels.phase == .loaded, let screen = viewModel.presenceScreen {
-            galleryPager.presence.remember(
-                channels.channels.count, screen: screen, section: Self.channelsPresenceSection
-            )
-        }
-        let snapshot = lastGallerySnapshot ?? viewModel.publishedGallery
-            ?? ProfileViewModel.GallerySnapshot(activity: .loading, media: .loading, isComplete: false)
-        showTabs(for: snapshot)
-        channelsPage?.render()
-    }
-
-    /// The new channel's sheet over the profile; Create lands in Messages
-    /// with the channel's thread (#2230), and the profile lists it on the
-    /// way back (`viewWillAppear`).
-    private func presentChannelCreation() {
-        guard presentedViewController == nil, let sheet = makeChannelCreation?() else { return }
-        present(sheet, animated: true)
+        ProfileTabPages.withPostsBesideChannels(shown)
     }
 
     // MARK: - The hero page's contract
@@ -2258,3 +2006,5 @@ extension ProfileViewController: ProfileDebugHooksHost {}
 #endif
 
 extension ProfileViewController: ProfileRelationActionsHost {}
+
+extension ProfileViewController: ProfileTabPagesHost {}
