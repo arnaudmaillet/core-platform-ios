@@ -12,15 +12,6 @@ import ThreadKit
 import UIKit
 
 final class PostDetailViewController: UIViewController {
-    /// Where an opened post is recorded — the profile's History tab
-    /// (#1344): every post opened counts, here as in the vertical feed.
-    var viewHistory: PostViewHistoryStore?
-
-    override func viewDidAppear(_ animated: Bool) {
-        super.viewDidAppear(animated)
-        if let postID = viewModel.postID { viewHistory?.record(postID.rawValue) }
-    }
-
     let viewModel: PostDetailViewModel
     let imagePipeline: ImagePipeline
     /// A TEXT post's resting comments: the threads grouped under pinned day
@@ -107,8 +98,6 @@ final class PostDetailViewController: UIViewController {
     /// The reader scrolled a stream: the opening tab is theirs now.
     func readerDidScroll() { hasChosenOpeningTab = true }
 
-    /// The tabs came (`true`), for a host that draws their selector.
-    var onPopularTabChange: ((Bool) -> Void)?
     /// The pager's fractional position — 0 Popular, 1 Recent — for the
     /// selector that follows it.
     var onStreamProgress: ((CGFloat) -> Void)?
@@ -197,7 +186,6 @@ final class PostDetailViewController: UIViewController {
         mountPopular()
         pager.isPagingEnabled = true
         viewModel.loadPopularIfNeeded()
-        onPopularTabChange?(true)
         if opensOnPopular { showStream(.popular, animated: false) }
     }
 
@@ -792,11 +780,6 @@ final class PostDetailViewController: UIViewController {
         composeBar.visibilityMenu = menu
     }
 
-    /// Whether the composer holds unsent text: what closing the page would lose.
-    var composerHasDraft: Bool {
-        !composeBar.draftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
     /// A draft whose first message is on its way — already sent, past recall.
     var isPublishing: Bool { viewModel.isDraft && composeBar.isSending }
 
@@ -1020,17 +1003,6 @@ final class PostDetailViewController: UIViewController {
         ])
         composeBar.riseWithKeyboard(of: view.keyboardLayoutGuide)
     }
-
-    /// Shapes the scrolling content for the snap feed's engaged layout:
-    /// `top` is the frosted media strip's height — the scroll view itself
-    /// spans the full cell (comments glide UNDER the strip), so the content
-    /// rests below it via inset, not via frame; `trailing` reserves the
-    /// action rail's exclusive column (zero overlap). The composer
-    /// deliberately stays full-width: the rail's territory ends well above
-    /// the footer.
-
-    /// The stream's frame of reference, for tests.
-    var debugStream: UICollectionView { stream.collectionView }
 
     /// Wires the composer's INTERACTIVE page-swipe — the bar forwards each
     /// pan phase (began/changed/ended) with the raw vertical translation and
@@ -1410,7 +1382,6 @@ final class PostDetailViewController: UIViewController {
                 pager.isPagingEnabled = false
                 if lastSettledStream !== stream { visibleStreamDidChange() }
             }
-            onPopularTabChange?(false)
             onCommentCountChange?(commentCount)
         }
     }
@@ -1618,11 +1589,6 @@ final class PostDetailViewController: UIViewController {
         guard !viewModel.isDraft else { return }
         composeBar.railFace = publishedRailFace
     }
-
-    /// The rail slot's sound gestures (#680) — the snap feed's: a tap toggles
-    /// the sound, a hold opens the sound sheet, as the media page's sound
-    /// bubble does. A text post's page has no bubble of its own: this slot is
-    /// its sound control.
 
     /// The post turned out unavailable to the viewer (#447) — said once, as
     /// this panel takes its own actions away (#1404). For a host that draws
@@ -2033,8 +1999,6 @@ final class PostDetailViewController: UIViewController {
         )
         present(sheet, animated: true)
     }
-
-    private var didCascadeComments = false
 
     private func renderComposing(_ composing: Bool) {
         composeBar.isSending = composing
