@@ -6,6 +6,62 @@ import Transitions
 import UIKit
 
 extension SnapFeedAssembly {
+    /// The plain push, for a caller with no origin to describe.
+    ///
+    /// `presentSnapFeedHero` reaches the same place when its origin reports
+    /// `hasHero == false`, and that is the right shape for a surface that HAS
+    /// an origin (a grid tile knows its post, its pixels and its rect). A Maps
+    /// text pin has none of that — a symbol on a circle is not a cover, and the
+    /// pin carries ids rather than models — so it says so directly instead of
+    /// filling a hero origin with fields the plain branch never reads.
+    ///
+    /// One line of body, and it is the point: everything that makes this push
+    /// survivable (the dismissal, its retainer, the tab bar) is in
+    /// `pushWithoutFlight`, and a second surface reaching for a bare
+    /// `pushViewController` is exactly the regression `PlainPushDismissalTests`
+    /// guards.
+    public func pushSnapFeed(postIDs: [PostID], from presenter: UIViewController) {
+        pushSnapFeed(postIDs: postIDs, from: presenter, sourceIsComplete: false)
+    }
+
+    public func pushSnapFeed(postIDs: [PostID], from presenter: UIViewController, sourceIsComplete: Bool) {
+        pushSnapFeed(postIDs: postIDs, from: presenter, sourceIsComplete: sourceIsComplete, beneath: nil)
+    }
+
+    public func pushSnapFeed(
+        postIDs: [PostID], from presenter: UIViewController, sourceIsComplete: Bool,
+        beneath: ((UIViewController) -> UIViewController)?
+    ) {
+        guard !postIDs.isEmpty, let nav = presenter.navigationController else { return }
+        pushWithoutFlight(
+            makeSnapFeedViewController(postIDs: postIDs, ownsInteractiveDismissal: true, sourceIsComplete: sourceIsComplete),
+            on: nav, reveal: nil, beneath: beneath
+        )
+    }
+
+    public func revealSnapFeed(
+        postIDs: [PostID],
+        from presenter: UIViewController,
+        origin: TextRevealOrigin,
+        beneath: ((UIViewController) -> UIViewController)?
+    ) {
+        revealSnapFeed(postIDs: postIDs, from: presenter, origin: origin, beneath: beneath, sourceIsComplete: false)
+    }
+
+    public func revealSnapFeed(
+        postIDs: [PostID],
+        from presenter: UIViewController,
+        origin: TextRevealOrigin,
+        beneath: ((UIViewController) -> UIViewController)?,
+        sourceIsComplete: Bool
+    ) {
+        guard !postIDs.isEmpty, let nav = presenter.navigationController else { return }
+        pushWithoutFlight(
+            makeSnapFeedViewController(postIDs: postIDs, ownsInteractiveDismissal: true, sourceIsComplete: sourceIsComplete),
+            on: nav, reveal: origin, beneath: beneath
+        )
+    }
+
     public func textRevealGeometry(closing feed: UIViewController, onto origin: TextRevealOrigin) -> RevealGeometry {
         TextRevealInstaller.geometry(feed: feed, origin: origin, pipeline: imagePipeline)
     }
