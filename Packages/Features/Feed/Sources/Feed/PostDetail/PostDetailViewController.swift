@@ -12,15 +12,6 @@ import ThreadKit
 import UIKit
 
 final class PostDetailViewController: UIViewController {
-    /// Where an opened post is recorded — the profile's History tab
-    /// (#1344): every post opened counts, here as in the vertical feed.
-    var viewHistory: PostViewHistoryStore?
-
-    override func viewDidAppear(_ animated: Bool) {
-        super.viewDidAppear(animated)
-        if let postID = viewModel.postID { viewHistory?.record(postID.rawValue) }
-    }
-
     let viewModel: PostDetailViewModel
     let imagePipeline: ImagePipeline
     /// A TEXT post's resting comments: the threads grouped under pinned day
@@ -39,9 +30,12 @@ final class PostDetailViewController: UIViewController {
     /// open underneath — and for a change of viewer. Nil (tests): neither is
     /// heard.
     private let viewerEvents: ViewerEvents?
-    /// The two subscriptions to `viewerEvents`, for this controller's
-    /// lifetime: they end with it.
-    private var viewerSubscriptions: [ViewerEventSubscription] = []
+    /// The composer avatar's profile switcher and the viewer channel's two
+    /// subscriptions (`PostDetailViewerSwitch`). Built on first use;
+    /// building it does nothing else.
+    private(set) lazy var viewerSwitch = PostDetailViewerSwitch(
+        host: self, profileSwitcher: profileSwitcher, viewerEvents: viewerEvents
+    )
 
     // MARK: - The two streams (#2007)
 
@@ -92,7 +86,7 @@ final class PostDetailViewController: UIViewController {
     }
 
     /// What moves and hides as one: the streams.
-    private var streamSurface: UIView { pager }
+    var streamSurface: UIView { pager }
 
     /// Whether the post has a Popular tab: its count reached the threshold —
     /// the opener's, or Recent's. Once there, it stays for the panel's life.
@@ -107,8 +101,6 @@ final class PostDetailViewController: UIViewController {
     /// The reader scrolled a stream: the opening tab is theirs now.
     func readerDidScroll() { hasChosenOpeningTab = true }
 
-    /// The tabs came (`true`), for a host that draws their selector.
-    var onPopularTabChange: ((Bool) -> Void)?
     /// The pager's fractional position — 0 Popular, 1 Recent — for the
     /// selector that follows it.
     var onStreamProgress: ((CGFloat) -> Void)?
@@ -197,7 +189,6 @@ final class PostDetailViewController: UIViewController {
         mountPopular()
         pager.isPagingEnabled = true
         viewModel.loadPopularIfNeeded()
-        onPopularTabChange?(true)
         if opensOnPopular { showStream(.popular, animated: false) }
     }
 
@@ -214,16 +205,19 @@ final class PostDetailViewController: UIViewController {
         applyRailWayBack()
         onScrollAwayChange?(stream.showsScrollAwayReturn)
         syncDayUnderHeader()
-        if wearsSheetEdges { sheetEdgePocket.scrollView = stream.collectionView }
+        sheetEdges.streamDidChange()
         onVisibleStreamChange?(stream.kind)
     }
 
-    // MARK: - The comments sheet's edges (#2087)
-
-    /// Whether the panel wears the sheet's edges (`wearSheetEdges`).
-    private var wearsSheetEdges = false
-    /// The composer as the pocket over the visible list's bottom edge.
-    private let sheetEdgePocket = UIScrollEdgeElementContainerInteraction()
+    /// The comments sheet's edges and the streams' clip at the composer
+    /// (`PostDetailSheetEdges`). Built on first use; building it does
+    /// nothing else.
+    private(set) lazy var sheetEdges = PostDetailSheetEdges(host: self)
+    func letSheetTakeShortStreams() { sheetEdges.letSheetTakeShortStreams() }
+    func wearSheetEdges() { sheetEdges.wearSheetEdges() }
+    func setStreamsClippedAtComposer(_ clipped: Bool, below: CGFloat = 0) {
+        sheetEdges.setStreamsClippedAtComposer(clipped, below: below)
+    }
 
     /// The panel's height for its visible stream as laid out — the engaged
     /// top, the rows, the composer's band: whether the comments outgrow the
@@ -243,42 +237,6 @@ final class PostDetailViewController: UIViewController {
     /// clamped back, inside the keyboard's animation — the rows slid under
     /// the bar and back (measured, 2026-11-03).
     var streamsRideKeyboard = true
-
-    /// A stream its room holds whole does not scroll at all, so a drag on it
-    /// is the sheet's own — the sheet stretches and springs back, as it does
-    /// under the grabber (#2087, the owner 2026-11-03). A longer stream
-    /// scrolls, as any list.
-    func letSheetTakeShortStreams() {
-        streams.forEach { $0.collectionView.alwaysBounceVertical = false }
-    }
-
-    /// The comments sheet's edges: UIKit's own SOFT edge effects, as the
-    /// app's other lists wear them (the owner, 2026-11-03) — the top one
-    /// under the sheet's bar, a titled screen's (`prefersSoftTopEdge`), the
-    /// bottom one under the composer, which stands over the visible list's
-    /// bottom edge as its pocket: `BottomEdgeBlurView`'s mechanism, the
-    /// composer being the content over the edge. The host's bar tracks
-    /// `stream.collectionView` (`onVisibleStreamChange`).
-    ///
-    /// ⚠️ On a window, not before: touching an edge effect materialises Liquid
-    /// Glass machinery (`StatusBarBlurView`).
-    func wearSheetEdges() {
-        guard !wearsSheetEdges else { return }
-        wearsSheetEdges = true
-        for stream in streams {
-            // ⚠️ WITHOUT THE FADE'S CLEARANCE (#2240): the stream owns its
-            // top inset — its shapes (#2195) and the short stream's anchor
-            // re-assert it whenever it differs — so a clearance topped up
-            // under it would be undone and re-added on every pass. Its
-            // shapes would have to count the fade themselves.
-            stream.collectionView.prefersSoftTopEdge(keepsContentBelowFade: false)
-            stream.collectionView.bottomEdgeEffect.isHidden = false
-            stream.collectionView.bottomEdgeEffect.style = .soft
-        }
-        sheetEdgePocket.edge = .bottom
-        sheetEdgePocket.scrollView = stream.collectionView
-        composeBar.addInteraction(sheetEdgePocket)
-    }
 
     // MARK: - The stream, as the panel's
 
@@ -394,23 +352,13 @@ final class PostDetailViewController: UIViewController {
     /// The armed reply target: the THREAD PARENT's id (replying to a reply
     /// binds to its top-level parent — comment.v1's two-depth contract)
     /// plus the tapped author's name for the placeholder.
-    private var replyTarget: (parentID: String, name: String)?
-    /// The viewer's point balance, spent by the compose bar's boost button.
-    /// Injected (one instance app-wide — the map's badge watches it); nil
-    /// leaves the button visible but inert.
+    private(set) var replyTarget: (parentID: String, name: String)?
+    /// The viewer's point balance, handed to the composer's boost.
     private let wallet: (any WalletStaking)?
-    /// Keeps the compose bar's receipt honest when the SAME post is boosted
-    /// through another surface (a text page shows this bar and the snap
-    /// screen's spend path at once). It stops observing when it goes, with
-    /// this controller: a nonisolated deinit has nothing to undo.
-    private var walletObservation: StoreObservation?
-    /// The session's undoable spend through THIS bar. Its window is this
-    /// controller's lifetime, which IS the product rule: the embedded
-    /// comments panel is torn down when the page changes, so moving on
-    /// finalizes the spend.
-    private var sessionBoostAmount = 0
-    /// The stake toast up for that spend (#957), closed with the window.
-    private weak var stakeToast: ToastView?
+    /// The composer's boost: the stake, its toast, the session undo and the
+    /// wallet's observation (`PostDetailComposerBoost`). Built on first use;
+    /// building it does nothing else.
+    private(set) lazy var boost = PostDetailComposerBoost(host: self, wallet: wallet)
 
     init(
         viewModel: PostDetailViewModel,
@@ -440,27 +388,6 @@ final class PostDetailViewController: UIViewController {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    /// Takes back everything this bar spent while the screen stayed up — the
-    /// menu's Undo entry and the stake toast's (#957).
-    private func undoSessionBoost() {
-        guard let wallet, sessionBoostAmount > 0, let postID = viewModel.postID,
-              let result = wallet.undoBoost(targetID: postID.rawValue, amount: sessionBoostAmount)
-        else { return }
-        let refunded = sessionBoostAmount
-        sessionBoostAmount = 0
-        // Taken back: the toast closing must not send it.
-        _ = stakeBurst.next()
-        // Turning off is silent (#1881).
-        composeBar.setBoostTotal(result.targetTotal, animated: true)
-        composeBar.playBoostRefund(amount: refunded)
-        refreshComposeBarBoostState()
-        StakeMenu.closeUndoToast(stakeToast)
-    }
-
-    /// Leaving the post commits its likes now, rather than 10 s after the
-    /// last tap (#676) — unless its stake toast is still up: the toast
-    /// follows the screen on top, its Undo live, and sends the burst when
-    /// it ends (#1375, the owner 2026-10-18).
     /// Leaving the post's comments — popped, dismissed, or inside a page or
     /// sheet that is — keeps a locked or paused voice comment for the
     /// session (#2309, the conversation's rule, #2102): opened again, it
@@ -475,12 +402,8 @@ final class PostDetailViewController: UIViewController {
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
-        let toastIsUp = stakeToast.map { !$0.isDismissing } ?? false
-        if !toastIsUp, let postID = viewModel.postID { wallet?.commitStakes(on: postID.rawValue) }
+        boost.commitUnlessToastIsUp()
     }
-
-    /// Numbers this screen's stake toasts (`StakeMenu.Burst`).
-    private let stakeBurst = StakeMenu.Burst()
 
     /// Rows re-measure on a genuine WIDTH change — rotation, iPad size
     /// classes. Nothing here touches the empty page's HEIGHT: that is
@@ -500,46 +423,7 @@ final class PostDetailViewController: UIViewController {
             $0.syncKeyboardRise(rise)
             $0.keepRestingEnd()
         }
-        syncStreamsClip()
-    }
-
-    /// Whether the streams end at the composer's foot (`setStreamsClippedAtComposer`).
-    private var clipsStreamsAtComposer = false
-    /// How far below the composer's foot the clipped streams end.
-    private var streamsClipBelowComposer: CGFloat = 0
-    private let streamsClip = UIView()
-
-    /// The streams end at the composer's foot, or run to the panel's bottom,
-    /// under the composer and its soft edge (the comments sheet, #2087). Clipped
-    /// while a keyboard is up only: the composer then moves within the sheet,
-    /// and rows were seen passing beneath it, in the band it leaves; at rest
-    /// the rows run to the sheet's foot (the owner, 2026-11-03).
-    ///
-    /// ⚠️ `below` CARRIES THEM ON UNDER THE KEYS (the owner, 2026-11-04): the
-    /// keyboard's top corners are rounded, and rows ending at the composer's
-    /// foot left a plain band there, its edge seen in the corners. Below the
-    /// composer they pass under its soft edge, at its fullest there.
-    func setStreamsClippedAtComposer(_ clipped: Bool, below: CGFloat = 0) {
-        guard clipped != clipsStreamsAtComposer else { return }
-        clipsStreamsAtComposer = clipped
-        streamsClipBelowComposer = below
-        streamsClip.backgroundColor = .black
-        // ⚠️ THE CLIP STARTS WHERE THE STREAMS ARE, NOT AT ZERO (measured,
-        // 2026-11-03): set inside the keyboard's animation, a clip born empty
-        // grew from nothing — the rows vanished, then came back from the top
-        // down, a flash at every keyboard. Its frame is set unanimated first.
-        UIView.performWithoutAnimation {
-            syncStreamsClip()
-            streamSurface.mask = clipped ? streamsClip : nil
-        }
-    }
-
-    /// The clip to the composer's foot, in this layout pass — inside a
-    /// keyboard's animation when one runs it, so the two move together.
-    private func syncStreamsClip() {
-        guard clipsStreamsAtComposer, streamSurface.bounds.width > 0 else { return }
-        let foot = composeBar.convert(composeBar.bounds, to: streamSurface).maxY + streamsClipBelowComposer
-        streamsClip.frame = CGRect(x: 0, y: 0, width: streamSurface.bounds.width, height: max(0, foot))
+        sheetEdges.syncStreamsClip()
     }
 
     /// How far the keyboard holds the composer's input row above the bar's
@@ -572,13 +456,13 @@ final class PostDetailViewController: UIViewController {
         title = "Comments"
         view.backgroundColor = .systemBackground
         configureViews()
-        installRailWayBack()
+        rail.installRailWayBack()
         // The snap feed's comments panel stands its stake bubble on the media
         // layout's like button: the same heart, badge and menu (#668).
         composeBar.usesLikeFace = true
         pushComposerLikeCount()
         if viewModel.isDraft { configureDraft() }
-        installCommentVoice()
+        voiceComments.installCommentVoice()
 
         viewModel.onPhaseChange = { [weak self] phase in self?.render(phase) }
         viewModel.onEngagementChange = { [weak self] state in self?.renderEngagement(state) }
@@ -608,7 +492,7 @@ final class PostDetailViewController: UIViewController {
             let notice = Self.reviewFailureNotice(approve: approve)
             self?.presentNotice(notice.title, notice.message)
         }
-        configureProfileSwitcher()
+        viewerSwitch.configureProfileSwitcher()
         // The empty page's floor is its block's own height, which the text
         // size changes — see `refitEmptyPage`.
         registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) {
@@ -620,60 +504,10 @@ final class PostDetailViewController: UIViewController {
             }
         }
         // …and the keyboard takes the room the page is fitted to.
-        observeKeyboardForEmptyPage()
+        keyboardWatch.observeKeyboardForEmptyPage()
         render(.loading)
         viewModel.viewDidLoad()
         if showsPopular { viewModel.loadPopularIfNeeded() }
-    }
-
-    /// Arms the composer avatar's profile switcher.
-    ///
-    /// Two independent halves, and the observer is the one that matters:
-    ///
-    ///  • The MENU is built from the switcher's pre-formatted rows, which
-    ///    need one async `reload()` first. `makeMenu` is then synchronous, so
-    ///    the menu opens fully rendered on its first frame.
-    ///  • The OBSERVER adopts whatever profile becomes active, whether the
-    ///    switch came from this menu or from the profile header with the
-    ///    comments still open. Listening to the broadcast rather than to the
-    ///    menu's own callback is what keeps the composer's face and the
-    ///    identity that posts the comment from drifting apart.
-    private func configureProfileSwitcher() {
-        viewerSubscriptions = [
-            viewerEvents?.onActiveProfileChange { [weak self] id in
-                self?.viewModel.adoptActiveViewer(id)
-            },
-            // Someone else is here now — most often a guest who just signed
-            // up from this composer's button: the face and the name re-read,
-            // and so does the menu of profiles to switch between.
-            viewerEvents?.onViewerChange { [weak self] in
-                self?.viewModel.reloadViewerIdentity()
-                self?.refreshProfileMenu()
-            },
-        ].compactMap { $0 }
-
-        refreshProfileMenu()
-    }
-
-    /// Reloads the switcher's profiles and counts, and arms the avatar to
-    /// open the app's one switcher (#2034) — switch-only: adding a profile is
-    /// the Profile feature's flow and this composer has no route to it.
-    private func refreshProfileMenu() {
-        guard let profileSwitcher else { return }
-        Task { [weak self] in
-            await profileSwitcher.reload()
-            guard let self else { return }
-            composeBar.setProfileSwitch { [weak self] source in
-                guard let self else { return }
-                profileSwitcher.present(
-                    from: .view(source), over: self, includesAddProfile: false,
-                    // The switch itself lands through the subscription above;
-                    // the reload here re-marks the active row for next time.
-                    onSwitch: { [weak self] in self?.refreshProfileMenu() },
-                    onAddProfile: {}
-                )
-            }
-        }
     }
 
     @objc func handleStreamTap() {
@@ -737,24 +571,6 @@ final class PostDetailViewController: UIViewController {
         }
     }
 
-    /// Pushes the wallet's current answer — affordability and the session
-    /// tally — into the bar's boost button: the enable state and the menu
-    /// it will build on its next long-press both derive from it.
-    private func refreshComposeBarBoostState() {
-        guard let wallet else { return }
-        composeBar.setBoostContext(
-            balance: wallet.stakeableBalance, undoableAmount: sessionBoostAmount, stakeShots: wallet.stakeShots
-        )
-    }
-
-    /// The boost button's opening face: this viewer's spend on this post so
-    /// far, from the wallet's ledger — nothing on a draft, which is not a post.
-    private func refreshBoostTotal() {
-        guard let wallet else { return }
-        composeBar.setBoostTotal(viewModel.postID.map { wallet.boostTotal(forTarget: $0.rawValue) } ?? 0)
-        refreshComposeBarBoostState()
-    }
-
     // MARK: - Draft (the "+" menu's Text Post)
 
     /// Where a published draft is handed on: the Text Post page, which keeps
@@ -790,11 +606,6 @@ final class PostDetailViewController: UIViewController {
     /// `CommentsInputBar.visibilityMenu`. Nil puts the boost back.
     func setVisibilityMenu(_ menu: UIMenu?) {
         composeBar.visibilityMenu = menu
-    }
-
-    /// Whether the composer holds unsent text: what closing the page would lose.
-    var composerHasDraft: Bool {
-        !composeBar.draftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     /// A draft whose first message is on its way — already sent, past recall.
@@ -842,8 +653,8 @@ final class PostDetailViewController: UIViewController {
         composeBar.defaultPlaceholder = nil
         composeBar.sendAccessibilityLabel = nil
         composeBar.visibilityMenu = nil
-        composeBar.railFace = publishedRailFace
-        refreshBoostTotal()
+        rail.applyPublishedFace()
+        boost.refreshBoostTotal()
         onPostPublished?(entry)
         // A post now: it has its two tabs and opens on Popular, the caption
         // first (#2287, no threshold) — the draft had none. Whatever the
@@ -873,22 +684,8 @@ final class PostDetailViewController: UIViewController {
         presentNotice(notice.title, notice.message)
     }
 
-    /// A held comment's review that didn't go: it is still held.
-    static func reviewFailureNotice(approve: Bool) -> (title: String, message: String) {
-        (
-            approve ? "Couldn't Approve Comment" : "Couldn't Decline Comment",
-            "The comment is still held for your review. Try again in a moment."
-        )
-    }
-
-    static func commentFailureNotice(refused: Bool) -> (title: String, message: String) {
-        refused
-            ? ("Comments Are Limited", "The author only takes comments from some people.")
-            : ("Couldn't Comment", "Your comment wasn't sent. Your text is still here, so you can try again.")
-    }
-
     /// The text page family's notices are alerts — see the conversation's.
-    private func presentNotice(_ title: String, _ message: String) {
+    func presentNotice(_ title: String, _ message: String) {
         guard presentedViewController == nil else { return }
         let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "OK", style: .default))
@@ -896,9 +693,7 @@ final class PostDetailViewController: UIViewController {
     }
 
     private func configureComposeBar() {
-        // A post's rail slot wears its sound (`publishedRailFace`). A draft
-        // is not a post: its slot stays empty until it is.
-        composeBar.railFace = viewModel.isDraft ? .empty : publishedRailFace
+        rail.applyOpeningFace()
         // The Liquid Glass composer (Private Messages' recipe): a floating
         // capsule field, no opaque bar, no separator — the glass carries
         // its own boundary against whatever is behind it.
@@ -915,73 +710,7 @@ final class PostDetailViewController: UIViewController {
         // The reply state's natural exit: keyboard retired over an empty
         // field — later compositions start top-level again.
         composeBar.onIdleDismiss = { [weak self] in self?.clearReplyState() }
-        // The bar's boost button: wallet verdict here, theatre back on the
-        // bar — the snap rail's exact contract, on the comments surface.
-        // Debit-first, so the animation never promises a state the balance
-        // doesn't have. Nil wallet (an unwired host) leaves the tap inert.
-        composeBar.onBoost = { [weak self] spend in
-            guard let self else { return }
-            // A guest signs up first; the boost then lands as asked.
-            MemberGates.perform(.like, from: self) { [weak self] in
-                // A sign-up that finished after the post went unavailable
-                // (#1404) has nothing left to boost.
-                guard let self, self.showsPostActions, let wallet = self.wallet else { return }
-                // A DRAFT is not a post yet, and a boost has nothing to land on —
-                // said, rather than spent against an id that does not exist.
-                guard let postID = self.viewModel.postID else {
-                    return self.presentNotice("Boost", "You can boost your post once it's published.")
-                }
-                switch wallet.stake(spend, on: postID.rawValue) {
-                case .boosted(_, let targetTotal, let spent):
-                    // `spent`, never the request — a near-cap boost is clamped.
-                    self.sessionBoostAmount += spent
-                    Haptics.play(.commit)
-                    // Receipt before theatre — the button flips to (or grows)
-                    // its number face, then the "+N" float rises off it.
-                    self.composeBar.setBoostTotal(targetTotal, animated: true)
-                    self.composeBar.playBoostConfirmation(amount: spent)
-                    // The burst so far, with Undo for all of it (#957) — until
-                    // the toast ends, wherever it has followed to (#1375).
-                    let burst = self.stakeBurst
-                    let generation = burst.next()
-                    let amount = self.sessionBoostAmount
-                    let key = postID.rawValue
-                    self.stakeToast = StakeMenu.undoToast(
-                        staked: amount, on: key, from: self,
-                        commit: { [weak self] in
-                            guard burst.isCurrent(generation) else { return }
-                            wallet.commitStakes(on: key)
-                            self?.sessionBoostAmount = 0
-                        },
-                        undo: { [weak self] in
-                            if let self {
-                                self.undoSessionBoost()
-                            } else {
-                                _ = wallet.undoBoost(targetID: key, amount: amount)
-                            }
-                        }
-                    )
-                case .insufficientBalance, .targetCapReached, .noShotsLeft, .shotDoesNotFit:
-                    Haptics.play(.error)
-                    self.composeBar.playBoostDenied()
-                }
-                self.refreshComposeBarBoostState()
-            }
-        }
-        // The menu's Undo entry: takes back everything this bar spent while
-        // the screen stayed up. Session-scoped by construction — the tally
-        // lives on this controller, and this controller dies with the visit.
-        composeBar.onBoostUndo = { [weak self] in self?.undoSessionBoost() }
-        // The button's opening face: this viewer's spend so far on this
-        // post, from the wallet's ledger — a boosted post greets its
-        // booster with the receipt, not the invitation. The observer keeps
-        // it honest against spends made through any other surface.
-        if let wallet {
-            refreshBoostTotal()
-            walletObservation = wallet.changes.observeOnMain { [weak self] in
-                self?.refreshBoostTotal()
-            }
-        }
+        boost.install()
         // The engaged footer band (hidden outside the engagement): below
         // the bar, above the stream.
         composerBackdrop.isHidden = true
@@ -1021,85 +750,21 @@ final class PostDetailViewController: UIViewController {
         composeBar.riseWithKeyboard(of: view.keyboardLayoutGuide)
     }
 
-    /// Shapes the scrolling content for the snap feed's engaged layout:
-    /// `top` is the frosted media strip's height — the scroll view itself
-    /// spans the full cell (comments glide UNDER the strip), so the content
-    /// rests below it via inset, not via frame; `trailing` reserves the
-    /// action rail's exclusive column (zero overlap). The composer
-    /// deliberately stays full-width: the rail's territory ends well above
-    /// the footer.
-
-    /// The stream's frame of reference, for tests.
-    var debugStream: UICollectionView { stream.collectionView }
-
-    /// Wires the composer's INTERACTIVE page-swipe — the bar forwards each
-    /// pan phase (began/changed/ended) with the raw vertical translation and
-    /// velocity, and the host drives the feed pager's `contentOffset` in
-    /// real time (finger-linked paging), settling on release.
-    ///
-    /// `pagesBack` answers, as a downward drag begins on a stream its room
-    /// holds whole (#2298 § 1), whether it goes to the previous post — the
-    /// feed's router, so the first post keeps its close there.
+    /// The feed's paging: the composer's page swipe, the pull past the
+    /// streams' ends and the page's VoiceOver actions
+    /// (`PostDetailFeedPaging`). Built on first use; building it does
+    /// nothing else.
+    private(set) lazy var feedPaging = PostDetailFeedPaging(host: self)
     func setEngagedPageSwipeHandler(
         _ handler: @escaping (CommentsInputBar.PageSwipePhase, CGFloat, CGFloat) -> Void,
         pagesBack: @escaping () -> Bool
     ) {
-        composeBar.onPageSwipe = handler
-        pagesBackFromStreamTop = pagesBack
-        // A page in a vertical feed: its streams read in its room (#2298).
-        // One that fits pages with the feed's swipe; one that scrolls goes on
-        // with the pull past its ends (`setPostPull`).
-        cutStreamsToRoom()
+        feedPaging.setEngagedPageSwipeHandler(handler, pagesBack: pagesBack)
     }
-    /// Whether a downward drag on a stream that fits goes to the previous
-    /// post. Nil outside a vertical feed.
-    private(set) var pagesBackFromStreamTop: (() -> Bool)?
-
-    // MARK: - The pull to the next / previous post (#2298 § 2)
-
-    /// What the feed gives the page's pull (#2298 § 2): where a pull that way
-    /// goes — the post's author, nil for nowhere (the feed's last post, the
-    /// first post's top, which keeps its close) — and the page change itself.
-    struct PostPull {
-        /// The post a pull that way would go to; nil for no pill.
-        var target: (PostPullDirection) -> PostPullTarget?
-        /// The feed's own page change to that post, from where the page
-        /// stands now, at `velocity` (pt/s, the finger's), then `completion`
-        /// once it has settled (or did not go).
-        var commit: (_ direction: PostPullDirection, _ velocity: CGFloat, _ completion: @escaping () -> Void) -> Void
-    }
-
-    /// The feed's side of the pull; nil outside a vertical feed (the comments
-    /// sheet has no pull, #2298 § 5).
-    private(set) var postPull: PostPull?
-
-    /// Wires the pull past the streams' ends to the feed, and the page's
-    /// VoiceOver actions with it: "Next post", "Previous post" — no pull
-    /// needed.
-    func setPostPull(_ pull: PostPull) {
-        postPull = pull
-        loadViewIfNeeded()
-        view.accessibilityCustomActions = [
-            UIAccessibilityCustomAction(name: "Next post") { [weak self] _ in self?.goToPost(.next) ?? false },
-            UIAccessibilityCustomAction(name: "Previous post") { [weak self] _ in self?.goToPost(.previous) ?? false },
-        ]
-    }
-
-    /// Where a pull that way would go now: nil with the keyboard up, or with
-    /// nowhere to go.
-    func postPullTarget(_ direction: PostPullDirection) -> PostPullTarget? {
-        guard let postPull, !composeBar.isKeyboardOpen else { return nil }
-        return postPull.target(direction)
-    }
-
-    /// The page's VoiceOver action: the post that way, as a committed pull
-    /// would go to it. False (VoiceOver says so) when there is none.
-    @discardableResult
-    func goToPost(_ direction: PostPullDirection) -> Bool {
-        guard let postPull, postPull.target(direction) != nil else { return false }
-        postPull.commit(direction, 0) {}
-        return true
-    }
+    var pagesBackFromStreamTop: (() -> Bool)? { feedPaging.pagesBackFromStreamTop }
+    var postPull: PostPull? { feedPaging.postPull }
+    func setPostPull(_ pull: PostPull) { feedPaging.setPostPull(pull) }
+    func postPullTarget(_ direction: PostPullDirection) -> PostPullTarget? { feedPaging.postPullTarget(direction) }
 
     /// The STREAM's shrink for the engagement, 0 (engaged) → 1 (dismissed).
     ///
@@ -1323,7 +988,7 @@ final class PostDetailViewController: UIViewController {
     /// that turns unavailable while shown (its revalidation answers
     /// not-found) loses them where it stands, as one that opens unavailable
     /// never shows them.
-    private var showsPostActions = true
+    private(set) var showsPostActions = true
 
     private func setPostActionsShown(_ shown: Bool) {
         guard shown != showsPostActions else { return }
@@ -1410,7 +1075,6 @@ final class PostDetailViewController: UIViewController {
                 pager.isPagingEnabled = false
                 if lastSettledStream !== stream { visibleStreamDidChange() }
             }
-            onPopularTabChange?(false)
             onCommentCountChange?(commentCount)
         }
     }
@@ -1505,19 +1169,6 @@ final class PostDetailViewController: UIViewController {
     /// The post this panel is about — nil on a draft.
     var postID: PostID? { viewModel.postID }
 
-    /// What a published post's rail slot wears: Share on a pushed text page
-    /// (`setRailShare`, #1999), else the sound's cover the snap feed hands
-    /// over (`setRailSoundFace`, #671) — nothing for a post with neither.
-    private var publishedRailFace: CommentsInputBar.RailFace {
-        guard railKeepsSlot else { return .noSlot }
-        guard railShareAction != nil || railSoundFace != nil else { return .empty }
-        // The way back (#1929), on a slot this composer draws; under a page's
-        // column the page's own bubble wears it (`onScrollAwayChange`).
-        if stream.showsScrollAwayReturn, composeBar.hostsActionColumn { return .returnTo(down: stream.returnsDown) }
-        if railShareAction != nil { return .share }
-        return railSoundFace.map { .sound($0) } ?? .empty
-    }
-
     // MARK: The way back (#1929)
 
     /// The way back came or went — for a host whose page draws the sound
@@ -1527,102 +1178,19 @@ final class PostDetailViewController: UIViewController {
     var showsScrollAwayReturn: Bool { stream.showsScrollAwayReturn }
     /// Whether it points down: Recent's start is its newest (#2007).
     var scrollAwayReturnsDown: Bool { stream.returnsDown }
-    /// The sound's tap action, the host's (`setRailSoundActions`).
-    private var soundTapAction: (() -> Void)?
-    /// The way back's hold on the composer's own slot.
-    private var railSoundHold: HoldToArmPresenter?
-    /// Whether the host asked the slot's record to turn, kept while the way
-    /// back hides it (#692).
-    private var railSpinning = false
-
-    /// The composer's slot as the way back stands.
-    func applyRailWayBack() {
-        if !viewModel.isDraft { composeBar.railFace = publishedRailFace }
-        let returns = composeBar.railFace == .returnTo(down: stream.returnsDown)
-        if !returns { composeBar.setRailSpinning(railSpinning) }
-        // Over Share (#1999) the hold arms Share on a media page — the
-        // slot's own action — and nothing on a text page.
-        let armsSheet = returns && railShareAction == nil && soundTapAction != nil
-            && railSoundFace?.isAvailable == true
-        let armsShare = returns && railShareAction != nil && railShareHoldArms
-        railSoundHold?.isEnabled = armsSheet || armsShare
-        // What the slot stood for stays reachable with the chevron up:
-        // VoiceOver's road — the sound, or Share.
-        if armsSheet {
-            composeBar.railHoldTarget.accessibilityCustomActions = [
-                UIAccessibilityCustomAction(name: "Sound") { [weak self] _ in
-                    self?.soundTapAction?()
-                    return true
-                },
-            ]
-        } else if returns, railShareAction != nil {
-            composeBar.railHoldTarget.accessibilityCustomActions = [
-                UIAccessibilityCustomAction(name: "Share") { [weak self] _ in
-                    self?.railShareAction?()
-                    return true
-                },
-            ]
-        } else {
-            composeBar.railHoldTarget.accessibilityCustomActions = nil
-        }
-    }
-
-    private func installRailWayBack() {
-        composeBar.onRailAction = { [weak self] in
-            guard let self else { return }
-            if case .returnTo = composeBar.railFace { return scrollToStart(animated: true) }
-            if composeBar.railFace == .share {
-                railShareAction?()
-            } else {
-                soundTapAction?()
-            }
-        }
-        let hold = HoldToArmPresenter(view: composeBar.railHoldTarget) { [weak self] in
-            guard let self else { return .picture(nil) }
-            return railShareAction != nil ? .symbol(CommentsInputBar.shareRailSymbol) : .picture(composeBar.railCoverImage)
-        }
-        hold.onFire = { [weak self] in
-            guard let self else { return }
-            if let railShareAction { railShareAction() } else { soundTapAction?() }
-        }
-        hold.isEnabled = false
-        railSoundHold = hold
-    }
-
-    private var railSoundFace: SnapSoundFace?
-    /// False for a text post with nothing in its slot (#1790, #1999): the
-    /// composer has no slot, its field widens into it.
-    private var railKeepsSlot = true
-    /// The post's Share, when the slot wears it (#1999): a pushed page.
-    private var railShareAction: (() -> Void)?
-    /// Whether the way back's hold arms Share (#1999): a media page's.
-    private var railShareHoldArms = false
-
-    /// Share in the slot (#1999), the toolbar's old action, on a pushed page:
-    /// a text page's (a text post has no sound) and a media page's (its sound
-    /// moves to the footer). `holdArms`: the way back's hold arms Share — a
-    /// media page's. Nil gives the slot back to the sound.
-    func setRailShare(_ action: (() -> Void)?, holdArms: Bool = false) {
-        railShareAction = action
-        railShareHoldArms = action != nil && holdArms
-        if action != nil { railKeepsSlot = true }
-        guard !viewModel.isDraft else { return }
-        applyRailWayBack()
-    }
-
-    /// The snap feed's sound bubble face, for the rail slot that stands on it
-    /// (#671); `keepsSlot` false takes the slot away (#1790).
+    /// The composer's rail slot: its face, the way back, Share and the
+    /// sound's gestures (`PostDetailRailSlot`), the only writer of
+    /// `composeBar.railFace`. Built on first use; building it does nothing
+    /// else.
+    private(set) lazy var rail = PostDetailRailSlot(host: self)
+    /// The composer's slot as the way back stands (`PostDetailRailSlot`).
+    func applyRailWayBack() { rail.applyRailWayBack() }
+    func setRailShare(_ action: (() -> Void)?, holdArms: Bool = false) { rail.setRailShare(action, holdArms: holdArms) }
     func setRailSoundFace(_ face: SnapSoundFace?, keepsSlot: Bool = true) {
-        railSoundFace = face
-        railKeepsSlot = keepsSlot
-        guard !viewModel.isDraft else { return }
-        composeBar.railFace = publishedRailFace
+        rail.setRailSoundFace(face, keepsSlot: keepsSlot)
     }
-
-    /// The rail slot's sound gestures (#680) — the snap feed's: a tap toggles
-    /// the sound, a hold opens the sound sheet, as the media page's sound
-    /// bubble does. A text post's page has no bubble of its own: this slot is
-    /// its sound control.
+    func setRailSoundSpinning(_ spinning: Bool) { rail.setRailSoundSpinning(spinning) }
+    func setRailSoundActions(tap: (() -> Void)?, hold: (() -> Void)?) { rail.setRailSoundActions(tap: tap, hold: hold) }
 
     /// The post turned out unavailable to the viewer (#447) — said once, as
     /// this panel takes its own actions away (#1404). For a host that draws
@@ -1640,9 +1208,7 @@ final class PostDetailViewController: UIViewController {
         sheet.voice = commentsVoice
         composeBar.configuration = sheet
         composeBar.hostsActionColumn = true
-        railShareAction = nil
-        railShareHoldArms = false
-        setRailSoundFace(nil, keepsSlot: false)
+        rail.clearForBareComposer()
     }
 
     /// The snap feed's page draws the action column above this panel (#695):
@@ -1680,7 +1246,7 @@ final class PostDetailViewController: UIViewController {
     var debugComposerOverlayOffset: CGFloat { composeBar.transform.ty }
     /// The way back (#1929), for tests.
     var debugRailFace: CommentsInputBar.RailFace { composeBar.railFace }
-    var debugRailSoundHold: HoldToArmPresenter? { railSoundHold }
+    var debugRailSoundHold: HoldToArmPresenter? { rail.railSoundHold }
     /// What VoiceOver offers on the slot while the way back shows (#1999).
     var debugRailCustomActions: [UIAccessibilityCustomAction]? {
         composeBar.railHoldTarget.accessibilityCustomActions
@@ -1694,21 +1260,6 @@ final class PostDetailViewController: UIViewController {
     var debugStreamOffset: CGFloat { stream.collectionView.contentOffset.y }
     var debugStreamTopOffset: CGFloat { -stream.collectionView.adjustedContentInset.top }
 
-    /// The slot's cover turns while the post plays aloud (#692).
-    func setRailSoundSpinning(_ spinning: Bool) {
-        railSpinning = spinning
-        composeBar.setRailSpinning(spinning)
-    }
-
-    /// The slot's sound actions: `tap` is what the sound does (the sheet);
-    /// while the way back shows, a tap goes back to the top and a hold arms
-    /// `tap` (#1929).
-    func setRailSoundActions(tap: (() -> Void)?, hold: (() -> Void)?) {
-        soundTapAction = tap
-        composeBar.onRailLongPress = hold
-        applyRailWayBack()
-    }
-
     /// The stake bubble's like badge reads the caption row's count — one
     /// number on one panel.
     private func pushComposerLikeCount() {
@@ -1719,173 +1270,17 @@ final class PostDetailViewController: UIViewController {
     /// test steps it.
     var skeletonClock: LoadingClock = .system
 
-    // MARK: - Landing the viewer's comment (#921)
-
-    /// The longest a landing waits for its scroll to say it ended: UIKit's
-    /// animated scroll takes about 0.3 s, and it says nothing when a drag
-    /// interrupts it.
-    static let landingScrollTimeout: TimeInterval = 0.6
-    /// The room a landing slot needs on screen to count as visible: about one
-    /// short comment row.
-    static let landingRowAllowance: CGFloat = 72
-
-    /// The comment row a stream cell carries, whichever cell it is.
-    static func commentRow(in cell: UICollectionViewCell) -> CommentRowView? {
-        (cell as? CommentCell)?.row ?? (cell as? ThreadRowCell)?.row
-    }
-
-    // MARK: - Stream data source
-
-    /// How long the bones take to step aside.
-    static let boneFade: TimeInterval = 0.2
-    /// The first row starts as the bones are half gone; each next one a beat
-    /// later, up to `revealStaggerCap` rows — past that the tail arrives
-    /// together rather than trickling in for a second.
-    static let revealLead: TimeInterval = 0.08
-    static let revealStagger: TimeInterval = 0.045
-    static let revealStaggerCap = 8
-    /// A rise of a few points and a hair of scale: the row settles INTO its
-    /// place rather than appearing on it. Small on purpose — a list, not a
-    /// stage entrance.
-    static let revealRise: CGFloat = 10
-    static let revealScale: CGFloat = 0.97
-
-    /// Whether a stream apply may animate. A cold apply never does (nothing
-    /// to animate from), and neither does the one that introduces the
-    /// CAPTION row — see `configure` for why a faded-in glass bubble reads
-    /// as a dark-mode flash. Pure, so the rule is testable on its own.
-    static func animatesStreamApply(hasAppliedStream: Bool, introducesCaption: Bool) -> Bool {
-        hasAppliedStream && !introducesCaption
-    }
-
-    static let nearEndRowCount = 5
-
-    /// The empty stream's words: an invitation to write while this is a
-    /// DRAFT, an invitation to comment once it is a post.
-    typealias EmptyPageCopy = CommentsEmptyPageCopy
-
-    static let commentsEmptyPageCopy = EmptyPageCopy(
-        // The comments glyph, app-wide — a DM thread's empty page keeps the
-        // two bubbles (Chat's `ConversationThreadViewController`): a
-        // conversation is not a post's comments.
-        symbol: PostActionSymbol.comments,
-        title: SnapCommentEmptyStateView.promptText,
-        subtitle: "Be the first to comment."
-    )
-
-    static let draftEmptyPageCopy = EmptyPageCopy(
-        symbol: "square.and.pencil",
-        title: "Start your post",
-        subtitle: "Your first message becomes the post."
-    )
-
-    /// The first page of comments failed with nothing on screen (#798). The
-    /// SAME row as the empty page — same fit, same place — in other words,
-    /// because what the reader needs is the reason the stream is empty, and
-    /// the way out of it.
-    static func commentsFailedPageCopy(_ message: String) -> EmptyPageCopy {
-        EmptyPageCopy(
-            symbol: "exclamationmark.triangle",
-            title: commentsFailureTitle(message),
-            subtitle: "Check your connection and try again.",
-            actionTitle: "Try Again"
-        )
-    }
-
-    /// The first page past 10 s (#1770): the empty page's row, saying so,
-    /// with Try Again.
-    static let commentsTakingLongerPageCopy = EmptyPageCopy(
-        symbol: TakingLongerCopy.symbol,
-        title: TakingLongerCopy.title,
-        subtitle: "The comments are still on their way.",
-        actionTitle: TakingLongerCopy.action
-    )
-
-    /// The failed page's headline (#794): offline and a timeout get their
-    /// short forms, since the subtitle already says what to do and saying
-    /// "try again" twice reads as a stutter; anything else is the view
-    /// model's own words.
-    static func commentsFailureTitle(_ message: String) -> String {
-        switch message {
-        case FailureCopy.offline: FailureCopy.offlineTitle
-        case FailureCopy.timeout: FailureCopy.timeoutTitle
-        default: message
-        }
-    }
-
     /// The engaged context's own insets, kept so the settled geometry can be
     /// computed before the transition has produced it. Nil until engaged.
     var engagedStreamInsets: (top: CGFloat, bottom: CGFloat)?
 
-    /// How much of the screen's bottom the keyboard covers while it is up,
-    /// nil when it is down.
-    ///
-    /// ⚠️ A HEIGHT, NEVER A CONVERTED POSITION. The sheet grows to its large
-    /// height FOR the keyboard, so this view is moving while the keyboard is:
-    /// converting the keyboard's frame into this view's coordinates answered
-    /// 520 where the truth was 377 — measured — and the invitation then sat
-    /// as though no keyboard were up. A height needs no coordinate space, and
-    /// the composer's own ceiling is anchored to the screen the same way (see
-    /// `setEngagedInsets`).
-    ///
-    /// Read from the notification's END frame rather than from
-    /// `keyboardLayoutGuide`: the guide only reaches that value as the
-    /// keyboard finishes animating, and the empty page is fitted once, to
-    /// where things are going.
-    var keyboardHeightFromBottom: CGFloat?
-    private let keyboardObservers = NotificationTokens()
-
-    private func observeKeyboardForEmptyPage() {
-        let center = NotificationCenter.default
-        keyboardObservers.replace(with: [
-            // The frame is read out here: a `Notification` cannot cross into
-            // the main actor's isolation, and a `CGRect` can.
-            center.addObserver(forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main) { [weak self] note in
-                let frame = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue
-                let scope = KeyboardNotificationScope.window(of: note)
-                MainActor.assumeIsolated {
-                    guard let self, self.view.hearsKeyboard(aimedAt: scope) else { return }
-                    self.keyboardIsMoving(endingAt: frame)
-                }
-            },
-            center.addObserver(forName: UIResponder.keyboardWillChangeFrameNotification, object: nil, queue: .main) { [weak self] note in
-                let frame = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue
-                let scope = KeyboardNotificationScope.window(of: note)
-                MainActor.assumeIsolated {
-                    guard let self, self.view.hearsKeyboard(aimedAt: scope) else { return }
-                    self.keyboardIsMoving(endingAt: frame)
-                }
-            },
-            center.addObserver(forName: UIResponder.keyboardWillHideNotification, object: nil, queue: .main) { [weak self] note in
-                let scope = KeyboardNotificationScope.window(of: note)
-                MainActor.assumeIsolated {
-                    guard let self, self.view.hearsKeyboard(aimedAt: scope) else { return }
-                    self.keyboardWentDown()
-                }
-            },
-        ])
-    }
-
-    private func keyboardIsMoving(endingAt frame: CGRect?) {
-        guard let window = view.window, let frame else { return }
-        let covered = max(0, window.screen.bounds.maxY - frame.minY)
-        guard keyboardHeightFromBottom != covered else { return }
-        keyboardHeightFromBottom = covered
-        // A short stream rises with the composer's input row (#1799).
-        streams.forEach {
-            $0.refitEmptyPage()
-            $0.syncBottomAnchor(animated: true)
-        }
-    }
-
-    private func keyboardWentDown() {
-        guard keyboardHeightFromBottom != nil else { return }
-        keyboardHeightFromBottom = nil
-        streams.forEach {
-            $0.refitEmptyPage()
-            $0.syncBottomAnchor(animated: true)
-        }
-    }
+    /// The keyboard's height for the empty page, and its three observers
+    /// (`PostDetailKeyboardWatch`). Built on first use; building it does
+    /// nothing else.
+    private(set) lazy var keyboardWatch = PostDetailKeyboardWatch(host: self)
+    /// How much of the screen's bottom the keyboard covers while it is up
+    /// (`PostDetailKeyboardWatch.keyboardHeightFromBottom`).
+    var keyboardHeightFromBottom: CGFloat? { keyboardWatch.keyboardHeightFromBottom }
 
     /// The empty stream's section insets, mirroring the layout
     /// (`collectionView`): no top inset — the stream leads with its caption
@@ -1933,7 +1328,7 @@ final class PostDetailViewController: UIViewController {
         composeBar.focusComposer()
     }
 
-    private func clearReplyState() {
+    func clearReplyState() {
         replyTarget = nil
         composeBar.setReplyPlaceholder(name: nil)
     }
@@ -1948,77 +1343,14 @@ final class PostDetailViewController: UIViewController {
         viewModel.acceptsVoiceComments ? .comment : .none
     }
 
-    /// Hold the empty field to record a voice comment (#2309) — the
-    /// conversation's mic, lock, pause, listen back and send (#2102), with a
-    /// comment's minute. A tap still types.
-    private(set) var voiceComposer: VoiceComposer?
-    /// The reply the take was started under: a reply's keyboard can go
-    /// while it records (`onIdleDismiss` clears the target), and the take
-    /// still answers the comment it was held for.
-    private var voiceReplyTarget: (parentID: String, name: String)?
-
-    private func installCommentVoice() {
-        // A draft's voice is its host's (`configureDraft`).
-        guard !viewModel.isDraft else { return }
-        composeBar.configuration.voice = commentsVoice
-        guard commentsVoice.records, voiceComposer == nil, let postID = viewModel.postID else { return }
-        let composer = VoiceComposer(for: .comment, draftKey: "comment-voice-\(postID.rawValue)")
-        composer.onSend = { [weak self] take in
-            self?.sendVoiceComment(CommentVoiceTake(fileURL: take.fileURL, duration: take.duration, waveform: take.waveform))
-        }
-        composer.onHint = { [weak self] hint in
-            guard let self else { return }
-            Feedback.info(hint, symbol: "mic", from: self)
-        }
-        composer.onPermissionDenied = { [weak self] in self?.offerMicrophoneSettings() }
-        composer.onPhaseChange = { [weak self] phase in self?.voicePhaseChanged(phase) }
-        composer.attach(to: composeBar, host: view)
-        voiceComposer = composer
-    }
-
-    private func voicePhaseChanged(_ phase: VoiceComposer.Phase) {
-        if phase == .idle {
-            voiceReplyTarget = nil
-        } else if voiceReplyTarget == nil {
-            voiceReplyTarget = replyTarget
-        }
-    }
-
-    /// A take from the comments' field, sent as a voice comment: behind the
-    /// member gate, as a typed comment is; under the reply it was held for;
-    /// with the words typed so far, if any, as its body.
-    func sendVoiceComment(_ take: CommentVoiceTake) {
-        let target = voiceReplyTarget ?? replyTarget
-        MemberGates.perform(.comment, from: self) { [weak self] in
-            guard let self else { return }
-            // A reply must be visible where it lands, as a typed one's.
-            if let target { expandedReplyParents.insert(target.parentID) }
-            let text = composeBar.draftText
-            viewModel.submitVoiceComment(take, text: text, parentID: target?.parentID)
-            if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { composeBar.draftText = "" }
-            clearReplyState()
-        }
-    }
-
-    /// A voice comment that didn't go, sent again from its row's tap.
-    func retryVoiceComment(_ commentID: String) {
-        MemberGates.perform(.comment, from: self) { [weak self] in
-            self?.viewModel.retryVoiceComment(commentID)
-        }
-    }
-
-    /// Once refused, a hold offers Settings — the conversation's (#2102).
-    private func offerMicrophoneSettings() {
-        let alert = UIAlertController(
-            title: "Microphone Access", message: "Allow microphone access to record voice comments.",
-            preferredStyle: .alert
-        )
-        alert.addAction(UIAlertAction(title: "Not Now", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Open Settings", style: .default) { _ in
-            if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
-        })
-        present(alert, animated: true)
-    }
+    /// The comments' voice: the field's recorder and its takes, sent as
+    /// voice comments (`PostDetailVoiceComments`). Built on first use;
+    /// building it does nothing else.
+    private(set) lazy var voiceComments = PostDetailVoiceComments(host: self)
+    /// The field's recorder (`PostDetailVoiceComments.voiceComposer`).
+    var voiceComposer: VoiceComposer? { voiceComments.voiceComposer }
+    func sendVoiceComment(_ take: CommentVoiceTake) { voiceComments.sendVoiceComment(take) }
+    func retryVoiceComment(_ commentID: String) { voiceComments.retryVoiceComment(commentID) }
 
     /// A comment's Copy says so (#803). Internal for tests.
     func confirmCopied() {
@@ -2033,8 +1365,6 @@ final class PostDetailViewController: UIViewController {
         )
         present(sheet, animated: true)
     }
-
-    private var didCascadeComments = false
 
     private func renderComposing(_ composing: Bool) {
         composeBar.isSending = composing
