@@ -40,15 +40,15 @@ final class SnapChromeView: UIView {
     /// nothing recomputed, so nothing jumps, and the flight's replica builds
     /// the same constraints, so it lands pixel-identical. What runs past the
     /// screen's bottom is never seen.
-    private let scrimView = GradientView(colors: SnapPageScrim.scrimColors,
+    let scrimView = GradientView(colors: SnapPageScrim.scrimColors,
                                          locations: SnapPageScrim.scrimLocations)
     /// Clips the scrim at the page's edges: deeper than the page, it would
     /// otherwise darken the next page in the pager (cells don't clip).
-    private let scrimClip = UIView()
+    let scrimClip = UIView()
 
     /// An `EmoteLabel`: the caption's emoji and `:code:` emotes animate in
     /// place, at the caption's own size (`composedCaption` marks them).
-    private let captionLabel = SnapCaptionLabel()
+    let captionLabel = SnapCaptionLabel()
 
     /// The bucket the caption's emotes are drawn at — what the screen warms
     /// the next captions at (#1504).
@@ -57,8 +57,8 @@ final class SnapChromeView: UIView {
     /// The band, the subtitle zone and the empty state (#2521): built with the
     /// chrome, laid out by it.
     private(set) lazy var commentSurfaces = SnapChromeCommentSurfaces(host: self)
-    private var commentTicker: SnapCommentTickerView { commentSurfaces.commentTicker }
-    private var subtitleView: SnapSubtitleView { commentSurfaces.subtitleView }
+    var commentTicker: SnapCommentTickerView { commentSurfaces.commentTicker }
+    var subtitleView: SnapSubtitleView { commentSurfaces.subtitleView }
     private var commentEmptyState: SnapCommentEmptyStateView { commentSurfaces.commentEmptyState }
     /// Which page of a COLLECTION the media is showing. Hidden for every post
     /// that has one piece of media, which is most of them.
@@ -94,7 +94,7 @@ final class SnapChromeView: UIView {
     /// The like pill, the sound bubble and their one glass (#695, #1872, #2521).
     private(set) lazy var actionColumn = SnapChromeActionColumn(host: self)
     var boostButton: SnapRailBoostButton { actionColumn.boostButton }
-    private var soundBubble: SnapSoundBubbleButton { actionColumn.soundBubble }
+    var soundBubble: SnapSoundBubbleButton { actionColumn.soundBubble }
 
     // MARK: The action column's stations (#695): see `SnapChromeActionColumn`.
     let boostStation = UIView()
@@ -119,7 +119,7 @@ final class SnapChromeView: UIView {
     }
 
     private var columnLayer: SnapActionColumnLayer { actionColumn.columnLayer }
-    private var glassColumn: SnapGlassColumn { actionColumn.glassColumn }
+    var glassColumn: SnapGlassColumn { actionColumn.glassColumn }
 
     private(set) var imagePipeline: ImagePipeline?
     /// The rail's top edge as a cell-relative constant (see `buildLayout`).
@@ -170,13 +170,6 @@ final class SnapChromeView: UIView {
 
     /// A tap on the caption — for tests.
     func debugTapCaption() { captionTapped() }
-
-    #if DEBUG
-    /// The scrim and the caption, for the scrim's suite.
-    var debugScrimView: UIView { scrimView }
-    var debugScrimClip: UIView { scrimClip }
-    var debugCaptionLabel: UIView { captionLabel }
-    #endif
 
     /// A comments surface was tapped (empty-state pill, subtitle zone, or
     /// ticker band — one fan-in, one path) — the cell forwards this as a
@@ -847,13 +840,6 @@ final class SnapChromeView: UIView {
         if changed { setNeedsLayout() }
     }
 
-    #if DEBUG
-    /// How far the column stands below its resting seat right now (#2326).
-    var debugColumnGlide: CGFloat { glassColumn.transform.ty }
-    /// The column's lift at rest, as this chrome stands.
-    var debugColumnLineLift: CGFloat { currentColumnLineLift }
-    #endif
-
     /// The caption block's height on a media page (#2252): two caption lines,
     /// rounded up to this screen's pixels — the height the label takes for
     /// two lines, so the floor never stretches a real two-line block.
@@ -1001,26 +987,6 @@ final class SnapChromeView: UIView {
 
     private var hasLaidOut = false
 
-    #if DEBUG
-    /// The band's and the stream's frames in this chrome's space.
-    var debugBandFrame: CGRect { commentTicker.frame }
-    var debugBandTrailingEnd: (cornerRadius: CGFloat, fadeLocations: [NSNumber]?) {
-        commentTicker.debugTrailingEnd
-    }
-    var debugStreamFrame: CGRect { subtitleView.frame }
-    var debugRailFrame: CGRect { shortcutRail.frame }
-    /// The wheel, which rides the column's layer (#1872).
-    var debugShortcutRail: SnapShortcutRailView { shortcutRail }
-    #endif
-
-    #if DEBUG
-    /// The caption's frame in `space`, for the landing probe that compares
-    /// the flight replica with the page it fades into.
-    func debugCaptionFrame(in space: UICoordinateSpace) -> CGRect {
-        captionLabel.convert(captionLabel.bounds, to: space)
-    }
-    #endif
-
     /// See `SnapChromeMediaStrip.setMediaPageCount` — the flight replica's too.
     func setMediaPageCount(_ count: Int, current: Int, clipPages: Set<Int> = []) {
         mediaStrip.setMediaPageCount(count, current: current, clipPages: clipPages)
@@ -1043,33 +1009,6 @@ final class SnapChromeView: UIView {
     /// them lives under the caption, well below this, so a collection's picture
     /// is as tall as any other's.
     var bottomReadoutTop: CGFloat { commentTicker.frame.minY }
-
-    #if DEBUG
-    /// The page strip and the caption, so a spec can state where the strip sits
-    /// in the column — and that its arrival moves nothing else.
-    var debugPageBarFrame: CGRect { mediaPageBar.frame }
-    /// The action column's two bubbles, for the spec that
-    /// holds them still across the media and comments layouts.
-    var debugBoostButton: UIButton { boostButton }
-    var debugSoundBubble: SnapSoundBubbleButton { soundBubble }
-    var debugSoundHold: HoldToArmPresenter? { actionColumn.soundHold }
-    /// The glass column's items, shape by shape, as the column stands them
-    /// now (#1872).
-    var debugColumnItems: [[String]] { actionColumn.columnSlots().map { $0.map(\.id) } }
-    var debugGlassColumn: SnapGlassColumn { glassColumn }
-    /// `view`'s frame in this chrome's space — a column item stands in its
-    /// bubble's glass, not in the chrome (#1872).
-    func debugFrame(of view: UIView) -> CGRect { view.convert(view.bounds, to: self) }
-    /// The sound's station, shown or not — where its bubble stands.
-    var debugSoundStationFrame: CGRect { soundStation.convert(soundStation.bounds, to: self) }
-    /// The comment band, in the chrome's space.
-    var debugTickerFrame: CGRect { commentTicker.frame }
-    /// The comment band and the subtitle pill themselves (#1798).
-    var debugCommentTicker: SnapCommentTickerView { commentTicker }
-    var debugSubtitleView: SnapSubtitleView { subtitleView }
-    var debugCaptionFrame: CGRect { captionLabel.frame }
-    var debugPageBar: SnapMediaPageBarView { mediaPageBar }
-    #endif
 
     /// Everything on the page that is ABOUT the post rather than part of the
     /// instrument in the viewer's hand.
@@ -1228,33 +1167,6 @@ final class SnapChromeView: UIView {
     /// See `SnapChromeActionColumn` — the flight replica's too.
     func setBoostTotal(_ total: Int, animated: Bool = false) { actionColumn.setBoostTotal(total, animated: animated) }
     func setPostLikeCount(_ count: Int64?) { actionColumn.setPostLikeCount(count) }
-
-    #if DEBUG
-    /// The like pill's transform — identity, always (#1186).
-    var debugBoostButtonTransform: CGAffineTransform { boostButton.transform }
-    /// The count under the pill's heart — nil while the pill is not showing.
-    var debugLikeBadgeText: String? { boostButton.isHidden ? nil : boostButton.configuration?.title }
-    /// Where the heart is drawn, in the chrome's space.
-    ///
-    /// ⚠️ THE GLYPH, centred in its image view, which stands taller than the
-    /// picture it shows (~2 pt above and below the heart). Read off the
-    /// view, the gaps looked even only while the button was measured half
-    /// laid out — at its title's width, the heart off centre; fully laid out
-    /// in the column's glass (#1872), the view's padding showed.
-    var debugLikeHeartFrame: CGRect {
-        boostButton.layoutIfNeeded()
-        guard let image = boostButton.imageView else { return .zero }
-        let frame = image.convert(image.bounds, to: self)
-        guard let drawn = image.image?.size, drawn.height > 0, drawn.height < frame.height else { return frame }
-        return frame.insetBy(dx: 0, dy: (frame.height - drawn.height) / 2)
-    }
-    /// Where the count is drawn, in the chrome's space.
-    var debugLikeBadgeFrame: CGRect {
-        boostButton.layoutIfNeeded()
-        guard let label = boostButton.titleLabel else { return .zero }
-        return label.convert(label.bounds, to: self)
-    }
-    #endif
 }
 
 extension SnapChromeView: SnapBoostReceiptsHost {}
