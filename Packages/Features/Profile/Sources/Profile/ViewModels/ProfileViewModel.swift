@@ -153,30 +153,16 @@ public final class ProfileViewModel {
     /// overflow menu offers.
     public private(set) var isBlocked = false
     private var blockInFlight = false
-    private var reportInFlight = false
-    /// What of this profile the viewer has muted (#403), read beside the
-    /// relationship; the nav bar's bell shows and edits it (#689).
-    public private(set) var muteScopes: MuteScopes = .none {
-        didSet {
-            guard muteScopes != oldValue else { return }
-            onMuteScopesChange?(muteScopes)
-        }
-    }
+    /// Mute, restrict and reports (`ProfileModeration`, #2522).
+    private(set) lazy var moderation = ProfileModeration(host: self, repository: repository, reporting: reporting)
+    public var muteScopes: MuteScopes { moderation.muteScopes }
     /// Fires when `muteScopes` changes — a read landing, a toggle, or its
     /// rollback — so the bell's glyph follows without a re-push.
     public var onMuteScopesChange: ((MuteScopes) -> Void)?
-    private(set) var muteInFlight = false
-    /// Bumped by every mute toggle, so a read that started before one can't
-    /// land after it and put the old scopes back.
-    private var muteGeneration = 0
-    /// Whether this composition can mute at all.
-    public var canMute: Bool { repository is any ProfileMuting }
-    /// Whether the viewer restricts this profile (#416), read beside the mute.
-    public private(set) var isRestricted = false
-    private var restrictInFlight = false
-    /// Same guard as `muteGeneration`, for restrict.
-    private var restrictGeneration = 0
-    public var canRestrict: Bool { repository is any ProfileRestricting }
+    var muteInFlight: Bool { moderation.muteInFlight }
+    public var canMute: Bool { moderation.canMute }
+    public var isRestricted: Bool { moderation.isRestricted }
+    public var canRestrict: Bool { moderation.canRestrict }
 
     private var load: Task<Void, Never>?
     private var relationshipLoad: Task<Void, Never>?
@@ -787,149 +773,12 @@ public final class ProfileViewModel {
         }
     }
 
-    /// Switches one mute scope. Optimistic, unlike block: a mute is a quiet
-    /// preference the target never sees, so a rollback costs nothing. The
-    /// toast says what is muted now.
-    public func toggleMute(_ scope: MuteScope) {
-        guard let profile, canModerate, !muteInFlight, let muting = repository as? any ProfileMuting else { return }
-        let before = muteScopes
-        let after = before.toggling(scope)
-        // Muting MORE is shown with Undo (#957), a deferred commit; un-muting
-        // stays the menu's own reverse row and goes out at once.
-        if after.contains(scope), onUndoable != nil {
-            muteScopes = after
-            // A read out from before the toggle must not overwrite it.
-            muteGeneration += 1
-            let handle = "@" + profile.handle
-            let id = profile.id
-            onUndoable?(UndoableAction(
-                message: Self.muteMessage(handle: handle, scopes: after),
-                symbol: "speaker.slash.fill",
-                commit: { [weak self] in
-                    // Superseded on this screen (un-muted from the menu, or a
-                    // later mute that carries this one): not sent. Gone with
-                    // the screen, it still is.
-                    if let self, self.muteScopes != after { return }
-                    Task { @MainActor [weak self] in
-                        do {
-                            try await muting.setMuteScopes(after, for: id)
-                        } catch {
-                            guard let self, self.muteScopes == after else { return }
-                            self.muteScopes = before
-                            self.onActionResult?(.commitFailed(message: "Couldn't mute \(handle)"))
-                        }
-                    }
-                },
-                undo: { [weak self] in
-                    guard let self, self.muteScopes == after else { return }
-                    self.muteScopes = before
-                    self.muteGeneration += 1
-                }
-            ))
-            return
-        }
-        muteScopes = after
-        muteInFlight = true
-        muteGeneration += 1
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                try await muting.setMuteScopes(after, for: profile.id)
-                self.onActionResult?(.muteChanged(handle: "@" + profile.handle, scopes: after))
-            } catch {
-                self.muteScopes = before
-                self.onActionResult?(.failed(message: "Couldn't change what you mute from this profile."))
-            }
-            self.muteInFlight = false
-        }
-    }
-
-    /// Restrict or unrestrict. Optimistic, like mute: the target never sees it.
-    public func toggleRestrict() {
-        guard let profile, canModerate, !restrictInFlight, let restricting = repository as? any ProfileRestricting else { return }
-        let target = !isRestricted
-        // Restricting is shown with Undo (#957), a deferred commit;
-        // unrestricting stays the menu's reverse row and goes out at once.
-        if target, onUndoable != nil {
-            isRestricted = true
-            // A read out from before the toggle must not overwrite it.
-            restrictGeneration += 1
-            let handle = "@" + profile.handle
-            let id = profile.id
-            onUndoable?(UndoableAction(
-                message: "Restricted \(handle)",
-                symbol: "person.crop.circle.badge.minus",
-                commit: { [weak self] in
-                    // Unrestricted from the menu meanwhile: not sent.
-                    if let self, !self.isRestricted { return }
-                    Task { @MainActor [weak self] in
-                        do {
-                            try await restricting.setRestricted(true, for: id)
-                        } catch {
-                            guard let self, self.isRestricted else { return }
-                            self.isRestricted = false
-                            self.onActionResult?(.commitFailed(message: "Couldn't restrict \(handle)"))
-                        }
-                    }
-                },
-                undo: { [weak self] in
-                    self?.isRestricted = false
-                    self?.restrictGeneration += 1
-                }
-            ))
-            return
-        }
-        isRestricted = target
-        restrictInFlight = true
-        restrictGeneration += 1
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                try await restricting.setRestricted(target, for: profile.id)
-                self.onActionResult?(.restrictChanged(handle: "@" + profile.handle, restricted: target))
-            } catch {
-                self.isRestricted = !target
-                self.onActionResult?(.failed(message: target ? "Couldn't restrict this profile." : "Couldn't unrestrict this profile."))
-            }
-            self.restrictInFlight = false
-        }
-    }
-
-    /// "Muted @ada's posts and messages", "Unmuted @ada".
+    public func toggleMute(_ scope: MuteScope) { moderation.toggleMute(scope) }
+    public func toggleRestrict() { moderation.toggleRestrict() }
     public nonisolated static func muteMessage(handle: String, scopes: MuteScopes) -> String {
-        guard !scopes.isEmpty else { return "Unmuted \(handle)" }
-        let names = MuteScope.allCases.filter(scopes.contains).map { $0.title.lowercased() }
-        let list = names.count > 1 ? names.dropLast().joined(separator: ", ") + " and " + names.last! : names[0]
-        return "Muted \(handle)'s \(list)"
+        ProfileModeration.muteMessage(handle: handle, scopes: scopes)
     }
-
-    /// File a moderation report against this profile. Reports are fire-and-
-    /// confirm: the result is reported either way, because a report the user
-    /// believes was filed but wasn't is the worst outcome here.
-    public func report(_ reason: ReportReason) {
-        guard let profile, canModerate, !reportInFlight else { return }
-        guard let reporting else {
-            onActionResult?(.failed(message: "Reporting isn't available right now."))
-            return
-        }
-        reportInFlight = true
-
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                // The surface is a triage signal: the same profile reported
-                // from its own screen and from a post card are different
-                // reports.
-                try await reporting.report(
-                    .profile(profile.id), reason: reason, surface: "ios.profile"
-                )
-                self.onActionResult?(.reported)
-            } catch {
-                self.onActionResult?(.failed(message: "Couldn't send this report. Try again."))
-            }
-            self.reportInFlight = false
-        }
-    }
+    public func report(_ reason: ReportReason) { moderation.report(reason) }
 
     // MARK: - Gallery
 
@@ -1058,32 +907,8 @@ public final class ProfileViewModel {
         if let onUndoable { onUndoable(action) } else { action.commit() }
     }
 
-    public func canReportPost(by authorID: ProfileID?) -> Bool {
-        guard reporting != nil else { return false }
-        // `canModerate` is false exactly on the viewer's own profile, and there
-        // an author matching the profile IS the viewer.
-        return canModerate || authorID != profile?.id
-    }
-
-    /// File a moderation report against one of the gallery's posts. Same
-    /// fire-and-confirm contract as `report(_:)`, and the same reason: a report
-    /// the user believes was filed but wasn't is the worst outcome here.
-    public func reportPost(_ postID: PostID, reason: ReportReason) {
-        guard let reporting else {
-            onActionResult?(.failed(message: "Reporting isn't available right now."))
-            return
-        }
-        Task { [weak self] in
-            do {
-                try await reporting.report(
-                    .post(postID), reason: reason, surface: "ios.profile.gallery"
-                )
-                self?.onActionResult?(.reported)
-            } catch {
-                self?.onActionResult?(.failed(message: "Couldn't send this report. Try again."))
-            }
-        }
-    }
+    public func canReportPost(by authorID: ProfileID?) -> Bool { moderation.canReportPost(by: authorID) }
+    public func reportPost(_ postID: PostID, reason: ReportReason) { moderation.reportPost(postID, reason: reason) }
 
     /// Where the user is — set by a tab tap or a settled swipe. Pure state
     /// (pages are always computed): the view pages to it, empty messages
@@ -1759,21 +1584,7 @@ public final class ProfileViewModel {
             self.apply(relationship)
             self.cache?.store(relationship, for: id)
             self.relationshipLoad = nil
-            // The mute rides beside the relationship; only someone else's
-            // profile can be muted.
-            // A toggle made while a read was out wins: the read is from before.
-            let muteAsked = self.muteGeneration
-            if relationship != .me, let muting = self.repository as? any ProfileMuting,
-               let scopes = try? await muting.muteScopes(for: id),
-               !self.muteInFlight, self.muteGeneration == muteAsked {
-                self.muteScopes = scopes
-            }
-            let restrictAsked = self.restrictGeneration
-            if relationship != .me, let restricting = self.repository as? any ProfileRestricting,
-               let restricted = try? await restricting.isRestricted(id),
-               !self.restrictInFlight, self.restrictGeneration == restrictAsked {
-                self.isRestricted = restricted
-            }
+            await self.moderation.readMuteAndRestrict(for: id, relationship: relationship)
         }
     }
 
@@ -1854,3 +1665,5 @@ public final class ProfileViewModel {
 }
 
 extension ProfileViewModel: ProfileMapPinHost {}
+
+extension ProfileViewModel: ProfileModerationHost {}
