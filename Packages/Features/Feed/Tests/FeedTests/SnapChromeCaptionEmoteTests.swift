@@ -24,7 +24,7 @@ struct SnapChromeCaptionEmoteTests {
     /// A one-line caption: codes replaced by their glyph, every emote marked,
     /// timestamp untouched, alone on line two (#2252).
     @Test func aShortCaptionMarksItsEmotes() {
-        let composed = SnapChromeView.composedCaption("Trip 🔥 :lol:", timestamp: timestamp, width: width)
+        let composed = SnapCaptionComposer.composedCaption("Trip 🔥 :lol:", timestamp: timestamp, width: width)
         #expect(composed.string == "Trip 🔥 😆\n7\u{00A0}weeks")
         #expect(markedIDs(composed) == ["noto:1f525", "lol"])
     }
@@ -33,17 +33,17 @@ struct SnapChromeCaptionEmoteTests {
     /// letters, and the emotes it keeps stay marked.
     @Test func truncationNeverSplitsAnEmote() {
         let caption = ":lol: " + String(repeating: "a long caption about the harbour ", count: 6) + ":lmao: end"
-        let composed = SnapChromeView.composedCaption(caption, timestamp: timestamp, width: width)
+        let composed = SnapCaptionComposer.composedCaption(caption, timestamp: timestamp, width: width)
         #expect(composed.string.contains("…"))
         #expect(composed.string.hasPrefix("😆"))
         #expect(!composed.string.contains(":"))
         #expect(markedIDs(composed) == ["lol"])
-        #expect(SnapChromeView.captionLineCount(composed, width: width) <= 2)
+        #expect(SnapCaptionComposer.captionLineCount(composed, width: width) <= 2)
     }
 
     /// Plain captions are byte-for-byte what they were.
     @Test func aPlainCaptionCarriesNoMarks() {
-        let composed = SnapChromeView.composedCaption("Golden hour.", timestamp: timestamp, width: width)
+        let composed = SnapCaptionComposer.composedCaption("Golden hour.", timestamp: timestamp, width: width)
         #expect(markedIDs(composed).isEmpty)
         #expect(composed.string == "Golden hour.\n7\u{00A0}weeks")
     }

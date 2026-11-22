@@ -238,7 +238,7 @@ final class SnapMediaPageBarView: UIView {
     /// black plate, ~21 pt tall on a 2 pt line, touched the column above and
     /// crowded the bar's glass below. The digits keep their legibility over
     /// a bright photograph the caption's way — its soft text shadow
-    /// (`SnapChromeView.captionTextShadow`), drawn with the glyphs, over the
+    /// (`SnapCaptionComposer.captionTextShadow`), drawn with the glyphs, over the
     /// bottom scrim that already covers this zone (#2175).
     private let counter: UILabel = {
         let label = UILabel()
@@ -255,7 +255,7 @@ final class SnapMediaPageBarView: UIView {
         NSAttributedString(string: text, attributes: [
             .font: counterFont,
             .foregroundColor: UIColor.white,
-            .shadow: SnapChromeView.captionTextShadow,
+            .shadow: SnapCaptionComposer.captionTextShadow,
         ])
     }
 

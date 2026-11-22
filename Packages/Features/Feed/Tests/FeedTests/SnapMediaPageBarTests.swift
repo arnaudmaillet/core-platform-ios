@@ -962,7 +962,7 @@ struct SnapMediaPageBarTests {
         #expect(font.pointSize == 11)
         #expect(attributes[.foregroundColor] as? UIColor == .white)
         let shadow = try #require(attributes[.shadow] as? NSShadow)
-        let caption = SnapChromeView.captionTextShadow
+        let caption = SnapCaptionComposer.captionTextShadow
         #expect(shadow.shadowBlurRadius == caption.shadowBlurRadius && shadow.shadowOffset == caption.shadowOffset)
         #expect((shadow.shadowColor as? UIColor) == (caption.shadowColor as? UIColor))
         // The footprint: the label's width and the inset — no padding left.
