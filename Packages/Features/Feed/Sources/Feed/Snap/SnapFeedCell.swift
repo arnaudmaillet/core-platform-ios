@@ -123,7 +123,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             return
         }
         personOcclusion.decide = { [weak self] in self?.occlusionDecision() ?? .clear }
-        personOcclusion.run(surface: surface, band: chrome.personOcclusionTicker)
+        personOcclusion.run(surface: surface, band: chrome.commentSurfaces.personOcclusionTicker)
     }
 
     /// The gate, asked eight times a second while the driver runs.
@@ -131,7 +131,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         let process = ProcessInfo.processInfo
         let inputs = PersonOcclusionGate.Inputs(
             enabled: SnapCommentTickerView.avoidsPeople,
-            bandShown: chrome.isPersonOcclusionBandShown,
+            bandShown: chrome.commentSurfaces.isPersonOcclusionBandShown,
             pageActive: isActive,
             playing: isClipAdvancing,
             inFlight: isChromeHeldForFlight,
@@ -639,7 +639,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             // The clip bar's feed, the occlusion and the comment streams
             // stand down with it.
             updatePlayheadFeed()
-            chrome.setTickerActive(false)
+            chrome.commentSurfaces.setTickerActive(false)
             chrome.setSubtitlesActive(false)
             // A media page's ground is dark whatever the system says; a text
             // page's follows it.
@@ -2212,7 +2212,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// on any on-screen page, including one being dragged in, unlike
     /// playback which stays on the settle-quantized active seam.
     func setTickerStreaming(_ streaming: Bool) {
-        chrome.setTickerActive(streaming)
+        chrome.commentSurfaces.setTickerActive(streaming)
         // The subtitle zone rides the same visibility seam: a page dragged
         // partway in slides in with its pill already rendered (the
         // persistent cue is static content between handoffs, like the
@@ -2269,7 +2269,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // but it is the restart edge after backgrounding: foregrounding
         // re-activates the settled page without a fresh `willDisplay`.
         // Both comment surfaces share it.
-        chrome.setTickerActive(!isPostUnavailable)
+        chrome.commentSurfaces.setTickerActive(!isPostUnavailable)
         chrome.setSubtitlesActive(!isPostUnavailable)
         // Nothing of a post the viewer may no longer see plays (#1409).
         guard !isPostUnavailable else { return }
@@ -3079,13 +3079,13 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// covered.
     /// A reveal has landed: the band enters now (see the ticker).
     func replayCommentBandEntrance() {
-        chrome.replayCommentBandEntrance()
+        chrome.commentSurfaces.replayCommentBandEntrance()
     }
 
     func setChromeHeldForFlight(_ held: Bool) {
         isChromeHeldForFlight = held
         defer { refreshPersonOcclusion() }
-        chrome.setTickerHeldForFlight(held)
+        chrome.commentSurfaces.setTickerHeldForFlight(held)
         // The column leaves and returns with the hold, engaged or not: the
         // replica flies its own (#695).
         chrome.setColumnHeld(held)
@@ -3114,7 +3114,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // tapped page). What the replica did NOT carry enters on its own:
         // the band through the ticker's release above, the pill here.
         chrome.alpha = 1
-        chrome.replaySubtitleEntrance()
+        chrome.commentSurfaces.replaySubtitleEntrance()
     }
 
     /// The page indicator's scrub, so the screen can make its dismissal yield.
@@ -3333,7 +3333,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// The band and the subtitle pill stop: this cell no longer shows the
     /// post it kept them running for through a swap (#1798).
     func standDownCommentSurfaces() {
-        chrome.setTickerActive(false)
+        chrome.commentSurfaces.setTickerActive(false)
         chrome.setSubtitlesActive(false)
     }
 
@@ -3348,7 +3348,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         mediaCard.clearPausedMarks()
         // Covers the paths visibility can't see: backgrounding and the
         // feed's own disappearance, where no `didEndDisplaying` fires.
-        chrome.setTickerActive(false)
+        chrome.commentSurfaces.setTickerActive(false)
         chrome.setSubtitlesActive(false)
         // Video is the only kind with anything to stop: a photo page's media
         // is static, so resigning leaves it exactly as it was.

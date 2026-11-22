@@ -54,11 +54,12 @@ final class SnapChromeView: UIView {
     /// the next captions at (#1504).
     var captionEmotePixelSide: Int { captionLabel.emotePixelSide }
 
-    /// The danmaku band, floating over the media directly above the caption.
-    /// Content reaches it only through `updateCommentStreams` — never through
-    /// `configure` — so the flight replica renders an empty, invisible band
-    /// by construction and the card stays pixel-identical to the landed page.
-    private let commentTicker = SnapCommentTickerView()
+    /// The band, the subtitle zone and the empty state (#2521): built with the
+    /// chrome, laid out by it.
+    private(set) lazy var commentSurfaces = SnapChromeCommentSurfaces(host: self)
+    private var commentTicker: SnapCommentTickerView { commentSurfaces.commentTicker }
+    private var subtitleView: SnapSubtitleView { commentSurfaces.subtitleView }
+    private var commentEmptyState: SnapCommentEmptyStateView { commentSurfaces.commentEmptyState }
     /// Which page of a COLLECTION the media is showing. Hidden for every post
     /// that has one piece of media, which is most of them.
     /// The page strip, at the bottom of the column and the full width of it.
@@ -88,23 +89,6 @@ final class SnapChromeView: UIView {
     /// The clip's length, kept because the card's readout is a time and the
     /// strip speaks in fractions.
     private var clipSeconds: Double = 0
-
-    /// The subtitle zone, directly above the band: a persistent pill of
-    /// semantic comments, one at a time, with the count bubble leading it.
-    /// Same content contract as the band (arrives only via
-    /// `updateCommentStreams`, so the flight replica's zone is empty by
-    /// construction) and the same visibility-scoped activation, so the
-    /// zone rides a page being dragged in.
-    private let subtitleView = SnapSubtitleView()
-
-    /// The comments empty state: a static "No comments yet" pill occupying
-    /// the band's slot when the post is KNOWN to have zero comments — the
-    /// one case where every comment surface above legitimately gates itself
-    /// away and the zone would otherwise read as unexplained blank space.
-    /// Same content contract as the band and the zone (visible only via
-    /// `updateCommentStreams`, on a loaded stream), so the flight replica
-    /// never shows it.
-    private let commentEmptyState = SnapCommentEmptyStateView()
 
     /// The vertical shortcut wheel on the trailing edge: quick-react
     /// shortcuts (our animated emotes, still until the wheel moves), spanning
@@ -1295,7 +1279,7 @@ final class SnapChromeView: UIView {
     /// Whether the represented post carries media. Text-only posts show an
     /// empty shell, so this gates page content — including ticker queues
     /// arriving *after* configure (`updateTickerComments`).
-    private var hasMedia = true {
+    private(set) var hasMedia = true {
         didSet { if hasMedia != oldValue { applySeat() } }
     }
 
@@ -1306,42 +1290,8 @@ final class SnapChromeView: UIView {
         }
     }
 
-    /// Replaces both comment surfaces' content (the ticker's wrap-around
-    /// queue and the subtitle zone's cue list). Live cells only — the flight
-    /// replica must never receive this (moving/timed content cannot be
-    /// pixel-identical across two instances), which is why it is not part of
-    /// `configure`. Empty streams hide their surface. Text-only posts refuse
-    /// content entirely (empty shell) — gated here, not at the callers, so
-    /// every arrival path (dequeue pull, async push) hits the same wall.
-    func updateCommentStreams(_ streams: FeedViewModel.CommentStreams) {
-        guard hasMedia else { return }
-        commentTicker.setComments(streams.reactions)
-        // Loaded, the band follows the bubbles: none, it goes. A SEED (top
-        // comments from the cache, not loaded) knows nearly as well — a seed
-        // with cues and no bubbles reserved the band by the card's count and
-        // left the pill floating over a hole until the load collapsed it
-        // (filmed on a device, 25 September 2026). Only a page with no
-        // streams at all keeps the card's guess.
-        if streams.isLoaded || streams.commentCount > 0 {
-            commentTicker.setReservesBand(!streams.reactions.isEmpty)
-        }
-        subtitleView.setCommentCount(streams.commentCount)
-        subtitleView.setCues(streams.subtitles)
-        // THE COUNT IS THE WHOLE CONDITION (product rule 2026-08-08): no
-        // comments → the pill; one or more → the comment stream speaks for
-        // the post and the pill stays down. The zone is never blank on
-        // either side of that line, and this view is not where that is
-        // enforced — `SubtitleCommentBuilder` guarantees a non-empty cue
-        // list for any post the band isn't already carrying, so "has
-        // comments" and "the zone renders" cannot come apart. A count pill
-        // ("2 comments") was tried in this slot as a stand-in for the
-        // stream and removed; the stream itself is the answer.
-        //
-        // `isLoaded` is the load/zero seam: an unloaded stream carries a
-        // zero count too, so without it the pill would flash on every page
-        // while its fetch is in flight.
-        commentEmptyState.setVisible(streams.isLoaded && streams.commentCount == 0)
-    }
+    /// See `SnapChromeCommentSurfaces.updateCommentStreams` (live cells only).
+    func updateCommentStreams(_ streams: FeedViewModel.CommentStreams) { commentSurfaces.updateCommentStreams(streams) }
 
 
     private var hasLaidOut = false
@@ -1366,28 +1316,9 @@ final class SnapChromeView: UIView {
     }
     #endif
 
-    /// Streams while the owning cell is on screen (visibility-scoped — a
-    /// page dragged partway in already flows; see the cell's
-    /// `setTickerStreaming`).
     /// How many media pages the post has, and which one is showing. A count
     /// below two hides the indicator — a readout for a single photograph is
     /// furniture answering a question nobody asked.
-    /// The flight's hold, passed to the ticker: no pre-fill at a transient
-    /// width (see `SnapCommentTickerView.setHeldForFlight`).
-    func setTickerHeldForFlight(_ held: Bool) {
-        commentTicker.setHeldForFlight(held)
-    }
-
-    /// See `SnapCommentTickerView.replayEntrance`.
-    func replayCommentBandEntrance() {
-        commentTicker.replayEntrance()
-    }
-
-    /// See `SnapSubtitleView.replayEntrance`.
-    func replaySubtitleEntrance() {
-        subtitleView.replayEntrance()
-    }
-
     func setMediaPageCount(_ count: Int, current: Int, clipPages: Set<Int> = []) {
         mediaPosition = CGFloat(current)
         // Nothing else moves for it (#2252): the strip reserves no height,
@@ -1726,16 +1657,6 @@ final class SnapChromeView: UIView {
     /// it. See `MediaPageIndicatorView.scrubGesture`.
     var mediaScrubGesture: UIGestureRecognizer { mediaPageBar.scrubGesture }
 
-    func setTickerActive(_ active: Bool) {
-        commentTicker.setActive(active)
-    }
-
-    /// "Don't Cover People" (#484): the band to mask — always the same view,
-    /// shown or not (it appears once its comments arrive).
-    var personOcclusionTicker: UIView { commentTicker }
-    /// Whether that band is on screen now.
-    var isPersonOcclusionBandShown: Bool { !commentTicker.isHidden && commentTicker.window != nil }
-
     /// The image pipeline the comment surfaces load author avatars through —
     /// forwarded to the ticker and the subtitle zone (both render an avatar
     /// leading their comment content). Set at configure, before any stream
@@ -1893,18 +1814,8 @@ final class SnapChromeView: UIView {
         }
     }
 
-    /// Cycles while the owning cell is on screen — the band's visibility
-    /// seam (plus the settle backstop for foregrounding), NOT playback's
-    /// settle scope: the persistent pill is static content between
-    /// handoffs, so it must ride a half-dragged page like the caption
-    /// does instead of popping in after settle.
-    func setSubtitlesActive(_ active: Bool) {
-        subtitleView.setActive(active)
-        // The empty state rides the same seam — its label's dwell is a
-        // READING clock, so it starts when the page is actually on screen,
-        // not when the stream lands on a cell still off in the pager.
-        commentEmptyState.setActive(active)
-    }
+    /// See `SnapChromeCommentSurfaces.setSubtitlesActive`.
+    func setSubtitlesActive(_ active: Bool) { commentSurfaces.setSubtitlesActive(active) }
 
     /// Clears post-specific content (cell reuse).
     func reset() {
@@ -2028,3 +1939,5 @@ final class SnapChromeView: UIView {
 }
 
 extension SnapChromeView: SnapBoostReceiptsHost {}
+
+extension SnapChromeView: SnapChromeCommentSurfacesHost {}
