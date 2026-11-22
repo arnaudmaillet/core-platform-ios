@@ -1286,7 +1286,7 @@ final class SnapFeedViewController: UIViewController {
                 cell.onReactionsRunningLow = { [weak self] id in self?.viewModel.bandRanLow(for: id) }
                 // With the side list open, a tap on the card closes it
                 // (#1550): the clip pauses from its tile instead.
-                cell.interceptsMediaTap = { [weak self] in
+                cell.mediaTaps.interceptsMediaTap = { [weak self] in
                     guard let sideList = self?.sideList, sideList.isOpen, !sideList.isSettling else { return false }
                     sideList.settle(open: false)
                     return true
@@ -1294,14 +1294,14 @@ final class SnapFeedViewController: UIViewController {
                 // A carousel's track (#1849): a tap or a hold on any of its
                 // pages acts on the post's sound with the clip on screen.
                 if SnapSoundState.isCarousel(model) {
-                    cell.onPostTrackTap = { [weak self, weak cell] in
+                    cell.mediaTaps.onPostTrackTap = { [weak self, weak cell] in
                         guard let self, let cell else { return }
                         self.soundPlayback.togglePostTrack(on: cell, id: id)
                     }
-                    cell.onPostTrackHold = { [weak self] held in self?.soundPlayback.holdPostTrack(held) }
+                    cell.mediaTaps.onPostTrackHold = { [weak self] held in self?.soundPlayback.holdPostTrack(held) }
                 } else {
-                    cell.onPostTrackTap = nil
-                    cell.onPostTrackHold = nil
+                    cell.mediaTaps.onPostTrackTap = nil
+                    cell.mediaTaps.onPostTrackHold = nil
                 }
                 // The boost spend: wallet verdict here (the cell holds no
                 // balance), theatre back on the cell that asked.

@@ -89,7 +89,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
 
     /// Whether there is anything to play at all — the replacement for the
     /// `mediaKind == .video` gates.
-    private var playsVideo: Bool { activeVideoURL != nil }
+    var playsVideo: Bool { activeVideoURL != nil }
 
     /// The surface the page's clip draws on, for a second surface to show
     /// the same playback (the side list's tile of this post, #1581). Nil: no
@@ -258,7 +258,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     private(set) var isCommentsEngaged = false
     /// The frozen screen thresholds (`applyChromeInsets`) — also the strip's
     /// vertical datum, so the slot math shares the chrome's inset authority.
-    private var frozenInsets: UIEdgeInsets = .zero
+    private(set) var frozenInsets: UIEdgeInsets = .zero
     /// The engaged state's comments region: a cell-owned container spanning
     /// the strip's bottom to the cell's bottom edge. The comments UI itself
     /// is NOT cell state — the feed VC installs a child controller's view
@@ -355,7 +355,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // second way to press pause. The pause glyph stays out of it for the
         // same reason: nothing was chosen, so nothing should be announced.
         let hold = UILongPressGestureRecognizer(target: self, action: #selector(handleMediaHold))
-        hold.minimumPressDuration = Self.holdToPauseDuration
+        hold.minimumPressDuration = MediaCarouselView.holdToPauseDuration
         hold.cancelsTouchesInView = false
         hold.delegate = self
         contentView.addGestureRecognizer(hold)
@@ -2044,94 +2044,22 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         }
     }
 
+    /// What a tap or a hold on the page means (#2521).
+    private(set) lazy var mediaTaps = SnapMediaTapArbiter(host: self)
+
     @objc private func handleBackgroundTap(_ recognizer: UITapGestureRecognizer) {
-        tapMedia(at: recognizer.location(in: contentView))
+        mediaTaps.tapMedia(at: recognizer.location(in: contentView))
     }
-
-    /// A tap that reached the page's own background. Internal (not private) so
-    /// the arbitration is unit-testable — the simulator injects no touches, and
-    /// this decision is the whole of what a tap means here.
-    func tapMedia(at point: CGPoint) {
-        // The screen's say first (#1550): with the side list open, a tap on
-        // the card closes the list rather than pausing.
-        if interceptsMediaTap?() == true { return }
-        // A text page's engagement is its permanent resting state: no tap
-        // collapses it, and it has no media to pause.
-        if isCommentsEngaged { return }
-        guard playbackTapRegionContains(point) else { return }
-        // A carousel's track (#1849): the screen pauses the post's sound and
-        // the clip on screen together.
-        if let onPostTrackTap {
-            onPostTrackTap()
-            return
-        }
-        togglePlayback()
-    }
-
-    /// A carousel's track (#1849): the post's sound is the screen's song
-    /// player's, one track across every page, and a tap or a hold on the
-    /// page acts on it as well as on the clip on screen. Set by the screen
-    /// for a carousel, nil for any other post.
-    var onPostTrackTap: (() -> Void)?
-    /// A hold on a carousel's page began (true) or ended (false).
-    var onPostTrackHold: ((Bool) -> Void)?
-
-    /// THE CLIP'S TERRITORY: the media band, between the header and the page's
-    /// bottom readout.
-    ///
-    /// The gesture used to take the whole cell, which put play/pause on the
-    /// caption, on the dead space under it, and in the band the nav bar's
-    /// platters float in — a tap aimed at the gap between two bar buttons
-    /// stopped the video. What the viewer means by "the picture" is bounded at
-    /// the top by the header and at the bottom by the first thing that is
-    /// clearly the page talking about the post: the comment band, or a
-    /// gallery's page dots where they sit above it.
-    ///
-    /// The trailing rail is NOT excluded here: it is interactive chrome, and
-    /// `isInteractiveTouch` already keeps every control's touches for the
-    /// control. This boundary is about territory, not about targets.
-    func playbackTapRegionContains(_ point: CGPoint) -> Bool {
-        playbackTapRegion.contains(point)
-    }
-
-    /// The region above, as a rectangle. The floor can only be as low as the
-    /// chrome's readout and never above the header — a cell that has not been
-    /// laid out yet answers with an empty rect rather than a negative one.
-    private var playbackTapRegion: CGRect {
-        let top = frozenInsets.top
-        let floor = max(top, chrome.bottomReadoutTop)
-        return CGRect(x: 0, y: top, width: bounds.width, height: floor - top)
-    }
-
-    /// How long a press must last before it counts as a hold rather than a tap.
-    ///
-    /// Short, because the gesture's whole value is that it feels immediate —
-    /// hold to look, let go to carry on. Long enough that an ordinary tap on
-    /// the way to play/pause never trips it.
-    static let holdToPauseDuration: TimeInterval = 0.2
 
     @objc private func handleMediaHold(_ recognizer: UILongPressGestureRecognizer) {
         switch recognizer.state {
         case .began:
-            beginMediaHold(at: recognizer.location(in: contentView))
+            mediaTaps.beginMediaHold(at: recognizer.location(in: contentView))
         case .ended, .cancelled, .failed:
-            endMediaHold()
+            mediaTaps.endMediaHold()
         default:
             break
         }
-    }
-
-    /// ⚠️ THE SAME TERRITORY AS THE TAP, and it has to be: two gestures that
-    /// disagree about where the picture is are two different pictures as far as
-    /// the hand is concerned. So the hold is off duty exactly where the tap is
-    /// — outside the media band, and while the thread is open (where the strip
-    /// means "bring the media back").
-    func beginMediaHold(at point: CGPoint) {
-        guard !isCommentsEngaged, playbackTapRegionContains(point) else { return }
-        // A carousel's track is held with its page, picture or clip (#1849).
-        onPostTrackHold?(true)
-        guard playsVideo, !isPostUnavailable else { return }
-        playback.beginHold()
     }
 
     /// Pauses the clip while a sheet covers it — the sound sheet's preview
@@ -2147,11 +2075,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             return
         }
         playback.setCovered(covered, on: surface)
-    }
-
-    func endMediaHold() {
-        onPostTrackHold?(false)
-        playback.endHold()
     }
 
     /// Keeps the page strip's clip bar fed while there is one to feed: the
@@ -2292,10 +2215,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         return paused
     }
 
-    /// A tap on the page, asked of the screen first: true when it took it
-    /// (#1550: the side list open closes, and the clip is left alone).
-    var interceptsMediaTap: (() -> Bool)?
-
     /// The stopped mark on the picture, shown or taken down from outside —
     /// the side list hands it over as it opens and back as it closes.
     func setPausedMarkVisible(_ visible: Bool, animated: Bool = true) {
@@ -2383,7 +2302,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
 
     /// The clip's territory as a rectangle, so a spec can state its edges
     /// against the screen's thresholds rather than against numbers of its own.
-    var debugPlaybackTapRegion: CGRect { playbackTapRegion }
+    var debugPlaybackTapRegion: CGRect { mediaTaps.playbackTapRegion }
 
     /// Puts the watched surface on the page the card is showing — the piece of
     /// activation a spec needs without activation's asynchronous start (which
@@ -2612,8 +2531,8 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         clearComments()
         onRequestComments = nil
         onReactionsRunningLow = nil
-        onPostTrackTap = nil
-        onPostTrackHold = nil
+        mediaTaps.onPostTrackTap = nil
+        mediaTaps.onPostTrackHold = nil
         onRequestBoost = nil
         onRequestBoostUndo = nil
         onRequestCommentsPageDrive = nil
@@ -2771,3 +2690,5 @@ extension SnapFeedCell: SnapCarouselPlaybackHost {}
 extension SnapFeedCell: SnapBrowseMirrorHost {}
 
 extension SnapFeedCell: SnapUnavailableBlockHost {}
+
+extension SnapFeedCell: SnapMediaTapArbiterHost {}
