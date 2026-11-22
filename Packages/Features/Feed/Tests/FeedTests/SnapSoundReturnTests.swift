@@ -55,8 +55,8 @@ struct SnapSoundReturnTests {
         chrome.setSoundFace(Self.face)
         var sheets = 0
         var returns = 0
-        chrome.onSoundSheetRequested = { sheets += 1 }
-        chrome.onSoundReturnRequested = { returns += 1 }
+        chrome.actionColumn.onSoundSheetRequested = { sheets += 1 }
+        chrome.actionColumn.onSoundReturnRequested = { returns += 1 }
         let bubble = chrome.debugSoundBubble
         let hold = try #require(chrome.debugSoundHold)
 

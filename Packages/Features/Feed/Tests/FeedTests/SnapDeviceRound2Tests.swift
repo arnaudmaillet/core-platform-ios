@@ -90,9 +90,9 @@ struct SnapDeviceRound2Tests {
         feed.seedProjection([Self.media()])
         feed.view.layoutIfNeeded()
 
-        SnapChromeView.debugRestock()
+        SnapChromeSpares.debugRestock()
         let replica = try #require(feed.zoomFlightChrome() as? SnapChromeView)
-        #expect(SnapChromeView.debugSpareCount == SnapChromeView.spareCapacity - 1, "the replica built its own")
+        #expect(SnapChromeSpares.debugSpareCount == SnapChromeSpares.spareCapacity - 1, "the replica built its own")
         replica.frame = Layout.screen
         replica.layoutIfNeeded()
         #expect(!replica.debugSoundBubble.isHidden)

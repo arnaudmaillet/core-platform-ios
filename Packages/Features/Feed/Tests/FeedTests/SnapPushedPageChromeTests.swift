@@ -90,12 +90,12 @@ struct SnapPushedPageChromeTests {
         // The cover's bottom: the bar's line, less the breath and the rest
         // gap, less the column's lift onto the caption's line (#2326).
         let barLine = chrome.bounds.height - SnapActionColumnLayoutTests.insets.bottom
-        let lift = SnapChromeView.columnLineLift()
+        let lift = SnapChromeGeometry.columnLineLift()
         #expect(abs(sound.maxY - (barLine - SnapActionColumn.bottomBreath - SnapActionColumn.inputRestingGap
             - lift)) < 0.5, "the cover is not its breath and its lift over the bar")
         // The cover's bottom on the caption's letters' line over a strip too
         // (#2326): one line for the caption and the column, as #2252 meant.
-        let drop = SnapChromeView.captionLetterDrop
+        let drop = SnapChromeGeometry.captionLetterDrop
         #expect(abs(chrome.debugCaptionFrame.maxY - drop - sound.maxY) < 0.5, "the cover is off the caption's line")
 
         let lone = laidOut(pages: 1)
@@ -115,7 +115,7 @@ struct SnapPushedPageChromeTests {
         chrome.setNeedsLayout()
         chrome.layoutIfNeeded()
         let cover = chrome.debugSoundBubble.convert(chrome.debugSoundBubble.bounds, to: chrome)
-        let letters = chrome.debugCaptionFrame.maxY - SnapChromeView.captionLetterDrop
+        let letters = chrome.debugCaptionFrame.maxY - SnapChromeGeometry.captionLetterDrop
         #expect(abs(cover.maxY - letters) < 0.5, "the column is off the caption's line")
     }
 }

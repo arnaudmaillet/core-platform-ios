@@ -279,7 +279,7 @@ struct SnapActionColumnLayoutTests {
         chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true))
         chrome.layoutIfNeeded()
         let lift = chrome.debugColumnLineLift
-        #expect(abs(lift - SnapChromeView.columnLineLift()) < 0.5)
+        #expect(abs(lift - SnapChromeGeometry.columnLineLift()) < 0.5)
         #expect(lift > 0)
         let station = chrome.debugSoundStationFrame
         func column() -> (like: CGRect, sound: CGRect) {
@@ -305,10 +305,10 @@ struct SnapActionColumnLayoutTests {
         // The sheet's share drives the same glide (#2087).
         chrome.setCommentsEngaged(false)
         #expect(chrome.debugColumnGlide == 0)
-        chrome.setCommentsSheetShare(0.25)
+        chrome.actionColumn.setCommentsSheetShare(0.25)
         #expect(abs(column().sound.minY - (rest.sound.minY + lift / 4)) < 0.5, "the sheet's share did not move the column")
         // A drag that cancels takes it back with the finger.
-        chrome.setCommentsSheetShare(0)
+        chrome.actionColumn.setCommentsSheetShare(0)
         #expect(column().sound == rest.sound)
         #expect(chrome.debugSoundStationFrame == station, "the station moved with the glide")
     }

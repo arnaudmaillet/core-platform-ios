@@ -57,7 +57,7 @@ struct FileSizeGuardTests {
         "Packages/Features/Feed/Sources/Feed/PostDetail/CommentStream.swift": 2495,
         "Packages/Features/Feed/Sources/Feed/PostDetail/PostDetailViewController.swift": 2047,
         "Packages/Features/Feed/Sources/Feed/PostDetail/PostDetailViewModel.swift": 1388,
-        "Packages/Features/Feed/Sources/Feed/Snap/SnapChromeView.swift": 2566,
+        "Packages/Features/Feed/Sources/Feed/Snap/SnapChromeView.swift": 1178,
         "Packages/Features/Feed/Sources/Feed/Snap/SnapCommentTickerView.swift": 1311,
         "Packages/Features/Feed/Sources/Feed/Snap/SnapCommentsCoordinator.swift": 1097,
         "Packages/Features/Feed/Sources/Feed/Snap/SnapCommentsSheet.swift": 2212,

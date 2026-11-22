@@ -70,8 +70,8 @@ struct SnapShareSlotTests {
         chrome.setSlotSharesPost(true)
         var shares = 0
         var sheets = 0
-        chrome.onShareRequested = { shares += 1 }
-        chrome.onSoundSheetRequested = { sheets += 1 }
+        chrome.actionColumn.onShareRequested = { shares += 1 }
+        chrome.actionColumn.onSoundSheetRequested = { sheets += 1 }
         let bubble = chrome.debugSoundBubble
         #expect(!bubble.isHidden, "a text page's column has no Share")
         #expect(bubble.accessibilityLabel == "Share")
@@ -108,8 +108,8 @@ struct SnapShareSlotTests {
         chrome.setSlotSharesPost(true, holdArmsShare: true)
         var shares = 0
         var sheets = 0
-        chrome.onShareRequested = { shares += 1 }
-        chrome.onSoundSheetRequested = { sheets += 1 }
+        chrome.actionColumn.onShareRequested = { shares += 1 }
+        chrome.actionColumn.onSoundSheetRequested = { sheets += 1 }
         let bubble = chrome.debugSoundBubble
         #expect(bubble.accessibilityLabel == "Share")
         #expect(!bubble.debugIsSpinning)

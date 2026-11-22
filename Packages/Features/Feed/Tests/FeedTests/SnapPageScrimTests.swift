@@ -45,8 +45,8 @@ struct SnapPageScrimTests {
     @Test func onAPushedPostTheScrimStartsAtTheCaptionLessTheFade() {
         let chrome = makeChrome()
         let caption = frame(of: chrome.debugCaptionLabel, in: chrome)
-        #expect(abs(scrimTop(chrome) - (caption.minY - SnapChromeView.scrimLead)) < 0.5)
-        #expect(SnapChromeView.scrimLead == 48, "the start the owner chose (#2175, option A)")
+        #expect(abs(scrimTop(chrome) - (caption.minY - SnapPageScrim.scrimLead)) < 0.5)
+        #expect(SnapPageScrim.scrimLead == 48, "the start the owner chose (#2175, option A)")
         // Deeper than the page, clipped at its edges: never over the next page.
         #expect(frame(of: chrome.debugScrimView, in: chrome).maxY >= chrome.bounds.maxY)
         #expect(chrome.debugScrimClip.clipsToBounds && frame(of: chrome.debugScrimClip, in: chrome) == chrome.bounds)
@@ -55,7 +55,7 @@ struct SnapPageScrimTests {
     @Test func aTimestampAloneIsTheBlock() {
         let chrome = makeChrome(caption: nil)
         let caption = frame(of: chrome.debugCaptionLabel, in: chrome)
-        #expect(abs(scrimTop(chrome) - (caption.minY - SnapChromeView.scrimLead)) < 0.5)
+        #expect(abs(scrimTop(chrome) - (caption.minY - SnapPageScrim.scrimLead)) < 0.5)
     }
 
     /// The measurement in the issue: the middle of the screen read 0.80 of the
@@ -95,7 +95,7 @@ struct SnapPageScrimTests {
         let long = makeChrome(caption: String(repeating: "Golden hour at the pier, the light going amber. ", count: 4))
         #expect(abs(scrimTop(long) - scrimTop(short)) < 0.5)
         let caption = frame(of: long.debugCaptionLabel, in: long)
-        #expect(abs(scrimTop(long) - (caption.minY - SnapChromeView.scrimLead)) < 0.5)
+        #expect(abs(scrimTop(long) - (caption.minY - SnapPageScrim.scrimLead)) < 0.5)
     }
 
     /// The flight's replica and the live page are two chromes configured
@@ -106,7 +106,7 @@ struct SnapPageScrimTests {
 
     /// The darkness `y` points down the page, as the scrim draws it there.
     private func darkness(atY y: CGFloat, in chrome: SnapChromeView) -> CGFloat {
-        SnapChromeView.scrimAlpha(at: y - scrimTop(chrome))
+        SnapPageScrim.scrimAlpha(at: y - scrimTop(chrome))
     }
 
     private static let twoLines = "Golden hour at the pier, the light going amber over the water, the boats coming in."
@@ -121,7 +121,7 @@ struct SnapPageScrimTests {
             darkness(atY: frame(of: two.debugCaptionLabel, in: two).minY, in: two),
         ]
         for top in tops {
-            #expect(abs(top - SnapChromeView.scrimTopAlpha) <= 0.01, "the block's top at \(top)")
+            #expect(abs(top - SnapPageScrim.scrimTopAlpha) <= 0.01, "the block's top at \(top)")
         }
         let caption = frame(of: two.debugCaptionLabel, in: two)
         #expect(caption.height > 30, "the premise: two lines (\(caption.height))")
@@ -134,21 +134,21 @@ struct SnapPageScrimTests {
     /// the curve is read there): darker than the text, lighter than before
     /// (0.75).
     @Test func theEdgeIsLighterThanItWas() {
-        let edge = SnapChromeView.scrimAlpha(at: SnapChromeView.scrimLead + 125)
+        let edge = SnapPageScrim.scrimAlpha(at: SnapPageScrim.scrimLead + 125)
         #expect(edge >= 0.55 && edge <= 0.65, "the edge at \(edge)")
     }
 
     /// Zero slope at the start, never steeper than the cap, no kink, darker
     /// all the way down — sampled every half point, past the page.
     @Test func theCurveIsGentleAndSmooth() {
-        let cap = SnapChromeView.scrimSlopeCap
+        let cap = SnapPageScrim.scrimSlopeCap
         let step: CGFloat = 0.5
         var previousSlope: CGFloat?
         var x: CGFloat = 0
-        #expect(SnapChromeView.scrimAlpha(at: 0) == 0)
-        #expect(SnapChromeView.scrimAlpha(at: step) / step < cap / 50, "a slope where it starts")
+        #expect(SnapPageScrim.scrimAlpha(at: 0) == 0)
+        #expect(SnapPageScrim.scrimAlpha(at: step) / step < cap / 50, "a slope where it starts")
         while x < 1_000 {
-            let slope = (SnapChromeView.scrimAlpha(at: x + step) - SnapChromeView.scrimAlpha(at: x)) / step
+            let slope = (SnapPageScrim.scrimAlpha(at: x + step) - SnapPageScrim.scrimAlpha(at: x)) / step
             #expect(slope > 0 || x < 1, "flat at \(x)")
             #expect(slope <= cap + 1e-6, "steeper than the cap at \(x): \(slope)")
             if let previousSlope {
@@ -158,21 +158,21 @@ struct SnapPageScrimTests {
             x += step
         }
         // The reference: about the first 20 pt under 3 %, read as nothing.
-        #expect(SnapChromeView.scrimAlpha(at: 20) < 0.03, "the first 20 pt show")
-        #expect(SnapChromeView.scrimAlpha(at: 1_000) < SnapChromeView.scrimCeiling)
+        #expect(SnapPageScrim.scrimAlpha(at: 20) < 0.03, "the first 20 pt show")
+        #expect(SnapPageScrim.scrimAlpha(at: 1_000) < SnapPageScrim.scrimCeiling)
     }
 
     /// The stops: from 0 to 1, a stop every 6 pt through the curve, every
     /// 30 pt through the slow ease, darker at each.
     @Test func theStopsAreDenseEnough() {
-        let points = SnapChromeView.scrimStopPoints
-        #expect(points.first == 0 && points.last == SnapChromeView.scrimHeight)
-        let dense = SnapChromeView.scrimLead + SnapChromeView.scrimLinearDepth
+        let points = SnapPageScrim.scrimStopPoints
+        #expect(points.first == 0 && points.last == SnapPageScrim.scrimHeight)
+        let dense = SnapPageScrim.scrimLead + SnapPageScrim.scrimLinearDepth
         for (a, b) in zip(points, points.dropFirst()) {
             #expect(b - a <= (a < dense ? 6 : 30) + 0.001, "a gap of \(b - a) at \(a)")
         }
-        let alphas = SnapChromeView.scrimColors.map { $0.cgColor.alpha }
+        let alphas = SnapPageScrim.scrimColors.map { $0.cgColor.alpha }
         #expect(zip(alphas.dropFirst(), alphas.dropFirst(2)).allSatisfy { $0 < $1 }, "not darker at every stop")
-        #expect(SnapChromeView.scrimLocations.first == 0 && SnapChromeView.scrimLocations.last == 1)
+        #expect(SnapPageScrim.scrimLocations.first == 0 && SnapPageScrim.scrimLocations.last == 1)
     }
 }

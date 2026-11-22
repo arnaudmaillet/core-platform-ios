@@ -962,7 +962,7 @@ struct SnapMediaPageBarTests {
         #expect(font.pointSize == 11)
         #expect(attributes[.foregroundColor] as? UIColor == .white)
         let shadow = try #require(attributes[.shadow] as? NSShadow)
-        let caption = SnapChromeView.captionTextShadow
+        let caption = SnapCaptionComposer.captionTextShadow
         #expect(shadow.shadowBlurRadius == caption.shadowBlurRadius && shadow.shadowOffset == caption.shadowOffset)
         #expect((shadow.shadowColor as? UIColor) == (caption.shadowColor as? UIColor))
         // The footprint: the label's width and the inset — no padding left.
@@ -1301,7 +1301,7 @@ struct SnapMediaPageBarTests {
 
     /// The bottom of the caption's letters: its last baseline.
     private func lettersBottom(_ view: SnapChromeView) -> CGFloat {
-        view.debugCaptionFrame.maxY - SnapChromeView.captionLetterDrop
+        view.debugCaptionFrame.maxY - SnapChromeGeometry.captionLetterDrop
     }
 
     /// The top of the toolbar's glass.
@@ -1368,9 +1368,9 @@ struct SnapMediaPageBarTests {
         #expect(abs(column.maxY - lettersBottom(view)) < 0.5)
         // The composer's line, less the column's lift.
         let composerLine = Self.barLine - SnapActionColumn.bottomBreath - SnapActionColumn.inputRestingGap
-        let lift = SnapChromeView.columnLineLift()
+        let lift = SnapChromeGeometry.columnLineLift()
         #expect(abs(column.maxY - (composerLine - lift)) < 0.5)
-        #expect(lift > SnapChromeView.coverLineLift(), "the column rose less than the caption")
+        #expect(lift > SnapChromeGeometry.coverLineLift(), "the column rose less than the caption")
         // The like pill rises with it: same height, same gap over the cover.
         let like = view.debugFrame(of: view.debugBoostButton)
         #expect(abs(like.height - SnapActionColumn.likePillHeight) < 0.5)
@@ -1416,7 +1416,7 @@ struct SnapMediaPageBarTests {
     /// strip's frame — and with it everything around it — stays put.
     @Test func theStripIsThinAtRestAndThickerWhileTouched() throws {
         let view = chrome(pages: 1, clipPages: [0])
-        view.setMediaPlayhead(0.2, seconds: 120)
+        view.mediaStrip.setMediaPlayhead(0.2, seconds: 120)
         view.layoutIfNeeded()
         let strip = view.debugPageBarFrame
         let caption = view.debugCaptionFrame
@@ -1479,14 +1479,14 @@ struct SnapMediaPageBarTests {
     @Test func theScrubCardFollowsTheThumbWithinTheColumn() {
         let view = chrome(pages: 1)
         view.setMediaPageCount(1, current: 0, clipPages: [0])
-        view.setMediaPlayhead(0.2, seconds: 120)
+        view.mediaStrip.setMediaPlayhead(0.2, seconds: 120)
         view.layoutIfNeeded()
         let strip = view.debugPageBarFrame
         let caption = view.debugCaptionFrame
 
         view.debugPageBar.debugScrub(.began, atX: strip.width / 2)
         view.debugPageBar.debugScrub(.changed, atX: strip.width / 2 + 40)
-        let middle = view.debugScrubPreviewFrame()
+        let middle = view.mediaStrip.debugScrubPreviewFrame()
         // Directly above the strip, and OVER whatever is there — the caption is
         // the page talking about the post, and a pointer that waited for empty room
         // would have to sit somewhere that is not where the thumb is. It floats,
@@ -1499,7 +1499,7 @@ struct SnapMediaPageBarTests {
         // Dragged to the far end, it stops at the column's edge rather than
         // running off it.
         view.debugPageBar.debugScrub(.changed, atX: strip.width * 4)
-        let far = view.debugScrubPreviewFrame()
+        let far = view.mediaStrip.debugScrubPreviewFrame()
         #expect(far.maxX <= strip.maxX + 0.5)
         #expect(far.minX > middle.minX)
         // The strip ends at the column's edge now (#2291): the card still
@@ -1514,7 +1514,7 @@ struct SnapMediaPageBarTests {
         // wheel, the boost anchor, the subtitle zone, the comment empty state —
         // so a card added once sits UNDER the comment surfaces it is meant to
         // point over. Reported exactly that way.
-        #expect(view.subviews.last === view.debugScrubPreview)
+        #expect(view.subviews.last === view.mediaStrip.debugScrubPreview)
     }
 
     /// ⚠️ AND ITS ARRIVAL MOVES NOTHING. A strip that pushed the caption up
@@ -1547,20 +1547,20 @@ struct SnapMediaPageBarTests {
     @Test func theScrubTakesThePagesTalkDownAndGivesItBack() {
         let view = chrome(pages: 1)
         view.setMediaPageCount(1, current: 0, clipPages: [0])
-        view.setMediaPlayhead(0.2, seconds: 120)
+        view.mediaStrip.setMediaPlayhead(0.2, seconds: 120)
         showSoundBubble(on: view)
         #expect(!view.debugSoundBubble.isHidden && view.debugSoundBubble.alpha == 1, "the premise: the sound bubble is on screen")
-        let resting = view.debugScrubFadedAlphas
+        let resting = view.mediaStrip.debugScrubFadedAlphas
 
         let bar = view.debugPageBar
         bar.debugScrub(.began, atX: 100)
         bar.debugScrub(.changed, atX: 140)
-        #expect(view.debugScrubFadedAlphas.allSatisfy { $0 == 0 })
+        #expect(view.mediaStrip.debugScrubFadedAlphas.allSatisfy { $0 == 0 })
         // The column fades as one glass (#1872).
         #expect(view.debugGlassColumn.alpha == 0, "the column stayed beside the scrub (#1847)")
 
         bar.debugScrub(.ended, atX: 140)
-        #expect(view.debugScrubFadedAlphas == resting)
+        #expect(view.mediaStrip.debugScrubFadedAlphas == resting)
         #expect(view.debugSoundBubble.alpha == 1)
     }
 
@@ -1574,20 +1574,20 @@ struct SnapMediaPageBarTests {
     @Test func aRecycleMidScrubGivesThePagesTalkBack() {
         let view = chrome(pages: 1)
         view.setMediaPageCount(1, current: 0, clipPages: [0])
-        view.setMediaPlayhead(0.2, seconds: 120)
+        view.mediaStrip.setMediaPlayhead(0.2, seconds: 120)
         showSoundBubble(on: view)
         #expect(!view.debugSoundBubble.isHidden && view.debugSoundBubble.alpha == 1, "the premise: the sound bubble is on screen")
-        let resting = view.debugScrubFadedAlphas
+        let resting = view.mediaStrip.debugScrubFadedAlphas
 
         let bar = view.debugPageBar
         bar.debugScrub(.began, atX: 100)
         bar.debugScrub(.changed, atX: 140)
-        #expect(view.debugScrubFadedAlphas.allSatisfy { $0 == 0 }, "the premise")
+        #expect(view.mediaStrip.debugScrubFadedAlphas.allSatisfy { $0 == 0 }, "the premise")
 
         // Taken away with the thumb still down.
         view.reset()
 
-        #expect(view.debugScrubFadedAlphas == resting)
+        #expect(view.mediaStrip.debugScrubFadedAlphas == resting)
         #expect(view.debugSoundBubble.alpha == 1, "the sound bubble came back to the next post faded")
     }
 
@@ -1595,7 +1595,7 @@ struct SnapMediaPageBarTests {
     @Test func theScrubLeavesTheStripAndItsCardAlone() {
         let view = chrome(pages: 1)
         view.setMediaPageCount(1, current: 0, clipPages: [0])
-        view.setMediaPlayhead(0.2, seconds: 120)
+        view.mediaStrip.setMediaPlayhead(0.2, seconds: 120)
         view.layoutIfNeeded()
 
         let bar = view.debugPageBar
@@ -1603,7 +1603,7 @@ struct SnapMediaPageBarTests {
         bar.debugScrub(.changed, atX: 140)
 
         #expect(bar.alpha == 1)
-        #expect(view.debugScrubPreview.alpha == 1)
+        #expect(view.mediaStrip.debugScrubPreview.alpha == 1)
     }
 
     /// ⚠️ THE CAPTION'S BOTTOM IS THE SAME WITH AND WITHOUT A STRIP (#2252):
@@ -1624,7 +1624,7 @@ struct SnapMediaPageBarTests {
         }
         // The cover's line, raised by the seat's lift (#2301).
         let line = Self.barLine - SnapActionColumn.bottomBreath - SnapActionColumn.inputRestingGap
-            - SnapChromeView.coverLineLift()
+            - SnapChromeGeometry.coverLineLift()
         #expect(abs(photo.debugCaptionFrame.maxY - line) < 0.5, "the caption is off its seat")
     }
 
@@ -1640,7 +1640,7 @@ struct SnapMediaPageBarTests {
             nil,
         ]
         let reference = chrome(pages: 0, caption: captions[0]).debugCaptionFrame
-        let twoLines = SnapChromeView.captionBlockHeight(scale: 3)
+        let twoLines = SnapChromeGeometry.captionBlockHeight(scale: 3)
         #expect(abs(reference.height - twoLines) < 0.5, "the block is \(reference.height) tall, not two lines")
         let formats: [(pages: Int, clips: Set<Int>)] = [(0, []), (3, []), (1, [0])]
         for caption in captions {
@@ -1738,7 +1738,7 @@ struct SnapMediaPageBarTests {
         let carousel = chrome(pages: 3)
         #expect(carousel.captionSlideMayBegin(velocity: CGPoint(x: 300, y: 0)))
         let clip = chrome(pages: 1, clipPages: [0])
-        clip.setMediaPlayhead(0.3, seconds: 20)
+        clip.mediaStrip.setMediaPlayhead(0.3, seconds: 20)
         #expect(clip.captionSlideMayBegin(velocity: CGPoint(x: -300, y: 20)))
     }
 
@@ -1768,13 +1768,13 @@ struct SnapMediaPageBarTests {
     /// the strip, and comes back (#2252 §3: the scrub's own fade).
     @Test func aCaptionSlideTakesThePagesTalkDownAndGivesItBack() {
         let view = chrome(pages: 1, clipPages: [0])
-        view.setMediaPlayhead(0.2, seconds: 120)
-        let resting = view.debugScrubFadedAlphas
+        view.mediaStrip.setMediaPlayhead(0.2, seconds: 120)
+        let resting = view.mediaStrip.debugScrubFadedAlphas
         view.debugPageBar.relativeDrag(.began, travel: 10)
         view.debugPageBar.relativeDrag(.changed, travel: 40)
-        #expect(view.debugScrubFadedAlphas.allSatisfy { $0 == 0 }, "the caption and the stack stayed")
+        #expect(view.mediaStrip.debugScrubFadedAlphas.allSatisfy { $0 == 0 }, "the caption and the stack stayed")
         view.debugPageBar.relativeDrag(.cancelled, travel: 40)
-        #expect(view.debugScrubFadedAlphas == resting, "a cancel left the page faded")
+        #expect(view.mediaStrip.debugScrubFadedAlphas == resting, "a cancel left the page faded")
     }
 }
 
@@ -1880,25 +1880,25 @@ struct SnapStripBrowseTests {
             thumbnailURL: nil, audioText: nil, likeCount: 0, timestampText: "now"
         ))
         view.setMediaPageCount(4, current: 0)
-        view.setMediaPreviews(thumbnails: [nil, nil, nil, nil], videoPages: [2], pipeline: nil)
+        view.mediaStrip.setMediaPreviews(thumbnails: [nil, nil, nil, nil], videoPages: [2], pipeline: nil)
         showSoundBubble(on: view)
-        let resting = view.debugScrubFadedAlphas
+        let resting = view.mediaStrip.debugScrubFadedAlphas
         let sound = view.debugSoundBubble
         let soundCentre = sound.convert(CGPoint(x: sound.bounds.midX, y: sound.bounds.midY), to: view)
         var browsed: [Int] = []
-        view.onMediaBrowse = { browsed.append($0) }
+        view.mediaStrip.onMediaBrowse = { browsed.append($0) }
 
         let bar = view.debugPageBar
         let slot = bar.browseSlotWidth
         bar.debugScrub(.began, atX: slot * 0.5)
         bar.debugScrub(.changed, atX: slot * 2.5)
-        #expect(view.debugScrubFadedAlphas.allSatisfy { $0 == 0 })
+        #expect(view.mediaStrip.debugScrubFadedAlphas.allSatisfy { $0 == 0 })
         // The column fades as one glass (#1872).
         #expect(view.debugGlassColumn.alpha == 0, "the column stayed beside the filmstrip (#1847)")
         // A tap where the sound bubble stood no longer reaches it.
         let hit = view.hitTest(soundCentre, with: nil)
         #expect(hit.map { !$0.isDescendant(of: sound) } ?? true, "a tap there would still open the sound")
-        let strip = view.debugBrowseStrip
+        let strip = view.mediaStrip.debugBrowseStrip
         #expect(strip.debugIsShown)
         #expect(strip.debugTileCount == 4)
         // The segments step aside for the filmstrip, whose counter takes
@@ -1922,7 +1922,7 @@ struct SnapStripBrowseTests {
         #expect(browsed == [2])
 
         bar.debugScrub(.ended, atX: slot * 2.5)
-        #expect(view.debugScrubFadedAlphas == resting)
+        #expect(view.mediaStrip.debugScrubFadedAlphas == resting)
         #expect(!strip.debugIsShown)
         #expect(bar.debugContainerOpacity == 1, "the segments did not come back")
     }

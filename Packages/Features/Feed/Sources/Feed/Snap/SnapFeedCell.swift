@@ -123,7 +123,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             return
         }
         personOcclusion.decide = { [weak self] in self?.occlusionDecision() ?? .clear }
-        personOcclusion.run(surface: surface, band: chrome.personOcclusionTicker)
+        personOcclusion.run(surface: surface, band: chrome.commentSurfaces.personOcclusionTicker)
     }
 
     /// The gate, asked eight times a second while the driver runs.
@@ -131,7 +131,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         let process = ProcessInfo.processInfo
         let inputs = PersonOcclusionGate.Inputs(
             enabled: SnapCommentTickerView.avoidsPeople,
-            bandShown: chrome.isPersonOcclusionBandShown,
+            bandShown: chrome.commentSurfaces.isPersonOcclusionBandShown,
             pageActive: isActive,
             playing: isClipAdvancing,
             inFlight: isChromeHeldForFlight,
@@ -561,19 +561,19 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             videoPlayback.detachSurface(mirror, reason: "browse-mirror")
             guard videoPlayback.attachSurface(mirror, alongsideSurface: surface) else {
                 browseMirrorPage = nil
-                chrome.setBrowseLiveSurface(nil, page: page)
+                chrome.mediaStrip.setBrowseLiveSurface(nil, page: page)
                 return
             }
         }
         browseMirrorPage = page
-        chrome.setBrowseLiveSurface(mirror, page: page)
+        chrome.mediaStrip.setBrowseLiveSurface(mirror, page: page)
     }
 
     private func tearDownBrowseMirror() {
         guard let mirror = browseMirror else { return }
         videoPlayback?.detachSurface(mirror, reason: "browse-mirror")
         browseMirrorPage = nil
-        chrome.setBrowseLiveSurface(nil, page: 0)
+        chrome.mediaStrip.setBrowseLiveSurface(nil, page: 0)
     }
 
     // MARK: Comments engagement
@@ -624,7 +624,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         guard unavailable != isPostUnavailable else { return }
         isPostUnavailable = unavailable
         chrome.isHidden = unavailable
-        chrome.setActionColumnShown(!unavailable)
+        chrome.actionColumn.setActionColumnShown(!unavailable)
         if unavailable {
             // What was playing stops where it stands, and nothing starts it
             // again: every start asks `isPostUnavailable`, and a resume a hold
@@ -639,7 +639,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             // The clip bar's feed, the occlusion and the comment streams
             // stand down with it.
             updatePlayheadFeed()
-            chrome.setTickerActive(false)
+            chrome.commentSurfaces.setTickerActive(false)
             chrome.setSubtitlesActive(false)
             // A media page's ground is dark whatever the system says; a text
             // page's follows it.
@@ -656,9 +656,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
 
     /// Boost feedback pass-throughs — the chrome owns the anchor and its
     /// theatre; the VC owns the wallet verdict that picks which one plays.
-    func playBoostConfirmation(amount: Int) { chrome.playBoostConfirmation(amount: amount) }
-    func playBoostDenied() { chrome.playBoostDenied() }
-    func playBoostRefund(amount: Int) { chrome.playBoostRefund(amount: amount) }
+    func playBoostConfirmation(amount: Int) { chrome.boostReceipts.playBoostConfirmation(amount: amount) }
+    func playBoostDenied() { chrome.boostReceipts.playBoostDenied() }
+    func playBoostRefund(amount: Int) { chrome.boostReceipts.playBoostRefund(amount: amount) }
     /// The viewer's cumulative spend on this post — the anchor's number
     /// face. Set at configure (from the wallet's ledger) and again after
     /// each confirmed spend; chrome reset returns it to 0 on reuse.
@@ -672,7 +672,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         chrome.setSlotSharesPost(shares, holdArmsShare: holdArmsShare)
     }
     /// Turns the sound bubble's cover while the post plays (#671).
-    func setSoundSpinning(_ spinning: Bool) { chrome.setSoundSpinning(spinning) }
+    func setSoundSpinning(_ spinning: Bool) { chrome.actionColumn.setSoundSpinning(spinning) }
     /// The sound bubble was tapped: the screen opens the sound sheet (#671).
     var onRequestSoundSheet: (() -> Void)?
     /// The sound bubble's way back (#1929): shown while the comments are
@@ -683,14 +683,14 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
 
     /// A text page's like stands in the screen's footer (#1924): no pill
     /// in its column.
-    func setLikeInFooter(_ inFooter: Bool) { chrome.likeInFooter = inFooter }
+    func setLikeInFooter(_ inFooter: Bool) { chrome.actionColumn.likeInFooter = inFooter }
     /// The sound bubble wears the post's Share (#1999) and was tapped: the
     /// screen opens the share sheet.
     var onRequestShare: (() -> Void)?
     /// The anchor's wallet context (affordability + undoable tally) —
     /// pushed at configure and on every wallet change.
     func setBoostContext(balance: Int, undoable: Int, stakeShots: Int = 0) {
-        chrome.setBoostContext(balance: balance, undoable: undoable, stakeShots: stakeShots)
+        chrome.actionColumn.setBoostContext(balance: balance, undoable: undoable, stakeShots: stakeShots)
     }
     /// pager INTERACTIVELY — the strip-side mirror of the composer bar's
     /// page-swipe. The cell forwards each pan phase with the raw vertical
@@ -833,11 +833,11 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // gets the continuous signal; everything else here acts on a PAGE and
         // gets the discrete one below.
         mediaCard.onScrollPosition = { [weak self] position in
-            self?.chrome.setMediaScrollPosition(position)
+            self?.chrome.mediaStrip.setMediaScrollPosition(position)
         }
         mediaCard.onPageChanged = { [weak self] page in
             guard let self else { return }
-            self.chrome.setMediaPage(page)
+            self.chrome.mediaStrip.setMediaPage(page)
             self.reconcilePagePlayback()
             // A page that is a clip draws the strip as its bar; one that is not
             // takes the bar away. Both are decided by what is under the viewer.
@@ -852,49 +852,49 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // lands on the playback: the bar and the clip meet here.
         playback.onPlayhead = { [weak self] fraction, seconds in
             guard let self else { return }
-            chrome.setMediaPlayhead(fraction, seconds: seconds)
+            chrome.mediaStrip.setMediaPlayhead(fraction, seconds: seconds)
             // A clip browsed onto may only start after the page turned: its
             // preview joins it as soon as it has a player.
             if isBrowsingMedia, browseMirrorPage != mediaCard.currentPage,
                mediaCard.videoPageIndices.contains(mediaCard.currentPage) { refreshBrowseMirror() }
         }
         playback.onLoading = { [weak self] loading in
-            self?.chrome.setMediaLoading(loading)
+            self?.chrome.mediaStrip.setMediaLoading(loading)
         }
         playback.onScrubPreviewLoading = { [weak self] loading in
-            self?.chrome.setScrubPreviewLoading(loading)
+            self?.chrome.mediaStrip.setScrubPreviewLoading(loading)
         }
         playback.onScrubPreviewPicture = { [weak self] image in
-            self?.chrome.setScrubPreviewPicture(image)
+            self?.chrome.mediaStrip.setScrubPreviewPicture(image)
         }
         #if DEBUG
         playback.debugCurrentPage = { [weak self] in self?.mediaCard.currentPage ?? 0 }
         playback.debugPostID = { [weak self] in self?.representedID?.rawValue ?? "nil" }
         #endif
-        chrome.onScrubPreviewRequested = { [weak self] fraction in
+        chrome.mediaStrip.onScrubPreviewRequested = { [weak self] fraction in
             self?.playback.updateScrubPreview(fraction)
         }
         // A tap on the bar, exact — see `SnapCellPlayback.seek(toFraction:)`.
         // A drag seeks only at its release (`endScrub(at:)`, #2150).
-        chrome.onMediaSeekRequested = { [weak self] fraction in
+        chrome.mediaStrip.onMediaSeekRequested = { [weak self] fraction in
             self?.playback.seek(toFraction: fraction)
         }
-        chrome.onMediaScrubBegan = { [weak self] in self?.playback.beginScrub() }
-        chrome.onMediaScrubEnded = { [weak self] fraction in self?.playback.endScrub(at: fraction) }
+        chrome.mediaStrip.onMediaScrubBegan = { [weak self] in self?.playback.beginScrub() }
+        chrome.mediaStrip.onMediaScrubEnded = { [weak self] fraction in self?.playback.endScrub(at: fraction) }
         // Browsing (#1734): the carousel jumps to the page under the finger,
         // and a clip landed on PLAYS at once — in the post and in its preview,
         // one player for both (the owner, 2026-10-25; `refreshBrowseMirror`).
-        chrome.onMediaBrowseBegan = { [weak self] in
+        chrome.mediaStrip.onMediaBrowseBegan = { [weak self] in
             guard let self else { return }
             isBrowsingMedia = true
             refreshBrowseMirror()
         }
-        chrome.onMediaBrowse = { [weak self] page in
+        chrome.mediaStrip.onMediaBrowse = { [weak self] page in
             guard let self else { return }
             mediaCard.setPage(page, animated: false)
             refreshBrowseMirror()
         }
-        chrome.onMediaBrowseEnded = { [weak self] page in
+        chrome.mediaStrip.onMediaBrowseEnded = { [weak self] page in
             guard let self else { return }
             isBrowsingMedia = false
             tearDownBrowseMirror()
@@ -902,7 +902,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             reconcilePagePlayback()
             updatePlayheadFeed()
         }
-        chrome.onMediaPageRequested = { [weak self] page in
+        chrome.mediaStrip.onMediaPageRequested = { [weak self] page in
             guard let self else { return }
             // ⚠️ A NEIGHBOUR IS A PAGE TURN; ANYTHING FURTHER IS A JUMP.
             //
@@ -1041,7 +1041,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // In the stage's twin, so it moves with the page (#1917).
         columnStage.frame = contentView.bounds
         contentView.addSubview(columnStage)
-        chrome.installActionColumn(in: columnStage)
+        chrome.actionColumn.installActionColumn(in: columnStage)
 
         // NOTE: no pause glyph is installed here. The mark that says a clip is
         // stopped belongs to the PICTURE — `SnapMediaCardView` holds it for a
@@ -1606,7 +1606,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // …which glides down to the composer's line on the same share, and
         // back up as the interface comes back (#2326): the sheet's own
         // movement is the clock, a drag that cancels included.
-        chrome.setCommentsSheetShare(hidden)
+        chrome.actionColumn.setCommentsSheetShare(hidden)
         guard let stage = mediaCard.superview else { return }
         let mediaRegion = stage.convert(mediaRegion, from: nil)
         guard mediaRegion.width > 0, mediaRegion.height > 0 else { return }
@@ -1859,7 +1859,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         commentsSheetMediaFade = 1
         chrome.alpha = 1
         columnStage.alpha = 1
-        chrome.setCommentsSheetShare(0)
+        chrome.actionColumn.setCommentsSheetShare(0)
         mediaCard.transform = .identity
         // Back to the page before the mask goes: the spread's sides never
         // show.
@@ -1981,9 +1981,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             guard let self, let id = self.representedID else { return }
             self.onRequestBoostUndo?(id)
         }
-        chrome.onSoundSheetRequested = { [weak self] in self?.onRequestSoundSheet?() }
-        chrome.onSoundReturnRequested = { [weak self] in self?.onRequestSoundReturn?() }
-        chrome.onShareRequested = { [weak self] in self?.onRequestShare?() }
+        chrome.actionColumn.onSoundSheetRequested = { [weak self] in self?.onRequestSoundSheet?() }
+        chrome.actionColumn.onSoundReturnRequested = { [weak self] in self?.onRequestSoundReturn?() }
+        chrome.actionColumn.onShareRequested = { [weak self] in self?.onRequestShare?() }
         #if DEBUG
         // Which projection fields are present the moment the page is
         // configured. Everything listed here is supposed to render at 0ms from
@@ -2103,7 +2103,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
                 current: mediaCard.currentPage,
                 clipPages: Set(mediaCard.videoPageIndices)
             )
-            chrome.setMediaPreviews(
+            chrome.mediaStrip.setMediaPreviews(
                 thumbnails: model.mediaPages.map(\.thumbnailURL),
                 videoPages: Set(mediaCard.videoPageIndices), pipeline: pipeline
             )
@@ -2144,7 +2144,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // the strip is drawn for one page and becomes that clip's bar. A lone
         // photograph reports nothing and keeps no strip.
         chrome.setMediaPageCount(isVideo ? 1 : 0, current: 0, clipPages: isVideo ? [0] : [])
-        chrome.setMediaPreviews(thumbnails: [], videoPages: [], pipeline: nil)
+        chrome.mediaStrip.setMediaPreviews(thumbnails: [], videoPages: [], pipeline: nil)
         updatePlayheadFeed()
 
         if isImage {
@@ -2212,7 +2212,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// on any on-screen page, including one being dragged in, unlike
     /// playback which stays on the settle-quantized active seam.
     func setTickerStreaming(_ streaming: Bool) {
-        chrome.setTickerActive(streaming)
+        chrome.commentSurfaces.setTickerActive(streaming)
         // The subtitle zone rides the same visibility seam: a page dragged
         // partway in slides in with its pill already rendered (the
         // persistent cue is static content between handoffs, like the
@@ -2269,7 +2269,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // but it is the restart edge after backgrounding: foregrounding
         // re-activates the settled page without a fresh `willDisplay`.
         // Both comment surfaces share it.
-        chrome.setTickerActive(!isPostUnavailable)
+        chrome.commentSurfaces.setTickerActive(!isPostUnavailable)
         chrome.setSubtitlesActive(!isPostUnavailable)
         // Nothing of a post the viewer may no longer see plays (#1409).
         guard !isPostUnavailable else { return }
@@ -3079,16 +3079,16 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// covered.
     /// A reveal has landed: the band enters now (see the ticker).
     func replayCommentBandEntrance() {
-        chrome.replayCommentBandEntrance()
+        chrome.commentSurfaces.replayCommentBandEntrance()
     }
 
     func setChromeHeldForFlight(_ held: Bool) {
         isChromeHeldForFlight = held
         defer { refreshPersonOcclusion() }
-        chrome.setTickerHeldForFlight(held)
+        chrome.commentSurfaces.setTickerHeldForFlight(held)
         // The column leaves and returns with the hold, engaged or not: the
         // replica flies its own (#695).
-        chrome.setColumnHeld(held)
+        chrome.actionColumn.setColumnHeld(held)
         if held {
             chrome.alpha = 0
             return
@@ -3114,11 +3114,11 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // tapped page). What the replica did NOT carry enters on its own:
         // the band through the ticker's release above, the pill here.
         chrome.alpha = 1
-        chrome.replaySubtitleEntrance()
+        chrome.commentSurfaces.replaySubtitleEntrance()
     }
 
     /// The page indicator's scrub, so the screen can make its dismissal yield.
-    var mediaScrubGesture: UIGestureRecognizer { chrome.mediaScrubGesture }
+    var mediaScrubGesture: UIGestureRecognizer { chrome.mediaStrip.mediaScrubGesture }
     /// The caption's slide, which drives the strip on a post with one (#2269).
     var captionSlideGesture: UIGestureRecognizer { chrome.captionSlide }
 
@@ -3273,7 +3273,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// Asks for a page exactly as the strip's tap does, so a spec drives the
     /// cell's own answer to that request rather than a route nobody uses.
     func debugRequestMediaPage(_ page: Int) {
-        chrome.onMediaPageRequested?(page)
+        chrome.mediaStrip.onMediaPageRequested?(page)
     }
 
     /// Every page instruction this cell has sent its card, in order — see the
@@ -3333,7 +3333,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// The band and the subtitle pill stop: this cell no longer shows the
     /// post it kept them running for through a swap (#1798).
     func standDownCommentSurfaces() {
-        chrome.setTickerActive(false)
+        chrome.commentSurfaces.setTickerActive(false)
         chrome.setSubtitlesActive(false)
     }
 
@@ -3348,7 +3348,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         mediaCard.clearPausedMarks()
         // Covers the paths visibility can't see: backgrounding and the
         // feed's own disappearance, where no `didEndDisplaying` fires.
-        chrome.setTickerActive(false)
+        chrome.commentSurfaces.setTickerActive(false)
         chrome.setSubtitlesActive(false)
         // Video is the only kind with anything to stop: a photo page's media
         // is static, so resigning leaves it exactly as it was.
@@ -3535,7 +3535,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // leaves the hold un-released — and the next post to use this cell would
         // arrive with no chrome at all and nothing on the way to bring it back.
         chrome.alpha = 1
-        chrome.setColumnHeld(false)
+        chrome.actionColumn.setColumnHeld(false)
         // The next post to land here is told whether it is still available.
         setPostUnavailable(false)
         cancelPrewarming()

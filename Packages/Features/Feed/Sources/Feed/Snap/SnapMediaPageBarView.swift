@@ -66,7 +66,7 @@ final class SnapMediaPageBarView: UIView {
     /// card's dot) and the caption kept a seat above it, 22 pt higher than
     /// on a single photo — the whole stack over the caption jumped between
     /// posts. Now the strip lies in the gap that already exists between the
-    /// caption and the bottom bar (`SnapChromeView.pageBarCenterOffset`) and
+    /// caption and the bottom bar (`SnapChromeGeometry.pageBarCenterOffset`) and
     /// reserves nothing, as TikTok's and Instagram's do.
     static let thickness: CGFloat = 2
 
@@ -238,7 +238,7 @@ final class SnapMediaPageBarView: UIView {
     /// black plate, ~21 pt tall on a 2 pt line, touched the column above and
     /// crowded the bar's glass below. The digits keep their legibility over
     /// a bright photograph the caption's way — its soft text shadow
-    /// (`SnapChromeView.captionTextShadow`), drawn with the glyphs, over the
+    /// (`SnapCaptionComposer.captionTextShadow`), drawn with the glyphs, over the
     /// bottom scrim that already covers this zone (#2175).
     private let counter: UILabel = {
         let label = UILabel()
@@ -255,7 +255,7 @@ final class SnapMediaPageBarView: UIView {
         NSAttributedString(string: text, attributes: [
             .font: counterFont,
             .foregroundColor: UIColor.white,
-            .shadow: SnapChromeView.captionTextShadow,
+            .shadow: SnapCaptionComposer.captionTextShadow,
         ])
     }
 

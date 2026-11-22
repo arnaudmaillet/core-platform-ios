@@ -29,26 +29,7 @@ final class SnapChromeView: UIView {
     /// alone above it (#1983, the owner 2026-10-31: "the scrim ends at the
     /// caption block, as a card's does").
     ///
-    /// ⚠️ IT WAS 68 % OF THE PAGE, from 32 % of the screen down, so that its
-    /// mid-stop sat behind the reaction band and the subtitle zone (#46). It
-    /// darkened the middle of every picture to 0.80 of its value and the
-    /// subject with it — the post looked darker full screen than on its tile.
-    /// The comment surfaces above the caption no longer get it, by the
-    /// owner's decision.
-    ///
-    /// ONE progressive ramp, darker all the way down (the owner, 2026-10-31,
-    /// on the device: no fade that stops on a plateau), calibrated on
-    /// TikTok's and Instagram's, measured over a white video (#2175, the
-    /// owner 2026-11-07: a little darker, the gradient itself imperceptible):
-    /// - it starts `scrimLead` (48 pt) above the caption block, with a zero
-    ///   slope — no line marks its top — and its first 20 pt stay under 3 %,
-    ///   which the eye reads as nothing (behind the danmaku's lower lane), as
-    ///   the reference's do;
-    /// - it is never steeper than `scrimSlopeCap` (0.4 % per point, the
-    ///   reference's), and its slope never kinks;
-    /// - it reaches `scrimTopAlpha` (0.12) at the block's top, about 0.26 at
-    ///   a two-line caption's last line, and about 0.60 at the screen's edge
-    ///   under the toolbar (it was 0.75), easing toward `scrimCeiling` below.
+    /// The ramp it draws is `SnapPageScrim`'s (#2521).
     ///
     /// ⚠️ IN POINTS, NOT FRACTIONS OF ITS HEIGHT. The darkness is set at
     /// points of the caption block, the same on every post whatever the
@@ -59,78 +40,26 @@ final class SnapChromeView: UIView {
     /// nothing recomputed, so nothing jumps, and the flight's replica builds
     /// the same constraints, so it lands pixel-identical. What runs past the
     /// screen's bottom is never seen.
-    private let scrimView = GradientView(colors: SnapChromeView.scrimColors,
-                                         locations: SnapChromeView.scrimLocations)
+    let scrimView = GradientView(colors: SnapPageScrim.scrimColors,
+                                         locations: SnapPageScrim.scrimLocations)
     /// Clips the scrim at the page's edges: deeper than the page, it would
     /// otherwise darken the next page in the pager (cells don't clip).
-    private let scrimClip = UIView()
-
-    /// How far above the caption block the ramp begins (#2175, the owner's
-    /// option A, 2026-11-07; it was 12 pt, from 2026-11-01): the reference's
-    /// darkness at the block's top cannot be reached gently from closer.
-    static let scrimLead: CGFloat = 48
-    /// The darkness at the caption block's top — its first line: the dark
-    /// side of the reference's 0.10–0.12 (the owner: a little darker), which
-    /// the app's smaller type (#2149) needs to reach about 0.26 by a two-line
-    /// caption's last line at the capped slope.
-    static let scrimTopAlpha: CGFloat = 0.12
-    /// The steepest the ramp gets, in alpha per point: the reference's.
-    static let scrimSlopeCap: CGFloat = 0.004
-    /// How far below the block's top the ramp stays at its cap before it
-    /// eases toward `scrimCeiling` — past a typical caption and the toolbar.
-    static let scrimLinearDepth: CGFloat = 140
-    /// What the ramp eases toward far below the block, never reaching it.
-    static let scrimCeiling: CGFloat = 0.8
-    /// The view's fixed height: the lead and more than any screen below it.
-    static let scrimHeight: CGFloat = scrimLead + 1_200
-
-    /// The ramp's darkness `x` points below where it starts (the block's top
-    /// is at `scrimLead`). Three pieces, the slope continuous at each joint:
-    /// a parabola from a zero slope up to the cap, the cap, then an
-    /// exponential ease whose first slope is the cap.
-    static func scrimAlpha(at x: CGFloat) -> CGFloat {
-        let cap = scrimSlopeCap
-        // Where the parabola meets the cap, so the block's top lands on
-        // `scrimTopAlpha`: a·x₁² + cap·(lead − x₁) with a = cap / 2x₁.
-        let joint = 2 * (cap * scrimLead - scrimTopAlpha) / cap
-        guard x > 0 else { return 0 }
-        if x <= joint { return cap / (2 * joint) * x * x }
-        let easeStart = scrimLead + scrimLinearDepth
-        let atJoint = cap * joint / 2
-        if x <= easeStart { return atJoint + cap * (x - joint) }
-        let atEase = atJoint + cap * (easeStart - joint)
-        let room = scrimCeiling - atEase
-        return scrimCeiling - room * CGFloat(exp(Double(-(x - easeStart) * cap / room)))
-    }
-
-    /// The stops, in points: every 6 pt through the curved start and the
-    /// cap — so linear interpolation between stops never shows — then every
-    /// 30 pt through the slow ease.
-    static let scrimStopPoints: [CGFloat] = {
-        let dense = scrimLead + scrimLinearDepth + 24
-        var points = Array(stride(from: CGFloat(0), through: dense, by: 6))
-        points += Array(stride(from: (points.last ?? 0) + 30, to: scrimHeight, by: 30))
-        points.append(scrimHeight)
-        return points
-    }()
-    static let scrimLocations: [NSNumber] = scrimStopPoints.map { NSNumber(value: Double($0 / scrimHeight)) }
-    static var scrimColors: [UIColor] {
-        scrimStopPoints.map { UIColor.black.withAlphaComponent(scrimAlpha(at: $0)) }
-    }
+    let scrimClip = UIView()
 
     /// An `EmoteLabel`: the caption's emoji and `:code:` emotes animate in
     /// place, at the caption's own size (`composedCaption` marks them).
-    private let captionLabel = SnapCaptionLabel()
+    let captionLabel = SnapCaptionLabel()
 
     /// The bucket the caption's emotes are drawn at — what the screen warms
     /// the next captions at (#1504).
     var captionEmotePixelSide: Int { captionLabel.emotePixelSide }
 
-    /// The danmaku band, floating over the media directly above the caption.
-    /// Content reaches it only through `updateCommentStreams` — never through
-    /// `configure` — so the flight replica renders an empty, invisible band
-    /// by construction and the card stays pixel-identical to the landed page.
-    private let commentTicker = SnapCommentTickerView()
+    /// The band, the subtitle zone and the empty state (#2521): built with the
+    /// chrome, laid out by it.
+    private(set) lazy var commentSurfaces = SnapChromeCommentSurfaces(host: self)
+    var commentTicker: SnapCommentTickerView { commentSurfaces.commentTicker }
+    var subtitleView: SnapSubtitleView { commentSurfaces.subtitleView }
+    private var commentEmptyState: SnapCommentEmptyStateView { commentSurfaces.commentEmptyState }
     /// Which page of a COLLECTION the media is showing. Hidden for every post
     /// that has one piece of media, which is most of them.
     /// The page strip, at the bottom of the column and the full width of it.
@@ -142,175 +71,34 @@ final class SnapChromeView: UIView {
     /// is in the one place the page also wants a tap to mean play/pause. Down
     /// here it is a strip the width of the caption, in the band between the
     /// caption and the bar, where a position is read rather than aimed at.
-    private let mediaPageBar = SnapMediaPageBarView()
-
-    /// Where the page strip's line is centred, below the margins line
-    /// (#2252, the owner 2026-11-10): halfway between the bottom of the
-    /// caption's letters and the top of the toolbar's glass.
-    ///
-    /// ⚠️ IT RESERVES NO HEIGHT. The caption stands on the cover's line on
-    /// every format (`captionOnCoverLine`); the strip lies in the gap that
-    /// was already there between the caption and the bar, so a video or a
-    /// carousel lays out exactly as a single photo does. Before #2252 the
-    /// caption sat 22 pt higher over a strip, and everything stacked on it
-    /// jumped between posts.
-    ///
-    /// The letters' bottom is the caption's last baseline: its frame's
-    /// bottom, less what its line box keeps under the baseline
-    /// (`captionLetterDrop`). Expected (the owner's measures, the issue):
-    /// about 10 pt either side of the line over the toolbar.
-    ///
-    /// ⚠️ SUPERSEDED BY #2301 (the owner, 2026-11-11): the strip is no longer
-    /// centred. Its line stands `SnapActionColumn.stripAboveGlass` (10 pt)
-    /// over the bar's glass, and the caption rises instead
-    /// (`coverLineLift`), its letters `captionAboveStrip` (16 pt) above it.
-    static func pageBarCenterOffset(breathApplied: Bool = true) -> CGFloat {
-        let glass: CGFloat = SnapActionColumn.glassBelowMargins(breathApplied: breathApplied)
-        return glass - SnapActionColumn.stripAboveGlass - SnapMediaPageBarView.thickness / 2
-    }
-
-    /// ⚠️ ONE SEAT FOR EVERY MEDIA POST, RAISED (#2301): how far the
-    /// caption's bottom — and with it the caption floor and the band —
-    /// stands above where #2252 put it (`inputRestingGap` over the margins),
-    /// so the caption's letters end `captionAboveStrip` over the strip's top,
-    /// strip or not. Stated from the glass: about 6 pt over the toolbar.
-    ///
-    /// The column rises too since #2326 (`columnLineLift`), which reverses
-    /// #2301's option (c), where it stayed on the composer's line.
-    static func coverLineLift(breathApplied: Bool = true) -> CGFloat {
-        let lettersAboveMargins: CGFloat = captionLettersAboveMargins(breathApplied: breathApplied)
-        let captionBottomAboveMargins: CGFloat = lettersAboveMargins - captionLetterDrop
-        return max(0, captionBottomAboveMargins - SnapActionColumn.inputRestingGap)
-    }
-
-    /// Where the caption's letters end above the margins line on a media
-    /// page (#2301): `captionAboveStrip` over the strip's top, which stands
-    /// `stripAboveGlass` over the bar's glass.
-    static func captionLettersAboveMargins(breathApplied: Bool = true) -> CGFloat {
-        let glass: CGFloat = SnapActionColumn.glassBelowMargins(breathApplied: breathApplied)
-        return SnapActionColumn.stripAboveGlass + SnapMediaPageBarView.thickness
-            + SnapActionColumn.captionAboveStrip - glass
-    }
-
-    /// ⚠️ THE COLUMN ON THE CAPTION'S LINE (#2326, the owner 2026-11-11,
-    /// reversing #2301's option c): how far the whole action column — the
-    /// sound cover or the share bubble at its bottom, the like pill and the
-    /// emote rail over it — stands above the composer's
-    /// line (`inputRestingGap`) on a media page at rest. Its bottom lands on
-    /// the caption's letters' line, `captionAboveStrip` (16 pt) over the
-    /// strip's top: 10 pt over the toolbar.
-    ///
-    /// This is the cover line's lift (`coverLineLift`) plus the caption's
-    /// letter drop: the caption's frame keeps what its line box holds under
-    /// the baseline, the column has nothing under its bottom.
-    ///
-    /// ⚠️ THE OTHER POSITION IS THE COMPOSER'S LINE. The engaged composer's
-    /// stake and rail stand on the like pill and the sound bubble (#669,
-    /// #680) at `inputRestingGap`; the column glides down to it inside the
-    /// comments' opening, driven by the opening's own progress, and back up
-    /// inside the close (`applyColumnGlide`).
-    static func columnLineLift(breathApplied: Bool = true) -> CGFloat {
-        let lettersAboveMargins: CGFloat = captionLettersAboveMargins(breathApplied: breathApplied)
-        return max(0, lettersAboveMargins - SnapActionColumn.inputRestingGap)
-    }
-
-    /// What the caption's line box keeps under its baseline: the bottom of
-    /// its letters stands this far above the label's bottom. Every line is
-    /// locked to the caption font's line height (`captionParagraphStyle`),
-    /// so it is that height less the font's ascender. Font-derived: it
-    /// follows Dynamic Type.
-    static var captionLetterDrop: CGFloat {
-        let font = UIFont.appFont(forTextStyle: CaptionRegister.textStyle)
-        return max(font.lineHeight - font.ascender, 0)
-    }
+    let mediaPageBar = SnapMediaPageBarView()
+    /// The strip's card, filmstrip and scrub focus (#2521): built with the chrome.
+    private(set) lazy var mediaStrip = SnapChromeMediaStrip(host: self)
 
     /// The strip's centre, re-stated when the bar under it or the text size
     /// changes (`applyPageBarPlacement`).
     private var pageBarCenterConstraint: NSLayoutConstraint?
 
 
-    /// The card a thumb dragging a clip's bar points with — the frame it would
-    /// land on and the time it would land at. Frame-managed and out of the
-    /// layout entirely: it exists only during a gesture, it follows the thumb,
-    /// and nothing else on this screen may move because it appeared.
-    private let scrubPreview = SnapScrubPreviewView()
-    /// The pages' previews while a finger browses the strip (#1734).
-    private let browseStrip = SnapBrowseStripView()
-
-    /// The clip's length, kept because the card's readout is a time and the
-    /// strip speaks in fractions.
-    private var clipSeconds: Double = 0
-
-    /// The subtitle zone, directly above the band: a persistent pill of
-    /// semantic comments, one at a time, with the count bubble leading it.
-    /// Same content contract as the band (arrives only via
-    /// `updateCommentStreams`, so the flight replica's zone is empty by
-    /// construction) and the same visibility-scoped activation, so the
-    /// zone rides a page being dragged in.
-    private let subtitleView = SnapSubtitleView()
-
-    /// The comments empty state: a static "No comments yet" pill occupying
-    /// the band's slot when the post is KNOWN to have zero comments — the
-    /// one case where every comment surface above legitimately gates itself
-    /// away and the zone would otherwise read as unexplained blank space.
-    /// Same content contract as the band and the zone (visible only via
-    /// `updateCommentStreams`, on a loaded stream), so the flight replica
-    /// never shows it.
-    private let commentEmptyState = SnapCommentEmptyStateView()
-
     /// The vertical shortcut wheel on the trailing edge: quick-react
     /// shortcuts (our animated emotes, still until the wheel moves), spanning
     /// the ticker's top up to the nav bar. Static content like the caption —
     /// populated from `configure` with a per-post deterministic payload, so
     /// the flight replica draws the identical wheel.
-    private let shortcutRail = SnapShortcutRailView()
+    let shortcutRail = SnapShortcutRailView()
     /// Where the wheel stands (#1872): an invisible view holding its
     /// constraints in the chrome, while the wheel itself rides the column's
     /// layer, above its glass.
     private let railSeat = UIView()
-    /// The wheel's own layer in the column's, faded with the chrome through
-    /// the comments' engagement — the fade it had as the chrome's child.
-    private let railLayer = SnapActionColumnLayer()
-    /// The fixed boost affordance: a Liquid Glass circle filling the
-    /// square where the rail overlaps the ticker band (diameter == the
-    /// band's height), the zone's ONLY layer — the old frosted backdrop
-    /// chip was removed in its favor. A chrome sibling ABOVE the rail
-    /// (never a scroll subview), so it holds still while emotes scroll —
-    /// and escapes the rail's edge-fade mask, which would otherwise
-    /// dissolve it. The rail reserves its bottom strip
-    /// (`bottomReservedInset`) so nothing settles behind it; the band's
-    /// bubbles are born under this glass and slide out of its seam.
-    /// Present on every MEDIA page and no text page — set from `configure`,
-    /// never from the stream (see there for why the band's hidden state is
-    /// the wrong authority for it).
-    private let boostButton = SnapRailBoostButton()
-    /// The post's like count on the like button's corner (#668) — or, in the
-    /// like pill (#669), under its heart.
-    /// The post's like count — `configure`'s, then the live one
-    /// (`setPostLikeCount`), the viewer's stake in it.
-    private var postLikeCount: Int64?
-    /// The SOUND bubble (#671), under the like pill on the field line, beside
-    /// the caption and the page strip — see `SnapActionColumn`. Media chrome,
-    /// like the pill (`applySoundVisibility`).
-    private let soundBubble = SnapSoundBubbleButton()
+    private var railLayer: SnapActionColumnLayer { actionColumn.railLayer }
+    /// The like pill, the sound bubble and their one glass (#695, #1872, #2521).
+    private(set) lazy var actionColumn = SnapChromeActionColumn(host: self)
+    var boostButton: SnapRailBoostButton { actionColumn.boostButton }
+    var soundBubble: SnapSoundBubbleButton { actionColumn.soundBubble }
 
-    // MARK: The action column (#695)
-    //
-    // ⚠️ ONE COLUMN FOR BOTH LAYOUTS. The like pill and the sound bubble are
-    // the page's — and they stay on screen when the comments take the page,
-    // where the composer used to draw a SECOND pill and slot on the same
-    // frames and the two crossfaded (the owner, on a device: "it looks
-    // replaced"). The composer now only reserves their room.
-    //
-    // So the two buttons live in `columnLayer`, which the owning cell mounts
-    // ABOVE this chrome (`installActionColumn(in:)`): this view's engagement
-    // fade, a single container alpha, never reaches them. They are framed by
-    // two invisible STATIONS that keep every constraint the buttons had —
-    // the caption, the band and the composer's reserved room all stop short
-    // of the same places. A chrome nobody installs (the hero flight's
-    // replica) keeps the layer inside itself, as before.
-    private let boostStation = UIView()
-    private let soundStation = UIView()
+    // MARK: The action column's stations (#695): see `SnapChromeActionColumn`.
+    let boostStation = UIView()
+    let soundStation = UIView()
     private var boostStationTop: NSLayoutConstraint?
     private var boostStationBottom: NSLayoutConstraint?
     /// The caption floor's bottom, raised with the caption on a media page
@@ -330,47 +118,10 @@ final class SnapChromeView: UIView {
         SnapActionColumn.inputRestingGap + SnapActionColumn.bubbleSize + SnapActionColumn.gap
     }
 
-    /// (#1924, the owner): a TEXT page's like stands in the screen's footer —
-    /// its heart and count beside save and repost — so the column floats no
-    /// pill over the composer, and a short comment list rests on it. A media
-    /// page keeps its pill; so does a screen with no footer.
-    var likeInFooter = false {
-        didSet {
-            guard likeInFooter != oldValue else { return }
-            applyLikePillVisibility()
-        }
-    }
+    private var columnLayer: SnapActionColumnLayer { actionColumn.columnLayer }
+    var glassColumn: SnapGlassColumn { actionColumn.glassColumn }
 
-    private func applyLikePillVisibility() {
-        let hidden = likeInFooter && !hasMedia
-        guard boostButton.isHidden != hidden else { return }
-        boostButton.isHidden = hidden
-        glassColumn.refresh(animated: false)
-    }
-    private let columnLayer = SnapActionColumnLayer()
-    /// The column's bubbles as ONE glass (#1872): the like and the sound
-    /// fuse, split and fold into the sound — the
-    /// buttons are its items, on their stations.
-    private let glassColumn = SnapGlassColumn()
-    /// Where `columnLayer` is mounted: this chrome, or the cell's content.
-    private weak var columnHost: UIView?
-
-    /// What the sound bubble draws for the represented post — nil when the
-    /// post has no sound bubble (the feed pushes it, `setSoundFace`).
-    private var soundFace: SnapSoundFace?
-    private var imagePipeline: ImagePipeline?
-    /// The sound bubble was tapped: open the sound sheet (#683).
-    var onSoundSheetRequested: (() -> Void)?
-    /// The sound bubble's way back was tapped (#1929): the stream goes back
-    /// to its start.
-    var onSoundReturnRequested: (() -> Void)?
-    /// The bubble wears the post's Share (#1999) and was tapped.
-    var onShareRequested: (() -> Void)?
-    /// Whether the way back's hold arms Share (#1999): a media page's.
-    private var holdArmsShare = false
-    /// The way back's hold (#1929): the disc rises with the cover, and once
-    /// full the sound sheet opens — the bubble's own tap action.
-    private var soundHold: HoldToArmPresenter?
+    private(set) var imagePipeline: ImagePipeline?
     /// The rail's top edge as a cell-relative constant (see `buildLayout`).
     /// Optional: margins change during `init` before the layout exists.
     private var railTopConstraint: NSLayoutConstraint?
@@ -419,13 +170,6 @@ final class SnapChromeView: UIView {
 
     /// A tap on the caption — for tests.
     func debugTapCaption() { captionTapped() }
-
-    #if DEBUG
-    /// The scrim and the caption, for the scrim's suite.
-    var debugScrimView: UIView { scrimView }
-    var debugScrimClip: UIView { scrimClip }
-    var debugCaptionLabel: UIView { captionLabel }
-    #endif
 
     /// A comments surface was tapped (empty-state pill, subtitle zone, or
     /// ticker band — one fan-in, one path) — the cell forwards this as a
@@ -484,7 +228,7 @@ final class SnapChromeView: UIView {
         // guide's reserved height is font-derived too, so it re-resolves on
         // the same beat.
         registerForTraitChanges([UITraitPreferredContentSizeCategory.self, UITraitDisplayScale.self]) { (self: SnapChromeView, _) in
-            self.captionFloorHeightConstraint?.constant = Self.captionFloorHeight
+            self.captionFloorHeightConstraint?.constant = SnapChromeGeometry.captionFloorHeight
             // The two-line block and the strip's place follow the font too
             // (#2252): two lines at every size, the line still centred under
             // the letters.
@@ -495,7 +239,7 @@ final class SnapChromeView: UIView {
 
         buildLayout()
         installSoundBubble()
-        applySoundVisibility()
+        actionColumn.applySoundVisibility()
         // The cover's line raised from the start (#2301), before any insets.
         applySeat()
     }
@@ -503,60 +247,8 @@ final class SnapChromeView: UIView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    // MARK: - Spares (#2126)
-
-    /// Chrome built ahead, at rest, for the next page a flight opens: the
-    /// new cell's chrome and the flight's replica each take one rather than
-    /// building theirs in the tap's turn (~4 ms apiece on the simulator,
-    /// `-O`). A spare is exactly what `init` leaves — never configured,
-    /// never in a window — so taking one is the same as building one.
-    private static var spares: [SnapChromeView] = []
-    static let spareCapacity = 2
-    private static var restockArmed = false
-    /// The text size the spares were built at: their caption floor is
-    /// font-derived (`captionFloorHeight`), resolved in `init` from the app's
-    /// size, not from a window they were never in.
-    private static var sparesCategory: UIContentSizeCategory?
-
-    /// A fresh chrome: a spare when one is ready, else built now. Spares
-    /// built at another text size are dropped, not handed out.
-    static func make() -> SnapChromeView {
-        defer { armRestock() }
-        if sparesCategory != UIApplication.shared.preferredContentSizeCategory { spares.removeAll() }
-        return spares.popLast() ?? SnapChromeView()
-    }
-
-    private static func addSpare() {
-        let category = UIApplication.shared.preferredContentSizeCategory
-        if sparesCategory != category { spares.removeAll() }
-        sparesCategory = category
-        spares.append(SnapChromeView())
-    }
-
-    /// Builds the spares back one at a time, a second after the last take —
-    /// past the flight it was taken for — and in the DEFAULT run-loop mode
-    /// only, so a scroll's tracking holds it off.
-    private static func armRestock() {
-        guard !restockArmed, spares.count < spareCapacity else { return }
-        restockArmed = true
-        let timer = Timer(timeInterval: 1, repeats: false) { _ in
-            MainActor.assumeIsolated {
-                restockArmed = false
-                guard spares.count < spareCapacity else { return }
-                addSpare()
-                armRestock()
-            }
-        }
-        RunLoop.main.add(timer, forMode: .default)
-    }
-
-    #if DEBUG
-    static var debugSpareCount: Int { spares.count }
-    /// Builds every spare now — tests cannot wait out the restock.
-    static func debugRestock() {
-        while spares.count < spareCapacity { addSpare() }
-    }
-    #endif
+    /// A fresh chrome, a spare when one is ready (`SnapChromeSpares`, #2126).
+    static func make() -> SnapChromeView { SnapChromeSpares.make() }
 
     /// The chrome is an overlay CANVAS: only its subviews are touchable.
     /// Bare-canvas hits fall through to whatever lies beneath — the media
@@ -577,23 +269,11 @@ final class SnapChromeView: UIView {
         // ⚠️ AND THE COLUMN BEFORE THE STRIP (#2291). The strip now runs under
         // the column, and its 44 pt area reaches up over the sound cover's
         // bottom: a touch that starts on a column item is that item's.
-        if !mediaPageBar.isHidden, mediaPageBar.alpha > 0.01, let item = columnItemHit(at: point, with: event) {
+        if !mediaPageBar.isHidden, mediaPageBar.alpha > 0.01, let item = actionColumn.columnItemHit(at: point, with: event) {
             return item
         }
         let hit = super.hitTest(point, with: event)
         return hit === self ? nil : hit
-    }
-
-    /// The column item (the sound cover, the like) under `point`, if one
-    /// takes touches there.
-    private func columnItemHit(at point: CGPoint, with event: UIEvent?) -> UIView? {
-        for item in [soundBubble, boostButton] as [UIView] {
-            guard !item.isHidden, item.alpha > 0.01, item.isUserInteractionEnabled, item.window != nil else { continue }
-            let local = convert(point, to: item)
-            guard item.point(inside: local, with: event), let hit = item.hitTest(local, with: event) else { continue }
-            return hit
-        }
-        return nil
     }
 
     private func buildLayout() {
@@ -627,7 +307,7 @@ final class SnapChromeView: UIView {
             scrimView.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
             scrimView.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
             // Fixed: its stops are points (see `scrimView`).
-            scrimView.heightAnchor.constraint(equalToConstant: Self.scrimHeight)
+            scrimView.heightAnchor.constraint(equalToConstant: SnapPageScrim.scrimHeight)
         }
 
         // Caption, over the scrim; its trailing edge stops one md short of the
@@ -671,7 +351,7 @@ final class SnapChromeView: UIView {
         // input bar, and the corner's position is a pure font constant,
         // pixel-identical whether the post is video, photo, or text.
         addLayoutGuide(captionFloorGuide)
-        let floorHeight = captionFloorGuide.heightAnchor.constraint(equalToConstant: Self.captionFloorHeight)
+        let floorHeight = captionFloorGuide.heightAnchor.constraint(equalToConstant: SnapChromeGeometry.captionFloorHeight)
         captionFloorHeightConstraint = floorHeight
         // Raised with the cover's line on a media page (#2301), so the band
         // keeps its place over the caption.
@@ -751,20 +431,7 @@ final class SnapChromeView: UIView {
         // stays clear of both: the strip is the pictures' index, the bar what
         // you can DO to the post. (It was pinned 4 pt over the margins line
         // in a 6 pt footprint, the caption seated 22 pt higher for it.)
-        scrubPreview.translatesAutoresizingMaskIntoConstraints = true
-        scrubPreview.frame = CGRect(origin: .zero, size: scrubPreview.totalSize)
-        scrubPreview.onShapeChange = { [weak self] in
-            guard let self, let last = lastScrubPreview else { return }
-            placeScrubPreview(at: last.x)
-        }
-        addSubview(scrubPreview)
-        mediaPageBar.onScrubPreview = { [weak self] preview in
-            self?.showScrubPreview(preview)
-        }
-        addSubview(browseStrip)
-        mediaPageBar.onBrowseBegan = { [weak self] page in self?.beginBrowse(at: page) }
-        mediaPageBar.onBrowse = { [weak self] page in self?.browse(to: page) }
-        mediaPageBar.onBrowseEnded = { [weak self] page in self?.endBrowse(at: page) }
+        mediaStrip.installOverlays()
         mediaPageBar.constrain(in: self) { parent in
             mediaPageBar.leadingAnchor.constraint(equalTo: captionLabel.leadingAnchor)
             mediaPageBar.heightAnchor.constraint(equalToConstant: SnapMediaPageBarView.thickness)
@@ -886,7 +553,7 @@ final class SnapChromeView: UIView {
         // seam against the caption.
         commentEmptyState.bottomAnchor.constraint(equalTo: captionLabel.topAnchor, constant: -Spacing.md).isActive = true
         // The scrim's top: the caption block's, less the lead.
-        scrimView.topAnchor.constraint(equalTo: captionLabel.topAnchor, constant: -Self.scrimLead).isActive = true
+        scrimView.topAnchor.constraint(equalTo: captionLabel.topAnchor, constant: -SnapPageScrim.scrimLead).isActive = true
         commentEmptyState.onTap = { [weak self] in self?.onCommentsTapped?() }
         subtitleView.onTap = { [weak self] in self?.onCommentsTapped?() }
         commentTicker.onTap = { [weak self] in self?.onCommentsTapped?() }
@@ -980,105 +647,15 @@ final class SnapChromeView: UIView {
         // floats between the caption and a glass bar, inside the content's
         // column.
         mediaPageBar.trailingAnchor.constraint(equalTo: soundStation.trailingAnchor).isActive = true
-        // The buttons are the glass column's items (#1872): the column is
-        // their one glass, standing them on their stations.
-        boostButton.drawsGlass = false
-        soundBubble.drawsGlass = false
-        for (id, button) in [(ColumnItem.like, boostButton as UIView), (ColumnItem.sound, soundBubble)] {
-            button.translatesAutoresizingMaskIntoConstraints = true
-            glassColumn.register(button, for: id)
-        }
-        glassColumn.anchorID = ColumnItem.sound
-        glassColumn.gap = SnapActionColumn.gap
-        glassColumn.layout = { [weak self] in self?.columnSlots() ?? [] }
-        glassColumn.frame = columnLayer.bounds
-        glassColumn.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        columnLayer.addSubview(glassColumn)
-        // The wheel over the glass (#1872), its capsule in it.
-        railLayer.frame = columnLayer.bounds
-        railLayer.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        railLayer.addSubview(shortcutRail)
-        columnLayer.addSubview(railLayer)
-        let capsule = shortcutRail.capsule
-        capsule.likeHeight = SnapActionColumn.likePillHeight
-        capsule.onLikeCover = { [weak self] cover in self?.glassColumn.setCover(ColumnItem.like, amount: cover) }
-        capsule.onReturnShown = { [weak self] shown in self?.boostButton.setShowsReturn(shown) }
-        boostButton.onReturn = { [weak capsule] in capsule?.returnToRest() }
-        capsule.host = { [weak self] glass in self?.glassColumn.insertAccessory(glass) }
-        mountColumn(in: self)
-        soundBubble.onTap = { [weak self] in
-            guard let self else { return }
-            if soundBubble.showsReturn {
-                onSoundReturnRequested?()
-            } else if soundBubble.sharesPost {
-                onShareRequested?()
-            } else {
-                onSoundSheetRequested?()
-            }
-        }
-        // No hold of its own since #1931 (no in-app mute): only the way back
-        // has one, arming the sheet (#1929).
-        let hold = HoldToArmPresenter(view: soundBubble) { [weak self] in
-            guard let self else { return .picture(nil) }
-            return soundBubble.sharesPost ? .symbol(CommentsInputBar.shareRailSymbol) : .picture(soundBubble.coverImage)
-        }
-        // The hold arms the slot's own action (#1929): the sheet, or Share
-        // on a media page's Share (#1999).
-        hold.onFire = { [weak self] in
-            guard let self else { return }
-            if soundBubble.sharesPost { onShareRequested?() } else { onSoundSheetRequested?() }
-        }
-        hold.isEnabled = false
-        soundHold = hold
+        actionColumn.assemble()
     }
 
-    /// Scrolled away from the comments' start (#1929): the sound bubble
-    /// offers the way back to the top, and its sheet moves to a hold — kept
-    /// for VoiceOver as a custom action.
+    /// See `SnapChromeActionColumn` — the cell's, the flight replica's and the tests'.
     func setSoundShowsReturn(_ shows: Bool, down: Bool = false, animated: Bool = true) {
-        guard shows != soundBubble.showsReturn || down != soundBubble.returnPointsDown else { return }
-        soundBubble.setShowsReturn(shows, down: down, animated: animated)
-        applySoundHold()
+        actionColumn.setSoundShowsReturn(shows, down: down, animated: animated)
     }
-
-    /// The way back's hold, and VoiceOver's road to the sheet, as the
-    /// bubble stands: only on the chevron, only for a sound the post plays.
-    private func applySoundHold() {
-        let returns = soundBubble.showsReturn
-        // Over Share (#1999) the hold arms Share on a media page — "a hold
-        // arms its own action" — and nothing on a text page.
-        let armsSheet = returns && !soundBubble.sharesPost && soundFace?.isAvailable == true
-        let armsShare = returns && soundBubble.sharesPost && holdArmsShare
-        soundHold?.isEnabled = armsSheet || armsShare
-        if armsSheet {
-            soundBubble.accessibilityCustomActions = [
-                UIAccessibilityCustomAction(name: "Sound") { [weak self] _ in
-                    self?.onSoundSheetRequested?()
-                    return true
-                },
-            ]
-        } else if returns, soundBubble.sharesPost {
-            // Share stays reachable with the chevron up: VoiceOver's road.
-            soundBubble.accessibilityCustomActions = [
-                UIAccessibilityCustomAction(name: "Share") { [weak self] _ in
-                    self?.onShareRequested?()
-                    return true
-                },
-            ]
-        } else {
-            soundBubble.accessibilityCustomActions = nil
-        }
-    }
-
-    /// The bubble as the post's Share (#1999) on a pushed page: a text
-    /// page's column is Share alone on the sound's frame, a media page's
-    /// ends on Share where the sound was (the sound moves to the footer).
-    /// `holdArmsShare`: the way back's hold arms Share — a media page's.
     func setSlotSharesPost(_ shares: Bool, holdArmsShare: Bool = false) {
-        self.holdArmsShare = shares && holdArmsShare
-        soundBubble.setSharesPost(shares)
-        applySoundHold()
-        applySoundVisibility()
+        actionColumn.setSlotSharesPost(shares, holdArmsShare: holdArmsShare)
     }
 
     private func railBottomConstraint() -> NSLayoutConstraint {
@@ -1129,28 +706,7 @@ final class SnapChromeView: UIView {
         return changed
     }
 
-    /// The sound bubble: shown for a post with a face — every media post has
-    /// one, greyed when it has no sound — or wearing a pushed text page's
-    /// Share (#1999), on the same frame.
-    private func applySoundVisibility() {
-        soundBubble.isHidden = soundFace == nil && !soundBubble.sharesPost
-        // The glass column stands what shows (#1872).
-        setNeedsLayout()
-    }
-
-    /// The sound bubble's face for the represented post (#671): its cover, the
-    /// mute state, greyed for a post with no audio; nil for none.
-    func setSoundFace(_ face: SnapSoundFace?) {
-        soundFace = face
-        soundBubble.setFace(face, pipeline: imagePipeline)
-        applySoundHold()
-        applySoundVisibility()
-    }
-
-    /// Turns the sound bubble's cover while the post plays.
-    func setSoundSpinning(_ spinning: Bool) {
-        soundBubble.setSpinning(spinning)
-    }
+    func setSoundFace(_ face: SnapSoundFace?) { actionColumn.setSoundFace(face) }
 
     /// The rail's reserved bottom strip is the glass square's height — a
     /// font-derived value (the ticker's intrinsic height), so it is read
@@ -1232,7 +788,7 @@ final class SnapChromeView: UIView {
     /// The strip's centre for this chrome as it stands: over the toolbar,
     /// with the breath in its margins once a feed handed them.
     private var currentPageBarCenterOffset: CGFloat {
-        Self.pageBarCenterOffset(breathApplied: fixedInsets != nil)
+        SnapChromeGeometry.pageBarCenterOffset(breathApplied: fixedInsets != nil)
     }
 
     /// Re-centres the strip (#2252): the bar under it, the breath and the
@@ -1249,14 +805,14 @@ final class SnapChromeView: UIView {
     /// media page's; a text page keeps #2252's line.
     private var currentCoverLineLift: CGFloat {
         guard hasMedia else { return 0 }
-        return onPixels(Self.coverLineLift(breathApplied: fixedInsets != nil))
+        return onPixels(SnapChromeGeometry.coverLineLift(breathApplied: fixedInsets != nil))
     }
 
     /// The column's lift for this chrome as it stands (#2326): a media
     /// page's; a text page keeps #2252's line.
-    private var currentColumnLineLift: CGFloat {
+    var currentColumnLineLift: CGFloat {
         guard hasMedia else { return 0 }
-        return onPixels(Self.columnLineLift(breathApplied: fixedInsets != nil))
+        return onPixels(SnapChromeGeometry.columnLineLift(breathApplied: fixedInsets != nil))
     }
 
     /// On the pixel grid, so the band, the floor, the column and the rail's
@@ -1280,82 +836,16 @@ final class SnapChromeView: UIView {
         }
         if applyColumnSeat() { changed = true }
         // The glide is a share of the column's lift, which may have changed.
-        applyColumnGlide()
+        actionColumn.applyColumnGlide()
         if changed { setNeedsLayout() }
     }
-
-    // MARK: - The column's glide with the comments (#2326)
-
-    /// How far the comments' opening has gone, as the in-page engagement
-    /// tells it (`setCommentsEngagedProgress`): 0 at rest, 1 engaged.
-    private var engagementColumnShare: CGFloat = 0
-    /// How far the comments sheet has taken the page's interface
-    /// (`setCommentsSheetShare`): 0 at rest, 1 the sheet up.
-    private var sheetColumnShare: CGFloat = 0
-
-    /// ⚠️ THE COLUMN GLIDES WITH THE COMMENTS, ON THEIR CLOCK (#2326). Its
-    /// two positions:
-    /// - AT REST, on the caption's line: the stations' constraints, risen by
-    ///   `columnLineLift` (`applyColumnSeat`);
-    /// - ENGAGED, on the composer's line (`inputRestingGap`), where the
-    ///   engaged composer's stake and rail stand on the like pill and the
-    ///   sound bubble (#669, #680): the same stations, shown that lift lower.
-    ///
-    /// Between them, the drop is the lift times how far the comments'
-    /// transition has gone — the in-page engagement's progress or the sheet's
-    /// share of the interface, whichever is further — so the column follows
-    /// the finger, the spring and the sheet's own movement with no clock of
-    /// its own: a drag that cancels takes it back with the finger.
-    ///
-    /// A translation of the column's glass and of the wheel's layer: the
-    /// stations — and every constraint the caption, the band and the strip
-    /// keep against them — stay at rest, nothing is laid out again on a
-    /// frame of the transition, and the glass column's own morph is left
-    /// alone. Inside an animation block (the engagement's spring), the
-    /// translation animates on that block's curve.
-    private func applyColumnGlide() {
-        let share = min(max(0, max(engagementColumnShare, sheetColumnShare)), 1)
-        let drop = currentColumnLineLift * share
-        let shift: CGAffineTransform = drop == 0 ? .identity : CGAffineTransform(translationX: 0, y: drop)
-        guard glassColumn.transform != shift || railLayer.transform != shift else { return }
-        glassColumn.transform = shift
-        railLayer.transform = shift
-        // The wheel's capsule is glass of the column's container: placed
-        // again against the wheel, both moved alike.
-        shortcutRail.capsule.layout()
-    }
-
-    /// How far the comments SHEET has taken the page's interface (#2087,
-    /// #2326): 0 at rest, 1 the sheet up — the pose's `interface`, read
-    /// every frame from the sheet's own movement. The column glides down to
-    /// the composer's line with it, and back up as it comes back.
-    func setCommentsSheetShare(_ share: CGFloat) {
-        let clamped = min(max(0, share), 1)
-        guard clamped != sheetColumnShare else { return }
-        sheetColumnShare = clamped
-        applyColumnGlide()
-    }
-
-    #if DEBUG
-    /// How far the column stands below its resting seat right now (#2326).
-    var debugColumnGlide: CGFloat { glassColumn.transform.ty }
-    /// The column's lift at rest, as this chrome stands.
-    var debugColumnLineLift: CGFloat { currentColumnLineLift }
-    #endif
 
     /// The caption block's height on a media page (#2252): two caption lines,
     /// rounded up to this screen's pixels — the height the label takes for
     /// two lines, so the floor never stretches a real two-line block.
     private var captionBlockHeight: CGFloat {
         let scale: CGFloat = traitCollection.displayScale > 0 ? traitCollection.displayScale : 3
-        return Self.captionBlockHeight(scale: scale)
-    }
-
-    /// Two caption lines, rounded up to `scale`'s pixels. Font-derived: it
-    /// follows Dynamic Type.
-    static func captionBlockHeight(scale: CGFloat) -> CGFloat {
-        let twoLines: CGFloat = 2 * UIFont.appFont(forTextStyle: CaptionRegister.textStyle).lineHeight
-        return (twoLines * scale).rounded(.up) / scale
+        return SnapChromeGeometry.captionBlockHeight(scale: scale)
     }
 
     /// Tracks the settled top margin into the rail's cell-relative top.
@@ -1398,7 +888,7 @@ final class SnapChromeView: UIView {
         captionBlockFloor?.constant = captionBlockHeight
         captionBlockFloor?.isActive = hasMedia
         // Each page's declared shape, for the scrub card (#1724).
-        pageAspects = model.mediaPages.enumerated().map { index, page in
+        mediaStrip.pageAspects = model.mediaPages.enumerated().map { index, page in
             CGFloat(index == 0 ? (model.headAspectRatio ?? page.aspectRatio) : page.aspectRatio)
         }
         // ⚠️ THE CHROME CARRIES ITS OWN THEME (#683). The live cell's content
@@ -1407,7 +897,7 @@ final class SnapChromeView: UIView {
         // glass with dark ink, and turned dark at the landing — while the
         // toolbar, themed already, was white from the first frame.
         overrideUserInterfaceStyle = SnapChromeTheme.style(hasMedia: hasMedia)
-        applyColumnStyle()
+        actionColumn.applyColumnStyle()
         scrimView.isHidden = !hasMedia
         // Set the timestamp before the caption so the caption's didSet
         // composes with both already in hand.
@@ -1416,33 +906,7 @@ final class SnapChromeView: UIView {
         // block's second line (#2252): the caption is then empty, not absent.
         caption = hasMedia ? (model.caption ?? "") : nil
         applyCaptionVisibility()
-        // THE BOOST ANCHOR IS FORMAT-SCOPED, NOT STATE-SCOPED — the rule the
-        // compose "+" that held this slot established. Every media page owns
-        // it from its first frame; its predecessor used to mirror the
-        // ticker's hidden state (`updateCommentStreams`), which meant it
-        // vanished on every page the band declined to animate: zero-comment
-        // posts, the sparse seed, and any page at all under Reduce Motion —
-        // the anchor disappearing where it was most useful.
-        //
-        // Text-only pages keep it hidden. Their engagement is a permanent
-        // resting state with its own composer bar, and that bar carries its
-        // OWN boost button — so the anchor here would be a second spend
-        // control for one post; setting it here rather than leaving the
-        // engagement's fade to swallow it also kills the flash it used to
-        // make in the frames before that engagement mounts.
-        //
-        // Owned by `configure` (static chrome, like the rail's emotes), so
-        // it needs no stream to appear and the flight replica — which never
-        // receives one — draws the identical corner.
-        // ⚠️ THE LIKE PILL IS ALWAYS THERE (#1713, the owner): no post hides
-        // its likes. On every page (#695) — but a text page's stands in the
-        // screen's footer when it has one (#1924, `likeInFooter`).
-        boostButton.isHidden = likeInFooter && !hasMedia
-        // The badge's count, from what the card knew; the screen then pushes
-        // the post's live one (`setPostLikeCount`).
-        postLikeCount = model.likeCount
-        applyLikeBadge(animated: false)
-        applySoundVisibility()
+        actionColumn.configure(with: model)
         if !hasMedia {
             commentTicker.setComments([])
             subtitleView.setCues([])
@@ -1506,339 +970,27 @@ final class SnapChromeView: UIView {
     /// Whether the represented post carries media. Text-only posts show an
     /// empty shell, so this gates page content — including ticker queues
     /// arriving *after* configure (`updateTickerComments`).
-    private var hasMedia = true {
+    private(set) var hasMedia = true {
         didSet { if hasMedia != oldValue { applySeat() } }
     }
 
     private func renderCaption() {
         lastRenderedCaptionWidth = captionLabel.bounds.width
         captionLabel.attributedText = caption.map {
-            Self.composedCaption($0, timestamp: timestampText, width: captionLabel.bounds.width)
+            SnapCaptionComposer.composedCaption($0, timestamp: timestampText, width: captionLabel.bounds.width)
         }
     }
 
-    /// The caption's register over the media, on every snap feed (#1697,
-    /// #1708, the owner): one text style below the body (`.subheadline`).
-    /// ONE register: it was a per-screen variant (the For You root's) until
-    /// the owner gave it to every vertical feed.
-    ///
-    /// ⚠️ WHITE, NO GREY (#2012, the owner 2026-11-01): the app's standard
-    /// text white over media — the subtitle zone's, the band's, a card's —
-    /// FIXED, not the dynamic `.label` (black in light mode). The caption and
-    /// its timestamp alike; the timestamp is set apart by its smaller
-    /// `.footnote` alone. It was a 0.78 grey with a half-white timestamp
-    /// (#1697), 3.4 : 1 over a bright picture under the scrim — under AA's
-    /// 4.5 : 1, and dimmer than the comments around it.
-    ///
-    /// The AGE has its own ink since #2052 (the owner, 2026-11-02): a
-    /// solid grey a little darker than the caption's white, so it steps
-    /// back as metadata. Solid, not a translucent white, so the picture
-    /// behind never shifts it; fixed, as the chrome is over media in both
-    /// appearances. The caption itself stays white.
-    enum CaptionRegister {
-        static let textStyle: UIFont.TextStyle = .subheadline
-        static let ink = UIColor.white
-        static let timestampInk: UIColor = {
-            #if DEBUG
-            // `-caption-age-white 0.65`: the owner's device comparison (#2052).
-            let white = UserDefaults.standard.double(forKey: "caption-age-white")
-            if white > 0, white <= 1 { return UIColor(white: white, alpha: 1) }
-            #endif
-            return UIColor(white: 0.75, alpha: 1)
-        }()
-    }
-
-    /// The caption typography — the shared attributes for the caption glyphs
-    /// (`.body`) and, for `secondary`, the appended timestamp: a SMALLER
-    /// `.footnote` register in its own grey (`timestampInk`, #2052), so it
-    /// reads as secondary metadata by its size and ink (the same footnote register the
-    /// engaged info card uses for the post age). Baked per-run so
-    /// `boundingRect` measures each font's true footprint — the two-line
-    /// truncation therefore accounts for the smaller timestamp automatically.
-    /// The text shadow lives here (an `NSShadow` drawn WITH the glyphs)
-    /// rather than as a `CALayer` shadow: a layer shadow on a full-width
-    /// label has no `shadowPath` and costs an offscreen pass every scrolled
-    /// frame.
-    private static func captionAttributes(
-        secondary: Bool
-    ) -> [NSAttributedString.Key: Any] {
-        [
-            .font: UIFont.appFont(forTextStyle: secondary ? .footnote : CaptionRegister.textStyle),
-            .foregroundColor: secondary ? CaptionRegister.timestampInk : CaptionRegister.ink,
-            .shadow: captionTextShadow,
-            // GEOMETRY LOCK: every line takes the PRIMARY (body) line height —
-            // identical on every run — so a line ending on the smaller
-            // footnote timestamp is still a full body line: the block is
-            // exactly one or two body lines tall.
-            .paragraphStyle: captionParagraphStyle,
-        ]
-    }
-
-    /// The caption's soft text shadow over the media: half-black, a 3 pt
-    /// blur, no offset. Worn too by the carousel's page counter, which has no
-    /// plate since #2326. A new one each time: `NSShadow` is mutable.
-    static var captionTextShadow: NSShadow {
-        let shadow = NSShadow()
-        shadow.shadowColor = UIColor.black.withAlphaComponent(0.5)
-        shadow.shadowBlurRadius = 3
-        shadow.shadowOffset = .zero
-        return shadow
-    }
-
-    /// The shared paragraph style baked into every caption run. It pins the
-    /// line height to the body font's (min == max) so mixed-font lines can't
-    /// collapse, and keeps WORD WRAPPING — never a truncating mode — because
-    /// `boundingRect` refuses to wrap under `.byTruncating*` (it would report
-    /// one line for any width), and `composedCaption` already fits the text
-    /// to two lines by construction, so the label needs no truncation of its
-    /// own.
-    private static var captionParagraphStyle: NSParagraphStyle {
-        let bodyLineHeight = UIFont.appFont(forTextStyle: CaptionRegister.textStyle).lineHeight
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.minimumLineHeight = bodyLineHeight
-        paragraph.maximumLineHeight = bodyLineHeight
-        paragraph.lineBreakMode = .byWordWrapping
-        return paragraph
-    }
-
-    /// The caption's locked box height: `SnapActionColumn.captionFloorHeight`
-    /// (#2380), which the column stands on.
-    static var captionFloorHeight: CGFloat { SnapActionColumn.captionFloorHeight }
-
-    /// How many lines `string` occupies at `width` — the two-line contract's
-    /// yardstick. A pure measurement (no label state), so `composedCaption`
-    /// can probe candidate renderings before committing one.
-    static func captionLineCount(
-        _ string: NSAttributedString, width: CGFloat
-    ) -> Int {
-        guard width > 0, string.length > 0 else { return 0 }
-        // No `.usesFontLeading`: the caption's paragraph style already locks
-        // every line box to the body line height, so the measured height is a
-        // clean multiple of it — adding per-font leading would only reintroduce
-        // the mixed-font variance the lock exists to remove.
-        let height = string.boundingRect(
-            with: CGSize(width: width, height: .greatestFiniteMagnitude),
-            options: [.usesLineFragmentOrigin],
-            context: nil
-        ).height
-        let lineHeight = UIFont.appFont(forTextStyle: CaptionRegister.textStyle).lineHeight
-        return max(1, Int((height / lineHeight).rounded()))
-    }
-
-    /// The single source of caption typography for every media post and both
-    /// chrome instances (live cell + flight replica) — a PURE function of
-    /// (text, timestamp, width) so both resolve identically. It enforces a
-    /// two-line contract: the block is ALWAYS two lines tall, and the date
-    /// is never on line one (#2252, the owner 2026-11-10):
-    ///
-    ///   • A one-line caption — the date ALONE on line two
-    ///     (`Golden hour.` / `7 weeks`).
-    ///   • Case B — a caption that runs onto line two takes the date inline
-    ///     at that line's end (`…line two  7 weeks`).
-    ///   • Case C — a longer caption truncates early on line two so the
-    ///     ellipsis + date always sit un-clipped at that line's end
-    ///     (`…cut off here…  7 weeks`).
-    ///   • No caption (media only) — line one empty, reserved, and the date
-    ///     on line two.
-    ///
-    /// ⚠️ CASE A IS GONE (#2252). A short caption took its date on its one
-    /// line (`Golden hour.  7 weeks`, the owner 2026-10-16, #1256): the
-    /// block was then one line tall and the stream above it came down a
-    /// line — a second jump between posts, after the strip's seat. The
-    /// block's bottom stands on the cover's line, so two lines on every post
-    /// keep the author row, the stream and the danmaku still.
-    ///
-    /// With no timestamp (or an unmeasured zero width) it returns the bare
-    /// caption — the label's own `numberOfLines`/truncation then applies, and
-    /// the chrome's two-line floor (`captionBlockFloor`) keeps the height.
-    ///
-    /// Emotes are marked BEFORE anything is measured (`EmoteText`): a `:code:`
-    /// is already the one emoji glyph it draws as, so every measurement below
-    /// sees the final line, and Case C's bisection — which counts graphemes —
-    /// can never cut an emote in half.
-    static func composedCaption(
-        _ caption: String, timestamp: String?, width: CGFloat
-    ) -> NSAttributedString {
-        let marked = NSMutableAttributedString(
-            attributedString: EmoteText.attributedString(caption, attributes: captionAttributes(secondary: false))
-        )
-        // `@handle`s and `#tag`s in semibold, white like the rest over the
-        // media (#524) — before anything is measured.
-        marked.applyTextEntityStyle(.emphasis)
-        let captionString: NSAttributedString = marked
-        guard let timestamp, !timestamp.isEmpty, width > 0 else { return captionString }
-
-        // ⚠️ ONE PIECE: "20 weeks" never splits across the two lines — the
-        // inline time once ended line one with "20" and began line two with
-        // "weeks" (seen on a device, 2026-10-16). Its spaces don't break.
-        let unbroken = timestamp.replacingOccurrences(of: " ", with: "\u{00A0}")
-        let timestampString = NSAttributedString(string: unbroken, attributes: captionAttributes(secondary: true))
-        let gap = NSAttributedString(string: "  ", attributes: captionAttributes(secondary: false))
-
-        // A caption on ONE line (or none): the date alone on line two, behind
-        // a line break — never beside the caption on line one (#2252). Kept
-        // only if it really is two lines, which a caption ending in a break
-        // of its own might not be; else the cases below place the date.
-        if captionString.length == 0 || captionLineCount(captionString, width: width) <= 1 {
-            let stacked = NSMutableAttributedString(attributedString: captionString)
-            stacked.append(NSAttributedString(string: "\n", attributes: captionAttributes(secondary: false)))
-            stacked.append(timestampString)
-            if captionLineCount(stacked, width: width) == 2 { return stacked }
-        }
-
-        // Case B: the caption runs onto line two, and its date follows it
-        // there, inline.
-        let inline = NSMutableAttributedString(attributedString: captionString)
-        inline.append(gap)
-        inline.append(timestampString)
-        if captionLineCount(inline, width: width) <= 2 { return inline }
-
-        // Case C: bisect for the longest caption prefix that keeps the
-        // ellipsis + timestamp inside two lines (prefix length grows the
-        // line count monotonically, so the largest fitting prefix is the
-        // truncation point).
-        let characters = Array(captionString.string)
-        func candidate(prefixLength: Int) -> NSAttributedString {
-            // Cut from the MARKED string, so the emotes a prefix keeps keep
-            // their marks.
-            let prefix = String(characters[0..<prefixLength])
-            let trimmed = prefix.trimmingCharacters(in: .whitespacesAndNewlines)
-            let out = NSMutableAttributedString()
-            if !trimmed.isEmpty, let range = prefix.range(of: trimmed) {
-                out.append(captionString.attributedSubstring(from: NSRange(range, in: prefix)))
-            }
-            out.append(NSAttributedString(string: "… ", attributes: captionAttributes(secondary: false)))
-            out.append(timestampString)
-            return out
-        }
-        var low = 0, high = characters.count, best = 0
-        while low <= high {
-            let mid = (low + high) / 2
-            if captionLineCount(candidate(prefixLength: mid), width: width) <= 2 {
-                best = mid
-                low = mid + 1
-            } else {
-                high = mid - 1
-            }
-        }
-        return candidate(prefixLength: best)
-    }
-
-    /// Replaces both comment surfaces' content (the ticker's wrap-around
-    /// queue and the subtitle zone's cue list). Live cells only — the flight
-    /// replica must never receive this (moving/timed content cannot be
-    /// pixel-identical across two instances), which is why it is not part of
-    /// `configure`. Empty streams hide their surface. Text-only posts refuse
-    /// content entirely (empty shell) — gated here, not at the callers, so
-    /// every arrival path (dequeue pull, async push) hits the same wall.
-    func updateCommentStreams(_ streams: FeedViewModel.CommentStreams) {
-        guard hasMedia else { return }
-        commentTicker.setComments(streams.reactions)
-        // Loaded, the band follows the bubbles: none, it goes. A SEED (top
-        // comments from the cache, not loaded) knows nearly as well — a seed
-        // with cues and no bubbles reserved the band by the card's count and
-        // left the pill floating over a hole until the load collapsed it
-        // (filmed on a device, 25 September 2026). Only a page with no
-        // streams at all keeps the card's guess.
-        if streams.isLoaded || streams.commentCount > 0 {
-            commentTicker.setReservesBand(!streams.reactions.isEmpty)
-        }
-        subtitleView.setCommentCount(streams.commentCount)
-        subtitleView.setCues(streams.subtitles)
-        // THE COUNT IS THE WHOLE CONDITION (product rule 2026-08-08): no
-        // comments → the pill; one or more → the comment stream speaks for
-        // the post and the pill stays down. The zone is never blank on
-        // either side of that line, and this view is not where that is
-        // enforced — `SubtitleCommentBuilder` guarantees a non-empty cue
-        // list for any post the band isn't already carrying, so "has
-        // comments" and "the zone renders" cannot come apart. A count pill
-        // ("2 comments") was tried in this slot as a stand-in for the
-        // stream and removed; the stream itself is the answer.
-        //
-        // `isLoaded` is the load/zero seam: an unloaded stream carries a
-        // zero count too, so without it the pill would flash on every page
-        // while its fetch is in flight.
-        commentEmptyState.setVisible(streams.isLoaded && streams.commentCount == 0)
-    }
+    /// See `SnapChromeCommentSurfaces.updateCommentStreams` (live cells only).
+    func updateCommentStreams(_ streams: FeedViewModel.CommentStreams) { commentSurfaces.updateCommentStreams(streams) }
 
 
     private var hasLaidOut = false
 
-    #if DEBUG
-    /// The band's and the stream's frames in this chrome's space.
-    var debugBandFrame: CGRect { commentTicker.frame }
-    var debugBandTrailingEnd: (cornerRadius: CGFloat, fadeLocations: [NSNumber]?) {
-        commentTicker.debugTrailingEnd
-    }
-    var debugStreamFrame: CGRect { subtitleView.frame }
-    var debugRailFrame: CGRect { shortcutRail.frame }
-    /// The wheel, which rides the column's layer (#1872).
-    var debugShortcutRail: SnapShortcutRailView { shortcutRail }
-    #endif
-
-    #if DEBUG
-    /// The caption's frame in `space`, for the landing probe that compares
-    /// the flight replica with the page it fades into.
-    func debugCaptionFrame(in space: UICoordinateSpace) -> CGRect {
-        captionLabel.convert(captionLabel.bounds, to: space)
-    }
-    #endif
-
-    /// Streams while the owning cell is on screen (visibility-scoped — a
-    /// page dragged partway in already flows; see the cell's
-    /// `setTickerStreaming`).
-    /// How many media pages the post has, and which one is showing. A count
-    /// below two hides the indicator — a readout for a single photograph is
-    /// furniture answering a question nobody asked.
-    /// The flight's hold, passed to the ticker: no pre-fill at a transient
-    /// width (see `SnapCommentTickerView.setHeldForFlight`).
-    func setTickerHeldForFlight(_ held: Bool) {
-        commentTicker.setHeldForFlight(held)
-    }
-
-    /// See `SnapCommentTickerView.replayEntrance`.
-    func replayCommentBandEntrance() {
-        commentTicker.replayEntrance()
-    }
-
-    /// See `SnapSubtitleView.replayEntrance`.
-    func replaySubtitleEntrance() {
-        subtitleView.replayEntrance()
-    }
-
+    /// See `SnapChromeMediaStrip.setMediaPageCount` — the flight replica's too.
     func setMediaPageCount(_ count: Int, current: Int, clipPages: Set<Int> = []) {
-        mediaPosition = CGFloat(current)
-        // Nothing else moves for it (#2252): the strip reserves no height,
-        // so a count arriving re-seats nothing.
-        mediaPageBar.configure(count: count, current: current, clipPages: clipPages)
-        #if DEBUG
-        runBrowseQAIfAsked(count: count)
-        #endif
+        mediaStrip.setMediaPageCount(count, current: current, clipPages: clipPages)
     }
-
-    #if DEBUG
-    /// QA (#1734): `-strip-browse <fraction>` holds a finger on the first
-    /// carousel's strip at that fraction of its width, to film the browse
-    /// (`-strip-browse-release` lets go after 4 s).
-    private static var ranBrowseQA = false
-    private func runBrowseQAIfAsked(count: Int) {
-        let arguments = ProcessInfo.processInfo.arguments
-        guard count >= 2, !Self.ranBrowseQA, let share = LaunchArgument.stripBrowse.doubleValue(in: arguments) else { return }
-        Self.ranBrowseQA = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-            guard let self else { return }
-            let bar = mediaPageBar
-            bar.debugScrub(.began, atX: 2)
-            bar.debugScrub(.changed, atX: 2 + SnapMediaPageBarView.debugTravelThreshold + 1)
-            bar.debugScrub(.changed, atX: bar.bounds.width * CGFloat(share))
-            // `-strip-browse-release`: and lets go 4 s later.
-            guard LaunchArgument.stripBrowseRelease.isPassed(in: arguments) else { return }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
-                bar.debugScrub(.ended, atX: bar.bounds.width * CGFloat(share))
-            }
-        }
-    }
-    #endif
 
     /// Where the page's BOTTOM READOUT begins — the top of the comment band.
     ///
@@ -1858,190 +1010,6 @@ final class SnapChromeView: UIView {
     /// is as tall as any other's.
     var bottomReadoutTop: CGFloat { commentTicker.frame.minY }
 
-    #if DEBUG
-    /// The page strip and the caption, so a spec can state where the strip sits
-    /// in the column — and that its arrival moves nothing else.
-    var debugPageBarFrame: CGRect { mediaPageBar.frame }
-    /// The action column's two bubbles, for the spec that
-    /// holds them still across the media and comments layouts.
-    var debugBoostButton: UIButton { boostButton }
-    var debugSoundBubble: SnapSoundBubbleButton { soundBubble }
-    var debugSoundHold: HoldToArmPresenter? { soundHold }
-    /// The glass column's items, shape by shape, as the column stands them
-    /// now (#1872).
-    var debugColumnItems: [[String]] { columnSlots().map { $0.map(\.id) } }
-    var debugGlassColumn: SnapGlassColumn { glassColumn }
-    /// `view`'s frame in this chrome's space — a column item stands in its
-    /// bubble's glass, not in the chrome (#1872).
-    func debugFrame(of view: UIView) -> CGRect { view.convert(view.bounds, to: self) }
-    /// The sound's station, shown or not — where its bubble stands.
-    var debugSoundStationFrame: CGRect { soundStation.convert(soundStation.bounds, to: self) }
-    /// The comment band, in the chrome's space.
-    var debugTickerFrame: CGRect { commentTicker.frame }
-    /// The comment band and the subtitle pill themselves (#1798).
-    var debugCommentTicker: SnapCommentTickerView { commentTicker }
-    var debugSubtitleView: SnapSubtitleView { subtitleView }
-    var debugCaptionFrame: CGRect { captionLabel.frame }
-    var debugPageBar: SnapMediaPageBarView { mediaPageBar }
-    var debugScrubPreview: SnapScrubPreviewView { scrubPreview }
-    func debugScrubPreviewFrame() -> CGRect { scrubPreview.frame }
-    #endif
-
-    /// Moves the mark as the viewer pages. Separate from the count because this
-    /// runs on every scroll callback of a carousel under a finger.
-    func setMediaPage(_ page: Int) {
-        mediaPageBar.setCurrent(page)
-    }
-
-    /// The carousel's position in fractional pages, straight through to the
-    /// strip: width and ink are read off it, so the strip reflows for the whole
-    /// gesture rather than at the crossing. See `SnapMediaPageBarView`.
-    func setMediaScrollPosition(_ position: CGFloat) {
-        mediaPosition = position
-        mediaPageBar.setPosition(position)
-    }
-
-    /// The watched clip is loading or not (#1537): the bar's pulse.
-    func setMediaLoading(_ loading: Bool) {
-        mediaPageBar.setLoading(loading)
-    }
-
-    /// How far through the clip the page is showing, when there is one whose
-    /// length is known — the strip draws it inside the segment it has grown
-    /// into a bar.
-    func setMediaPlayhead(_ fraction: Double?, seconds: Double = 0) {
-        clipSeconds = seconds
-        mediaPageBar.setPlayhead(fraction)
-    }
-
-    /// A frame the scrub card is pointing at. There is no "nothing new" here:
-    /// a decode that failed leaves the last frame standing — see
-    /// `SnapScrubPreviewView.setPicture`.
-    func setScrubPreviewPicture(_ image: CGImage) {
-        scrubPreview.setPicture(image)
-    }
-
-    /// Whether a frame is on its way, so the card can stand in for one it has
-    /// not got.
-    func setScrubPreviewLoading(_ loading: Bool) {
-        scrubPreview.setLoading(loading)
-    }
-
-    /// Asked for a frame at a moment in the clip, or told the gesture is over.
-    /// The CELL owns playback, so the request travels out.
-    var onScrubPreviewRequested: ((Double?) -> Void)?
-
-    /// Puts the card over the thumb and tells the host what to fetch.
-    ///
-    /// ⚠️ CLAMPED TO THE STRIP'S ENDS, not to the screen: the card is a label
-    /// on the strip, and one that ran past them would point at nothing. The
-    /// strip ends 12 pt in on both sides (#2291), so the card stays on screen.
-    private func showScrubPreview(_ preview: (fraction: Double, x: CGFloat)?) {
-        guard let preview else {
-            scrubPreview.hide()
-            setScrubFocus(false)
-            onScrubPreviewRequested?(nil)
-            return
-        }
-        setScrubFocus(true)
-        lastScrubPreview = preview
-        // The clip's own shape (#1724): the page the viewer is on.
-        let page = Int(mediaPosition.rounded())
-        if pageAspects.indices.contains(page) { scrubPreview.aspect = pageAspects[page] }
-        placeScrubPreview(at: preview.x)
-        // ⚠️ ABOVE EVERYTHING, and re-stated on every show. The card is built
-        // with the strip, and the surfaces added after it — the shortcut wheel,
-        // the boost anchor, the subtitle zone, the comment empty state — are
-        // its own siblings, so a card added once sits UNDER the comment
-        // surfaces it is meant to point over. Reported exactly that way.
-        bringSubviewToFront(scrubPreview)
-        scrubPreview.show(fraction: preview.fraction, seconds: clipSeconds)
-        onScrubPreviewRequested?(preview.fraction)
-    }
-
-    /// The last point the card was asked over, for a re-place after a reshape.
-    private var lastScrubPreview: (fraction: Double, x: CGFloat)?
-    /// Each page's declared shape, width / height (#1724) — `configure`'s.
-    private var pageAspects: [CGFloat] = []
-    /// The carousel's position in pages — which page's shape the card takes.
-    private var mediaPosition: CGFloat = 0
-
-    /// Sizes the card to its shape and puts it over `x` along the strip.
-    private func placeScrubPreview(at x: CGFloat) {
-        let size = scrubPreview.totalSize
-        let alongTheStrip = mediaPageBar.frame.minX + x
-        let leftMost = mediaPageBar.frame.minX + size.width / 2
-        let rightMost = mediaPageBar.frame.maxX - size.width / 2
-        scrubPreview.frame = CGRect(
-            x: min(max(alongTheStrip, leftMost), rightMost) - size.width / 2,
-            y: mediaPageBar.frame.minY - size.height - Spacing.sm,
-            width: size.width, height: size.height
-        )
-    }
-
-    // MARK: - Browsing the pages (#1734)
-
-    /// The carousel's previews: each page's thumbnail, and which are clips.
-    func setMediaPreviews(thumbnails: [URL?], videoPages: Set<Int>, pipeline: ImagePipeline?) {
-        browseStrip.configure(thumbnails: thumbnails, videoPages: videoPages, pipeline: pipeline)
-    }
-
-    /// The clip the post is playing on `page`, mirrored into its preview while
-    /// browsing (nil: none) — the CELL owns playback and hands the surface.
-    func setBrowseLiveSurface(_ view: UIView?, page: Int) {
-        browseStrip.setLiveView(view, page: page)
-    }
-
-    /// A finger started sliding through the pages: the page's talk fades as
-    /// it does under a clip's scrub, and the previews come up over the strip.
-    var onMediaBrowseBegan: (() -> Void)?
-    /// The page under the finger changed — the CELL turns the carousel.
-    var onMediaBrowse: ((Int) -> Void)?
-    /// The finger let go on this page.
-    var onMediaBrowseEnded: ((Int) -> Void)?
-
-    private func beginBrowse(at page: Int) {
-        setScrubFocus(true)
-        placeBrowseStrip()
-        // Above everything, re-stated on every show — the scrub card's rule.
-        bringSubviewToFront(browseStrip)
-        browseStrip.show(selecting: page, anchorX: browseAnchor(page))
-        onMediaBrowseBegan?()
-    }
-
-    private func browse(to page: Int) {
-        browseStrip.select(page, anchorX: browseAnchor(page))
-        onMediaBrowse?(page)
-    }
-
-    private func endBrowse(at page: Int) {
-        browseStrip.hide()
-        setScrubFocus(false)
-        onMediaBrowseEnded?(page)
-    }
-
-    /// The filmstrip across the chrome's width, its counter on the strip's
-    /// line — the row takes the caption's room above it, faded for the
-    /// browse — as the reference app lays it out.
-    private func placeBrowseStrip() {
-        let bar = mediaPageBar.frame
-        let height = SnapBrowseStripView.height
-        let counterMid = height - SnapBrowseStripView.counterHeight / 2
-        browseStrip.frame = CGRect(x: 0, y: bar.midY - counterMid, width: bounds.width, height: height)
-    }
-
-    /// Where the chosen tile stands: over the finger's slot on the strip, in
-    /// the filmstrip's space.
-    private func browseAnchor(_ page: Int) -> CGFloat {
-        mediaPageBar.frame.minX + mediaPageBar.browseSlotCenter(page) - browseStrip.frame.minX
-    }
-
-    #if DEBUG
-    var debugBrowseStrip: SnapBrowseStripView { browseStrip }
-    #endif
-
-    // MARK: - The scrub's focus
-
     /// Everything on the page that is ABOUT the post rather than part of the
     /// instrument in the viewer's hand.
     ///
@@ -2056,103 +1024,11 @@ final class SnapChromeView: UIView {
     /// the available one — the way out of a post should not blink away because
     /// a thumb landed on a clip's bar.
     ///
-    private var scrubFadedViews: [UIView] {
+    var scrubFadedViews: [UIView] {
         // The column fades as one glass (#1872): its bubbles' glass would
         // stay behind the buttons' faded faces.
         [captionLabel, commentTicker, subtitleView, commentEmptyState, shortcutRail, glassColumn]
     }
-
-    /// What each faded view was worth before the scrub took it, so the fade
-    /// back RESTORES rather than asserts.
-    ///
-    /// ⚠️ Restoring to 1 would be a bug with a long tail: several of these are
-    /// faded by someone else for their own reasons — the rail rides the
-    /// pull-down's progress, the band and the caption fade through an
-    /// engagement — and a scrub that ended by setting them all to full would
-    /// hand back a page brighter than the one it borrowed.
-    private var scrubFadeRestore: [(view: UIView, alpha: CGFloat)] = []
-
-    /// Fades the page's talk out under a scrub, and back when it ends.
-    ///
-    /// A viewer dragging along a clip's bar is looking for a MOMENT in the
-    /// picture, and the card showing it is a small thing over a page still
-    /// crowded with everything else. So the page recedes for the length of the
-    /// gesture and comes back when the thumb lifts.
-    private func setScrubFocus(_ focused: Bool, animated: Bool = true) {
-        // Guarding on the ledger, not on a flag: entering twice would capture
-        // the faded values as the ones to restore, which is how a fade becomes
-        // permanent.
-        guard focused == scrubFadeRestore.isEmpty else { return }
-        let restoring = scrubFadeRestore
-        if focused {
-            scrubFadeRestore = scrubFadedViews.map { (view: $0, alpha: $0.alpha) }
-        } else {
-            scrubFadeRestore = []
-        }
-        let targets: [(view: UIView, alpha: CGFloat)] = focused
-            ? scrubFadeRestore.map { (view: $0.view, alpha: 0) }
-            : restoring
-        let apply = { for target in targets { target.view.alpha = target.alpha } }
-        guard animated else { return apply() }
-        UIView.animate(
-            withDuration: Self.scrubFocusDuration,
-            delay: 0,
-            options: [.beginFromCurrentState, .allowUserInteraction, .curveEaseInOut],
-            animations: apply
-        )
-    }
-
-    /// Long enough to read as a fade, short enough that a quick tap-and-drag on
-    /// a bar does not spend its first moments in a dissolve.
-    static let scrubFocusDuration: TimeInterval = 0.2
-
-    #if DEBUG
-    /// What the page's talk is worth right now — the question a spec asks to
-    /// prove the scrub took it away and gave it back.
-    var debugScrubFadedAlphas: [CGFloat] { scrubFadedViews.map(\.alpha) }
-    #endif
-
-    /// The viewer dragged along a clip's bar. The CELL owns playback, so the
-    /// request travels out rather than the chrome reaching for a player.
-    var onMediaSeekRequested: ((Double) -> Void)? {
-        get { mediaPageBar.onSeekRequested }
-        set { mediaPageBar.onSeekRequested = newValue }
-    }
-
-    /// A drag took hold of the clip's playhead — see `SnapMediaPageBarView
-    /// .onScrubBegan`.
-    var onMediaScrubBegan: (() -> Void)? {
-        get { mediaPageBar.onScrubBegan }
-        set { mediaPageBar.onScrubBegan = newValue }
-    }
-
-    /// The drag let go, at this fraction (nil on a cancel).
-    var onMediaScrubEnded: ((Double?) -> Void)? {
-        get { mediaPageBar.onScrubEnded }
-        set { mediaPageBar.onScrubEnded = newValue }
-    }
-
-
-    /// The viewer asked for a page by touching the indicator. The CELL owns the
-    /// carousel, so the request travels out rather than the chrome reaching in.
-    var onMediaPageRequested: ((Int) -> Void)? {
-        get { mediaPageBar.onPageRequested }
-        set { mediaPageBar.onPageRequested = newValue }
-    }
-
-    /// The indicator's scrub, passed up so the screen's own pans can yield to
-    /// it. See `MediaPageIndicatorView.scrubGesture`.
-    var mediaScrubGesture: UIGestureRecognizer { mediaPageBar.scrubGesture }
-
-    func setTickerActive(_ active: Bool) {
-        commentTicker.setActive(active)
-    }
-
-    /// "Don't Cover People" (#484): the band to mask — always the same view,
-    /// shown or not (it appears once its comments arrive).
-    var personOcclusionTicker: UIView { commentTicker }
-    /// Whether that band is on screen now.
-    var isPersonOcclusionBandShown: Bool { !commentTicker.isHidden && commentTicker.window != nil }
 
     /// The image pipeline the comment surfaces load author avatars through —
     /// forwarded to the ticker and the subtitle zone (both render an avatar
@@ -2217,8 +1093,8 @@ final class SnapChromeView: UIView {
         railLayer.alpha = resolved
         // The column glides to the composer's line on the same progress
         // (#2326) — on the same curve inside the engagement's spring.
-        engagementColumnShare = 1 - resolved
-        applyColumnGlide()
+        actionColumn.engagementColumnShare = 1 - resolved
+        actionColumn.applyColumnGlide()
         shortcutRail.capsule.layout()
         if returnedToRest { commentEmptyState.restartLabelDwell() }
     }
@@ -2240,89 +1116,8 @@ final class SnapChromeView: UIView {
         columnLayer.superview === self ? transform.ty : columnLayer.transform.ty
     }
 
-    /// Mounts the column ABOVE this chrome in `host` (the cell's content
-    /// view), so the engagement fade leaves it on screen. The buttons stay on
-    /// their stations: same frames, by construction.
-    func installActionColumn(in host: UIView) {
-        mountColumn(in: host)
-    }
-
-    private func mountColumn(in host: UIView) {
-        columnHost = host
-        columnLayer.translatesAutoresizingMaskIntoConstraints = false
-        host.addSubview(columnLayer)
-        let constraints = [
-            columnLayer.leadingAnchor.constraint(equalTo: leadingAnchor),
-            columnLayer.trailingAnchor.constraint(equalTo: trailingAnchor),
-            columnLayer.topAnchor.constraint(equalTo: topAnchor),
-            columnLayer.bottomAnchor.constraint(equalTo: bottomAnchor),
-        ]
-        NSLayoutConstraint.activate(constraints)
-    }
-
-    /// The glass column's items (#1872).
-    enum ColumnItem {
-        static let like = "like"
-        static let sound = "sound"
-    }
-
-    /// Where the column's items stand: on their stations, each a bubble of
-    /// its own.
-    private func columnSlots() -> [[SnapGlassColumn.Slot]] {
-        func slot(_ id: String, _ item: UIView, _ station: UIView) -> SnapGlassColumn.Slot? {
-            guard !item.isHidden, station.bounds.width > 0 else { return nil }
-            // Into the column's layer, which the glass fills: the glass's own
-            // glide (#2326) is not undone by the conversion.
-            return SnapGlassColumn.Slot(id: id, frame: station.convert(station.bounds, to: columnLayer))
-        }
-        let sound = slot(ColumnItem.sound, soundBubble, soundStation)
-        return [
-            slot(ColumnItem.like, boostButton, boostStation),
-            sound,
-        ].compactMap { $0.map { [$0] } }
-    }
-
-    /// Shows or hides the column — the like (boost) pill and the sound
-    /// bubble — for a post the viewer may still act on (#1409). Its own
-    /// switch, not the flight's hold (`setColumnHeld`, an alpha): a post
-    /// that turned unavailable keeps it down whatever the flight does.
-    func setActionColumnShown(_ shown: Bool) {
-        columnLayer.isHidden = !shown
-    }
-
-    /// Hides the column with the page while a flight covers it — the
-    /// replica carries its own. Unlike the chrome's own hold, released into
-    /// the engaged state too: the column belongs to both.
-    func setColumnHeld(_ held: Bool) {
-        columnLayer.alpha = held ? 0 : 1
-    }
-
-    /// The column's ink: dark glass and white ink on a media page — in
-    /// BOTH layouts, the comments' included (the owner, on a device: the
-    /// column stays dark) — and a text page's own theme.
-    private func applyColumnStyle() {
-        let style: UIUserInterfaceStyle = hasMedia ? .dark : .unspecified
-        columnLayer.overrideUserInterfaceStyle = style
-        // ⚠️ AND ON EACH ITEM (#1872): a glass's content takes the ink the
-        // glass picks over what is behind it, and the column's ink is the
-        // page's choice — white over media, whatever the picture.
-        for item in [boostButton as UIView, soundBubble] {
-            item.overrideUserInterfaceStyle = style
-        }
-    }
-
-    /// Cycles while the owning cell is on screen — the band's visibility
-    /// seam (plus the settle backstop for foregrounding), NOT playback's
-    /// settle scope: the persistent pill is static content between
-    /// handoffs, so it must ride a half-dragged page like the caption
-    /// does instead of popping in after settle.
-    func setSubtitlesActive(_ active: Bool) {
-        subtitleView.setActive(active)
-        // The empty state rides the same seam — its label's dwell is a
-        // READING clock, so it starts when the page is actually on screen,
-        // not when the stream lands on a cell still off in the pager.
-        commentEmptyState.setActive(active)
-    }
+    /// See `SnapChromeCommentSurfaces.setSubtitlesActive`.
+    func setSubtitlesActive(_ active: Bool) { commentSurfaces.setSubtitlesActive(active) }
 
     /// Clears post-specific content (cell reuse).
     func reset() {
@@ -2333,18 +1128,18 @@ final class SnapChromeView: UIView {
         // the next post as a caption and a band that never come back. The same
         // trap as the line below, one gesture further in. Unanimated: there is
         // nothing on screen to dissolve, and the next configure is immediate.
-        setScrubFocus(false, animated: false)
+        mediaStrip.setScrubFocus(false, animated: false)
         // …and a browse in flight takes its previews with it (#1734).
-        browseStrip.hide(animated: false)
+        mediaStrip.browseStrip.hide(animated: false)
         // A scaffold handed the next post while still faded would keep that
         // post's chrome invisible.
         alpha = 1
         railLayer.alpha = 1
         lastEngagedProgress = 1
         // The column back on its resting seat (#2326).
-        engagementColumnShare = 0
-        sheetColumnShare = 0
-        applyColumnGlide()
+        actionColumn.engagementColumnShare = 0
+        actionColumn.sheetColumnShare = 0
+        actionColumn.applyColumnGlide()
         caption = nil
         applyCaptionVisibility()
         onCommentsTapped = nil
@@ -2352,18 +1147,7 @@ final class SnapChromeView: UIView {
         onBoostUndoRequested = nil
         hasMedia = true
         commentTicker.reset()
-        boostButton.isHidden = true
-        boostButton.setSpentTotal(0)
-        postLikeCount = nil
-        applyLikeBadge(animated: false)
-        soundFace = nil
-        setSoundShowsReturn(false, animated: false)
-        soundBubble.setFace(nil, pipeline: nil)
-        soundBubble.setSharesPost(false)
-        soundBubble.isHidden = true
-        // Back to the unwired default (enabled, nothing undoable) — the
-        // next configure pushes the real context.
-        boostButton.setWalletContext(balance: .max, undoableAmount: 0)
+        actionColumn.reset()
         subtitleView.reset()
         // Both, and in this order: `setActive(false)` clears the visibility
         // seam the scaffold arrived with (the cell's streaming flag is not
@@ -2377,190 +1161,18 @@ final class SnapChromeView: UIView {
 
     // MARK: - Boost feedback
 
-    /// The viewer's cumulative spend on the represented post — turns the like
-    /// heart red (#668); the count moves through the store
-    /// (`setPostLikeCount`). Owned by the cell's configurator (the chrome has
-    /// no wallet); reset to 0 with the rest of the post state on reuse.
-    /// `animated` is kept for the callers' stake and undo theatre.
-    func setBoostTotal(_ total: Int, animated: Bool = false) {
-        boostButton.setSpentTotal(total)
-        applyLikeBadge(animated: animated)
-    }
+    /// The like pill's receipts for a spend (#2521).
+    private(set) lazy var boostReceipts = SnapBoostReceipts(host: self)
 
-    /// The post's live like count (#896) — the app's `EntityStore`, where
-    /// the viewer's stakes already are (`WalletStakeLikes`).
-    func setPostLikeCount(_ count: Int64?) {
-        guard count != postLikeCount else { return }
-        postLikeCount = count
-        applyLikeBadge(animated: false)
-    }
-
-
-
-    /// The badge's count: the post's, the viewer's stake included (product
-    /// decision 2026-10-08) — and included ONCE, by the store the count
-    /// comes from (`WalletStakeLikes`, #896). Adding the stake here counted a
-    /// committed stake twice (the server's count already holds it), and the
-    /// card the post opened from showed another number.
-    private func applyLikeBadge(animated: Bool) {
-        // Drawn by the pill itself, under its heart (#692).
-        boostButton.setLikeCount(postLikeCount)
-    }
-
-    #if DEBUG
-    /// The like pill's transform — identity, always (#1186).
-    var debugBoostButtonTransform: CGAffineTransform { boostButton.transform }
-    /// The count under the pill's heart — nil while the pill is not showing.
-    var debugLikeBadgeText: String? { boostButton.isHidden ? nil : boostButton.configuration?.title }
-    /// Where the heart is drawn, in the chrome's space.
-    ///
-    /// ⚠️ THE GLYPH, centred in its image view, which stands taller than the
-    /// picture it shows (~2 pt above and below the heart). Read off the
-    /// view, the gaps looked even only while the button was measured half
-    /// laid out — at its title's width, the heart off centre; fully laid out
-    /// in the column's glass (#1872), the view's padding showed.
-    var debugLikeHeartFrame: CGRect {
-        boostButton.layoutIfNeeded()
-        guard let image = boostButton.imageView else { return .zero }
-        let frame = image.convert(image.bounds, to: self)
-        guard let drawn = image.image?.size, drawn.height > 0, drawn.height < frame.height else { return frame }
-        return frame.insetBy(dx: 0, dy: (frame.height - drawn.height) / 2)
-    }
-    /// Where the count is drawn, in the chrome's space.
-    var debugLikeBadgeFrame: CGRect {
-        boostButton.layoutIfNeeded()
-        guard let label = boostButton.titleLabel else { return .zero }
-        return label.convert(label.bounds, to: self)
-    }
-    #endif
-
-    /// The anchor's wallet context: what the balance can still afford and
-    /// how much of this post's spend is session-undoable — the enable state
-    /// and the menu's live contents both derive from it.
-    func setBoostContext(balance: Int, undoable: Int, stakeShots: Int = 0) {
-        boostButton.setWalletContext(balance: balance, undoableAmount: undoable, stakeShots: stakeShots)
-    }
-
-    /// The spend's visible receipt: a gold "+N" born on the boost anchor
-    /// that rises and dissolves; the anchor itself moves only by the glass's
-    /// own press. Pure theatre over state that already changed — the wallet
-    /// debited synchronously before this runs, so the animation can be
-    /// dropped (hidden anchor, mid-reuse) without the count going wrong.
-    func playBoostConfirmation(amount: Int) {
-        guard !boostButton.isHidden, boostButton.bounds.width > 0 else { return }
-
-        let label = UILabel()
-        label.text = "+\(amount)"
-        label.font = .scaledMonospacedDigitSystemFont(
-            ofSize: 17, weight: .heavy, relativeTo: .headline, maximumPointSize: 24
-        )
-        label.textColor = .systemYellow
-        // The scrim under it is a gradient, not a guarantee — the same
-        // legibility shadow the nav glyphs wear over live media.
-        label.layer.shadowColor = UIColor.black.cgColor
-        label.layer.shadowOpacity = 0.5
-        label.layer.shadowRadius = 3
-        label.layer.shadowOffset = .zero
-        label.sizeToFit()
-        label.center = CGPoint(x: boostButton.center.x, y: boostButton.frame.minY - Spacing.md)
-        label.alpha = 0
-        label.isUserInteractionEnabled = false
-        addSubview(label)
-
-        UIView.animateKeyframes(withDuration: 0.9, delay: 0, options: [.calculationModeCubic]) {
-            UIView.addKeyframe(withRelativeStartTime: 0, relativeDuration: 0.2) {
-                label.alpha = 1
-                label.center.y -= 18
-            }
-            UIView.addKeyframe(withRelativeStartTime: 0.2, relativeDuration: 0.55) {
-                label.center.y -= 26
-            }
-            UIView.addKeyframe(withRelativeStartTime: 0.55, relativeDuration: 0.45) {
-                label.alpha = 0
-            }
-        } completion: { _ in
-            label.removeFromSuperview()
-        }
-
-        // ⚠️ NO DIP OF ITS OWN (#1186): the pill is a glass button, whose
-        // native press already acknowledges the tap. A spring scale here ran
-        // on top of it and read as a tremble (the owner, on a device).
-    }
-
-    /// The refund's receipt: a cool "−N" that sinks and dissolves — the
-    /// confirmation float mirrored, in the direction money leaves the post.
-    /// White, not gold: gold is the earning color, and an undo is not a
-    /// payout.
-    func playBoostRefund(amount: Int) {
-        guard !boostButton.isHidden, boostButton.bounds.width > 0 else { return }
-        let label = UILabel()
-        label.text = "−\(amount)"
-        label.font = .scaledMonospacedDigitSystemFont(
-            ofSize: 17, weight: .heavy, relativeTo: .headline, maximumPointSize: 24
-        )
-        label.textColor = UIColor.white.withAlphaComponent(0.9)
-        label.layer.shadowColor = UIColor.black.cgColor
-        label.layer.shadowOpacity = 0.5
-        label.layer.shadowRadius = 3
-        label.layer.shadowOffset = .zero
-        label.sizeToFit()
-        label.center = CGPoint(x: boostButton.center.x, y: boostButton.frame.minY - Spacing.md)
-        label.alpha = 0
-        label.isUserInteractionEnabled = false
-        addSubview(label)
-        UIView.animateKeyframes(withDuration: 0.9, delay: 0, options: [.calculationModeCubic]) {
-            UIView.addKeyframe(withRelativeStartTime: 0, relativeDuration: 0.2) {
-                label.alpha = 1
-                label.center.y += 14
-            }
-            UIView.addKeyframe(withRelativeStartTime: 0.2, relativeDuration: 0.55) {
-                label.center.y += 20
-            }
-            UIView.addKeyframe(withRelativeStartTime: 0.55, relativeDuration: 0.45) {
-                label.alpha = 0
-            }
-        } completion: { _ in
-            label.removeFromSuperview()
-        }
-    }
-
-    /// The refusal: a horizontal head-shake on the anchor — the wallet
-    /// couldn't cover the spend, and nothing changed. Paired with the
-    /// error haptic the owner fires; deliberately no floating label (a
-    /// "-0" would read as a payout).
-    func playBoostDenied() {
-        guard !boostButton.isHidden else { return }
-        let shake = CAKeyframeAnimation(keyPath: "transform.translation.x")
-        shake.values = [0, -7, 6, -4, 3, -1, 0]
-        shake.duration = 0.4
-        shake.timingFunction = CAMediaTimingFunction(name: .easeOut)
-        boostButton.layer.add(shake, forKey: "boost.denied")
-    }
+    /// See `SnapChromeActionColumn` — the flight replica's too.
+    func setBoostTotal(_ total: Int, animated: Bool = false) { actionColumn.setBoostTotal(total, animated: animated) }
+    func setPostLikeCount(_ count: Int64?) { actionColumn.setPostLikeCount(count) }
 }
 
-/// The caption slide's delegate: begins only on a clearly horizontal travel
-/// over a post with a strip (`SnapChromeView.captionSlideMayBegin`). An object
-/// of its own — the chrome is a `UIView`, whose own `gestureRecognizerShouldBegin`
-/// is asked of every recognizer attached to it.
-final class SnapCaptionSlideGate: NSObject, UIGestureRecognizerDelegate {
-    var mayBegin: (CGPoint) -> Bool = { _ in false }
+extension SnapChromeView: SnapBoostReceiptsHost {}
 
-    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-        guard let pan = gestureRecognizer as? UIPanGestureRecognizer else { return true }
-        // Past its slop, the travel says the direction; the velocity backs it
-        // when the travel is still too small to read.
-        let travel = pan.translation(in: pan.view)
-        return mayBegin(travel == .zero ? pan.velocity(in: pan.view) : travel)
-    }
-}
+extension SnapChromeView: SnapChromeCommentSurfacesHost {}
 
-/// The caption: an `EmoteLabel` that tells a horizontal pager above it
-/// (Shots' sector pager, `HorizontalDragClaiming`) when a slide starting on it
-/// is its own — on a post with a strip (#2269).
-final class SnapCaptionLabel: EmoteLabel, HorizontalDragClaiming {
-    var claimsDrag: (CGPoint) -> Bool = { _ in false }
+extension SnapChromeView: SnapChromeMediaStripHost {}
 
-    func claimsHorizontalDrag(velocity: CGPoint) -> Bool {
-        claimsDrag(velocity)
-    }
-}
+extension SnapChromeView: SnapChromeActionColumnHost {}

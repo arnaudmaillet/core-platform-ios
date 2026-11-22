@@ -37,7 +37,7 @@ final class SnapCellPlayback: NSObject {
     private let isActive: () -> Bool
 
     /// The playhead to draw: a fraction (nil when there is none to report)
-    /// and the clip's length in seconds — `SnapChromeView.setMediaPlayhead`.
+    /// and the clip's length in seconds — `SnapChromeMediaStrip.setMediaPlayhead`.
     var onPlayhead: ((Double?, Double) -> Void)?
     /// The watched clip is loading — its length not known yet, or its player
     /// stalled — past a short grace (#1537): the bar shows its pulse.
