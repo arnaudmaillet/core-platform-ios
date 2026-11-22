@@ -77,7 +77,7 @@ final class SnapCommentsSheetSession: NSObject, UISheetPresentationControllerDel
     /// the sheet stands on.
     ///
     /// - Parameter picture: what the sheet shrinks, as the page draws it
-    ///   (`SnapFeedCell.commentsSheetPictureSize`).
+    ///   (`SnapCommentsSheetPose.commentsSheetPictureSize`).
     static func restingHeight(
         screen: CGSize, safeArea: UIEdgeInsets, picture: CGSize,
         catalogue: [CommentsSheetShape] = CommentsSheetShape.catalogue,
@@ -178,7 +178,7 @@ final class SnapCommentsSheetSession: NSObject, UISheetPresentationControllerDel
     func present(animated: Bool, handover: Handover? = nil) {
         guard let feed, let window = feed.view.window, let cell else { return sheetDidGo() }
         let resting = Self.restingHeight(
-            screen: window.bounds.size, safeArea: window.safeAreaInsets, picture: cell.commentsSheetPictureSize
+            screen: window.bounds.size, safeArea: window.safeAreaInsets, picture: cell.commentsSheetPose.commentsSheetPictureSize
         )
         // A custom detent's height leaves out the bottom safe area, which the
         // content's own height includes.
@@ -201,7 +201,7 @@ final class SnapCommentsSheetSession: NSObject, UISheetPresentationControllerDel
         sheet.traitOverrides.userInterfaceLevel = .base
         let rule = CommentsSheetDetents(
             restingHeight: resting, bottomInset: bottomInset,
-            offersExpanded: Self.offersExpandedDetent(picture: cell.commentsSheetPictureSize)
+            offersExpanded: Self.offersExpandedDetent(picture: cell.commentsSheetPose.commentsSheetPictureSize)
         )
         detentRule = rule
         if let controller = sheet.sheetPresentationController {
@@ -614,7 +614,7 @@ final class SnapCommentsSheetSession: NSObject, UISheetPresentationControllerDel
         // only a room smaller than that is the preview's.
         let ridesKeys = (content.isKeyboardUp || isKeyboardHiding) && !content.editsDetached
         let previewHeight = SnapCommentsPreview.size(
-            for: cell.commentsSheetPictureSize, screenWidth: window.bounds.width
+            for: cell.commentsSheetPose.commentsSheetPictureSize, screenWidth: window.bounds.width
         ).height
         let smallest = ridesKeys ? min(previewHeight, Self.keyboardFloor) : previewHeight
         let region = CGRect(
@@ -676,7 +676,7 @@ final class SnapCommentsSheetSession: NSObject, UISheetPresentationControllerDel
             pose = turned.pose
             if turned.caughtUp { turnaround = nil }
         }
-        cell.setCommentsSheetLayout(pose, sheetCornerRadius: sheetRadius, previewCornerRadius: SnapCommentsPreview.cornerRadius)
+        cell.commentsSheetPose.setCommentsSheetLayout(pose, sheetCornerRadius: sheetRadius, previewCornerRadius: SnapCommentsPreview.cornerRadius)
         lastPose = pose
         lastSheetRadius = sheetRadius
         followPreview(wantsPreview: previewOwnsMedia && mediaOutShare >= 1, in: window, sheetTop: top)
@@ -799,7 +799,7 @@ final class SnapCommentsSheetSession: NSObject, UISheetPresentationControllerDel
         lastSheetTop = sheetTop
         if preview == nil {
             guard wantsPreview, !isLeaving, !isPreviewUnavailable, let cell,
-                  let picture = cell.commentsSheetPictureFrame, picture.width > 0, picture.height > 0 else { return }
+                  let picture = cell.commentsSheetPose.commentsSheetPictureFrame, picture.width > 0, picture.height > 0 else { return }
             let size = SnapCommentsPreview.size(for: picture.size, screenWidth: window.bounds.width)
             guard makePreview(size: size, in: window) else {
                 isPreviewUnavailable = true
@@ -843,7 +843,7 @@ final class SnapCommentsSheetSession: NSObject, UISheetPresentationControllerDel
         } else {
             // The media is the sheet's again at once — it scales back in with
             // the sheet — as the preview fades out over it.
-            cell.setCommentsSheetMediaHidden(false)
+            cell.commentsSheetPose.setCommentsSheetMediaHidden(false)
             cell.setPausedMarkVisible(isMediaPaused, animated: false)
             UIView.animate(
                 withDuration: 0.18, delay: 0, options: [.beginFromCurrentState, .curveEaseIn, .allowUserInteraction]
@@ -987,8 +987,8 @@ final class SnapCommentsSheetSession: NSObject, UISheetPresentationControllerDel
     /// A preview for the media, over the media, which it hides — false
     /// when the media has nothing for it to draw.
     private func makePreview(size: CGSize, in window: UIWindow) -> Bool {
-        guard let cell, let picture = cell.commentsSheetPictureFrame,
-              let media = cell.makeCommentsPreviewContent() else { return false }
+        guard let cell, let picture = cell.commentsSheetPose.commentsSheetPictureFrame,
+              let media = cell.commentsSheetPose.makeCommentsPreviewContent() else { return false }
         let preview = SnapCommentsPreview(content: media)
         preview.onPan = { [weak self] pan in self?.previewPanned(pan) }
         preview.onTap = { [weak self] in self?.previewTapped() }
@@ -1013,7 +1013,7 @@ final class SnapCommentsSheetSession: NSObject, UISheetPresentationControllerDel
             preview.showStash(leading: nil)
             previewCorner = SnapCommentsPreview.lastCorner
             preview.isHidden = false
-            cell.setCommentsSheetMediaHidden(true)
+            cell.commentsSheetPose.setCommentsSheetMediaHidden(true)
         } else {
             preview.layer.removeAllAnimations()
             isPreviewHeld = false
@@ -1021,7 +1021,7 @@ final class SnapCommentsSheetSession: NSObject, UISheetPresentationControllerDel
             preview.isHidden = true
             preview.alpha = 1
             preview.transform = .identity
-            cell.setCommentsSheetMediaHidden(false)
+            cell.commentsSheetPose.setCommentsSheetMediaHidden(false)
             cell.setPausedMarkVisible(isMediaPaused, animated: false)
         }
     }
@@ -1032,7 +1032,7 @@ final class SnapCommentsSheetSession: NSObject, UISheetPresentationControllerDel
         isPreviewHeld = false
         guard let preview else { return }
         self.preview = nil
-        cell?.releaseCommentsPreviewContent(preview.content)
+        cell?.commentsSheetPose.releaseCommentsPreviewContent(preview.content)
         isMediaPaused = false
         preview.removeFromSuperview()
     }
@@ -1288,7 +1288,7 @@ final class SnapCommentsSheetSession: NSObject, UISheetPresentationControllerDel
         if reduceMotion, !standsIn, let window = cell.window {
             // A stand-in where the shrunk media stands, to fade out over the
             // page fading in: drawn from the media as it was last laid out.
-            let size = cell.commentsSheetPictureFrame?.size ?? from.region.size
+            let size = cell.commentsSheetPose.commentsSheetPictureFrame?.size ?? from.region.size
             if preview == nil, size.width > 0, size.height > 0 { _ = makePreview(size: size, in: window) }
             if let preview {
                 standInAlphaFrom = 1
@@ -1310,15 +1310,15 @@ final class SnapCommentsSheetSession: NSObject, UISheetPresentationControllerDel
         standsIn = true
         // The media under the sheet is the stand-in's to show until the sheet
         // has gone — but for a cross-fade, which shows both.
-        if !UIAccessibility.isReduceMotionEnabled { cell.setCommentsSheetMediaHidden(true) }
+        if !UIAccessibility.isReduceMotionEnabled { cell.commentsSheetPose.setCommentsSheetMediaHidden(true) }
     }
 
     /// The stand-in drawn as the media stands this frame.
     private func placeStandIn(furniture: CGFloat, cell: SnapFeedCell) {
-        guard let preview, let window = cell.commentsSheetPictureFrame,
-              let picture = cell.commentsSheetWholePictureFrame else { return }
+        guard let preview, let window = cell.commentsSheetPose.commentsSheetPictureFrame,
+              let picture = cell.commentsSheetPose.commentsSheetWholePictureFrame else { return }
         preview.standIn(
-            window: window, cornerRadius: cell.commentsSheetPictureRadius, picture: picture, furniture: furniture
+            window: window, cornerRadius: cell.commentsSheetPose.commentsSheetPictureRadius, picture: picture, furniture: furniture
         )
     }
 
@@ -1337,7 +1337,7 @@ final class SnapCommentsSheetSession: NSObject, UISheetPresentationControllerDel
         if landsByFade {
             followFade(from: landing.from, remaining: left, cell: cell)
         } else {
-            cell.setCommentsSheetLayout(pose, sheetCornerRadius: lastSheetRadius, previewCornerRadius: previewRadius)
+            cell.commentsSheetPose.setCommentsSheetLayout(pose, sheetCornerRadius: lastSheetRadius, previewCornerRadius: previewRadius)
             if standsIn {
                 if sheetHasGone {
                     handStandInBack()
@@ -1361,19 +1361,19 @@ final class SnapCommentsSheetSession: NSObject, UISheetPresentationControllerDel
         rest.region = from.region
         rest.interface = from.interface * left
         if standsIn, let preview {
-            cell.setCommentsSheetMediaHidden(false)
-            cell.setCommentsSheetLayout(rest, sheetCornerRadius: lastSheetRadius, previewCornerRadius: previewRadius)
-            cell.commentsSheetMediaFade = 1 - left
+            cell.commentsSheetPose.setCommentsSheetMediaHidden(false)
+            cell.commentsSheetPose.setCommentsSheetLayout(rest, sheetCornerRadius: lastSheetRadius, previewCornerRadius: previewRadius)
+            cell.commentsSheetPose.commentsSheetMediaFade = 1 - left
             preview.alpha = left
             return
         }
         if left > 0.5 {
-            cell.setCommentsSheetLayout(from, sheetCornerRadius: lastSheetRadius, previewCornerRadius: previewRadius)
-            cell.commentsSheetMediaFade = (left - 0.5) / 0.5
+            cell.commentsSheetPose.setCommentsSheetLayout(from, sheetCornerRadius: lastSheetRadius, previewCornerRadius: previewRadius)
+            cell.commentsSheetPose.commentsSheetMediaFade = (left - 0.5) / 0.5
         } else {
             rest.interface = from.interface * left / 0.5
-            cell.setCommentsSheetLayout(rest, sheetCornerRadius: lastSheetRadius, previewCornerRadius: previewRadius)
-            cell.commentsSheetMediaFade = 1 - left / 0.5
+            cell.commentsSheetPose.setCommentsSheetLayout(rest, sheetCornerRadius: lastSheetRadius, previewCornerRadius: previewRadius)
+            cell.commentsSheetPose.commentsSheetMediaFade = 1 - left / 0.5
         }
     }
 
@@ -1434,7 +1434,7 @@ final class SnapCommentsSheetSession: NSObject, UISheetPresentationControllerDel
         standsIn = false
         isPreviewHeld = false
         removePreview()
-        cell?.clearCommentsSheetLayout()
+        cell?.commentsSheetPose.clearCommentsSheetLayout()
         setTopBarItemsHidden(false, animated: true)
     }
 
@@ -1506,7 +1506,7 @@ final class SnapCommentsSheetSession: NSObject, UISheetPresentationControllerDel
     /// sheet to read.
     func debugBeginLanding(from pose: CommentsSheetPose, now: CFTimeInterval, duration: CFTimeInterval) {
         lastPose = pose
-        cell?.setCommentsSheetLayout(pose, sheetCornerRadius: 0, previewCornerRadius: SnapCommentsPreview.cornerRadius)
+        cell?.commentsSheetPose.setCommentsSheetLayout(pose, sheetCornerRadius: 0, previewCornerRadius: SnapCommentsPreview.cornerRadius)
         beginLanding(duration: duration, now: now)
     }
 

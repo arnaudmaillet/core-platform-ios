@@ -44,7 +44,7 @@ struct CommentsSheetRestingHeightTests {
 
     /// The picture the sheet is handed: the page's picture, cut.
     private func cut(_ width: CGFloat, _ height: CGFloat) -> CGSize {
-        SnapFeedCell.commentsSheetCut(of: CGRect(x: 0, y: 0, width: width, height: height)).size
+        CommentsSheetShape.commentsSheetCut(of: CGRect(x: 0, y: 0, width: width, height: height)).size
     }
 
     // MARK: - The four heights, on a 17 Pro Max

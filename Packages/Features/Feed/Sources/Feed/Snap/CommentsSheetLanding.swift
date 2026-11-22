@@ -1,7 +1,7 @@
 import UIKit
 
 /// The page under the comments sheet, as one value (#2287 § 4): what
-/// `SnapFeedCell.setCommentsSheetLayout` draws — how far the media has gone
+/// `SnapCommentsSheetPose.setCommentsSheetLayout` draws — how far the media has gone
 /// towards the sheet, the room it shrinks into, its scale-out, its corners'
 /// way to the preview's — and how far the page's interface has gone.
 struct CommentsSheetPose: Equatable {
@@ -21,7 +21,7 @@ struct CommentsSheetPose: Equatable {
     /// The page at rest, the room left to whoever draws it.
     static let restingPose = CommentsSheetPose(progress: 0, region: .zero, out: 0, towardsPreview: 0, interface: 0)
 
-    /// The page at rest: what `SnapFeedCell.clearCommentsSheetLayout` leaves.
+    /// The page at rest: what `SnapCommentsSheetPose.clearCommentsSheetLayout` leaves.
     var isAtRest: Bool { progress <= 0.0005 && out <= 0.0005 && interface <= 0.0005 }
 
     /// A new opening TURNING AROUND from this pose (#2287 § 4): a sheet
