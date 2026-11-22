@@ -270,7 +270,6 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         shareTargeting = dependencies.shareTargeting
         entities = dependencies.entities
         discovery = dependencies.discovery
-        localCache = dependencies.localCache
         postDrafts = dependencies.postDrafts
         soundProvider = dependencies.soundProvider
         useSound = dependencies.useSound
@@ -478,7 +477,6 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     private let postCounters: (any PostCounterReading)?
     private let discovery: (any FeedProviding)?
     private let shareTargeting: (any ShareTargeting)?
-    private let localCache: FeedLocalCache?
 
     /// Whether `presenter` may open a post now: its stack is at rest and it
     /// is (inside) the screen on top. What For You and the post list check
@@ -1246,27 +1244,6 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         )
     }
 
-    /// Brings the dock back after a flight that hid it.
-    ///
-    /// ⚠️ Called from EVERY close-out, not just the completed return. A flight
-    /// ends three ways and only one is `onSourceReturned`: the push can be caught
-    /// and reversed mid-air (`onPresentationCancelled`, where the destination
-    /// never showed), and the grab can be released short of the threshold
-    /// (`onDismissalCancelled`, where it stays up and the bar must stay down).
-    /// Hanging the restore on one of the three is how a viewer ends up on their
-    /// profile with no dock and no gesture that brings it back.
-    ///
-    /// A local closure was the first shape of this and it CRASHED the Swift
-    /// frontend — captured into the flight's own callbacks, it segfaulted the
-    /// compiler rather than failing to typecheck. A method is not a workaround
-    /// here; it is the thing that compiles.
-    ///
-    /// ⚠️ The refusal below asks `concealsAppTabBar`, NOT conformance. It used
-    /// to test `is any ZoomTransitionDestination` and read that as "another
-    /// full-bleed surface is underneath, whose own mechanic owns the dock". The
-    /// place page conforms without covering anything, so a feed popping onto it
-    /// took this early return and left the viewer on a perfectly ordinary
-    /// screen with no dock.
     /// The way back for a post the viewer PAGED onto that has nothing to fly.
     ///
     /// ⚠️ THE PRESENTATION WAS CHOSEN AT THE TAP. A tile opens with a hero;
@@ -1372,6 +1349,28 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         #endif
     }
 
+    /// Brings the dock back after a flight that hid it.
+    ///
+    /// ⚠️ Called from EVERY close-out, not just the completed return. A flight
+    /// ends three ways and only one is `onSourceReturned`: the push can be caught
+    /// and reversed mid-air (`onPresentationCancelled`, where the destination
+    /// never showed), and the grab can be released short of the threshold
+    /// (`onDismissalCancelled`, where it stays up and the bar must stay down).
+    /// Hanging the restore on one of the three is how a viewer ends up on their
+    /// profile with no dock and no gesture that brings it back.
+    ///
+    /// A local closure was the first shape of this and it CRASHED the Swift
+    /// frontend — captured into the flight's own callbacks, it segfaulted the
+    /// compiler rather than failing to typecheck. A method is not a workaround
+    /// here; it is the thing that compiles.
+    ///
+    /// ⚠️ The refusal below asks `concealsAppTabBar`, NOT conformance. It used
+    /// to test `is any ZoomTransitionDestination` and read that as "another
+    /// full-bleed surface is underneath, whose own mechanic owns the dock". The
+    /// place page conforms without covering anything, so a feed popping onto it
+    /// took this early return and left the viewer on a perfectly ordinary
+    /// screen with no dock.
+    ///
     /// A BACKSTOP that shows the dock once the screen landed on is the one
     /// on top — a completed return, a reversed opening. Through UIKit, one
     /// turn after the callback it is called from (UIKit's own
