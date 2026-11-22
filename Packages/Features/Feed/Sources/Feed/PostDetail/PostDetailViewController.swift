@@ -383,22 +383,12 @@ final class PostDetailViewController: UIViewController {
     /// binds to its top-level parent — comment.v1's two-depth contract)
     /// plus the tapped author's name for the placeholder.
     private var replyTarget: (parentID: String, name: String)?
-    /// The viewer's point balance, spent by the compose bar's boost button.
-    /// Injected (one instance app-wide — the map's badge watches it); nil
-    /// leaves the button visible but inert.
+    /// The viewer's point balance, handed to the composer's boost.
     private let wallet: (any WalletStaking)?
-    /// Keeps the compose bar's receipt honest when the SAME post is boosted
-    /// through another surface (a text page shows this bar and the snap
-    /// screen's spend path at once). It stops observing when it goes, with
-    /// this controller: a nonisolated deinit has nothing to undo.
-    private var walletObservation: StoreObservation?
-    /// The session's undoable spend through THIS bar. Its window is this
-    /// controller's lifetime, which IS the product rule: the embedded
-    /// comments panel is torn down when the page changes, so moving on
-    /// finalizes the spend.
-    private var sessionBoostAmount = 0
-    /// The stake toast up for that spend (#957), closed with the window.
-    private weak var stakeToast: ToastView?
+    /// The composer's boost: the stake, its toast, the session undo and the
+    /// wallet's observation (`PostDetailComposerBoost`). Built on first use;
+    /// building it does nothing else.
+    private(set) lazy var boost = PostDetailComposerBoost(host: self, wallet: wallet)
 
     init(
         viewModel: PostDetailViewModel,
@@ -428,27 +418,6 @@ final class PostDetailViewController: UIViewController {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    /// Takes back everything this bar spent while the screen stayed up — the
-    /// menu's Undo entry and the stake toast's (#957).
-    private func undoSessionBoost() {
-        guard let wallet, sessionBoostAmount > 0, let postID = viewModel.postID,
-              let result = wallet.undoBoost(targetID: postID.rawValue, amount: sessionBoostAmount)
-        else { return }
-        let refunded = sessionBoostAmount
-        sessionBoostAmount = 0
-        // Taken back: the toast closing must not send it.
-        _ = stakeBurst.next()
-        // Turning off is silent (#1881).
-        composeBar.setBoostTotal(result.targetTotal, animated: true)
-        composeBar.playBoostRefund(amount: refunded)
-        refreshComposeBarBoostState()
-        StakeMenu.closeUndoToast(stakeToast)
-    }
-
-    /// Leaving the post commits its likes now, rather than 10 s after the
-    /// last tap (#676) — unless its stake toast is still up: the toast
-    /// follows the screen on top, its Undo live, and sends the burst when
-    /// it ends (#1375, the owner 2026-10-18).
     /// Leaving the post's comments — popped, dismissed, or inside a page or
     /// sheet that is — keeps a locked or paused voice comment for the
     /// session (#2309, the conversation's rule, #2102): opened again, it
@@ -463,12 +432,8 @@ final class PostDetailViewController: UIViewController {
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
-        let toastIsUp = stakeToast.map { !$0.isDismissing } ?? false
-        if !toastIsUp, let postID = viewModel.postID { wallet?.commitStakes(on: postID.rawValue) }
+        boost.commitUnlessToastIsUp()
     }
-
-    /// Numbers this screen's stake toasts (`StakeMenu.Burst`).
-    private let stakeBurst = StakeMenu.Burst()
 
     /// Rows re-measure on a genuine WIDTH change — rotation, iPad size
     /// classes. Nothing here touches the empty page's HEIGHT: that is
@@ -725,24 +690,6 @@ final class PostDetailViewController: UIViewController {
         }
     }
 
-    /// Pushes the wallet's current answer — affordability and the session
-    /// tally — into the bar's boost button: the enable state and the menu
-    /// it will build on its next long-press both derive from it.
-    private func refreshComposeBarBoostState() {
-        guard let wallet else { return }
-        composeBar.setBoostContext(
-            balance: wallet.stakeableBalance, undoableAmount: sessionBoostAmount, stakeShots: wallet.stakeShots
-        )
-    }
-
-    /// The boost button's opening face: this viewer's spend on this post so
-    /// far, from the wallet's ledger — nothing on a draft, which is not a post.
-    private func refreshBoostTotal() {
-        guard let wallet else { return }
-        composeBar.setBoostTotal(viewModel.postID.map { wallet.boostTotal(forTarget: $0.rawValue) } ?? 0)
-        refreshComposeBarBoostState()
-    }
-
     // MARK: - Draft (the "+" menu's Text Post)
 
     /// Where a published draft is handed on: the Text Post page, which keeps
@@ -826,7 +773,7 @@ final class PostDetailViewController: UIViewController {
         composeBar.sendAccessibilityLabel = nil
         composeBar.visibilityMenu = nil
         composeBar.railFace = publishedRailFace
-        refreshBoostTotal()
+        boost.refreshBoostTotal()
         onPostPublished?(entry)
         // A post now: it has its two tabs and opens on Popular, the caption
         // first (#2287, no threshold) — the draft had none. Whatever the
@@ -857,7 +804,7 @@ final class PostDetailViewController: UIViewController {
     }
 
     /// The text page family's notices are alerts — see the conversation's.
-    private func presentNotice(_ title: String, _ message: String) {
+    func presentNotice(_ title: String, _ message: String) {
         guard presentedViewController == nil else { return }
         let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "OK", style: .default))
@@ -884,73 +831,7 @@ final class PostDetailViewController: UIViewController {
         // The reply state's natural exit: keyboard retired over an empty
         // field — later compositions start top-level again.
         composeBar.onIdleDismiss = { [weak self] in self?.clearReplyState() }
-        // The bar's boost button: wallet verdict here, theatre back on the
-        // bar — the snap rail's exact contract, on the comments surface.
-        // Debit-first, so the animation never promises a state the balance
-        // doesn't have. Nil wallet (an unwired host) leaves the tap inert.
-        composeBar.onBoost = { [weak self] spend in
-            guard let self else { return }
-            // A guest signs up first; the boost then lands as asked.
-            MemberGates.perform(.like, from: self) { [weak self] in
-                // A sign-up that finished after the post went unavailable
-                // (#1404) has nothing left to boost.
-                guard let self, self.showsPostActions, let wallet = self.wallet else { return }
-                // A DRAFT is not a post yet, and a boost has nothing to land on —
-                // said, rather than spent against an id that does not exist.
-                guard let postID = self.viewModel.postID else {
-                    return self.presentNotice("Boost", "You can boost your post once it's published.")
-                }
-                switch wallet.stake(spend, on: postID.rawValue) {
-                case .boosted(_, let targetTotal, let spent):
-                    // `spent`, never the request — a near-cap boost is clamped.
-                    self.sessionBoostAmount += spent
-                    Haptics.play(.commit)
-                    // Receipt before theatre — the button flips to (or grows)
-                    // its number face, then the "+N" float rises off it.
-                    self.composeBar.setBoostTotal(targetTotal, animated: true)
-                    self.composeBar.playBoostConfirmation(amount: spent)
-                    // The burst so far, with Undo for all of it (#957) — until
-                    // the toast ends, wherever it has followed to (#1375).
-                    let burst = self.stakeBurst
-                    let generation = burst.next()
-                    let amount = self.sessionBoostAmount
-                    let key = postID.rawValue
-                    self.stakeToast = StakeMenu.undoToast(
-                        staked: amount, on: key, from: self,
-                        commit: { [weak self] in
-                            guard burst.isCurrent(generation) else { return }
-                            wallet.commitStakes(on: key)
-                            self?.sessionBoostAmount = 0
-                        },
-                        undo: { [weak self] in
-                            if let self {
-                                self.undoSessionBoost()
-                            } else {
-                                _ = wallet.undoBoost(targetID: key, amount: amount)
-                            }
-                        }
-                    )
-                case .insufficientBalance, .targetCapReached, .noShotsLeft, .shotDoesNotFit:
-                    Haptics.play(.error)
-                    self.composeBar.playBoostDenied()
-                }
-                self.refreshComposeBarBoostState()
-            }
-        }
-        // The menu's Undo entry: takes back everything this bar spent while
-        // the screen stayed up. Session-scoped by construction — the tally
-        // lives on this controller, and this controller dies with the visit.
-        composeBar.onBoostUndo = { [weak self] in self?.undoSessionBoost() }
-        // The button's opening face: this viewer's spend so far on this
-        // post, from the wallet's ledger — a boosted post greets its
-        // booster with the receipt, not the invitation. The observer keeps
-        // it honest against spends made through any other surface.
-        if let wallet {
-            refreshBoostTotal()
-            walletObservation = wallet.changes.observeOnMain { [weak self] in
-                self?.refreshBoostTotal()
-            }
-        }
+        boost.install()
         // The engaged footer band (hidden outside the engagement): below
         // the bar, above the stream.
         composerBackdrop.isHidden = true
@@ -1281,7 +1162,7 @@ final class PostDetailViewController: UIViewController {
     /// that turns unavailable while shown (its revalidation answers
     /// not-found) loses them where it stands, as one that opens unavailable
     /// never shows them.
-    private var showsPostActions = true
+    private(set) var showsPostActions = true
 
     private func setPostActionsShown(_ shown: Bool) {
         guard shown != showsPostActions else { return }
