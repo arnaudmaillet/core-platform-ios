@@ -25,7 +25,7 @@ typealias ProfileGridPageFactory = (_ style: PostGridPageStyle, _ savesPosts: Bo
 final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAccessoryHosting, ProfileRouteAnswering {
     /// For You's grid page (#1273, epic #1269): the profile's pages and its
     /// media gallery are For You's, so every tile behaves as For You's does.
-    private let makeGridPage: ProfileGridPageFactory
+    let makeGridPage: ProfileGridPageFactory
 
     /// Internal (not private) only for the +QA hooks.
     let viewModel: ProfileViewModel
@@ -37,14 +37,14 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     /// Handed the profile this screen holds, so the editor opens on it
     /// instead of fetching it again (charter P7).
     private let makeEditViewController: ((UserProfile?, @escaping () -> Void) -> UIViewController)?
-    /// The origin said this profile is the viewer's own (`presumesOtherProfile`).
+    /// The origin said this profile is the viewer's own.
     private let identityStubIsSelf: Bool
     /// Builds the account settings screen (own profile only, the gear's
     /// destination). Nil for other users.
     private let makeSettingsViewController: (() -> UIViewController)?
     /// Builds the reusable profile-switcher menu (own profile only). Nil for
     /// other users — switching is a viewer affordance.
-    private let switcherFactory: ProfileSwitcherMenuFactory?
+    let switcherFactory: ProfileSwitcherMenuFactory?
     /// Builds the followers / following screen for a subject and a starting
     /// tab. Nil when the app wasn't wired with a relationships repository, in
     /// which case the counters stay inert rather than opening an empty screen.
@@ -54,13 +54,14 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
 
     /// Retained for the share sheet, which builds its own QR card (and a
     /// throwaway one to rasterize) and needs the same avatar cache.
-    private let imagePipeline: ImagePipeline
+    let imagePipeline: ImagePipeline
     /// The player pool, kept for the media gallery "View all" pushes (#631).
     private let videoPlayback: VideoPlaybackController?
-    /// That gallery while it is up, so the pages landing reach it.
-    private weak var mediaGallery: ProfileMediaGalleryViewController?
+    /// Opening a post, and the media gallery "View all" pushes
+    /// (`ProfilePostOpening`, #2522).
+    private(set) lazy var postOpening = ProfilePostOpening(host: self)
     /// Supplies the share sheet's quick-send row; nil hides it.
-    private let shareTargeting: (any ProfileShareTargeting)?
+    let shareTargeting: (any ProfileShareTargeting)?
     /// Internal (not private) only for the +QA hooks.
     let headerView: ProfileHeaderView
     /// Internal (not private) only for the +QA hooks.
@@ -74,19 +75,17 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     var staking: PostCardStaking? {
         didSet { galleryPager.staking = staking }
     }
-    /// Which pages this profile has. The viewer's own carries Saved and Liked;
-    /// everyone else's does not, because neither pile is anybody else's to see.
-    /// The tabs on show: Posts, and each other source once it has
-    /// something in it (#742). One tab is no selector at all.
-    private var tabs: [ProfileTab]
+    /// The tabs on show at construction — Posts alone; `ProfileTabPages`
+    /// owns them from there.
+    private let initialTabs: [ProfileTab]
     /// Every tab this profile can have.
-    private let allTabs: [ProfileTab]
+    let allTabs: [ProfileTab]
     /// The Channels tab's model (#2232): the channels this profile owns,
     /// read through Chat's seam. Nil with the channels off — no tab at all.
     /// Internal for tests.
     let channels: ProfileChannelsViewModel?
     /// The new channel's sheet, for the own tab's "Create a Channel" (#2232).
-    private let makeChannelCreation: (@MainActor () -> UIViewController?)?
+    let makeChannelCreation: (@MainActor () -> UIViewController?)?
     /// The strip's home when the tab bar is under this screen. Nil on a pushed
     /// profile, where the bottom toolbar carries it instead.
     ///
@@ -103,34 +102,14 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     /// The strip's toolbar item, on a pushed profile (#728) — the search
     /// results' too (#881). Internal for tests.
     var selectorItem: UIBarButtonItem? { selector.item }
-    /// First-load guarantee: while the skeleton screen is up, the scroll
-    /// content must fill the viewport, so the gallery's shimmer rows reach
-    /// the screen bottom from the very first layout pass. The pager's own
-    /// fitted-height pin sits at `.defaultHigh` (750); this inequality
-    /// outranks it, and the pager is the only stretchable link in the
-    /// content chain — so it, not the header, absorbs the remainder. Without
-    /// this, the first frames of a push can catch the pager at its floor
-    /// (the fitted height converges only after the collection's first
-    /// real-width pass), cropping the skeleton to a row and a half.
-    private var skeletonViewportFill: NSLayoutConstraint?
     private var didSubordinatePagerToPop = false
     #if DEBUG
-    /// Launch-argument hooks are one-shot; see `viewDidAppear`.
-    private var hasArmedDebugHooks = false
-    #endif
-    #if DEBUG
-    /// Latches the `-profile-map-pin-demo` tap to a single firing.
-    private var didTapMapPinForQA = false
-    /// Latches the `-profile-relationships` QA push to a single firing.
-    private var didPushRelationshipsForQA = false
-    /// Mute-change toasts shown (#1951): their ARRIVAL, which a test cannot
-    /// miss, where their presence on the bar lasts only a few seconds.
-    private(set) var debugMuteToastsShown = 0
-    /// The Undo toasts this screen has shown, and the latest — counted at
-    /// their arrival: on a starved runner one can come and go between two
-    /// looks (#1951). Tests.
-    private(set) var debugUndoToastsShown = 0
-    private(set) weak var debugLastUndoToast: ToastView?
+    /// The launch-argument hooks (`ProfileDebugHooks`, #2522), armed once
+    /// from `viewDidAppear`.
+    private(set) lazy var debugHooks = ProfileDebugHooks(host: self)
+    /// Whether this profile has an editor, and settings: the viewer's own.
+    var hasEditor: Bool { makeEditViewController != nil }
+    var hasSettings: Bool { makeSettingsViewController != nil }
     #endif
 
     /// The own-profile settings gear; pushes Settings (`SettingsFeatureBuilding`).
@@ -204,7 +183,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     /// Stashed so `viewWillAppear` can bind the bar from current state before
     /// the push animation starts, whenever the data beat the transition; a
     /// change once the view is up rides the transition it lands in.
-    private var currentHandle: String? {
+    private(set) var currentHandle: String? {
         didSet {
             guard currentHandle != oldValue, isViewLoaded else { return }
             alongsideTransition { screen, _ in screen.applyBarTitle() }
@@ -217,7 +196,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     /// The phase last rendered.
     private var renderedPhase: ProfileViewModel.Phase = .loading
     /// The gallery as last rendered.
-    private var lastGallerySnapshot: ProfileViewModel.GallerySnapshot?
+    private(set) var lastGallerySnapshot: ProfileViewModel.GallerySnapshot?
     #if DEBUG
     private var hasLoggedFirstFrame = false
     fileprivate var lastTracedReadiness = ""
@@ -229,44 +208,11 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     /// cannot work it out for itself (a nav root inside a tab bar and a pushed
     /// screen look identical from in here).
     private let trayPlacement: ProfileTrayPlacement
-    /// True between an account switch and the incoming profile landing. While
-    /// set, the skeleton is withheld and updates cross-dissolve.
-    private var isSwitchingProfile = false
     /// The app's viewer channel (#2376), whose profile switches this screen
     /// follows, whichever switcher made them. Nil (tests): none is heard.
-    private let viewerEvents: ViewerEvents?
-    /// The switch subscription, for this screen's lifetime: it ends with it.
-    private var activeProfileSubscription: ViewerEventSubscription?
-
-    private enum Metrics {
-        /// Between the identity block and the selector.
-        ///
-        /// Deliberately TIGHTER than the gap below it. The selector belongs to
-        /// the profile it sits under — same margins, same column — and what it
-        /// needs separating from is the content it filters. Equal gaps made it
-        /// read as a third thing floating between two others.
-        static let selectorTopGap: CGFloat = 10
-        /// How long the hand-over between the two selectors takes.
-        ///
-        /// Short enough to feel like a state change rather than a performance —
-        /// this fires mid-scroll, with the viewer's attention on the content
-        /// coming up, not on the chrome.
-        static let dockTransition: TimeInterval = 0.26
-        /// How small the leaving selector shrinks to, and how small the arriving
-        /// one starts.
-        ///
-        /// Shallow on purpose. A deep zoom reads as an object flying towards the
-        /// viewer; this is one control changing places, and at 0.88 the scale is
-        /// felt as crispness rather than seen as travel.
-        static let dockZoomScale: CGFloat = 0.88
-        /// How long the outgoing profile takes to dissolve into the new one.
-        static let switchCrossfade: TimeInterval = 0.28
-        /// The bottom tray's own height.
-        static let inlineTrayHeight = InlineFilterTrayView.height
-        /// Between the tray and the bar beneath it, so the two glass rows read
-        /// as separate objects rather than one stack.
-        static let inlineTraySpacing = InlineFilterTrayView.spacingBelow
-    }
+    let viewerEvents: ViewerEvents?
+    /// The account switcher on the own profile's name (`ProfileAccountSwitcher`, #2522).
+    private(set) lazy var accountSwitcher = ProfileAccountSwitcher(host: self)
 
     init(
         viewModel: ProfileViewModel,
@@ -317,7 +263,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         // Posts alone until the other sources answer (#742): a source shows
         // up only with something in it.
         let shown = allTabs.filter { $0 == .format(.activity) }
-        self.tabs = shown
+        self.initialTabs = shown
         let savesPosts = viewModel.bookmarks != nil
         // A tab's page is built the first time it is shown (#2125).
         // The Channels page draws its model (#2232); "Create a Channel" asks
@@ -398,10 +344,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     override func viewDidLoad() {
         // The hero page's layout, bar dress and travel (#1655).
         super.viewDidLoad()
-        // Kept on this screen, so it ends with it — no `deinit` to remember.
-        activeProfileSubscription = viewerEvents?.onActiveProfileChange { [weak self] id in
-            self?.activeProfileSwitched(to: id)
-        }
+        accountSwitcher.subscribe()
         configureNavigationBar()
         // Compose the bar before first layout so the push animation carries a
         // finished toolbar (the title and action slot fill in when the data
@@ -447,7 +390,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
             HeroScreenCost.measure("landing.mapPin") {
                 // The rails' rows keep the menu open (`.keepsMenuPresented`):
                 // their checkmarks follow in place.
-                self?.refreshVisibleMapRows()
+                self?.relationActions.refreshVisibleMapRows()
                 self?.noteLandingMilestone()
             }
         }
@@ -457,7 +400,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
             self?.applyHeaderAction()
         }
         // The tray's bell opens the scoped Mute menu (#689, #2302).
-        headerView.setBellMenu(makeMuteMenu())
+        headerView.setBellMenu(relationActions.makeMuteMenu())
         headerView.onFollowTapped = { [weak self] in
             guard let self else { return }
             MemberGates.perform(.follow(handle: viewModel.profile?.handle), from: self) { [weak self] in
@@ -483,31 +426,21 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         headerView.onRelationshipsTapped = { [weak self] direction in
             self?.pushRelationships(direction)
         }
-        configureMoreMenu()
+        relationActions.configureMoreMenu()
         viewModel.onActionResult = { [weak self] result in
-            self?.render(result)
+            self?.relationActions.render(result)
         }
         // Deleting a post, muting, restricting: done at once on screen, with
         // Undo in the toast; sent when its countdown runs out (#957).
         viewModel.onUndoable = { [weak self] action in
-            guard let self else { return }
-            let toast = Feedback.undoable(
-                action.message, symbol: action.symbol, from: self,
-                commit: action.commit, undo: action.undo
-            )
-            #if DEBUG
-            debugUndoToastsShown += 1
-            debugLastUndoToast = toast
-            #else
-            _ = toast
-            #endif
+            self?.relationActions.presentUndoable(action)
         }
         viewModel.onDismissRequested = { [weak self] in
-            self?.leaveAfterBlock()
+            self?.relationActions.leaveAfterBlock()
         }
         viewModel.onLoadSettled = { [weak self] in
             HeroScreenCost.measure("landing.settled") {
-                self?.isSwitchingProfile = false
+                self?.accountSwitcher.isSwitchingProfile = false
                 // A refresh that brought nothing new publishes no phase, so
                 // the spinner stops here — where every load ends, however it
                 // ended.
@@ -517,22 +450,22 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         // A gallery that landed before this screen bound: its tabs now.
         if let landed = viewModel.publishedGallery {
             lastGallerySnapshot = landed
-            showTabs(for: landed)
+            tabPages.showTabs(for: landed)
         }
         viewModel.onGalleryChange = { [weak self] snapshot in
             self?.lastGallerySnapshot = snapshot
-            self?.historyChanged()
-            self?.showTabs(for: snapshot)
+            self?.historySelectMode.historyChanged()
+            self?.tabPages.showTabs(for: snapshot)
             HeroScreenCost.measure("landing.gallery") { self?.galleryPager.render(snapshot) }
             // The media gallery "View all" pushed, if it is up, grows with
             // the pages as they land (#631).
-            self?.mediaGallery?.render(snapshot.media)
+            self?.postOpening.mediaGallery?.render(snapshot.media)
             self?.noteLandingMilestone()
             #if DEBUG
             self?.auditPostMenu(snapshot)
             #endif
         }
-        bindChannels()
+        tabPages.bindChannels()
         galleryPager.onItemTapped = { [weak self] post, stream in
             self?.openGalleryPost(post, stream: stream, showingComments: false)
         }
@@ -560,7 +493,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         galleryPager.onViewAllTapped = { [weak self] in self?.pushMediaGallery() }
         galleryPager.authorMenuActions = { [weak self] context, tab in
             guard let self else { return [] }
-            var actions = galleryMenuActions(for: context)
+            var actions = relationActions.galleryMenuActions(for: context)
             // History's own row (#1344): out of the history, not the post.
             if tab == .history {
                 let id = context.post.id
@@ -572,12 +505,12 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         // selectors; a tab tap records it and pages.
         galleryPager.onPageSettled = { [weak self] tab in
             guard let self else { return }
-            self.adoptTab(tab)
+            self.tabPages.adoptTab(tab)
             if let index = self.tabs.firstIndex(of: tab) {
-                self.mirrorSelection(to: index)
+                self.tabPages.mirrorSelection(to: index)
             }
         }
-        configureFilterTray()
+        tabPages.configureFilterTray()
         // Mirror the (possibly stub-seeded) relationship into the header's
         // tray, so Message visibility agrees with the toolbar from the start.
         applyHeaderAction()
@@ -795,477 +728,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
             }
         }
         #if DEBUG
-        // ARMED ONCE. `viewDidAppear` runs again when a pushed post is dismissed,
-        // and re-running these drove a second scroll on top of the background
-        // reveal, undoing it moments before any check could look. Every "the
-        // reveal was reverted" reading traced back to here, not to the product.
-        defer { hasArmedDebugHooks = true }
-        if hasArmedDebugHooks { return }
-        // Dev convenience: `-profile-overscroll` parks the scroll view in the
-        // pulled-down region (no touch injection in the sim), so the banner's
-        // stretch-over-overscroll behavior can be screenshotted.
-        if LaunchArgument.profileOverscroll.isPassed() {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-                self?.galleryPager.debugOverscroll(by: 140)
-            }
-        }
-        // Dev convenience: `-profile-layout-audit` prints the resolved header
-        // view tree (frames included) once content has settled — numeric
-        // spacing audits without pixel-measuring screenshots.
-        if LaunchArgument.profileLayoutAudit.isPassed() {
-            // The 1.5s is kept as a floor (the settle beat the audit was
-            // calibrated on), but the print now WAITS FOR THE PROFILE: on a slow
-            // run the fixed delay dumped the redacted skeleton header and the
-            // spacing audit measured bones, reading like a real layout.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-                QAWait.until("profile-layout-audit", { [weak self] in
-                    self?.viewModel.profile != nil
-                }) { [weak self] in
-                    guard let self else { return }
-                    // The content render lands in THIS turn's layout pass at
-                    // the earliest; flush it so the frames are the loaded ones.
-                    self.view.layoutIfNeeded()
-                    let description = self.headerView
-                        .perform(Selector(("recursiveDescription")))?
-                        .takeUnretainedValue()
-                    print("PROFILE-LAYOUT-AUDIT\n\(description.map(String.init(describing:)) ?? "unavailable")")
-                }
-            }
-        }
-        // Dev convenience: `-profile-ink-audit` prints the WCAG contrast of
-        // the name and the handle against the pixels actually rendered behind
-        // them (see `ProfileHeaderView.debugIdentityContrast`) — once the
-        // profile AND its banner picture are in, since the picture decides
-        // both the shape and what the type stands on.
-        if LaunchArgument.profileInkAudit.isPassed() {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-                QAWait.until("profile-ink-audit", { [weak self] in
-                    guard let self, self.viewModel.profile != nil else { return false }
-                    return self.headerView.bannerFormat == .none || self.headerView.debugBannerHasPicture
-                }) { [weak self] in
-                    guard let self else { return }
-                    // Past the banner's 0.25s dissolve.
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                        guard let self else { return }
-                        self.view.layoutIfNeeded()
-                        let style = self.traitCollection.userInterfaceStyle == .dark ? "dark" : "light"
-                        guard let contrast = self.headerView.debugIdentityContrast() else {
-                            print("PROFILE-INK-AUDIT unavailable")
-                            return
-                        }
-                        print(
-                            "PROFILE-INK-AUDIT format=\(self.headerView.bannerFormat) style=\(style) "
-                                + "tones=\(self.headerView.debugInkTones) "
-                                + "name=[\(contrast.name)] handle=[\(contrast.handle)] "
-                                + String(format: "blur-bake=%.1fms %dKB", self.headerView.debugBlurBakeMilliseconds,
-                                         self.headerView.debugBlurBakeBytes / 1024)
-                                + " " + (self.headerView.debugBodyContrast() ?? [])
-                                    .map { "\($0.0)=[\($0.1)]" }.joined(separator: " ")
-                        )
-                    }
-                }
-            }
-        }
-        // Dev convenience: `-profile-menu-audit` prints the "..." menu the
-        // current state resolves to, and fires the copy action so the toast is
-        // screenshottable. The menu is the one thing on this screen no launch
-        // argument can otherwise reach — it opens on a tap, and the sim has no
-        // touch injection.
-        if LaunchArgument.profileMenuAudit.isPassed() {
-            // Waits for the RELATIONSHIP READ, not just the clock: the menu's
-            // moderation group and its Block/Unblock title are both decided by
-            // it, and with `-profile-relationship-delay` (3s) the fixed 1.5s
-            // printed `canModerate=false isBlocked=false` — the pre-read menu,
-            // reported as the answer. The read is in when this is someone
-            // else's profile we can moderate, or the subject is known to be the
-            // viewer (own profile, or a routed one the read said is self).
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-                QAWait.until("profile-menu-audit", { [weak self] in
-                    guard let self else { return false }
-                    return self.viewModel.canModerate
-                        || self.viewModel.relationshipsSubject?.isSelf == true
-                }) { [weak self] in
-                    guard let self else { return }
-                    let titles = self.moreMenuElements().flatMap { element -> [String] in
-                        guard let group = element as? UIMenu else { return [element.title] }
-                        return ["—"] + group.children.map(\.title)
-                    }
-                    print("PROFILE-MENU-AUDIT canModerate=\(self.viewModel.canModerate) "
-                        + "isBlocked=\(self.viewModel.isBlocked) items=\(titles)")
-                    self.copyProfileLink()
-                }
-            }
-        }
-        let arguments = ProcessInfo.processInfo.arguments
-        // Dev convenience: `-profile-follow-tap` fires the nav-bar Follow /
-        // Following item through its own primary action ~2s in, and prints the
-        // state either side. A bar item takes no simulated touch, so this is
-        // how the item's wiring is verified at all.
-        // Dev convenience: `-profile-edit-privacy` pushes the editor and then
-        // its Privacy row, which sits behind two taps the simulator can't
-        // deliver.
-        if LaunchArgument.profileEditPrivacy.isPassed(in: arguments) {
-            // Each step waits for the state the next one reads. The push needs
-            // a loaded profile (the editor is built from it) and a stack at
-            // rest with this screen on top; the Privacy row needs the editor
-            // to have LANDED. The fixed 1s between them used to reach for
-            // `topViewController as? EditProfileViewController` while the
-            // push was still in flight — or had never started — and no-op.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-                guard let self else { return }
-                guard makeEditViewController != nil else {
-                    QAWait.fail("profile-edit-privacy", "this profile has no editor (not the viewer's own)")
-                    return
-                }
-                QAWait.until("profile-edit-privacy push", { [weak self] in
-                    guard let self, let navigation = self.navigationController else { return false }
-                    return self.viewModel.profile != nil
-                        && navigation.topViewController === self
-                        && navigation.transitionCoordinator == nil
-                }) { [weak self] in
-                    guard let self else { return }
-                    self.pushEditProfile()
-                    QAWait.until("profile-edit-privacy open", { [weak self] in
-                        guard let navigation = self?.navigationController else { return false }
-                        return navigation.topViewController is EditProfileViewController
-                            && navigation.transitionCoordinator == nil
-                    }) { [weak self] in
-                        self?.qaOpenPrivacy()
-                    }
-                }
-            }
-        }
-        if LaunchArgument.profileFollowTap.isPassed(in: arguments) {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-                self?.qaTapFollowItem()
-            }
-        }
-        // Dev convenience: `-open-settings [section]` pushes Settings once this
-        // screen is at rest on top, then the named section (a
-        // `SettingsSection` raw value: account, security, privacy, legal…).
-        // The gear is a bar item, which takes no simulated touch.
-        if LaunchArgument.openSettings.isPassed(in: arguments) {
-            let sectionName = LaunchArgument.openSettings.value(in: arguments).flatMap { $0.hasPrefix("-") ? nil : $0 }
-            QAWait.until("open-settings push", { [weak self] in
-                guard let self, let navigation = self.navigationController else { return false }
-                return navigation.topViewController === self && navigation.transitionCoordinator == nil
-            }) { [weak self] in
-                guard let self else { return }
-                guard self.makeSettingsViewController != nil else {
-                    QAWait.fail("open-settings", "this profile has no settings (not the viewer's own)")
-                    return
-                }
-                self.pushSettings()
-                guard let sectionName else { return }
-                QAWait.until("open-settings section", { [weak self] in
-                    guard let navigation = self?.navigationController else { return false }
-                    return navigation.topViewController is any SettingsSectionOpening
-                        && navigation.transitionCoordinator == nil
-                }) { [weak self] in
-                    let settings = self?.navigationController?.topViewController as? any SettingsSectionOpening
-                    if settings?.openSection(named: sectionName) == false {
-                        QAWait.fail("open-settings", "unknown section \(sectionName)")
-                    }
-                }
-            }
-        }
-        // Dev convenience: `-profile-relationships [following]` opens the
-        // followers / following screen once the profile has loaded — it lives
-        // behind a tap on the counter row, which the simulator can't deliver.
-        // Combine with `-profile-relationships-tab` / `-...-action` (read by
-        // the destination) to drive the tab switch and a row's button.
-        // Once per screen, not once per appearance: `viewDidAppear` fires again
-        // when the relationships screen pops back, and re-pushing there made
-        // the QA run loop between the two forever.
-        // `-profile-map-pin-demo`: taps the map-pin bubble once the button has
-        // actually appeared, which needs BOTH the relationship read and the
-        // pin read to land — the simulator delivers no taps, and a fixed delay
-        // here would fire into a hidden button on a slow run. Pair with
-        // `-open-profile <id>` for a profile the viewer follows.
-        if LaunchArgument.profileMapPinDemo.isPassed(in: arguments), !didTapMapPinForQA {
-            didTapMapPinForQA = true
-            pollForMapPinButton()
-        }
-        if LaunchArgument.profileRelationships.isPassed(in: arguments), !didPushRelationshipsForQA {
-            didPushRelationshipsForQA = true
-            let direction: RelationshipDirection =
-                LaunchArgument.profileRelationships.value(in: arguments) == "following" ? .following : .followers
-            // Polled, not a single fixed delay: the push needs a loaded
-            // profile (it hands the subject's privacy state over), and under
-            // `-mock-latency` — the very flag you'd combine this with to
-            // screenshot the destination's skeleton — the profile isn't loaded
-            // a second and a half in, so a one-shot attempt silently no-ops.
-            func attempt(_ remaining: Int) {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                    guard let self else { return }
-                    // Retry rather than bail on a transient miss: this used to
-                    // `return` whenever the profile wasn't topmost at that exact
-                    // instant, which killed the whole chain if the tick landed
-                    // mid-transition — an intermittently empty recording.
-                    let isTop = self.navigationController?.topViewController === self
-                    if isTop, self.viewModel.relationshipsSubject != nil {
-                        self.pushRelationships(direction)
-                    } else if remaining > 0 {
-                        attempt(remaining - 1)
-                    }
-                }
-            }
-            attempt(30)
-        }
-        // `-profile-tab <posts|saved|liked>` selects a tab on the viewer's own
-        // profile, `<posts|reposts|tagged>` on someone else's (#696).
-        if let wanted = LaunchArgument.profileTab.value(in: arguments) {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
-                guard let self,
-                      let index = tabs.firstIndex(where: { $0.title.lowercased() == wanted })
-                else { return }
-                selectTab(at: index)
-            }
-        }
-        // `-profile-view-all [seconds]`: pushes the media gallery a chunk's
-        // "View all" opens (#631), once the posts have had time to land.
-        if LaunchArgument.profileViewAll.isPassed(in: arguments) {
-            let delay = LaunchArgument.profileViewAll.doubleValue(in: arguments) ?? 2
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-                self?.pushMediaGallery()
-            }
-        }
-        // `-header-dock-demo`: docks and undocks the selector on a timer, ANIMATED,
-        // so the hand-over can be recorded. A bar item's system capsule is not
-        // ours to fade, so whether the pill pops or crossfades is a question only
-        // frames can answer.
-        // `-profile-probe-item`: a PLAIN 80x36 view as a leading bar item. If even
-        // this is not hosted, the fault is this surface's leading group and not
-        // anything about the selector's host.
-        if LaunchArgument.profileProbeItem.isPassed(in: arguments) {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
-                guard let self else { return }
-                let swatch = UIView(frame: CGRect(x: 0, y: 0, width: 80, height: 36))
-                swatch.backgroundColor = .systemRed
-                swatch.translatesAutoresizingMaskIntoConstraints = true
-                let probeItem = BarItems.container(id: "profile.debug.dock-probe", view: swatch)
-                var leading = navigationItem.leftBarButtonItems ?? []
-                leading.append(probeItem)
-                navigationItem.leftBarButtonItems = leading
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                    print("[dock] PROBE plainItemHosted=\(swatch.window != nil) "
-                        + "frame=\(swatch.frame) leftCount=\(self.navigationItem.leftBarButtonItems?.count ?? -1)")
-                }
-            }
-        }
-        // `-profile-scroll <points>` scrolls the active page before anything
-        // else, so a tile can be driven while it is tucked UNDER the header —
-        // at rest nothing is, since the content starts below it, and that is
-        // the only state the header-alignment bug appears in.
-        if let points = LaunchArgument.profileScroll.doubleValue(in: arguments) {
-            // Polls: a fixed delay clamps to the top while the page is still
-            // loading and the run then tests a tile at rest, which is the
-            // one state the alignment bug cannot appear in.
-            //
-            // Through `QAWait` now, so running out of attempts PRINTS — it
-            // used to fall off the end of the loop silently. What counts as
-            // done is `debugSetVerticalOffset`'s to say: the requested offset,
-            // or the end of a page whose content has actually loaded (see there
-            // for why a loading page's clamp used to pass on the first try).
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
-                QAWait.until("profile-scroll \(points)", timeout: 15, interval: 0.25, { [weak self] in
-                    self?.galleryPager.debugSetVerticalOffset(CGFloat(points)) ?? false
-                }) { [weak self] in
-                    guard let self else { return }
-                    print("[qa] profile-scroll settled requested=\(points) "
-                        + "offset=\(galleryPager.verticalOffset)")
-                }
-            }
-        }
-        // `-profile-scroll-sweep`: scrolls the page from the top to 240pt and
-        // back, frame by frame, 3s each way (after 2.5s) — the header's fade
-        // and parallax filmed without touch injection — and says what each
-        // frame cost (`HeroScrollFrameProbe`: `HERO-SCROLL profile …` on
-        // standard error).
-        if LaunchArgument.profileScrollSweep.isPassed(in: arguments) {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
-                guard let self else { return }
-                debugSweepStep(began: CACurrentMediaTime(), probe: HeroScrollFrameProbe(name: "profile", root: headerView))
-            }
-        }
-        // `-profile-stretch-sweep`: once the profile and its picture are in,
-        // pulls the page down past its top — the banner stretching — to
-        // `HeroStretchSweep.depth`, holds, lets go through the refresh a
-        // finger's pull would start (#2235), and settles at rest while it lands
-        // (`HERO-SCROLL profile-stretch/<phase> …` on standard error, see
-        // `HeroScrollFrameProbe`).
-        if LaunchArgument.profileStretchSweep.isPassed(in: arguments) {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-                QAWait.until("-profile-stretch-sweep", { [weak self] in
-                    guard let self else { return false }
-                    return viewModel.profile != nil && headerView.debugBannerHasPicture
-                }) { [weak self] in
-                    // The bake lands a beat after the picture.
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-                        guard let self else { return }
-                        debugStretchStep(
-                            began: CACurrentMediaTime(),
-                            probe: HeroScrollFrameProbe(name: "profile-stretch", root: headerView), phase: nil
-                        )
-                    }
-                }
-            }
-        }
-        // `-profile-bar-tree`: the navigation bar's real subview tree. The own
-        // profile reports a bar that is in a window, not hidden, at alpha 1, with
-        // items in its arrays — and renders none of them. Only the tree can say
-        // whether UIKit built wrappers for them at all.
-        if LaunchArgument.profileBarTree.isPassed(in: arguments) {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 8.0) { [weak self] in
-                guard let bar = self?.navigationController?.navigationBar else { return }
-                func walk(_ view: UIView, depth: Int) {
-                    let pad = String(repeating: "  ", count: depth)
-                    print(String(format: "[bar-tree] %@%@ frame=%.0f,%.0f %.0fx%.0f alpha=%.2f hidden=%@ subs=%d",
-                                 pad, String(describing: type(of: view)),
-                                 view.frame.minX, view.frame.minY, view.frame.width, view.frame.height,
-                                 view.alpha, view.isHidden ? "Y" : "N", view.subviews.count))
-                    guard depth < 6 else { return }
-                    for sub in view.subviews { walk(sub, depth: depth + 1) }
-                }
-                walk(bar, depth: 0)
-            }
-        }
-        // `-profile-dock`: drives the header all the way to DOCKED, and says so.
-        //
-        // ⚠️ **A scroll that lands is not a dock.** `-profile-scroll <points>`
-        // stops when the offset applies — which happens while a page is still
-        // loading and clamps short of the dock line — so runs meant to exercise
-        // the docked selector quietly never docked, the bar had nothing to host,
-        // and the audit reported "no selector on this bar". That was read as a
-        // hosting failure twice, and two fixes were judged against it.
-        //
-        // This polls on the STATE the test is about, retries the scroll each
-        // time, and prints either SETTLED or GAVE UP — so a run can never be
-        // silently meaningless.
-        if LaunchArgument.profileDock.isPassed(in: arguments) {
-            var attempts = 0
-            func attempt() {
-                attempts += 1
-                // Far past any dock line; the page clamps to whatever it has.
-                _ = galleryPager.debugSetVerticalOffset(3_000)
-                // ⚠️ THE SUCCESS EXIT THIS LOOP NEVER HAD. It re-forced the
-                // offset for the full 40s and then printed GAVE UP on every run,
-                // docked or not — so the promised SETTLED line did not exist and
-                // the only verdict it could give was a failure. Docked is the
-                // header's own definition: the active page has travelled at
-                // least `headerTravel`, the line `applyHeaderOffset` stops the
-                // header at and the identity fade finishes on. A zero travel
-                // means the header has not laid out, which is not a dock.
-                let dockLine = headerTravel
-                let offset = galleryPager.verticalOffset
-                if dockLine > 0, offset >= dockLine - 0.5 {
-                    print("[dock] SETTLED docked=true attempts=\(attempts) "
-                        + "offset=\(offset) dockLine=\(dockLine) "
-                        + "offsets=\(galleryPager.debugVerticalOffsets)")
-                    return
-                }
-                if attempts < 160 {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: attempt)
-                } else {
-                    print("[dock] GAVE UP docked=false attempts=\(attempts) "
-                        + "offsets=\(galleryPager.debugVerticalOffsets) "
-                        + "hasGallery=\(viewModel.hasGallery)")
-                    // The shared GAVE UP line too, so one grep covers every hook.
-                    QAWait.fail("profile-dock", "offset=\(offset) dockLine=\(dockLine)")
-                }
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: attempt)
-        }
-        // `-profile-open-post <index>` taps a gallery tile once the gallery has
-        // content. The sim injects no touches, and a tile tap is the only way
-        // to reach either the open destination or the background reveal.
-        if let index = LaunchArgument.profileOpenPost.intValue(in: arguments) {
-            var attempts = 0
-            func attempt() {
-                attempts += 1
-                // Polls rather than firing on a fixed delay: the gallery's
-                // first page has to land, and a fixed delay silently no-ops
-                // under `-mock-latency`.
-                if galleryPager.debugSelectItem(at: index) { return }
-                if attempts < 60 {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: attempt)
-                }
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: attempt)
-        }
-        // Dev convenience: `-profile-share-demo [activity]` opens the QR share sheet once
-        // the profile has loaded — the sheet is behind a tap on the header's
-        // QR bubble, which the sim can't deliver.
-        if LaunchArgument.profileShareDemo.isPassed(in: arguments) {
-            // `activity` chains into the system share sheet and `send` into a
-            // DM with the first quick-send target — both go through the real
-            // dismiss-then-hand-off path, so the handoff itself is what gets
-            // screenshotted, not a shortcut around it.
-            let chained = LaunchArgument.profileShareDemo.value(in: arguments)
-            // Both steps are gated on state now. `presentShareSheet` returns
-            // without a word until `shareCard` exists (a loaded profile), and a
-            // stack mid-transition refuses the presentation — so the fixed 2s
-            // opened nothing on a slow run, and the chained step then optional-
-            // chained every call onto a nil sheet: a whole scripted sequence
-            // that exercised nothing and printed nothing.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-                QAWait.until("profile-share-demo present", { [weak self] in
-                    guard let self, let navigation = self.navigationController else { return false }
-                    return self.viewModel.shareCard != nil
-                        && navigation.topViewController === self
-                        && navigation.transitionCoordinator == nil
-                        && self.presentedViewController == nil
-                }) { [weak self] in
-                    self?.presentShareSheet()
-                    let chainedActions = [
-                        "activity", "send", "search", "search-empty", "search-cancel",
-                        "search-send", "search-scroll", "search-lower"
-                    ]
-                    guard chainedActions.contains(chained ?? "") else { return }
-                    // Waits for the sheet to have FINISHED presenting (the 2s
-                    // stood in for that) rather than for the clock.
-                    QAWait.until("profile-share-demo \(chained ?? "")", { [weak self] in
-                        guard let sheet = self?.presentedViewController as? ProfileShareViewController
-                        else { return false }
-                        return !sheet.isBeingPresented && sheet.transitionCoordinator == nil
-                    }) { [weak self] in
-                        self?.qaRunShareChain(chained)
-                    }
-                }
-            }
-        }
-        // Dev convenience: `-profile-block-demo [account]` runs the block
-        // command for real (mock `social_graph.v1/Block`, then the
-        // confirmation toast and the pop), skipping only the confirmation
-        // sheet — which needs a tap the simulator can't deliver. Pass
-        // `account` to exercise the account-wide fan-out.
-        if LaunchArgument.profileBlockDemo.isPassed(in: arguments) {
-            let scope: ProfileBlockScope =
-                LaunchArgument.profileBlockDemo.value(in: arguments) == "account" ? .account : .profile
-            // `block` returns without a word unless the profile has loaded AND
-            // the relationship read has made it moderatable — so the fixed 2s
-            // blocked nothing on a slow run and the run still looked done.
-            // Waits for the read to settle either way (moderatable, or known to
-            // be the viewer), then says why when it cannot block.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-                QAWait.until("profile-block-demo", { [weak self] in
-                    guard let self else { return false }
-                    return self.viewModel.canModerate
-                        || self.viewModel.relationshipsSubject?.isSelf == true
-                }) { [weak self] in
-                    guard let self else { return }
-                    guard viewModel.canModerate else {
-                        QAWait.fail("profile-block-demo", "this is the viewer's own profile")
-                        return
-                    }
-                    guard !viewModel.isBlocked else {
-                        QAWait.fail("profile-block-demo", "the profile is already blocked")
-                        return
-                    }
-                    viewModel.block(scope)
-                }
-            }
-        }
+        debugHooks.armOnce()
         #endif
     }
 
@@ -1276,7 +739,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     /// navigation (the rows inside it do route — each one opens someone else's
     /// profile). Gated on a loaded profile, because the subject it hands over
     /// carries the privacy state.
-    private func pushRelationships(_ direction: RelationshipDirection) {
+    func pushRelationships(_ direction: RelationshipDirection) {
         guard let makeRelationshipsViewController,
               let subject = viewModel.relationshipsSubject
         else { return }
@@ -1285,24 +748,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         )
     }
 
-    /// Ticks the rail rows of the open see-more menu to the current state:
-    /// a row keeps the menu open, and its mark must follow
-    /// (`ProfileMenuBuilder.retickingMapRows`).
-    private func refreshVisibleMapRows() {
-        let current = viewModel.mapPinButton.categories
-        headerView.updateVisibleMoreMenu { menu in
-            ProfileMenuBuilder.retickingMapRows(in: menu, to: current)
-        }
-    }
-
-    /// The map rails' rows for the current state (`ProfileMenuBuilder`).
-    private func mapFavoriteMenuActions() -> [UIAction] {
-        ProfileMenuBuilder.mapFavoriteMenuActions(viewModel.mapPinButton) { [weak self] category in
-            self?.viewModel.toggleMapCategory(category)
-        }
-    }
-
-    private func pushEditProfile() {
+    func pushEditProfile() {
         guard let makeEditViewController else { return }
         // Pushed onto the profile's own stack, not presented: back / edge-swipe
         // returns here. Edits are per-field (each pushes its own screen), so a
@@ -1314,68 +760,26 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         navigationController?.pushViewController(editViewController, animated: true)
     }
 
-    // MARK: - Mute bell
+    // MARK: - Relation actions
 
-    /// Whether the bell stands — in the header's row, where Follow was, since
-    /// #2302 (the owner, 2026-11-11; it stood in the bar's corner before):
-    /// a profile the viewer FOLLOWS, in a composition that can mute, for a
-    /// member — the card's rule (`ProfileRelationControl.showsMuteBell`). The
-    /// same rule the see-more menu's Mute submenu had (#689): a guest has no
-    /// account to mute from.
-    ///
-    /// ⚠️ NO BELL UNTIL THE READ SAYS FOLLOWING (the owner, 2026-10-18,
-    /// #1398). It used to be presumed from frame 0 on someone else's profile
-    /// (#778) and taken away once the read said "not followed" — so every
-    /// profile the viewer does not follow showed a bell for the whole push,
-    /// then lost it. There is nothing of theirs to mute until they are
-    /// followed (2026-10-15), and an unknown relationship is not "followed".
-    private var showsMuteBell: Bool {
-        guard !viewModel.namesNoOne else { return false }
-        return ProfileRelationControl.showsMuteBell(
-            followButton: followButtonState, canMute: viewModel.canMute,
-            isGuest: MemberGates.gate(from: self)?.isMember == false
-        )
-    }
-
-    /// The header's row for the relationship (#2302): Follow or Requested,
-    /// the bell once followed — its glyph, its enabling — or Message alone.
-    /// On every change of the relationship, the scopes (on the tap, a
-    /// refusal, an Undo, #2143), and the lookup's answer.
-    private func applyHeaderAction() {
-        let bell = showsMuteBell
-            ? ProfileHeaderView.Bell(scopes: viewModel.muteScopes, isEnabled: isMuteBellEnabled)
-            : nil
-        headerView.configureAction(followButtonState, bell: bell)
-    }
-
-    /// Whether the bell can be used yet: a handle or link route has no one to
-    /// mute until the relationship read says the lookup found someone else.
-    private var isMuteBellEnabled: Bool {
-        !viewModel.wasOpenedByReference || viewModel.canModerate
-    }
+    /// The header's relation row, the menus and the actions' outcomes
+    /// (`ProfileRelationActions`, #2522).
+    private(set) lazy var relationActions = ProfileRelationActions(host: self)
+    var actionAnchor: UIView { headerView.moreButtonAnchor }
+    var blockToastSource: UIViewController { navigationController ?? self }
+    private func applyHeaderAction() { relationActions.applyHeaderAction() }
+    private func applyRelationMark() { relationActions.applyRelationMark() }
+    func presentShareSheet() { relationActions.presentShareSheet() }
+    func copyProfileLink() { relationActions.copyProfileLink() }
+    func moreMenuElements() -> [UIMenuElement] { relationActions.moreMenuElements() }
+    #if DEBUG
+    var debugMuteToastsShown: Int { relationActions.debugMuteToastsShown }
+    var debugUndoToastsShown: Int { relationActions.debugUndoToastsShown }
+    var debugLastUndoToast: ToastView? { relationActions.debugLastUndoToast }
+    #endif
 
     /// The keys the router's repeat filter asks about (#800).
     var profileRouteKeys: Set<ProfileRouteKey> { viewModel.profileRouteKeys }
-
-    /// A profile reached by id that is not the viewer's own, as far as frame 0
-    /// can tell: no self stub, no Edit wiring.
-    private var presumesOtherProfile: Bool {
-        !viewModel.isOwnProfile && !identityStubIsSelf && makeEditViewController == nil
-    }
-
-    /// Resolved when it opens, so the checkmarks are the current scopes.
-    private func makeMuteMenu() -> UIMenu {
-        UIMenu(children: [UIDeferredMenuElement.uncached { [weak self] completion in
-            completion(self?.muteMenuElements() ?? [])
-        }])
-    }
-
-    /// The scoped Mute menu for the current scopes (`ProfileMenuBuilder`).
-    private func muteMenuElements() -> [UIMenuElement] {
-        ProfileMenuBuilder.muteMenuElements(viewModel.muteScopes) { [weak self] scope in
-            self?.viewModel.toggleMute(scope)
-        }
-    }
 
     // MARK: - Follow in the corner (#2248)
 
@@ -1475,273 +879,17 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     var debugMuteBell: AppButton? { headerView.debugBell }
     /// What picking the bell menu's `scope` does. Tests.
     func debugToggleMute(_ scope: MuteScope) { viewModel.toggleMute(scope) }
-    func debugMuteMenuElements() -> [UIMenuElement] { muteMenuElements() }
+    func debugMuteMenuElements() -> [UIMenuElement] { relationActions.muteMenuElements() }
     func debugMoreMenuElements() -> [UIMenuElement] { moreMenuElements() }
     /// The map pin's rows, for `-profile-map-pin-audit` (+QA).
-    func debugMapFavoriteMenuActions() -> [UIAction] { mapFavoriteMenuActions() }
+    func debugMapFavoriteMenuActions() -> [UIAction] { relationActions.mapFavoriteMenuActions() }
     /// A gallery card's "..." rows, for `-post-menu-audit` (+QA).
     func debugGalleryMenuActions(
         for context: PostGridAuthorMenuContext
     ) -> [PostCardMenuAction] {
-        galleryMenuActions(for: context)
+        relationActions.galleryMenuActions(for: context)
     }
     #endif
-
-    // MARK: - Overflow menu
-
-    /// Installs the see-more bubble's menu. The children are built at OPEN
-    /// time through an uncached deferred element (the feed's "..." precedent),
-    /// not at wiring time: whether the moderation group belongs, and whether it
-    /// reads Block or Unblock, depends on a relationship that usually resolves
-    /// after this runs and can change while the screen is up.
-    private func configureMoreMenu() {
-        headerView.setMoreMenu(UIMenu(children: [
-            UIDeferredMenuElement.uncached { [weak self] completion in
-                completion(self?.moreMenuElements() ?? [])
-            }
-        ]))
-    }
-
-    private func moreMenuElements() -> [UIMenuElement] {
-        ProfileMenuBuilder.moreMenuElements(
-            ProfileMenuBuilder.MoreMenuState(
-                canShare: viewModel.shareCard != nil,
-                mapPin: viewModel.mapPinButton,
-                canModerate: viewModel.canModerate,
-                isGuest: MemberGates.gate(from: self)?.isMember == false,
-                canRestrict: viewModel.canRestrict,
-                isRestricted: viewModel.isRestricted,
-                isBlocked: viewModel.isBlocked,
-                canClearHistory: viewModel.isOwnProfile && viewModel.hasHistory,
-                isFollowing: followButtonState == .following && !viewModel.namesNoOne
-            ),
-            handlers: ProfileMenuBuilder.MoreMenuHandlers(
-                share: { [weak self] in self?.presentShareSheet() },
-                copyLink: { [weak self] in self?.copyProfileLink() },
-                toggleMapCategory: { [weak self] category in self?.viewModel.toggleMapCategory(category) },
-                report: { [weak self] in self?.presentReportReasons() },
-                toggleRestrict: { [weak self] in self?.viewModel.toggleRestrict() },
-                unblock: { [weak self] in self?.viewModel.unblock() },
-                confirmBlock: { [weak self] in self?.confirmBlock() },
-                clearHistory: { [weak self] in self?.confirmClearHistory() },
-                unfollow: { [weak self] in self?.unfollowTapped() }
-            )
-        )
-    }
-
-    /// The "…" menu's Unfollow (#2302): the tray's own path — the member
-    /// gate, the optimistic flip, the silent off (#1886) — only while the
-    /// viewer still follows: a menu opened before a change must not follow
-    /// back.
-    private func unfollowTapped() {
-        guard followButtonState == .following else { return }
-        headerView.onFollowTapped?()
-    }
-
-    /// "Clear History" asks once (#1344): the list cannot be brought back.
-    private func confirmClearHistory() {
-        let alert = UIAlertController(
-            title: "Clear History?",
-            message: "Posts you watched will no longer appear in History.",
-            preferredStyle: .actionSheet
-        )
-        alert.addAction(UIAlertAction(title: "Clear History", style: .destructive) { [weak self] _ in
-            self?.viewModel.clearHistory()
-        })
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        present(alert, animated: true)
-    }
-
-    /// Opens the unified share surface — the QR sheet — rather than jumping
-    /// straight to the system share sheet. Both the header's QR bubble and the
-    /// menu's Share land here, so there is exactly one answer to "share this
-    /// profile"; the system sheet is reachable from inside it.
-    private func presentShareSheet() {
-        guard let card = viewModel.shareCard else { return }
-        let sheet = ProfileShareViewController(
-            card: card,
-            imagePipeline: imagePipeline,
-            targeting: shareTargeting,
-            // Read HERE, where there is a window: the sheet has none until it
-            // is already on screen, and reading it there made the corners snap
-            // after the presentation animation instead of riding it.
-            deviceCornerRadius: ScreenGeometry.cornerRadius(behind: view),
-            // The sheet is full-width on iPhone, so this is its width for the
-            // frames before it has been laid out.
-            fallbackWidth: view.bounds.width
-        )
-        // Both escape hatches come back HERE, after the sheet has dismissed
-        // itself: the system sheet would otherwise stack on top of this one,
-        // and a pushed thread would land behind it.
-        sheet.onSystemShare = { [weak self] card, image in
-            self?.presentActivitySheet(for: card, image: image)
-        }
-        sheet.onSendToTarget = { [weak self] target, card in
-            self?.viewModel.sendProfile(card, to: target)
-        }
-        present(sheet, animated: true)
-    }
-
-    /// The system share sheet, opened once the QR sheet is gone. Two items:
-    /// the link (carrying the metadata that gives the sheet a branded header)
-    /// and the rendered card — the image is what makes Save Image and image
-    /// targets work, which is why this feature needs no photo-library
-    /// permission of its own.
-    private func presentActivitySheet(for card: ProfileViewModel.ShareCard, image: UIImage) {
-        let source = ProfileShareItemSource(card: card, icon: image)
-        let activity = UIActivityViewController(activityItems: [source, image], applicationActivities: nil)
-        activity.popoverPresentationController?.sourceView = headerView.moreButtonAnchor
-        present(activity, animated: true)
-    }
-
-    private func copyProfileLink() {
-        guard let link = viewModel.shareLink else { return }
-        // Both slots: `.url` is what other apps paste as a rich link, `.string`
-        // is what plain-text fields read. Setting only the former leaves a
-        // Notes paste empty.
-        UIPasteboard.general.url = link
-        UIPasteboard.general.string = link.absoluteString
-        Feedback.success("Link copied", symbol: "link", from: self)
-    }
-
-    /// Block is destructive and, here, one-way out of the screen — so it asks
-    /// first. Named with the handle so it can't be answered on autopilot.
-    ///
-    /// An action sheet rather than an alert, because the question is not
-    /// yes/no but *how far*: this app treats one account as owning several
-    /// profiles (the switcher is a first-class affordance), so blocking one
-    /// handle can leave the same person reaching the viewer from an alias.
-    /// Two destructive options read as a scope choice; an alert's OK/Cancel
-    /// shape would have to hide one of them behind a second step.
-    private func confirmBlock() {
-        let handle = viewModel.handle ?? "this user"
-        let sheet = UIAlertController(
-            title: "Block \(handle)?",
-            message: "They won't be able to find your profile or message you, and you'll stop seeing their posts. They aren't notified.\n\nBlocking the account also blocks any other profiles it owns.",
-            preferredStyle: .actionSheet
-        )
-        // The narrow, predictable action leads: it is what "Block" meant
-        // before this choice existed, and it is the one that can't overreach.
-        sheet.addAction(UIAlertAction(title: "Block \(handle)", style: .destructive) { [weak self] _ in
-            self?.viewModel.block(.profile)
-        })
-        sheet.addAction(UIAlertAction(title: "Block Account & All Profiles", style: .destructive) { [weak self] _ in
-            self?.viewModel.block(.account)
-        })
-        sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        sheet.popoverPresentationController?.sourceView = headerView.moreButtonAnchor
-        present(sheet, animated: true)
-    }
-
-    /// `moderation.v1.OpenCase` carries a policy category, so the report asks
-    /// for one rather than filing everything as "other" — a category-less
-    /// report is near-useless to the moderation queue.
-    ///
-    /// The picker itself now lives in `PostGrid`, beside the post card's "..."
-    /// that raises the same question: two screens asking a viewer to classify
-    /// a report must ask it in the same words, and the second copy would have
-    /// been written the day the card grew a Report row.
-    /// Report only — or, on the viewer's own post, Edit and Delete
-    /// (`ProfileMenuBuilder.galleryMenuActions`).
-    private func galleryMenuActions(
-        for context: PostGridAuthorMenuContext
-    ) -> [PostCardMenuAction] {
-        ProfileMenuBuilder.galleryMenuActions(
-            isViewerPost: viewModel.isViewerPost(by: context.authorID),
-            canReport: viewModel.canReportPost(by: context.authorID),
-            // At once, with Undo in the toast (#957) — no confirmation sheet.
-            onDelete: { [weak self] in self?.viewModel.deletePost(context.post.id) },
-            onReport: { [weak self] in self?.presentPostReportReasons(for: context) }
-        )
-    }
-
-    /// The same question, asked of a post instead of the profile — and asked by
-    /// the same picker, anchored on the row's own "..." rather than on the
-    /// header's.
-    private func presentPostReportReasons(
-        for context: PostGridAuthorMenuContext
-    ) {
-        ReportReasonSheet.present(
-            from: self, subject: "this post", sourceView: context.anchor
-        ) { [weak self] reason in
-            self?.viewModel.reportPost(context.post.id, reason: reason)
-        }
-    }
-
-    private func presentReportReasons() {
-        ReportReasonSheet.present(
-            from: self,
-            subject: viewModel.handle ?? "this profile",
-            sourceView: headerView.moreButtonAnchor
-        ) { [weak self] reason in
-            self?.viewModel.report(reason)
-        }
-    }
-
-    /// Reports the outcome of a menu command. Confirmations are toasts (the
-    /// action is already done — an alert would only demand a second tap);
-    /// failures are alerts, because a failed block or report is something the
-    /// user must know to retry.
-    private func render(_ result: ProfileViewModel.ActionResult) {
-        switch result {
-        case .blocked(let handle, let profileCount):
-            // Says what was actually blocked, not what was asked for: an
-            // account-scoped block can only reach the aliases the fleet let us
-            // see, so claiming "and all their profiles" would be a promise the
-            // client can't keep (see `ProfileBlockScope`).
-            let message = profileCount > 1
-                ? "Blocked \(handle) and \(profileCount - 1) more"
-                : "Blocked \(handle)"
-            // Sourced from the navigation controller, not this screen: the
-            // block pops this view controller in the same turn, and a toast
-            // parented here would leave with it.
-            Feedback.success(message, symbol: "hand.raised.fill", from: navigationController ?? self)
-        case .unblocked(let handle):
-            Feedback.success("Unblocked \(handle)", symbol: "hand.raised.slash.fill", from: self)
-            // Unblocked, the "+" is back (#2014): the button never moved.
-            applyRelationMark()
-        case .muteChanged(let handle, let scopes):
-            #if DEBUG
-            debugMuteToastsShown += 1
-            #endif
-            Feedback.success(
-                ProfileViewModel.muteMessage(handle: handle, scopes: scopes),
-                symbol: scopes.isEmpty ? "speaker.wave.2.fill" : "speaker.slash.fill",
-                from: self
-            )
-        case .restrictChanged(let handle, let restricted):
-            Feedback.success(
-                restricted ? "Restricted \(handle)" : "Unrestricted \(handle)",
-                symbol: restricted ? "person.crop.circle.badge.minus" : "person.crop.circle.badge.checkmark",
-                from: self
-            )
-        case .commitFailed(let message):
-            // Already put back on screen (#957): say why it came back.
-            Feedback.failure(message, from: self)
-        case .reported:
-            Feedback.success("Report sent", symbol: "flag.fill", from: self)
-        case .followFailed(let message):
-            // A toast, not the alert below: the button has already flipped
-            // back, so there is nothing to decide — only why it moved (#802).
-            Feedback.failure(message, from: self)
-        case .failed(let message):
-            let alert = UIAlertController(title: nil, message: message, preferredStyle: .alert)
-            alert.addAction(UIAlertAction(title: "OK", style: .default))
-            present(alert, animated: true)
-        }
-    }
-
-    /// Leaves the blocked profile: pop when pushed (the common case — a profile
-    /// reached by routing), dismiss when presented. A tab-root profile is left
-    /// standing, but it can't get here: own profiles can't be blocked.
-    private func leaveAfterBlock() {
-        // An open menu-spawned alert would otherwise ride out the pop.
-        if let alert = presentedViewController { dismiss(presented: alert, animated: false) }
-        // THIS profile, wherever it is now (#1144): the block answered after
-        // an `await`, and the viewer may have gone back or pushed on since —
-        // a plain pop would have closed that other screen.
-        closeScreen()
-    }
 
     // MARK: - Setup
 
@@ -1760,25 +908,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         settings.tintColor = .label
         settingsItem = settings
 
-        // ⚠️ THE SWITCHER IS THE NAME'S, NOT THE BAR'S (the owner,
-        // 2026-11-08): the own profile's name wears a chevron, and a tap on
-        // it opens the app's one switcher (#2034), anchored to the name. The
-        // switch itself is picked up through `viewerEvents`, so
-        // this screen refreshes whichever switcher was used.
-        if switcherFactory != nil {
-            headerView.onTitleTapped = { [weak self] in self?.presentSwitcherFromName() }
-            // Pre-load profiles, avatars and counts, so the switcher opens
-            // complete on its first frame.
-            reloadSwitcherMenu()
-        }
-    }
-
-    /// The own profile's name was tapped: the switcher, from the name.
-    private func presentSwitcherFromName() {
-        switcherFactory?.present(
-            from: .view(headerView.titleAnchor), over: self, includesAddProfile: true,
-            onSwitch: {}, onAddProfile: { [weak self] in self?.presentAddProfilePlaceholder() }
-        )
+        accountSwitcher.configureNameSwitcher()
     }
 
     /// Installs (or clears) the shell's trailing accessory. Safe before the
@@ -1833,7 +963,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
 
     /// The viewer's own profile — the tab root, the only one with account
     /// actions — names its day leading (#1642).
-    private var dayLeads: Bool { onLogout != nil }
+    var dayLeads: Bool { onLogout != nil }
 
     /// Names `section` innermost of the trailing group, or takes the name
     /// away. No day over a page for no one (#1406): its gallery is gone.
@@ -1873,75 +1003,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     var debugActivePageIndex: Int { galleryPager.activePageIndex }
     #endif
 
-    /// Pre-fetches the switcher snapshot and installs a synchronous menu on the
-    /// switcher item. Re-run after a switch so the active marker updates.
-    ///
-    /// `onSwitch` is empty on purpose. Refreshing is driven by
-    /// `viewerEvents` instead, so it happens no matter WHICH switcher
-    /// was used — this screen's own, or the Profile tab's long-press menu, which
-    /// is built by the shell and cannot call back into here.
-    private func reloadSwitcherMenu() {
-        guard let switcherFactory else { return }
-        Task { await switcherFactory.reload() }
-    }
-
-    /// The active profile changed — from any switcher anywhere.
-    ///
-    /// Refetches unconditionally, including on someone ELSE's profile: the
-    /// viewer changed, so the follow state and relationship button this screen
-    /// shows are now answers to a different question, not just the identity at
-    /// the top.
-    private func activeProfileSwitched(to profile: ProfileID) {
-        // Cache-first: a profile already seen renders on THIS turn, and the
-        // fetch behind it becomes a silent revalidation. A miss has nothing
-        // truthful to show for the new identity, so it redacts rather than
-        // leaving the previous profile's name and numbers on screen.
-        // Armed BEFORE the seed: `revalidate` publishes cached content on this
-        // same turn, so the stagger has to be in place already or the cached
-        // profile snaps in. It is closed out by `onLoadSettled`, NOT by a
-        // phase arriving — a revalidation that agrees with the cache publishes
-        // no phase at all, and hanging the reset off one that may never come
-        // is what stranded this screen in a skeleton.
-        isSwitchingProfile = true
-        if !viewModel.revalidate(after: profile) {
-            // Nothing known about the new identity: bones are the honest state,
-            // and their un-redact reveal is the animation — no stagger over it.
-            isSwitchingProfile = false
-            headerView.render(.loading, profileKnown: false, animated: false)
-        }
-        // Re-read the snapshot so the menu's active marker moves to the profile
-        // just switched to.
-        reloadSwitcherMenu()
-    }
-
-    /// Runs `changes` as a cross-dissolve while a switch is in flight, and
-    /// plainly otherwise. Used for both halves of the incoming profile — the
-    /// header and the gallery arrive on separate callbacks, and each dissolves
-    /// over whatever it is replacing.
-    private func applySwitchable(on target: UIView, _ changes: @escaping () -> Void) {
-        guard isSwitchingProfile, view.window != nil else {
-            changes()
-            return
-        }
-        UIView.transition(
-            with: target,
-            duration: Metrics.switchCrossfade,
-            options: [.transitionCrossDissolve, .allowUserInteraction, .beginFromCurrentState],
-            animations: changes
-        )
-    }
-
-    private func presentAddProfilePlaceholder() {
-        let alert = UIAlertController(
-            title: "Add Profile",
-            message: "Creating a new profile isn't available yet.",
-            preferredStyle: .alert
-        )
-        alert.addAction(UIAlertAction(title: "OK", style: .default))
-        present(alert, animated: true)
-    }
-
-    private func pushSettings() {
+    func pushSettings() {
         guard let settingsViewController = makeSettingsViewController?() else { return }
         navigationController?.pushViewController(settingsViewController, animated: true)
     }
@@ -1952,7 +1014,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     /// places: viewDidLoad (initial composition), viewWillAppear (synchronous
     /// pre-transition bind), and the async data callbacks (via
     /// `alongsideTransition`).
-    private func applyNavigationState(animated: Bool = false) {
+    func applyNavigationState(animated: Bool = false) {
         // ⚠️ **AND THE CHEVRON KEEPS ITS SILENCE.** A titled root gives every
         // screen pushed from it a WORDED back button, and two pushed bars were
         // budgeted against a bare 44pt chevron: `SearchResultsViewController`
@@ -2321,207 +1383,28 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         }
     }
 
-    /// Wears the relationship on the header's avatar (#2014).
-    private func applyRelationMark() {
-        headerView.configureRelationMark(
-            followButtonState, mutual: viewModel.isMutualFollow, blocked: viewModel.isBlocked,
-            isOwnProfile: viewModel.isOwnProfile
-        )
-    }
-
-    /// Whether the header's action tray is out of sight: under the
-    /// navigation bar, by the header's coming position (`travelled` — the
-    /// constraint moves it on the next layout pass), or faded with the
-    /// identity block. The header stops climbing once its selector docks, so
-    /// the tray's foot can rest at the bar's edge; by then the identity fade
-    /// (`applyIdentityFade`, run first) has taken it out.
-    /// Wires the selector and the source filter, and puts the selector in its
-    /// inline slot: a format tab records the selection and pages the gallery; a
-    /// source pick re-filters every page in place.
-    private func configureFilterTray() {
-        guard viewModel.hasGallery else { return }
-
-        // Both ways (`HeroPageSelector.bind`): the lens tracks the pages, the
-        // pill scrubs them, a reselect goes back to the top of the tab.
-        selector.bind(to: galleryPager) { [weak self] index in self?.barSelectionChanged(index) }
-
-        placeSelectors()
-
-        // Land on the user's global preference: tab selection and pager page
-        // adopt the (possibly stored) filter before first layout, so the
-        // screen OPENS there — no visible jump. The preference names a FORMAT,
-        // so it can only ever land on one of the three every profile has.
-        let tab = ProfileTab.format(viewModel.galleryFilter.format)
-        if let index = tabs.firstIndex(of: tab) {
-            mirrorSelection(to: index)
-        }
-        galleryPager.setActivePage(tab, animated: false)
-
-    }
-
-    /// A tap on either selector: record the format, page the gallery, and carry
-    /// the choice to the other bar so the hand-over has nothing to reconcile.
-    private func barSelectionChanged(_ index: Int) {
-        mirrorSelection(to: index)
-        let tab = tabs[index]
-        adoptTab(tab)
-        galleryPager.setActivePage(tab, animated: selector.bar.animatesPageChanges)
-    }
-
-    /// Arms the full-width dismissal, once, and only for a PUSHED profile.
-    ///
-    /// The gate is asked per gesture rather than re-installed per tab: a
-    /// recognizer added and removed as the viewer pages is one that will
-    /// eventually be missing when a thumb arrives.
-    ///
-    /// Ordering the pager behind it is safe on every tab precisely because
-    /// the gate decides. Past the first tab the dismissal pan never begins,
-    /// fails immediately, and the pager pages exactly as it always did.
-
-    /// Records the choice.
-    ///
-    /// ⚠️ Only a FORMAT page is a filter preference. Saved and Liked are
-    /// corpora, not formats, and writing one into the stored filter would mean
-    /// re-opening the profile on a tab the next profile may not even have.
-    private func adoptTab(_ tab: ProfileTab) {
-        let changed = shownTab != tab
-        shownTab = tab
-        viewModel.setActiveTab(tab)
-        // Off the History page: it takes in what was viewed (#2170), and its
-        // select mode ends.
-        if tab != .history {
-            viewModel.releaseHistory()
-            setSelectingHistory(false)
-        }
-        // History's Select stands in the gear's place, and only there (#2307):
-        // leaving History with the tray away puts the gear back, coming back
-        // brings Select.
-        if changed { applyNavigationState(animated: view.window != nil) }
-    }
-
-    /// The page on screen, as last adopted.
-    private var shownTab: ProfileTab?
+    /// The tabs, their selector and the Channels tab (`ProfileTabPages`, #2522).
+    private(set) lazy var tabPages = ProfileTabPages(host: self, tabs: initialTabs)
+    var tabs: [ProfileTab] { tabPages.tabs }
+    var shownTab: ProfileTab? { tabPages.shownTab }
 
     // MARK: - History's select mode (the owner, 2026-11-08)
 
-    /// History's rows wear their selection circles; the bar says Done and the
-    /// foot of the screen "Remove from History (n)" in the tabs' place.
-    private(set) var isSelectingHistory = false
-    private var historySelection: [PostID] = []
-
-    /// The own profile, on its History page, in the gear's place (#2307, the
-    /// owner 2026-11-11):
-    ///
-    /// | History                    | the corner |
-    /// |----------------------------|------------|
-    /// | tray in sight              | the gear (nil here) |
-    /// | tray scrolled away         | Select (disabled with no history) |
-    /// | selecting, wherever scrolled | Done |
-    ///
-    /// No Select at rest: it comes in once the header's tray has gone under
-    /// the bar, as someone else's Follow does (#2248). Done holds while
-    /// selecting, even back at the top — without it there would be no way
-    /// out; after it, the scroll's rule again. The word, not a pencil: iOS's
-    /// word for the mode (Photos, Files, Mail), beside the header's Edit
-    /// profile.
-    private var historySelectBarItem: UIBarButtonItem? {
-        guard dayLeads, !viewModel.namesNoOne, shownTab == .history else { return nil }
-        if isSelectingHistory { return historyDoneItem }
-        guard isTrayScrolledAway else { return nil }
-        historySelectItem.isEnabled = viewModel.hasHistory
-        return historySelectItem
-    }
-
-    /// History's Select or Done, if the bar wears one now.
-    private var shownHistoryBarItem: UIBarButtonItem? {
-        ownTrailingBarItems.first { $0 === historySelectItem || $0 === historyDoneItem }
-    }
-
-    private lazy var historySelectItem = BarItems.title(id: "profile.history.select", title: "Select") { [weak self] in
-        self?.setSelectingHistory(true)
-    }
-
-    private lazy var historyDoneItem = BarItems.title(id: "profile.history.done", title: "Done", prominent: true) {
-        [weak self] in self?.setSelectingHistory(false)
-    }
-
-    /// The select mode's one action, in the selector's place: "Remove from
-    /// History (n)", in red, the accessory's own capsule around it.
-    private lazy var historyRemoveButton: UIButton = {
-        var configuration = UIButton.Configuration.plain()
-        configuration.baseForegroundColor = .systemRed
-        configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
-            var attributes = attributes
-            attributes.font = UIFont.scaledFont(forTextStyle: .headline, weight: .semibold)
-            return attributes
-        }
-        let button = UIButton(configuration: configuration)
-        button.addAction(UIAction { [weak self] _ in self?.removeSelectedHistory() }, for: .primaryActionTriggered)
-        return button
-    }()
-
-    /// Into, or out of, History's select mode. `restoresFoot` false: the
-    /// screen is leaving, and its own disappearance takes the band down.
+    /// History's select mode (`ProfileHistorySelection`, #2522).
+    private(set) lazy var historySelectMode = ProfileHistorySelection(host: self)
+    var isSelectingHistory: Bool { historySelectMode.isSelectingHistory }
+    private var historySelectBarItem: UIBarButtonItem? { historySelectMode.historySelectBarItem }
+    private var shownHistoryBarItem: UIBarButtonItem? { historySelectMode.shownHistoryBarItem }
     func setSelectingHistory(_ selecting: Bool, restoresFoot: Bool = true) {
-        guard selecting != isSelectingHistory else { return }
-        guard !selecting || (shownTab == .history && viewModel.hasHistory) else { return }
-        isSelectingHistory = selecting
-        // Selecting holds the viewer on History: no paging to the other tabs.
-        galleryPager.allowsPaging = !selecting
-        let page = galleryPager.builtPage(for: .history)
-        page?.onRowSelectionChanged = { [weak self] ids in self?.historySelectionChanged(ids) }
-        page?.setSelectingRows(selecting)
-        historySelection = page?.selectedRowPostIDs ?? []
-        applyHistoryRemoveTitle()
-        swapFootForHistoryRemove(selecting, restoresFoot: restoresFoot)
-        applyNavigationState(animated: view.window != nil)
-    }
-
-    /// History changed: Select is offered while there is something to
-    /// select, and the select mode ends with the last row.
-    private func historyChanged() {
-        historySelectItem.isEnabled = viewModel.hasHistory
-        if isSelectingHistory, !viewModel.hasHistory { setSelectingHistory(false) }
-    }
-
-    private func historySelectionChanged(_ ids: [PostID]) {
-        historySelection = ids
-        applyHistoryRemoveTitle()
-    }
-
-    private func applyHistoryRemoveTitle() {
-        let count = historySelection.count
-        historyRemoveButton.configuration?.title = count == 0 ? "Remove from History" : "Remove from History (\(count))"
-        historyRemoveButton.isEnabled = count > 0
-        historyRemoveButton.accessibilityLabel = count == 0
-            ? "Remove from History" : "Remove \(count) from History"
-    }
-
-    /// The selected rows leave the history, with the list's own animation;
-    /// the select mode ends there, as Photos' does after a delete.
-    private func removeSelectedHistory() {
-        let ids = historySelection
-        guard !ids.isEmpty else { return }
-        viewModel.removeFromHistory(ids)
-        setSelectingHistory(false)
-    }
-
-    /// The foot of the screen: the selector's own accessory wears "Remove
-    /// from History (n)" in the strip's place while selecting — the same
-    /// capsule, its content replaced (the owner, 2026-11-08) — and the strip
-    /// again after. `restoresFoot` is kept for a screen leaving, whose band
-    /// its own disappearance takes down with the stand-in in it.
-    private func swapFootForHistoryRemove(_ selecting: Bool, restoresFoot: Bool) {
-        let animated = view.window != nil && restoresFoot
-        selectorAccessory?.showStandIn(selecting ? historyRemoveButton : nil, animated: animated)
+        historySelectMode.setSelectingHistory(selecting, restoresFoot: restoresFoot)
     }
 
     #if DEBUG
     var debugHistoryPage: (any PostGridPage)? { galleryPager.builtPage(for: .history) }
     var debugAllowsPaging: Bool { galleryPager.allowsPaging }
-    var debugHistoryRemoveTitle: String? { historyRemoveButton.configuration?.title }
-    var debugHistoryRemoveEnabled: Bool { historyRemoveButton.isEnabled }
-    func debugTapHistoryRemove() { removeSelectedHistory() }
+    var debugHistoryRemoveTitle: String? { historySelectMode.debugHistoryRemoveTitle }
+    var debugHistoryRemoveEnabled: Bool { historySelectMode.debugHistoryRemoveEnabled }
+    func debugTapHistoryRemove() { historySelectMode.debugTapHistoryRemove() }
     #endif
 
     /// A post opened from History is covering the screen: the screen is
@@ -2529,247 +1412,22 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     /// screen is back.
     private var isShowingHistoryPost = false
 
-    /// Selects a tab the way a selector tap does — the shared path behind the
-    /// debug hook and the tests, so neither exercises a shortcut around the
-    /// real one.
-    func selectTab(at index: Int) {
-        guard tabs.indices.contains(index) else { return }
-        mirrorSelection(to: index)
-        adoptTab(tabs[index])
-        galleryPager.setActivePage(tabs[index], animated: false)
-    }
+    func selectTab(at index: Int) { tabPages.selectTab(at: index) }
 
-    /// Puts both selectors on the same segment.
-    ///
-    /// ⚠️ There is deliberately no silent `select` on `PagedTabBar` — choosing
-    /// a segment announces itself, by design, so that a scripted selection
-    /// drives the same path a finger does. That makes mirroring re-entrant, and
-    /// the flag rather than a silent setter is what closes the loop: the echo
-    /// arrives, sees the flag, and stops.
-    /// Puts the strip on a selection the pager reached by itself.
-    ///
-    /// ⚠️ THE RE-ENTRANCY LATCH WENT WITH THE SECOND COPY. It existed because
-    /// `select` fires `.valueChanged`, whose action mirrored into the other
-    /// bar, which selected again. With one strip the guard below is all of it.
-    private func mirrorSelection(to index: Int) {
-        selector.select(index)
-    }
-
-    /// Puts one selector in the page's column and the other in the navigation
-    /// bar's title slot, and leaves them there.
-    ///
-    /// ⚠️ A title view is positioned by FRAME, so the docked bar keeps
-    /// autoresizing on and states its size through `sizeToFit`. The inline one
-    /// is laid out by constraints. Nothing is re-parented after this, which is
-    /// the point: the hand-over is two animations, not a move.
-    /// Puts the docked selector's item into the leading group, or takes it out.
-    ///
-    /// ⚠️ **MEMBERSHIP, not `isHidden`.** Hiding the item looked right and left
-    /// the selector unhosted for good: an item that is hidden when the bar lays
-    /// out never has its custom view added, and un-hiding it later does not bring
-    /// it back — measured as `isHidden=false`, `alpha=1`, `isBarDocked=true`,
-    /// `intrinsicW=325` and a host frame of exactly zero, on the one surface of
-    /// the four whose item starts hidden. Adding the item hosts it; removing it
-    /// takes UIKit's glass capsule with it, which is the other thing `isHidden`
-    /// was there for.
-
-
-
-    /// Puts the selector at the foot of the screen, in a `UITabAccessory` —
-    /// on BOTH profiles.
-    ///
-    /// ⚠️ **A PUSHED SCREEN CAN HOST ONE, AND THE COMMIT THAT SAID OTHERWISE
-    /// WAS WRONG.** "A pushed screen has no tab bar to hang an accessory from"
-    /// is the sentence that sent this branch to the toolbar; the search
-    /// results — which also sets `hidesBottomBarWhenPushed` — then measured the
-    /// opposite: `env=regular`, a 360x48 container at the foot, laid out
-    /// exactly as on a tab root. `UITabAccessory.h` says so too, defining
-    /// `.regular` as "above the bottom tab bar when it is visible; **or, at the
-    /// bottom of the UITabBarController's view**".
-    ///
-    /// ⚠️ **`trayPlacement` IS THE ONLY THING THAT CAN ANSWER THIS, and it is
-    /// injected for that reason.** Its own note says why: "the host knows, and
-    /// the screen cannot work it out for itself (a nav root inside a tab bar
-    /// and a pushed screen look identical from in here)". Two other questions
-    /// look like this one and are not it — `onLogout != nil` is whether this is
-    /// the canonical account entry point, and `viewModel.isOwnProfile` is
-    /// whether it is the viewer. A ROUTED self profile is own-profile, wears
-    /// five tabs and an Edit button, and is PUSHED: choosing by
-    /// `isOwnProfile` would hang a shell-lifetime accessory on a screen with
-    /// `hidesBottomBarWhenPushed = true`, which is the measured leak the
-    /// accessory's install/remove bracket exists to prevent.
-    ///
-    /// ⚠️ ONE PAGE, NO SELECTOR (#631). Anyone else's profile has only Posts,
-    /// and a strip with one segment is a label pretending to be a control.
-    ///
-    ///
-    /// ⚠️ **TWO HOMES, BY WHERE THE PROFILE IS (#728, the owner's call
-    /// 2026-10-09).** #718 floated the strip in this view at its intrinsic
-    /// width on both; that was not the ask.
-    /// - The Profile **tab root** keeps it in the tab bar's `UITabAccessory`,
-    ///   as it always had.
-    /// - A **pushed** profile hosts it as a toolbar item at the bottom leading
-    ///   corner, at its intrinsic width — the relations screen's arrangement:
-    ///   the item's platter is the glass, so the strip draws none
-    ///   (`.platter`).
-    private func placeSelectors() {
-        guard viewModel.hasGallery, tabs.count > 1 else { return }
-        selector.place(on: self)
-    }
-
-    /// Takes the selector away when one tab is left (#742).
-    private func removeSelectors() {
-        selector.remove(from: self)
-    }
-
-    /// The tabs whose source is still loading and which had posts the last
-    /// time this profile was seen (`SectionPresenceStore`, #1773).
     static func rememberedTabs(
         _ tabs: [ProfileTab], in snapshot: ProfileViewModel.GallerySnapshot,
         screen: String?, presence: SectionPresenceStore
     ) -> [ProfileTab] {
-        guard let screen else { return [] }
-        return tabs.filter { tab in
-            snapshot.state(for: tab) == .loading
-                && (presence.count(screen: screen, section: String(describing: tab)) ?? 0) > 0
-        }
+        ProfileTabPages.rememberedTabs(tabs, in: snapshot, screen: screen, presence: presence)
     }
-
-    /// ⚠️ NO TAB FOR A SOURCE WITH NOTHING IN IT (#742, the owner's call
-    /// 2026-10-09) — Posts included since #1422 (owner, 2026-10-19). A tab
-    /// shows once its source holds something; a source still loading waits,
-    /// rather than showing a tab that might leave. Two exceptions:
-    /// - the viewer's OWN Posts stays even empty: it is where the invitation
-    ///   to post belongs;
-    /// - with nothing shown at all, Posts is the one page — loading, "No
-    ///   Posts Yet", or the lock of a private profile — so the area under
-    ///   the header is never blank, which reads as still loading.
-    ///
-    /// A private profile the viewer does not follow thus shows Tagged alone
-    /// when it has posts, plainly — no lock line (#1445) — and the lock alone
-    /// when it has none; following it brings the tabs back as their sources
-    /// fill. One tab left is no selector at all, in the tab
-    /// bar's accessory as in a pushed profile's toolbar.
-    private func showTabs(for snapshot: ProfileViewModel.GallerySnapshot) {
-        var shown = Self.shownTabs(
-            allTabs, in: snapshot, isOwnProfile: viewModel.isOwnProfile, hasChannels: showsChannelsTab
-        )
-        // ⚠️ SECTIONS BY PRESENCE (#1773): a source still loading whose tab
-        // had posts last time keeps its tab from the first frame — it does
-        // not pop in when its source answers.
-        let remembered = Self.rememberedTabs(
-            allTabs, in: snapshot, screen: viewModel.presenceScreen, presence: galleryPager.presence
-        )
-        shown = allTabs.filter { shown.contains($0) || remembered.contains($0) }
-        shown = Self.withPostsBesideChannels(shown)
-        if shown.isEmpty { shown = [.format(.activity)] }
-        guard shown != tabs else { return }
-        let active = tabs.indices.contains(galleryPager.activePageIndex) ? tabs[galleryPager.activePageIndex] : nil
-        tabs = shown
-        galleryPager.setVisibleTabs(shown)
-        selectorBar.setTitles(shown.map(\.title))
-        let index = active.flatMap { shown.firstIndex(of: $0) } ?? 0
-        mirrorSelection(to: index)
-        // ⚠️ THE PAGE ON SCREEN IS ADOPTED WHEN ITS TAB WENT (#772). An account
-        // switch on Reposts or Tagged cuts the tabs to Posts while every source
-        // reloads; the strip clamps quietly and the pager settles nothing, so
-        // the source stayed on the tab that left — Posts then paged and pushed
-        // "View all" from the wrong corpus.
-        if active != shown[index] { adoptTab(shown[index]) }
-        if shown.count > 1 {
-            let wasPlaced = selector.isPlaced
-            placeSelectors()
-            // ⚠️ ON SCREEN, NOT IN A WINDOW. A tab that arrives while a pushed
-            // screen (Settings) is covering this one found the view still in
-            // the window mid-push, installed the band, and nothing ever took
-            // it down: this screen's `viewWillDisappear` had already run with
-            // no band to remove. The next `viewWillAppear` puts it up.
-            guard !wasPlaced, isShownOnScreen else { return }
-            // Arrived while on screen: up now, not at the next appearance.
-            selector.install(on: self, alongside: nil)
-            if navigationController?.topViewController === self {
-                selector.showToolbar(for: self, animated: true)
-            }
-        } else {
-            removeSelectors()
-        }
-    }
-
-    /// The tabs `snapshot` gives something to show, in `all`'s order (#742,
-    /// #1422): those whose source holds posts, and the viewer's own Posts.
-    /// Empty when nothing has posts yet — `showTabs` then shows Posts alone.
-    ///
-    /// Channels (#2232) is no source of posts: it shows when the profile
-    /// owns a channel the viewer may see (`hasChannels`), like any tab only
-    /// with something in it.
     static func shownTabs(
         _ all: [ProfileTab], in snapshot: ProfileViewModel.GallerySnapshot, isOwnProfile: Bool,
         hasChannels: Bool = false
     ) -> [ProfileTab] {
-        all.filter { tab in
-            if tab == .channels { return hasChannels }
-            if tab == .format(.activity), isOwnProfile { return true }
-            if case .content(let posts) = snapshot.state(for: tab) { return !posts.isEmpty }
-            return false
-        }
+        ProfileTabPages.shownTabs(all, in: snapshot, isOwnProfile: isOwnProfile, hasChannels: hasChannels)
     }
-
-    /// ⚠️ CHANNELS NEVER STANDS ALONE (#2232): a profile with channels and
-    /// no post yet — or a private one the viewer doesn't follow — keeps
-    /// Posts first, so its "No Posts Yet" or its lock stays where the viewer
-    /// looks for it, and the channels are the second tab. Pure, for tests.
     static func withPostsBesideChannels(_ shown: [ProfileTab]) -> [ProfileTab] {
-        shown == [.channels] ? [.format(.activity), .channels] : shown
-    }
-
-    /// Whether Channels is a tab now (#2232): with a channel listed, or
-    /// while its read is on its way for a profile that had one last time
-    /// (sections by presence, #1773) — so it doesn't pop in under the
-    /// viewer when the answer lands.
-    private var showsChannelsTab: Bool {
-        guard let channels else { return false }
-        if channels.hasChannels { return true }
-        guard channels.phase == .loading, let screen = viewModel.presenceScreen else { return false }
-        return (galleryPager.presence.count(screen: screen, section: Self.channelsPresenceSection) ?? 0) > 0
-    }
-
-    /// The key Channels' presence is remembered under (#1773).
-    private static let channelsPresenceSection = String(describing: ProfileTab.channels)
-
-    /// Follows the Channels model (#2232): its tab comes and goes with its
-    /// channels, its page redraws, a refused write shakes its row's button,
-    /// and "Create a Channel" presents the new channel's sheet.
-    private func bindChannels() {
-        guard let channels else { return }
-        channels.onChange = { [weak self] in self?.channelsDidChange() }
-        channels.onActionFailed = { [weak self] id in self?.channelsPage?.showFailure(for: id) }
-        channels.onCreate = { [weak self] in self?.presentChannelCreation() }
-    }
-
-    /// The Channels page, once its tab has been shown.
-    private var channelsPage: ProfileChannelsPage? {
-        galleryPager.builtPage(for: .channels) as? ProfileChannelsPage
-    }
-
-    private func channelsDidChange() {
-        guard let channels else { return }
-        if channels.phase == .loaded, let screen = viewModel.presenceScreen {
-            galleryPager.presence.remember(
-                channels.channels.count, screen: screen, section: Self.channelsPresenceSection
-            )
-        }
-        let snapshot = lastGallerySnapshot ?? viewModel.publishedGallery
-            ?? ProfileViewModel.GallerySnapshot(activity: .loading, media: .loading, isComplete: false)
-        showTabs(for: snapshot)
-        channelsPage?.render()
-    }
-
-    /// The new channel's sheet over the profile; Create lands in Messages
-    /// with the channel's thread (#2230), and the profile lists it on the
-    /// way back (`viewWillAppear`).
-    private func presentChannelCreation() {
-        guard presentedViewController == nil, let sheet = makeChannelCreation?() else { return }
-        present(sheet, animated: true)
+        ProfileTabPages.withPostsBesideChannels(shown)
     }
 
     // MARK: - The hero page's contract
@@ -2838,9 +1496,8 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
             // became the transition — a diagonal wipe across the identity.
             // The GALLERY still redacts, because its rows are genuinely
             // unknown until the fetch lands and bones are the honest answer.
-            headerView.render(phase, profileKnown: viewModel.profile != nil, switching: isSwitchingProfile, animated: false)
+            headerView.render(phase, profileKnown: viewModel.profile != nil, switching: accountSwitcher.isSwitchingProfile, animated: false)
             if viewModel.hasGallery {
-                skeletonViewportFill?.isActive = true
                 galleryPager.render(ProfileViewModel.GallerySnapshot(
                     activity: .loading, media: .loading, isComplete: false,
                     reposts: .loading, tagged: .loading,
@@ -2857,7 +1514,6 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
             if currentHandle == nil { currentHandle = seed.handle ?? seed.displayName }
             headerView.render(phase, profileKnown: false, switching: false, animated: false)
             if viewModel.hasGallery {
-                skeletonViewportFill?.isActive = true
                 galleryPager.render(ProfileViewModel.GallerySnapshot(
                     activity: .loading, media: .loading, isComplete: false,
                     reposts: .loading, tagged: .loading,
@@ -2869,9 +1525,6 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
             pullIndicator.endRefreshing()
             statusView.isHidden = true
             galleryPager.isHidden = false
-            // Content owns its height again; the release rides the same
-            // layout pass as the (dissolve-masked) gallery height snap.
-            skeletonViewportFill?.isActive = false
             // Instagram-style: the @handle is the screen's title (the header
             // shows the bold display name). "Profile" only until first load.
             // Content usually lands mid-push; rebind inside the transition
@@ -2892,7 +1545,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
             // lightly staggered, so one identity becomes another rather than
             // the whole screen blinking over at once.
             headerView.render(
-                phase, profileKnown: true, switching: isSwitchingProfile, animated: view.window != nil
+                phase, profileKnown: true, switching: accountSwitcher.isSwitchingProfile, animated: view.window != nil
             )
             updateBannerVideo()
 
@@ -2900,7 +1553,6 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
             pullIndicator.endRefreshing()
             // Never leave the previous profile held over an error.
             galleryPager.isHidden = true
-            skeletonViewportFill?.isActive = false
             // Nothing ever loaded (an offline handle tap, #800): no header
             // around the block (`ProfileHeaderView.render`).
             headerView.render(phase, profileKnown: viewModel.profile != nil, animated: false)
@@ -2928,7 +1580,6 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
             // button.
             pullIndicator.endRefreshing()
             galleryPager.isHidden = true
-            skeletonViewportFill?.isActive = false
             headerView.render(phase, profileKnown: viewModel.profile != nil, animated: false)
             statusView.configure(
                 symbolName: "person.crop.circle.badge.questionmark", title: message, subtitle: detail
@@ -3021,124 +1672,18 @@ extension ProfileViewController {
 
 #endif
 
-#if DEBUG
-
-#endif
-
 extension ProfileViewController {
-    /// "View all" under one of Posts' chunks: the profile's photos and videos
-    /// as the media mosaic (#631) — what the Gallery tab was.
-    ///
-    /// Fed from here as pages land (`onGalleryChange`), under the same
-    /// source, and its posts open through `openGalleryPost` measured against
-    /// ITS mosaic, so a close lands on the tile it left from.
-    /// What "View all" pushes is the page on screen's media (#696): Reposts
-    /// and Tagged have their own, on every profile since #772.
-    private var mediaGalleryTitle: String {
-        switch tabs[galleryPager.activePageIndex] {
-        case .reposts: "Reposted Media"
-        case .tagged: "Tagged Media"
-        default: ProfileTab.format(.media).title
-        }
-    }
+    func pushMediaGallery() { postOpening.pushMediaGallery() }
 
-    func pushMediaGallery() {
-        guard navigationController?.transitionCoordinator == nil else { return }
-        let savesPosts = viewModel.bookmarks != nil
-        let gallery = ProfileMediaGalleryViewController(
-            handle: currentHandle, title: mediaGalleryTitle
-        ) { [makeGridPage] style in makeGridPage(style, savesPosts) }
-        gallery.loadViewIfNeeded()
-        gallery.render(lastGallerySnapshot?.media ?? .loading)
-        gallery.onOpen = { [weak self, weak gallery] post, stream, showingComments in
-            guard let self, let gallery else { return }
-            openGalleryPost(
-                post, stream: stream, showingComments: showingComments,
-                from: gallery.grid, presenter: gallery, format: .media
-            )
-        }
-        gallery.onNearEnd = { [weak self] in self?.viewModel.loadMoreGallery() }
-        // ⚠️ THE LIST ON SCREEN IS THE MEDIA NOW, and the model pages for it:
-        // a page of text posts adds no tile here, so no tile would come on
-        // screen to ask for the next one — the model reads on instead, as it
-        // does for whichever list is showing (`appendGalleryPages`).
-        viewModel.setGalleryFormat(.media)
-        gallery.onClose = { [weak self] in self?.viewModel.setGalleryFormat(.activity) }
-        mediaGallery = gallery
-        navigationController?.pushViewController(gallery, animated: true)
-    }
-
-    /// Opens a gallery post — from its card, or from its comment chip with the
-    /// thread already up (`showingComments`, never set for a text post: its
-    /// page IS its thread).
-    ///
-    /// `surface` is the list it was tapped in — the profile's pager unless
-    /// said otherwise, or the media gallery its "View all" pushed (#631),
-    /// which then also `presents` the feed and names its `format` for the
-    /// feed's continuation.
     func openGalleryPost(
         _ post: GalleryPost, stream: [GalleryPost], showingComments: Bool,
         from surface: (any PostGridPage)? = nil,
         presenter: UIViewController? = nil,
         format: GalleryFilter.Format = .activity
     ) {
-        let presenter = presenter ?? self
-        // One opening at a time: a second tap while the first push is in the
-        // air pushed a second feed over it.
-        guard navigationController?.transitionCoordinator == nil else { return }
-        let window = stream.isEmpty ? [post] : stream
-        // ⚠️ EVERY tap goes through the hero seam, including the ones with
-        // no hero to fly.
-        //
-        // It used to branch here: no geometry meant no flight, and no
-        // flight meant falling out of the feature entirely onto
-        // `AppRoute.postStream` — a bare push with no dismissal gesture, no
-        // tab-bar hide and no projection. That branch was written as "the
-        // animation degrades", but what actually degraded was the screen:
-        // text-only posts opened under the tab bar, empty, and could not be
-        // swiped away at all.
-        //
-        // The choice of presentation belongs to the feed, which owns both
-        // the card and the dismissal — so this screen says only what it
-        // has, and `hasHero` is the whole of what it knows about flying.
-        guard let feedHero else {
-            // No composition root wired the seam (previews, tests). The
-            // route is still the honest answer there — and it is the only
-            // caller left that has to settle for it.
-            viewModel.galleryItemTapped(post.id, stream: window.map(\.id))
-            return
-        }
-        guard let page = surface ?? galleryPager.activePage else { return }
-        // ⚠️ THE ONE TILE CONTRACT (#1273, epic #1269): For You's page
-        // describes its tile — a take-off playing, the playhead continued on
-        // a same-post close (this used to restart the clip), the tile's own
-        // parked clip after paging on, the words faded in on a close, the
-        // tile's or the card's window when there is no picture to fly.
-        let origin = page.heroOrigin(
-            opening: post, stream: window, in: presenter.view,
-            textReveal: page.closeWindow(
-                for: post, alignsPageToSource: true,
-                willStageDismissal: {},
-                dismissalDidEnd: { _ in }
-            ),
-            opensComments: showingComments,
-            willStageDismissal: {},
-            // The header floats over pages whose insets never move while a
-            // post covers them (`contentInsetAdjustmentBehavior = .never`).
-            pinsBeforeClose: false,
-            continuation: { [weak self] after in
-                await self?.viewModel.galleryPostIDs(after: after, in: format)
-            }
+        postOpening.openGalleryPost(
+            post, stream: stream, showingComments: showingComments, from: surface, presenter: presenter, format: format
         )
-        feedHero(window.map(\.id), presenter, origin)
-        // ⚠️ A REFUSED OPEN PUSHES NOTHING (the stack mid-transition), and the
-        // scope opened above would then hold this still-visible grid silent:
-        // only the screen's next appearance ends it, and it never disappeared.
-        // The push is synchronous, so the stack already says which happened.
-        if let navigation = presenter.navigationController,
-           navigation.topViewController === presenter, presenter.presentedViewController == nil {
-            page.endPlaybackHandoff()
-        }
     }
 }
 
@@ -3178,3 +1723,17 @@ extension ProfileViewController: ContentPopGating {
 extension ProfileViewController: StackScreen {
     var leaving: ScreenLeaving { .nativeBack }
 }
+
+#if DEBUG
+extension ProfileViewController: ProfileDebugHooksHost {}
+#endif
+
+extension ProfileViewController: ProfileRelationActionsHost {}
+
+extension ProfileViewController: ProfileTabPagesHost {}
+
+extension ProfileViewController: ProfileHistorySelectionHost {}
+
+extension ProfileViewController: ProfilePostOpeningHost {}
+
+extension ProfileViewController: ProfileAccountSwitcherHost {}
