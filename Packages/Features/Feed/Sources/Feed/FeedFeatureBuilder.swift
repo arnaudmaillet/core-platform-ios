@@ -160,67 +160,18 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             self.savedSounds = savedSounds
             self.viewerProfile = viewerProfile
         }
+
+        /// The wallet a screen's BADGE reads: none for a guest.
+        @MainActor var balanceWallet: (any WalletStaking)? { showsBalance() ? wallet : nil }
     }
 
     private let repository: any FeedProviding
-    private let engagementProvider: (any EngagementProviding)?
-    private let commentsProvider: (any CommentsProviding)?
+    private let postCounters: (any PostCounterReading)?
     /// Every surface's warm of a post's first comments, before it is opened
     /// (#2002): one instance, so nothing is asked twice across surfaces.
     /// A class, so every copy of this builder shares it.
     /// Shared with the place page (#2381).
     public let postOpenWarm: PostOpenWarm?
-    private let realtime: (any FeedRealtimeSubscribing)?
-    private let composedPosts: ComposedPostChannel
-    private let router: any Router
-    private let imagePipeline: ImagePipeline
-    private let videoPlayback: VideoPlaybackController?
-    /// Vends the profile switcher for the comments composer's avatar menu.
-    ///
-    /// A FACTORY, not an instance: `ProfileSwitcherPresenting` caches its
-    /// pre-formatted rows from the last `reload()`, so each surface that
-    /// offers switching holds its own — sharing one would make two screens
-    /// race over the same row cache. A nil switcher leaves the composer's
-    /// face inert.
-    private let makeProfileSwitcher: @MainActor () -> (any ProfileSwitcherPresenting)?
-    /// The viewer's point balance, shared with every surface that shows or
-    /// spends it (the map toolbar's badge, the rail's boost anchor, the
-    /// comments bar). One instance app-wide — `WalletStore`'s change post is
-    /// scoped to the instance. Nil leaves the boost buttons inert.
-    private let wallet: (any WalletStaking)?
-    /// Vends the wallet/claim sheet for the feed header's balance badge —
-    /// injected because the sheet is shell-owned (it is the same one the
-    /// map's badge presents, and the two must never diverge). Nil leaves
-    /// the feed's badge display-only, the pre-sheet behaviour.
-    private let makeWalletSheet: (@MainActor () -> UIViewController)?
-    /// Whether the viewer is shown a balance at all — asked as each screen is
-    /// built. A guest is not (#1146, the owner 2026-10-14): no badge on any
-    /// bar. The wallet itself still backs the like controls, whose spend a
-    /// guest only reaches by signing up.
-    private let showsBalance: @MainActor () -> Bool
-    /// The wallet a screen's BADGE reads: none for a guest.
-    private var balanceWallet: (any WalletStaking)? { showsBalance() ? wallet : nil }
-    /// Files moderation reports raised from a post card's "..." menu. Nil
-    /// withholds the Report row.
-    private let reporting: (any ContentReporting)?
-    /// Unfollows an author from that same menu. Nil withholds the Unfollow row.
-    ///
-    /// Both are the general seams from `CoreModels`, not this feature's own:
-    /// the concrete implementations live where the moderation and social-graph
-    /// clients are already wired, and the composition root hands the same
-    /// instances to whoever needs them.
-    private let socialGraph: (any SocialGraphWriting)?
-    /// Whether the viewer follows a post's author — the snap feed's author
-    /// pill offers its "+" only to someone the viewer does not follow yet, and
-    /// follows them through `socialGraph`. Nil (or a nil `socialGraph`): no "+".
-    private let followRelations: (any SocialGraphReading)?
-    /// The app's one follow-change channel, so the pill's "+" agrees with a
-    /// follow or unfollow made on any other surface.
-    private let followEvents: FollowGraphEvents
-    /// The app's one post and profile per id (#896): every snap feed reads
-    /// the viewer's relation to an author from it, so a follow on one feed
-    /// is the badge of all of them.
-    private let entities: any EntityReading & EntityWriting
 
     /// The lists' author bands' relation mark and "+" (#2300): ONE binding
     /// for every surface this root builds — For You, the place page, a post
@@ -228,30 +179,16 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     /// author rows. A reference, so every copy of this builder shares it.
     /// Shared with the place page (#2381).
     public let authorMarks: PostAuthorMarks
-    /// The posts the server withholds from this viewer, learnt on any feed
-    /// (#2048): every feed and the For You grid drop the ones not on show.
-    /// The app's one record (#2376).
-    private let unavailablePosts: UnavailablePosts
-    /// The viewer's saved pile (#837): the app's one (#2376), which every
-    /// feed, card and grid page this root builds reads and writes.
-    private let bookmarks: PostBookmarkStore
-    /// What the viewer viewed (#1344): every vertical feed records into the
-    /// app's one pile, which the profile's History tab reads (#2376).
-    private let viewHistory: PostViewHistoryStore
-    /// The sounds the viewer saved, for the sound sheet's star (#2376).
-    private let savedSounds: SavedSoundStore
-    /// The profile using the app, for the author marks: its own posts wear no
-    /// badge from the first frame (#2098).
-    private let viewerProfile: @MainActor () -> ProfileID?
-    /// The Text Post page's drafts. The app hands in its one store (built
-    /// once in `AppContainer`, charter P4); a test hands in one of its own.
-    private let postDrafts: PostDraftStore
-    /// Which sound a clip is set to, for the sound sheet. Nil: every clip is
-    /// its own "original sound", played straight from the clip.
-    private let soundProvider: (any PostSoundProviding)?
-    /// "Use this sound" — the shell opens its camera with it. Nil hides the
-    /// button: an action that cannot act is not offered.
-    private let useSound: (@MainActor (PostSound) -> Void)?
+    /// The posts the app holds, and their loads (#1862, #1863).
+    private let heldPosts: FeedHeldPosts
+    /// The Snap feed: its construction and its openings.
+    private let snapFeed: SnapFeedAssembly
+    /// The grids the builder lends to Profile, Chat and Search.
+    private let grids: PostGridsAssembly
+    /// The "+" menu's Text Post and a channel's "Share as a Post".
+    private let textPost: TextPostAssembly
+    /// The playback warms: a map marker's clip, the posts a surface is about to open.
+    private let warms: FeedPlaybackWarms
     /// The keys For You's content contexts were stored under (#1423): the
     /// feature is gone, and so is the stored choice — no device keeps a dead
     /// value. A second launch finds nothing to remove.
@@ -262,31 +199,12 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     }
 
     public init(dependencies: Dependencies) {
-        bookmarks = dependencies.bookmarks
-        viewHistory = dependencies.viewHistory
-        unavailablePosts = dependencies.unavailablePosts
-        savedSounds = dependencies.savedSounds
-        viewerProfile = dependencies.viewerProfile
-        shareTargeting = dependencies.shareTargeting
-        entities = dependencies.entities
-        discovery = dependencies.discovery
-        localCache = dependencies.localCache
-        postDrafts = dependencies.postDrafts
-        soundProvider = dependencies.soundProvider
-        useSound = dependencies.useSound
         postCounters = dependencies.postCounters
-        reporting = dependencies.reporting
-        socialGraph = dependencies.socialGraph
-        followRelations = dependencies.followRelations
-        followEvents = dependencies.followEvents
         authorMarks = PostAuthorMarks(
             writer: dependencies.socialGraph, reader: dependencies.followRelations, entities: dependencies.entities,
             followEvents: dependencies.followEvents, viewer: dependencies.viewerProfile
         )
-        makeProfileSwitcher = dependencies.makeProfileSwitcher
         repository = dependencies.repository
-        engagementProvider = dependencies.engagementProvider
-        commentsProvider = dependencies.commentsProvider
         postOpenWarm = dependencies.commentsProvider.map { provider in
             PostOpenWarm(
                 prefetch: { id in await provider.prefetchTopComments(for: id) },
@@ -295,190 +213,55 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                 previews: { ids in await provider.prefetchPreviews(for: ids) }
             )
         }
-        realtime = dependencies.realtime
-        composedPosts = dependencies.composedPosts
-        router = dependencies.router
-        imagePipeline = dependencies.imagePipeline
-        videoPlayback = dependencies.videoPlayback
-        wallet = dependencies.wallet
-        makeWalletSheet = dependencies.makeWalletSheet
+        heldPosts = FeedHeldPosts(dependencies: dependencies)
+        let comments = PostCommentsAssembly(dependencies: dependencies)
+        snapFeed = SnapFeedAssembly(
+            dependencies: dependencies, postOpenWarm: postOpenWarm, comments: comments, heldPosts: heldPosts
+        )
+        grids = PostGridsAssembly(
+            dependencies: dependencies, postOpenWarm: postOpenWarm, authorMarks: authorMarks,
+            snapFeed: snapFeed, heldPosts: heldPosts
+        )
+        textPost = TextPostAssembly(dependencies: dependencies)
+        warms = FeedPlaybackWarms(dependencies: dependencies, postOpenWarm: postOpenWarm)
         Self.forgetRetiredForYouModes(in: .standard)
-        showsBalance = dependencies.showsBalance
         // Every grid's tiles follow the feed's playback policy — Autoplay,
         // the network, Low Power Mode — For You's and a profile's alike (#580).
         GridVideoPlaybackCoordinator.allowsAutoplay = { MediaPlaybackPolicy.autoplays }
     }
 
-    /// The timeline is the full-screen snap feed — the app's sole Timeline.
-    public func makeFeedViewController() -> UIViewController {
-        makeSnapFeed(
-            viewModel: FeedViewModel(
-                repository: repository,
-                engagementProvider: engagementProvider,
-                commentsProvider: commentsProvider,
-                realtime: realtime,
-                composedPosts: composedPosts,
-                router: router,
-                entities: entities,
-                unavailablePosts: unavailablePosts
-            )
-        )
-    }
-
+    // The posts the app holds: `FeedHeldPosts`.
     public func galleryPosts(_ ids: [PostID]) async -> [PostID: GalleryPost] {
-        var found: [PostID: FeedEntry] = [:]
-        var missing: [PostID] = []
-        for id in ids {
-            if let entry = heldEntry(id) { found[id] = entry } else { missing.append(id) }
-        }
-        let repository = repository
-        await withTaskGroup(of: (PostID, FeedEntry?).self) { group in
-            for id in missing {
-                group.addTask { (id, try? await repository.loadPost(id)) }
-            }
-            for await (id, entry) in group {
-                if let entry { found[id] = entry }
-            }
-        }
-        return found.mapValues(DiscoverRepository.galleryPost(from:))
+        await heldPosts.galleryPosts(ids)
     }
 
     @MainActor
     public func heldGalleryPost(_ id: PostID) -> GalleryPost? {
-        guard var post = heldEntry(id).map(DiscoverRepository.galleryPost(from:)) else { return nil }
-        // A like count the store does not know is the card's unknown state,
-        // not a zero (#1863): the hydration's counter read fills it.
-        if repository.peekPost(id) == nil, entities.post(id)?.likeCount == nil { post.reactionCount = nil }
-        return post
+        heldPosts.heldGalleryPost(id)
     }
 
-
-    /// `ids`' posts, loaded together and returned in `ids`' order; a post
-    /// that cannot be loaded is left out (#1863).
     nonisolated static func loadConcurrently(_ ids: [PostID], from repository: any FeedProviding) async -> [FeedEntry] {
-        let loaded = await withTaskGroup(of: (PostID, FeedEntry?).self) { group in
-            for id in ids { group.addTask { (id, try? await repository.loadPost(id)) } }
-            return await group.reduce(into: [PostID: FeedEntry]()) { found, pair in
-                if let entry = pair.1 { found[pair.0] = entry }
-            }
-        }
-        return ids.compactMap { loaded[$0] }
+        await FeedHeldPosts.loadConcurrently(ids, from: repository)
     }
 
-    /// A post the app holds, read synchronously (#1862): the feed's small
-    /// mirror (`peekPost`), then the app's `EntityStore` — whose device
-    /// backing reloads hundreds of posts at launch the mirror never saw. The
-    /// store's like count is a copy: a real load replaces it.
-    func heldEntry(_ id: PostID) -> FeedEntry? {
-        // A post deleted in this session is held by no one (#896).
-        guard !entities.isDeleted(id) else { return nil }
-        if let entry = repository.peekPost(id) { return entry }
-        return Self.entry(id, in: entities)
-    }
-
-    /// `id` as `store` holds it: the post and its author, both needed.
     static func entry(_ id: PostID, in store: any EntityReading) -> FeedEntry? {
-        guard let entity = store.post(id), let post = entity.post,
-              let author = store.profile(post.authorID)?.summary
-        else { return nil }
-        return FeedEntry(post: post, author: author, likeCount: entity.likeCount ?? 0)
+        FeedHeldPosts.entry(id, in: store)
     }
 
-    /// Starts `postID`'s page player now, at `seconds` into its clip — a finger
-    /// has landed on its map marker (#646). Nil when the post is not hydrated
-    /// yet (the map warms visible posts' DATA on every settle, so it usually
-    /// is), when it is not a single clip, when autoplay is off, or without a
-    /// player pool. The caller ends it: see `FlightPlaybackWarm.end(opened:)`.
+    // The playback warms: `FeedPlaybackWarms`.
     @MainActor
     public func warmPlayback(of postID: PostID, at seconds: TimeInterval?) -> (any FeedPlaybackWarm)? {
-        let entry = repository.peekPost(postID)
-        // Not gated on autoplay (#702): the flight lands on a full-screen post,
-        // which plays whatever Autoplay says.
-        guard let videoPlayback, let entry,
-              let clip = FlightPlaybackWarm.warmableClip(of: entry) else {
-            #if DEBUG
-            if LaunchArgument.zoomLiveLog.isPassed() {
-                print("[zoom-live] warm refused \(postID.rawValue): pool=\(videoPlayback != nil) "
-                      + "autoplay=\(MediaPlaybackPolicy.autoplays) hydrated=\(entry != nil) "
-                      + "attachments=\(entry?.post.attachments.map { $0.mimeType } ?? [])")
-            }
-            #endif
-            return nil
-        }
-        let warm = FlightPlaybackWarm(pool: videoPlayback, url: clip.url, scope: clip.scope)
-        warm.start(at: seconds)
-        return warm
+        warms.warmPlayback(of: postID, at: seconds)
     }
 
-    /// See `FeedFeatureBuilding.prerollPlayback` (#654).
     @MainActor
     public func prerollPlayback(of postID: PostID, at seconds: TimeInterval?) -> (any FeedPlaybackWarm)? {
-        let process = ProcessInfo.processInfo
-        let allowed = FlightPlaybackWarm.prerollAllowed(preloads: MediaPlaybackPolicy.preloads,
-                                                        autoplays: MediaPlaybackPolicy.autoplays,
-                                                        lowPower: process.isLowPowerModeEnabled,
-                                                        thermal: process.thermalState)
-        let entry = repository.peekPost(postID)
-        // Not hydrated yet: the map warms its visible posts' data on the same
-        // settle, and which ones a sweep reaches is not guaranteed. Asked for
-        // here, so the map's next try finds it.
-        if allowed, entry == nil {
-            let repository = repository
-            Task { await repository.prewarm([postID]) }
-        }
-        guard allowed, let videoPlayback, let entry,
-              let clip = FlightPlaybackWarm.warmableClip(of: entry) else {
-            #if DEBUG
-            if LaunchArgument.zoomLiveLog.isPassed(in: process.arguments) {
-                print("[zoom-live] preroll refused \(postID.rawValue): preloads=\(MediaPlaybackPolicy.preloads) "
-                      + "autoplay=\(MediaPlaybackPolicy.autoplays) lowPower=\(process.isLowPowerModeEnabled) "
-                      + "thermal=\(process.thermalState.rawValue) hydrated=\(entry != nil)")
-            }
-            #endif
-            return nil
-        }
-        let warm = FlightPlaybackWarm(pool: videoPlayback, url: clip.url, scope: clip.scope)
-        warm.start(at: seconds, pausedOnFirstFrame: true)
-        return warm
+        warms.prerollPlayback(of: postID, at: seconds)
     }
 
     public func prewarmPosts(_ ids: [PostID]) async {
-        #if DEBUG
-        // See `isColdOpenForced`: a warmed corpus seeds synchronously and the
-        // cold path is unreachable, which is why it could only be filmed by
-        // accident on a slow machine.
-        guard !Self.isColdOpenForced else { return }
-        #endif
-        // The map's visible pins and the sound sheet's posts warm their first
-        // comments too, queued behind what is on screen elsewhere (#2002).
-        postOpenWarm?.warmLater(ids)
-        await repository.prewarm(ids)
+        await warms.prewarmPosts(ids)
     }
-
-    #if DEBUG
-    /// `-feed-cold-open [ms]`: forces the path a FIRST open takes, and holds it
-    /// open long enough to film.
-    ///
-    /// ⚠️ THE COLD PATH IS NORMALLY UNREACHABLE ON DEMAND, and that is the
-    /// point of this. `prewarmVisiblePosts` warms up to 16 posts on every
-    /// viewport settle, seconds before any tap, and the seed below is
-    /// all-or-nothing — so whether a given pin opens cold depends on a Set's
-    /// iteration order and on which sweep was cancelled by the next. A defect
-    /// reachable only by luck is a defect nobody can prove fixed.
-    ///
-    /// It suppresses the prewarm, forbids the synchronous seed, and delays the
-    /// hydration by `ms` (default 800). The delay sits on the POST fetch alone,
-    /// not the transport, so the map's own markers stay fast and the window
-    /// under test is the only slow thing.
-    static var isColdOpenForced: Bool {
-        LaunchArgument.feedColdOpen.isPassed()
-    }
-    #endif
-
-    private let postCounters: (any PostCounterReading)?
-    private let discovery: (any FeedProviding)?
-    private let shareTargeting: (any ShareTargeting)?
-    private let localCache: FeedLocalCache?
 
     /// Whether `presenter` may open a post now: its stack is at rest and it
     /// is (inside) the screen on top. What For You and the post list check
@@ -488,355 +271,96 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         PostOpening.canOpen(from: presenter, on: nav)
     }
 
+    // The Snap feed's construction and openings: `SnapFeedAssembly`.
+    public func makeFeedViewController() -> UIViewController {
+        snapFeed.makeFeedViewController()
+    }
+
     public func presentSnapFeedHero(
         postIDs: [PostID],
         from presenter: UIViewController,
         origin: SnapFeedHeroOrigin
     ) {
-        guard !postIDs.isEmpty, let nav = presenter.navigationController else { return }
-        // ⚠️ ONE OPENING AT A TIME. For You and the post list guard their own
-        // taps; the screens that open through here (a profile, the place page,
-        // Discover, search) did not, so a double tap pushed two feeds, and the
-        // second captured the first flight as the delegate to restore.
-        guard Self.canOpen(from: presenter, on: nav) else { return }
-        let destination = makeSnapFeedViewController(
-            postIDs: postIDs, ownsInteractiveDismissal: true, continuation: origin.continuation
-        )
-        // Hand over the projection the origin is already showing, on BOTH
-        // presentations. The flight used to hide the cost of not doing this —
-        // the card carries the tile's own pixels, so the destination behind it
-        // could be empty for the length of the animation and nobody saw it —
-        // which is why this was only ever noticed on the plain push below.
-        (destination as? SnapFeedViewController)
-            .map { $0.seedProjection(SnapFeedViewController.keepingOpeningKind(GalleryPostProjection.seedModels(from: origin.stream))) }
-        // The collection's page the source is showing, and the source
-        // following the post's carousel back — the same pair For You's own
-        // list handed its feed (until #2453).
-        if let feed = destination as? SnapFeedViewController {
-            if let page = origin.mediaPage { feed.openMediaPage(page, for: origin.post.id) }
-            if let follow = origin.followMediaPage { feed.onMediaPageChanged = follow }
-        }
-        // ⚠️ OPENED BY ITS COMMENT COUNT — the thread comes up with the page.
-        //
-        // Handed over as a page instruction rather than acted on at the tap, so
-        // the destination spends the engagement's layout when it is ready to.
-        // The reveal point is the rect the flight is about to fly, so the
-        // thread is revealed OUT of the photograph rather than arriving over
-        // it. Same shape as For You's own chip.
-        if origin.opensComments {
-            (destination as? SnapFeedViewController)?.openComments(
-                for: origin.post.id, revealingFrom: origin.frame(presenter.view)
-            )
-        }
-        // The snap feed is the only thing this builds, and it conforms — but
-        // the factory is typed `UIViewController` for callers who do not care.
-        //
-        // ⚠️ `hasHero` is asked FIRST, and it is not the same question as
-        // whether the cast succeeds. A text-only post has no media surface at
-        // either end of a flight, so there is nothing to fly even though the
-        // destination is perfectly flyable. Both answers land on the same feed;
-        // only the way in differs, which is the right thing to degrade.
-        //
-        // Historically this method had no such branch: an origin with no hero
-        // was flown anyway (from a rect it had to invent), and a destination
-        // that failed the cast was silently dropped on the floor — the tap did
-        // nothing at all. Neither is a presentation.
-        // Reduce Motion: the stack's own push, no flight and no window
-        // (`HeroMotionPolicy`).
-        let reducesMotion = HeroMotionPolicy.prefersNativePush
-        // A list's row of words (#2243) opens with the native push too: no
-        // window, so the plain push's close — the native pop, whatever page
-        // the feed shows by then (`heroLandingAcceptsHero = { false }`), its
-        // vertical closes pulls.
-        let nativePush = reducesMotion || origin.opensWithNativePush
-        guard origin.hasHero, !nativePush,
-              let flyable = destination as? any ZoomTransitionDestination else {
-            pushWithoutFlight(destination, on: nav, reveal: nativePush ? nil : origin.textReveal)
-            return
-        }
-        // The feed is a pager and this origin lands where it took off, so the
-        // one thing the source cannot work out for itself is what the viewer is
-        // leaving — asked of the feed, at staging, never captured here.
-        let source = ExternalHeroZoomSource(
-            origin: origin,
-            settle: { [weak destination] in
-                let feed = destination as? any SnapFeedSettleReporting
-                return (id: feed?.settledPostID, cover: feed?.settledCoverImage, page: feed?.settledMediaPage)
-            }
-        )
-        // ⚠️ THE SESSION OWNS THE FLIGHT'S LIFE (`HeroPushSession`): this
-        // builder is a struct and cannot hold it, so the session keeps itself
-        // alive until it closes, leases the stack's delegate slot (SAVED, not
-        // assumed nil — a profile owns the slot through its own slide dismissal
-        // before it pushes anything, and restoring nil orphaned it), and runs
-        // ONE close-out for a return AND a reversed push. The reversed push
-        // used to restore the dock and nothing else, leaking the whole flight.
-        let session = HeroPushSession(
-            source: source, destination: flyable, on: nav, retainsItself: true
-        )
-        let transition = session.controller
-        // The pushed feed owns its dismissal grab, exactly as it does when the
-        // For You grid opens it — otherwise the stack's edge gesture and the
-        // flight's own grab both try to drive one pop.
-        (destination as? SnapFeedViewController)?.zoomOwnsInteractiveDismissal = true
-
-        // The card close armed beside the flight and its landing, kept for as
-        // long as the session (the close holds its landing weakly).
-        let retainer = HeroTransitionRetainer()
-        session.onClose = { [weak nav] _ in
-            origin.setConcealed(false)
-            // Released a turn later with the session: the close-out runs
-            // inside the card close's own forwarded `didShow`.
-            let released = (retainer.cardClose, retainer.cardCloseLanding)
-            retainer.cardClose = nil
-            retainer.cardCloseLanding = nil
-            DispatchQueue.main.async { withExtendedLifetime(released) {} }
-            // A BACKSTOP for the dock — the close's commit has normally shown
-            // it already (below). Through UIKit, never an alpha.
-            Self.restoreTabBar(on: nav)
-        }
-        // An abandoned grab leaves the post up — and never raised the dock,
-        // which waits for a COMMITTED release, so there is nothing to undo.
-        // ⚠️ BOTH AXES GO HOME TO THE TILE, including for a post opened from
-        // the PLACE PAGE.
-        //
-        // That page used to split them: the vertical grab flew home while the
-        // horizontal one ESCAPED past the gallery to the map, on the reading
-        // that a rightward swipe is the platform's back gesture and the map is
-        // where the flow began. It read as a level being skipped. A post opened
-        // from a place belongs to that place, so both ways out of it land
-        // there, and leaving the place for the map is the place's own gesture
-        // to offer (`installMapReturnIfTop`) — one screen, one level, each
-        // time.
-        //
-        // What went with the split: the escape's slide, the stack surgery that
-        // dropped the gallery mid-gesture and re-inserted it on a cancel, and
-        // the `setDismissSource` registration that pointed a pop at a marker.
-        // A gesture that no longer crosses two levels needs none of it.
-        // ⚠️ AND THE CARD-SHAPED CLOSE RIDES ALONG FOR EVERY PRESENTER THAT CAN
-        // LAND ONE — not only the place page.
-        //
-        // This used to ask `presenter as? PlaceProfileViewController`, so a
-        // PROFILE opened its media posts with a flight and nothing beside it:
-        // page onto a text post and both zoom grabs refuse the `.card` close,
-        // the flight's animator declines it, and the stack's edge pop is
-        // disclaimed — no drag at all, and a chevron that fell through to
-        // UIKit's plain pop. Filmed on a profile's Activity tab as the list
-        // coming back on a cut, while For You's Following list, which has
-        // always armed this close, revealed onto its card. See
-        // `cardCloseLanding(for:origin:pipeline:dock:)`.
-        let cardLanding = Self.cardCloseLanding(
-            for: presenter, origin: origin, pipeline: imagePipeline,
-            dock: { Self.withDockChoreography($0, on: nav) }
-        )
-        // THE GRAB. Without it this push had no dismissal gesture at all:
-        // claiming `zoomOwnsInteractiveDismissal` above tells the stack's
-        // native edge-swipe to stay out of the way, which is correct only
-        // because the flight attaches its own — and a claim with nothing
-        // behind it leaves the screen unswipeable. Accessing `view` loads it
-        // so the pan has something to attach to.
-        transition.attachInteractiveDismissal(
-            to: destination.view, axes: [.horizontal, .vertical]
-        ) { [weak nav, weak transition, weak session, weak destination] in
-            // ⚠️ NOT WHILE A CARD CLOSE HOLDS THE SLOT. It forwards a `.hero`
-            // pop to this flight already, and taking the slot from it was
-            // permanent: after a cancelled grab, paging to a text post and
-            // dragging ran UIKit's plain pop (this controller refuses `.card`),
-            // and the card close never heard a `didShow` again, so it leaked
-            // on every committed grab, with the row it concealed.
-            if let transition, let nav, session?.holdsDelegateSlot == false {
-                NavigationDelegateHub.of(nav).lease(transition)
-            }
-            // ⚠️ NOTHING ABOUT THE DOCK HERE any more. Grab-begin used to put
-            // the bar's state back at alpha 0 and the landing showed it. The
-            // feed brings it back itself, through UIKit, once its close is
-            // committed — see `SnapFeedViewController.revealDockForClose`.
-            // The post is what leaves (#1144), never whatever is on top.
-            destination?.closeScreen(whenBusy: .drop)
-        }
-        #if DEBUG
-        // `-zoom-live-log`: the grab is invisible until a finger arrives, and
-        // the simulator has none — so this is the only way a scripted run can
-        // tell "attached" from "claimed ownership and attached nothing", which
-        // is what left profile-opened posts unswipeable.
-        if LaunchArgument.zoomLiveLog.isPassed() {
-            let pans = destination.view.gestureRecognizers?
-                .filter { $0 is UIPanGestureRecognizer }.count ?? 0
-            print("[hero] pushed with dismissal grab: pans=\(pans)")
-        }
-        #endif
-        #if DEBUG
-        // `-hero-demo-grab`: dismiss the pushed post by grab once it lands, so a
-        // scripted run can see the surface UNDERNEATH in its returned state.
-        // The reveal that runs while the post covers it is only observable there.
-        if LaunchArgument.heroDemoGrab.isPassed() {
-            transition.onDestinationShown = { [weak transition] in
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                    transition?.debugScriptedGrab()
-                }
-            }
-        }
-        #endif
-        // ⚠️ Hidden BY HAND, not with `hidesBottomBarWhenPushed`.
-        //
-        // The feed reached for that flag twice and measured the same defect both
-        // times — most recently on the plain percent driver this path also uses:
-        // its bottom-bar choreography does not scrub with a custom interactive
-        // pop, so the bar arrives fully rendered at pop-begin and stands over the
-        // post for the whole length of a grab. See `FeedFlowCoordinator.push`,
-        // which hides on the push and restores on the completed pop; this is the
-        // same cure for the same push, arriving from a profile instead of a pin.
-        //
-        // Nothing else was hiding it here: `syncTabBarVisibility` runs on tab
-        // selection, never on a push, and this push replaces the navigation
-        // delegate with the flight — so the shell hears nothing either.
-        //
-        // ⚠️ AFTER THE PUSH'S FIRST FRAME (#2126): the hide's own work was 7–10
-        // ms of the tap's turn, ahead of the card's first movement. Asked
-        // here, before the push changes the top; done once the turn's commit
-        // is out, and only while this feed is still the one on top.
-        #if DEBUG
-        // `-tabbar-flag`: the A/B this decision rests on. Swaps the hand-managed
-        // hide for `hidesBottomBarWhenPushed`, so the two can be filmed against
-        // each other on the same grab rather than argued about.
-        let usesFlag = LaunchArgument.tabbarFlag.isPassed()
-        if usesFlag { destination.hidesBottomBarWhenPushed = true }
-        let hidesBar = !usesFlag && !nav.flagHidesAppTabBar(at: nav.topViewController)
-        #else
-        // ⚠️ NOT UNDER `hidesBottomBarWhenPushed` (#769): a profile over a
-        // conversation has handed the bar to UIKit already, and an explicit
-        // hide there outlived the pops (`flagHidesAppTabBar`).
-        let hidesBar = !nav.flagHidesAppTabBar(at: nav.topViewController)
-        #endif
-        session.takeDelegateSlot()
-        // No `session.prepareDestination()`: this feed is built fresh on every
-        // tap, so the pre-paid layout would be a cold one paid between the
-        // finger lifting and the flight starting — the map measured that as a
-        // pause before the animation (see `MapsViewController`). Only a REUSED
-        // destination (For You's) gains from it.
-        // ⚠️ THE STACK SETTLED FIRST: a push in the same turn as one that has
-        // not been laid out yet (a screen pushed without animation, a host
-        // just presented) is dropped by UIKit. The bar's hide used to settle
-        // the stack by the way, before it moved after the push (#2126). On a
-        // settled stack this lays nothing out.
-        nav.view.layoutIfNeeded()
-        nav.pushViewController(destination, animated: true)
-        if hidesBar {
-            nav.tabBarController?.hideTabBarNativelyAfterCommit { [weak nav, weak destination] in
-                destination != nil && nav?.topViewController === destination
-            }
-        }
-        // ⚠️ AFTER THE PUSH, and that is the whole of whether it works. The
-        // line above hands the stack's delegate to the flight, so a driver
-        // installed before it captures a slot it is about to lose — and a
-        // dismissal it never hears about is one UIKit never asks for an
-        // interaction controller for, which reads as a dead gesture. Installing
-        // here makes the FLIGHT what this driver saves and forwards a `.hero`
-        // pop back to. The map's own card-close says the same thing about the
-        // same ordering.
-        if let cardLanding {
-            Self.attachTileCardClose(
-                feed: destination, landing: cardLanding, on: nav,
-                retainer: retainer, session: session
-            )
-        }
+        snapFeed.presentSnapFeedHero(postIDs: postIDs, from: presenter, origin: origin)
     }
 
-    /// For You's own grid page, for a feature that hosts its own posts — the
-    /// profile's pages (#1273, epic #1269): every media tile in the app is
-    /// For You's tile. `savesPosts`: whether its cards offer to save (the
-    /// viewer's own saved pile); false hides the control.
-    ///
-    /// The composition root's, on the concrete builder: `FeedFeatureBuilding`
-    /// no longer names the page, whose protocol needs PostGrid's cards
-    /// (`PostCardStaking`), so FeedInterface stays clear of PostGrid (#2380).
-    /// The profile and Chat receive it as a closure.
-    public func makePostGridPage(style: PostGridPageStyle, savesPosts: Bool) -> any PostGridPage {
-        // The app's one pool, the same instance For You's tabs borrow from.
-        let page = PostGridPages.make(
-            style: style, imagePipeline: imagePipeline, videoPlayback: videoPlayback,
-            bookmarks: savesPosts ? bookmarks : nil, withheldPosts: unavailablePosts,
-            postOpenWarm: postOpenWarm
+    public func pushSnapFeed(postIDs: [PostID], from presenter: UIViewController) {
+        snapFeed.pushSnapFeed(postIDs: postIDs, from: presenter)
+    }
+
+    public func pushSnapFeed(postIDs: [PostID], from presenter: UIViewController, sourceIsComplete: Bool) {
+        snapFeed.pushSnapFeed(postIDs: postIDs, from: presenter, sourceIsComplete: sourceIsComplete)
+    }
+
+    public func pushSnapFeed(
+        postIDs: [PostID], from presenter: UIViewController, sourceIsComplete: Bool,
+        beneath: ((UIViewController) -> UIViewController)?
+    ) {
+        snapFeed.pushSnapFeed(postIDs: postIDs, from: presenter, sourceIsComplete: sourceIsComplete, beneath: beneath)
+    }
+
+    public func revealSnapFeed(
+        postIDs: [PostID],
+        from presenter: UIViewController,
+        origin: TextRevealOrigin,
+        beneath: ((UIViewController) -> UIViewController)?
+    ) {
+        snapFeed.revealSnapFeed(postIDs: postIDs, from: presenter, origin: origin, beneath: beneath)
+    }
+
+    public func revealSnapFeed(
+        postIDs: [PostID],
+        from presenter: UIViewController,
+        origin: TextRevealOrigin,
+        beneath: ((UIViewController) -> UIViewController)?,
+        sourceIsComplete: Bool
+    ) {
+        snapFeed.revealSnapFeed(
+            postIDs: postIDs, from: presenter, origin: origin, beneath: beneath, sourceIsComplete: sourceIsComplete
         )
-        // A card's author band wears its relation mark (#2300).
-        (page as? PostGridPageView)?.authorMarks = authorMarks
-        return page
+    }
+
+    public func makeSnapFeedViewController(
+        postIDs: [PostID],
+        ownsInteractiveDismissal: Bool
+    ) -> UIViewController {
+        snapFeed.makeSnapFeedViewController(postIDs: postIDs, ownsInteractiveDismissal: ownsInteractiveDismissal)
+    }
+
+    public func makeSnapFeedViewController(
+        postIDs: [PostID],
+        ownsInteractiveDismissal: Bool,
+        sourceIsComplete: Bool
+    ) -> UIViewController {
+        snapFeed.makeSnapFeedViewController(
+            postIDs: postIDs, ownsInteractiveDismissal: ownsInteractiveDismissal, sourceIsComplete: sourceIsComplete
+        )
+    }
+
+    public func makePostFeedViewController(for postID: PostID, opensComments: Bool) -> UIViewController {
+        snapFeed.makePostFeedViewController(for: postID, opensComments: opensComments)
+    }
+
+    // The grids the builder lends: `PostGridsAssembly`.
+    public func makePostGridPage(style: PostGridPageStyle, savesPosts: Bool) -> any PostGridPage {
+        grids.makePostGridPage(style: style, savesPosts: savesPosts)
     }
 
     public func makePostSetSurface(style: PostSetSurfaceStyle) -> any PostSetSurface {
-        let base = repository
-        let postCounters = postCounters
-        let entities = entities
-        let surface = PostSetSurfaceViewController(
-            style: style,
-            imagePipeline: imagePipeline,
-            // The app's one pool, the same instance For You's tabs borrow from.
-            videoPlayback: videoPlayback,
-            bookmarks: bookmarks,
-            withheldPosts: unavailablePosts,
-            // What the app holds, drawn before the hydration lands (#1863).
-            held: { [self] id in heldGalleryPost(id) },
-            hydrate: { ids in
-                // The place profile's hydration, verbatim in shape: a fixed-set
-                // provider through the For You repository so every member is a
-                // cache hit, then ONE batched counter read for both counts.
-                // Three surfaces asking three different ways is how they come to
-                // disagree — see `PlaceFeatureBuilder.makeClusterGallery`'s note (Place).
-                let provider = FixedPostsFeedProvider(base: base, ids: ids)
-                // A post deleted in this session is no result, whatever the
-                // index still answers (#896).
-                guard let hydrated = try? await DiscoverRepository(feed: provider).firstPage().posts
-                else { return [] }
-                let posts = hydrated.filter { !entities.isDeleted($0.id) }
-                guard let postCounters else { return posts }
-                let byPostID = await postCounters.counters(forPostIDs: posts.map(\.id.rawValue))
-                guard !byPostID.isEmpty else { return posts }
-                return posts.map { post in
-                    guard let counts = byPostID[post.id.rawValue] else { return post }
-                    var decorated = post
-                    decorated.reactionCount = counts.likes ?? post.reactionCount
-                    decorated.commentCount = counts.comments
-                    return decorated
-                }
-            }
-        )
-        // ⚠️ A FLIGHT, NOT A PUSH, and this is what it used to be:
-        // `router.route(to: .post(id))`, the platform's plain slide. These
-        // pages ARE the grid For You's two tabs were (until #2453), so a tap on
-        // them had every reason to open the way a tap on For You did — and did
-        // not, because the host was new and nobody had handed it the opener.
-        surface.openPost = { [self] presenter, origin, ids in
-            presentSnapFeedHero(postIDs: ids, from: presenter, origin: origin)
-        }
-        // The results draw their posts' live counts, and their like chips
-        // stake from the app's one wallet (#896) — For You's cards' binding.
-        let staking = wallet.map { PostCardStaking(wallet: $0, entities: entities, saves: bookmarks) }
-        surface.staking = staking
-        // …and their author bands wear the relation mark (#2300).
-        surface.authorMarks = authorMarks
-        // "View all" on a discover page: For You's own media gallery, with the
-        // header For You's pushed screens wear (#629).
-        surface.makeGallery = { [self] in
-            let gallery = DiscoverGalleryViewController(
-                imagePipeline: imagePipeline, videoPlayback: videoPlayback,
-                bookmarks: bookmarks, withheldPosts: unavailablePosts,
-                header: PushedScreenHeader(wallet: balanceWallet, makeWalletSheet: makeWalletSheet, router: router),
-                // The same binding as the results it was pushed from.
-                staking: staking,
-                openPost: { [self] presenter, origin, ids in
-                    presentSnapFeedHero(postIDs: ids, from: presenter, origin: origin)
-                }
-            )
-            gallery.postOpenWarm = postOpenWarm
-            return gallery
-        }
-        // Its tiles warm their posts' first comments (#2002).
-        surface.postOpenWarm = postOpenWarm
-        return surface
+        grids.makePostSetSurface(style: style)
     }
 
+    // The plain opening's geometry: `SnapFeedAssembly`.
     public func textRevealGeometry(closing feed: UIViewController, onto origin: TextRevealOrigin) -> RevealGeometry {
-        TextRevealInstaller.geometry(feed: feed, origin: origin, pipeline: imagePipeline)
+        snapFeed.textRevealGeometry(closing: feed, onto: origin)
+    }
+
+    public func makeRevealGeometry(
+        dismissing feed: UIViewController,
+        origin: TextRevealOrigin,
+        onWillClose: (() -> Void)?
+    ) -> RevealGeometry {
+        snapFeed.makeRevealGeometry(dismissing: feed, origin: origin, onWillClose: onWillClose)
     }
 
     /// A place's posts as its page draws them (#2381: the place page lives in
@@ -876,894 +400,22 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         return members
     }
 
-    /// The plain push, for a caller with no origin to describe.
-    ///
-    /// `presentSnapFeedHero` reaches the same place when its origin reports
-    /// `hasHero == false`, and that is the right shape for a surface that HAS
-    /// an origin (a grid tile knows its post, its pixels and its rect). A Maps
-    /// text pin has none of that — a symbol on a circle is not a cover, and the
-    /// pin carries ids rather than models — so it says so directly instead of
-    /// filling a hero origin with fields the plain branch never reads.
-    ///
-    /// One line of body, and it is the point: everything that makes this push
-    /// survivable (the dismissal, its retainer, the tab bar) is in
-    /// `pushWithoutFlight`, and a second surface reaching for a bare
-    /// `pushViewController` is exactly the regression `PlainPushDismissalTests`
-    /// guards.
-    public func pushSnapFeed(postIDs: [PostID], from presenter: UIViewController) {
-        pushSnapFeed(postIDs: postIDs, from: presenter, sourceIsComplete: false)
-    }
-
-    public func pushSnapFeed(postIDs: [PostID], from presenter: UIViewController, sourceIsComplete: Bool) {
-        pushSnapFeed(postIDs: postIDs, from: presenter, sourceIsComplete: sourceIsComplete, beneath: nil)
-    }
-
-    public func pushSnapFeed(
-        postIDs: [PostID], from presenter: UIViewController, sourceIsComplete: Bool,
-        beneath: ((UIViewController) -> UIViewController)?
-    ) {
-        guard !postIDs.isEmpty, let nav = presenter.navigationController else { return }
-        pushWithoutFlight(
-            makeSnapFeedViewController(postIDs: postIDs, ownsInteractiveDismissal: true, sourceIsComplete: sourceIsComplete),
-            on: nav, reveal: nil, beneath: beneath
-        )
-    }
-
-    public func revealSnapFeed(
-        postIDs: [PostID],
-        from presenter: UIViewController,
-        origin: TextRevealOrigin,
-        beneath: ((UIViewController) -> UIViewController)?
-    ) {
-        revealSnapFeed(postIDs: postIDs, from: presenter, origin: origin, beneath: beneath, sourceIsComplete: false)
-    }
-
-    public func revealSnapFeed(
-        postIDs: [PostID],
-        from presenter: UIViewController,
-        origin: TextRevealOrigin,
-        beneath: ((UIViewController) -> UIViewController)?,
-        sourceIsComplete: Bool
-    ) {
-        guard !postIDs.isEmpty, let nav = presenter.navigationController else { return }
-        pushWithoutFlight(
-            makeSnapFeedViewController(postIDs: postIDs, ownsInteractiveDismissal: true, sourceIsComplete: sourceIsComplete),
-            on: nav, reveal: origin, beneath: beneath
-        )
-    }
-
-    /// The reveal's geometry for a CLOSE, built without pushing anything.
-    ///
-    /// ⚠️ SAFE ON A LOADED FEED, unlike the push — which runs on an empty one
-    /// and relies on it. `TextRevealInstaller.geometry` also arms the loading
-    /// page, and both of its side effects decline here by construction:
-    /// `presentLoadingPage` returns immediately once `orderedIDs` is non-empty,
-    /// and the empty ground it sets only ever feeds the resolver's empty
-    /// branch.
-    ///
-    /// Deliberately NOT wrapped in `withDockChoreography`: a caller that owns
-    /// its own bottom chrome (the map does) restores it itself, and two owners
-    /// would fight over one bar.
-    public func makeRevealGeometry(
-        dismissing feed: UIViewController,
-        origin: TextRevealOrigin,
-        onWillClose: (() -> Void)?
-    ) -> RevealGeometry {
-        (feed as? SnapFeedViewController)?.onWillCloseFeed = onWillClose
-        return TextRevealInstaller.geometry(
-            feed: feed, origin: origin, pipeline: imagePipeline
-        )
-    }
-
-    /// Pushes the feed with no flight, and gives it a way back by hand.
-    ///
-    /// The presentation a post with nothing to fly gets: a native push, plus a
-    /// full-surface rightward swipe that scrubs the pop 1:1 and releases on the
-    /// same contract every other dismissal in this app uses. Deliberately the
-    /// SAME shape For You's text branch had (the tab is gone since #2453),
-    /// because a viewer opening the same text post from two surfaces is looking
-    /// at one screen and must get one set of gestures.
-    ///
-    /// ⚠️ Claiming ownership and attaching the swipe are ONE act, never two.
-    /// `zoomOwnsInteractiveDismissal` tells `NativePopPolicy` to refuse the
-    /// stack's native edge pop — correct only because something else is about
-    /// to drive the dismissal. The whole defect this method exists to fix was a
-    /// push that inherited the claim (it is the type's default) and attached
-    /// nothing: a screen that refused every horizontal drag, edge or surface,
-    /// leaving the back chevron as the only way out.
-    private func pushWithoutFlight(
-        _ destination: UIViewController,
-        on nav: UINavigationController,
-        reveal: TextRevealOrigin?,
-        beneath: ((UIViewController) -> UIViewController)? = nil
-    ) {
-        (destination as? SnapFeedViewController)?.zoomOwnsInteractiveDismissal = true
-        // A surface that can describe the ROW it is opening from gets the
-        // reveal instead of the bare push — the window, not the slide. Every
-        // caller of this method reaches it the same way (nothing to fly), so
-        // this is the one place a second screen has to be taught.
-        let revealing = reveal.map { _ in TextRevealInstaller.isEnabled } ?? false
-
-        // This builder is a struct and `UINavigationController.delegate` is
-        // weak, so nothing here would otherwise keep the dismissal alive to see
-        // the swipe. The retainer does; the dismissal's own completion clears
-        // it, so the cycle lasts exactly as long as the screen does — the same
-        // bargain `HeroTransitionRetainer` strikes for the flight.
-        let retainer = SlideDismissalRetainer()
-        let dismissal = InteractiveSlideDismissal()
-        retainer.dismissal = dismissal
-        // Accessing `view` loads it so the pan has something to attach to.
-        dismissal.attach(to: destination, axes: [.horizontal, .vertical])
-        dismissal.onFeedPopped = { nav in
-            // Completed pops only — swipe or back button. A cancelled swipe
-            // reports nothing here, which is exactly right: the feed is staying
-            // up and the bar must stay down.
-            Self.restoreTabBar(on: nav)
-            retainer.dismissal = nil
-        }
-        // SAVED, not clobbered — `install` captures whatever owned the stack
-        // before this screen and hands it back on teardown. A pushed profile
-        // owns it (its own `InteractiveSlideDismissal` for the profile's
-        // dismissal), and that has to survive this push intact.
-        dismissal.install(on: nav)
-
-        // The dock comes back with the close — through UIKit, once it is
-        // committed — and the FEED does that itself, for every way of leaving
-        // (`SnapFeedViewController.revealDockForClose`). What stays here is
-        // the backstop (`onFeedPopped`, `withDockChoreography`).
-        //
-        // Hidden BY HAND, through UIKit, for the same reason the flight path
-        // states at length: `hidesBottomBarWhenPushed`'s choreography does not
-        // scrub with a custom interactive pop, and this screen has one. A
-        // window's opening too — it used to keep the bar up for frame 0 and
-        // fade its alpha out as the page grew past it (the bar covers the
-        // bottom 26pt of the row a reveal departs from); UIKit's own animation
-        // uncovers that strip now.
-        //
-        // ⚠️ Not under `hidesBottomBarWhenPushed` (#769, `flagHidesAppTabBar`).
-        if !nav.flagHidesAppTabBar(at: nav.topViewController) {
-            nav.tabBarController?.hideTabBarNatively()
-        }
-
-        if let reveal, revealing {
-            // The OPENING is this reveal's, and it has to say so: a geometry
-            // alone no longer means the push is one, now that a media post
-            // carries one for the case where the viewer pages onto a text post
-            // before closing. See `InteractiveSlideDismissal.revealPresents`.
-            dismissal.revealPresents = true
-            // ⚠️ AND NO HERO WILL TAKE THIS SCREEN'S CLOSE, so the slide must
-            // not hand a media page's pop to one.
-            //
-            // This screen opened as a WINDOW, and the feed is a pager: page onto
-            // a photograph and its post reports `.hero`. The slide then
-            // FORWARDS a pop with no gesture behind it — the chevron — to the
-            // delegate it displaced. On this path that is never a flight for
-            // this feed (nothing here builds one; a profile's own slide or the
-            // map's controller answers about a different screen), so the answer
-            // is nil, and nil is UIKit's plain pop: the list came back on a cut
-            // while a drag on the same page closed as the window. For You's list
-            // says the same thing about the same landing (its
-            // `heroLandingAcceptsHero` is false for a text row), and so the
-            // chevron there closes as the window too.
-            dismissal.heroLandingAcceptsHero = { false }
-            dismissal.revealGeometry = TextRevealInstaller.geometry(
-                feed: destination,
-                origin: Self.withDockChoreography(reveal, on: nav),
-                pipeline: imagePipeline
-            )
-        } else {
-            // ⚠️ A NATIVE PUSH CLOSES WITH THE NATIVE POP (#2015, the owner:
-            // "a screen closes the way it opened"), whatever page is on screen
-            // by then. The feed is a pager: page onto a photograph and its post
-            // reports `.hero`, and the slide would forward the chevron's pop to
-            // the delegate it displaced. Nothing here builds a flight for this
-            // feed, so the answer is nil — UIKit's slide — said explicitly, as
-            // the window's path says it. No `revealGeometry` either: no window.
-            dismissal.heroLandingAcceptsHero = { false }
-            // And its vertical closes are PULLS (#2045, #2046): the page lifts
-            // under a fixed bar, and a release past the threshold is the same
-            // native pop — never a page sliding up or down over the map.
-            dismissal.closesByPull = true
-        }
-        // A place page beneath a semantic cluster's feed: the VERTICAL
-        // dismissal's landing, slid under the feed at swipe-begin — the
-        // Case-B restaging recipe, inverted (INSERT instead of drop) — so
-        // the plain single pop that follows lands on it.
-        //
-        // THE TWO AXES GO TO DIFFERENT PLACES, and each closes onto what is
-        // really there: rightward onto the map's marker, downward onto the
-        // post's own card on the place page's Activity tab. One
-        // `revealGeometry` cannot describe both, so `prepareForDismissal`
-        // swaps it for the live axis — which is early enough by construction,
-        // the driver reading the geometry three lines after asking.
-        if let beneath {
-            // Built NOW and captured STRONGLY: until a vertical swipe
-            // inserts it, this closure chain is the page's only owner.
-            // Hydration starts inside the builder (`PlaceFeatureBuilder.makeClusterGallery`
-            // begins loading), so the first dismissal lands on cards rather
-            // than a skeleton.
-            let landing = beneath(destination)
-            // The marker's own geometry, kept for the rightward leg.
-            let markerGeometry = dismissal.revealGeometry
-            // ⚠️ THE FALLBACK TRAVELS SIDEWAYS whatever the hand did. A
-            // downward slide reads as the page being dropped; the platform's
-            // back-direction is the honest look for a close that could not
-            // stage its card.
-            dismissal.fallbackSlideAxis = .horizontal
-            // ⚠️ `dismissal` IS CAPTURED WEAKLY, and the strong capture it
-            // replaces was a retain cycle: the driver owns this closure and the
-            // closure wrote through the driver, so every dismissal ever prepared
-            // kept its driver alive for the life of the process. Invisible to
-            // every census — what leaks is a DRIVER, which nothing counts —
-            // and one per opened post.
-            dismissal.prepareForDismissal = { [weak landing, weak dismissal] axis in
-                guard let dismissal else { return }
-                // Down onto the place page; right and up (#761) onto the marker.
-                guard axis.landsBeneath else {
-                    dismissal.revealGeometry = markerGeometry
-                    return
-                }
-                // Staged off the stack, under the chrome it is about to wear.
-                (landing as? any FeedBeneathLanding)?.stagingChromeTop = nav.navigationBar.frame.maxY
-                // Nil origin — no card to land on — leaves the geometry nil,
-                // which is exactly how the driver selects the plain slide.
-                dismissal.revealGeometry = (landing as? any FeedBeneathLanding)?
-                    .markerFlightLandingOrigin(
-                        sizedTo: nav.view.bounds,
-                        // The post the viewer is on: its kind picks Popular's
-                        // card, and with no Popular card it goes at the head of
-                        // Recent. Read HERE because this closure runs before the
-                        // driver takes the geometry, which is the last moment
-                        // the list can still be arranged.
-                        settled: (destination as? SnapFeedViewController)?.activePostID
-                    )
-                    .map {
-                        TextRevealInstaller.geometry(
-                            feed: destination, origin: $0, pipeline: imagePipeline
-                        )
-                    }
-            }
-            let staged = dismissal.onWillBeginPop
-            dismissal.onWillBeginPop = { [weak nav, weak destination] axis in
-                staged?(axis)
-                guard axis.landsBeneath, let nav, let destination,
-                      !nav.viewControllers.contains(landing),
-                      let feedIndex = nav.viewControllers.firstIndex(of: destination)
-                else { return }
-                var stack = nav.viewControllers
-                stack.insert(landing, at: feedIndex)
-                nav.setViewControllers(stack, animated: false)
-                // The removal half, for an abandoned swipe: the page leaves
-                // again so the back button and the horizontal close keep
-                // their map landing. Both hops are load-bearing — the
-                // coordinator exists only once the pop has begun (next
-                // turn), and its completion fires inside
-                // `completeTransition(false)`'s call stack, where a
-                // same-turn `setViewControllers` is silently swallowed
-                // (measured on the map's escape; see its cancel closure).
-                DispatchQueue.main.async { [weak nav, weak destination] in
-                    guard let coordinator = destination?.transitionCoordinator else { return }
-                    coordinator.animate(alongsideTransition: nil) { context in
-                        guard context.isCancelled else { return }
-                        DispatchQueue.main.async { [weak nav, weak destination] in
-                            guard let nav, let destination,
-                                  nav.topViewController === destination,
-                                  nav.viewControllers.contains(landing) else { return }
-                            var stack = nav.viewControllers
-                            stack.removeAll { $0 === landing }
-                            nav.setViewControllers(stack, animated: false)
-                        }
-                    }
-                }
-            }
-        }
-        nav.pushViewController(destination, animated: true)
-        #if DEBUG
-        // `-zoom-live-log`: the only way a scripted run can tell "attached" from
-        // "claimed ownership and attached nothing", which is what the defect
-        // looked like from the outside — a screen that renders perfectly and
-        // answers no gesture.
-        if LaunchArgument.zoomLiveLog.isPassed() {
-            let pans = destination.view.gestureRecognizers?
-                .filter { $0 is UIPanGestureRecognizer }.count ?? 0
-            print("[hero] pushed WITHOUT flight, dismissal pans=\(pans)")
-        }
-        // `-text-swipe-demo <peak>`: walks the exact begin/update/release path a
-        // finger drives, since the simulator injects none. The SAME argument
-        // For You's own text branch honours, deliberately — a viewer's thumb
-        // does not know which screen opened the post, so neither should the
-        // harness that stands in for it.
-        //
-        // ⚠️ It reports whether the pop is being DRIVEN, not whether the screen
-        // went away. With no delegate — or one that does not vend this driver —
-        // `popViewController` still pops on UIKit's own animation: the depth
-        // changes, the screen leaves, and a harness watching only for that
-        // reports success while a real finger would have watched the page jump
-        // instead of follow. That distinction is the entire defect.
-        let arguments = ProcessInfo.processInfo.arguments
-        if let peak = LaunchArgument.textSwipeDemo.doubleValue(in: arguments) {
-            // `-zoom-demo-grab-vertical` flips this script to the vertical
-            // axis, exactly as it does the zoom demos — the axis a semantic
-            // cluster's feed dismisses into its place page on.
-            //
-            // `-text-swipe-demo-horizontal` overrides it back, for the run that
-            // needs BOTH in one process: reach the place page by a vertical
-            // dismiss, then leave the post above it sideways. A single
-            // process-wide flag cannot say that, which is how this leg went
-            // unscripted while the flag was set for the leg before it.
-            let axis: ZoomDismissAxis
-            if LaunchArgument.textSwipeDemoHorizontal.isPassed(in: arguments) {
-                axis = .horizontal
-            } else {
-                axis = LaunchArgument.zoomDemoGrabVertical.isPassed(in: arguments) ? .vertical : .horizontal
-            }
-            // Optional second argument: how long to wait. A run that PAGES the
-            // feed first has to outlast that paging — a swipe scripted before
-            // the pager has settled asks about the post the feed opened on,
-            // which is the one case the re-pointing exists for.
-            let delay = LaunchArgument.textSwipeDemo.value(at: 2, in: arguments).flatMap(Double.init) ?? 1.5
-            Task { @MainActor in
-                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
-                let driven = await dismissal.debugPerformSwipe(
-                    peakProgress: CGFloat(peak), axis: axis
-                )
-                print("[text-swipe] peak=\(peak) axis=\(axis) driven=\(driven)")
-            }
-        }
-        #endif
-    }
-
-    /// Wraps a surface's reveal hooks with the DOCK's own choreography.
-    ///
-    /// Composed rather than asked of the surface, because the dock belongs to
-    /// the navigation shell and not to whichever screen is opening a post — a
-    /// profile should no more have to know how the bar is retired than For You
-    /// should have to be told where a profile's rows are. Each hook runs both:
-    /// the shell's part and the surface's own.
-    private static func withDockChoreography(
-        _ reveal: TextRevealOrigin, on nav: UINavigationController
-    ) -> TextRevealOrigin {
-        // `replacingChrome`, never a rebuilt `TextRevealOrigin`. This method
-        // used to construct one field by field and dropped four of them —
-        // `captionTop`, `authorBand`, `makeDismissStandIn` and `setConcealed` —
-        // which are exactly the pieces a profile gallery's reveal was missing
-        // while For You's, which does not come through here, had them all.
-        reveal.replacingChrome(
-            presentationDidEnd: { [weak nav] landed in
-                // The bar went down through UIKit with the push. A REVERSED
-                // opening never showed the page, so the bar goes back to being
-                // the grid's — through UIKit again.
-                if !landed { Self.restoreTabBar(on: nav) }
-                reveal.presentationDidEnd(landed)
-            },
-            dismissalDidEnd: { [weak nav] committed in
-                reveal.dismissalDidEnd(committed)
-                // A BACKSTOP for the dock: the release's commit has normally
-                // shown it already. A cancelled swipe never raised it.
-                guard committed else { return }
-                Self.restoreTabBar(on: nav)
-            }
-        )
-    }
-
-    /// Brings the dock back after a flight that hid it.
-    ///
-    /// ⚠️ Called from EVERY close-out, not just the completed return. A flight
-    /// ends three ways and only one is `onSourceReturned`: the push can be caught
-    /// and reversed mid-air (`onPresentationCancelled`, where the destination
-    /// never showed), and the grab can be released short of the threshold
-    /// (`onDismissalCancelled`, where it stays up and the bar must stay down).
-    /// Hanging the restore on one of the three is how a viewer ends up on their
-    /// profile with no dock and no gesture that brings it back.
-    ///
-    /// A local closure was the first shape of this and it CRASHED the Swift
-    /// frontend — captured into the flight's own callbacks, it segfaulted the
-    /// compiler rather than failing to typecheck. A method is not a workaround
-    /// here; it is the thing that compiles.
-    ///
-    /// ⚠️ The refusal below asks `concealsAppTabBar`, NOT conformance. It used
-    /// to test `is any ZoomTransitionDestination` and read that as "another
-    /// full-bleed surface is underneath, whose own mechanic owns the dock". The
-    /// place page conforms without covering anything, so a feed popping onto it
-    /// took this early return and left the viewer on a perfectly ordinary
-    /// screen with no dock.
-    /// The way back for a post the viewer PAGED onto that has nothing to fly.
-    ///
-    /// ⚠️ THE PRESENTATION WAS CHOSEN AT THE TAP. A tile opens with a hero;
-    /// swipe to a text post and there is no media left for that hero to carry.
-    /// Both zoom grabs then refuse — they gate on `zoomDismissalKind != .card`
-    /// BEFORE they look at an axis — the pop animator declines for the same
-    /// reason, and this push has already disclaimed the stack's native edge
-    /// gesture. Measured one level up on the map, where the drag did nothing at
-    /// all on either axis and the chevron was the only way out; the map cured
-    /// it with `attachCardCloseAlongsideFlight` and this path never got the
-    /// equivalent.
-    ///
-    /// ⚠️ BOTH AXES, like every other card-close.
-    ///
-    /// It was vertical-only for exactly as long as the horizontal axis had a
-    /// second slide on it — the escape past this page to the map, which also
-    /// claimed `.card`, and two `InteractiveSlideDismissal`s claiming the same
-    /// kind on the same drag is the one thing the arbitration cannot resolve.
-    /// The escape is gone; the narrowing outlived it by one commit, and what it
-    /// left behind was a page with NOTHING on its horizontal axis: the flight
-    /// refuses `.card` before it looks at an axis, and the only driver that
-    /// would take it was armed elsewhere. Open a post from Activity, page onto
-    /// a text one, swipe right — nothing at all happened. Reported.
-    private static func attachTileCardClose(
-        feed: UIViewController,
-        landing: any CardCloseLanding,
-        on nav: UINavigationController,
-        retainer: HeroTransitionRetainer,
-        session: HeroPushSession
-    ) {
-        let close = InteractiveSlideDismissal()
-        retainer.cardClose = close
-        // It holds the stack's slot on the flight's behalf, so the session's
-        // close may take the slot back from it.
-        session.registerForwarder(close)
-        // A landing that is not a screen has no other owner — see
-        // `HeroTransitionRetainer.cardCloseLanding`. A screen needs no help.
-        if landing is RowCardCloseLanding { retainer.cardCloseLanding = landing }
-        // The shared rules — both axes, arbitrated, staged ONCE and only for a
-        // close that carries a card — are `armAsCardCloseAlongsideFlight`'s,
-        // the same call For You's grid makes. What is this host's is only the
-        // landing, and the staging MOVES a scroll position and releases a
-        // concealment, which is why the once-only latch matters here.
-        close.armAsCardCloseAlongsideFlight(on: feed) { [weak landing, weak close] feed in
-            guard let landing, let close else { return false }
-            close.revealGeometry = landing.cardCloseGeometry(dismissing: feed)
-            return true
-        }
-        // ⚠️ THE DOCK COMES BACK WITH A ROW'S CLOSE, the way it does from For
-        // You's list and from this builder's own reveal push: the feed shows
-        // it through UIKit once the close commits
-        // (`SnapFeedViewController.revealDockForClose`), and
-        // `withDockChoreography`'s `dismissalDidEnd` — which
-        // `RowCardCloseLanding` already carries — is the landing's backstop.
-        // The backstop: whatever animated the close, nothing stays hidden. The
-        // staging conceals a tile and only the reveal's own completion pays
-        // that back, so a pop finished by anything else would leave a hole.
-        close.onFeedPopped = { [weak landing] _ in
-            landing?.clearLandingConcealment()
-            retainer.cardClose = nil
-            retainer.cardCloseLanding = nil
-        }
-        // AFTER the push, so the flight controller is what `install` captures
-        // and a `.hero` pop forwards straight back to it.
-        close.install(on: nav)
-        #if DEBUG
-        // `-tile-card-close-demo <peak>`: the driver's OWN scripted route.
-        //
-        // Nothing else can reach it. `debugScriptedGrab` picks among the ZOOM
-        // drivers, every one of which refuses `.card` before it looks at an
-        // axis; `-text-swipe-demo` is bound to whichever slide its own block
-        // closes over, and this one has no block. A driver with no scripted
-        // route is a driver nobody verifies — the hole that had just been
-        // closed for the neighbouring leg.
-        let arguments = ProcessInfo.processInfo.arguments
-        if let peak = LaunchArgument.tileCardCloseDemo.doubleValue(in: arguments) {
-            // Optional second argument: how long to wait. The default is the
-            // usual beat after the push, but a run that pages the feed first
-            // has to outlast that paging — a swipe scripted before the pager
-            // has SETTLED asks about the post the feed opened on, which is the
-            // one row this driver is not for.
-            let delay = LaunchArgument.tileCardCloseDemo.value(at: 2, in: arguments).flatMap(Double.init) ?? 2.5
-            Task { @MainActor [weak close, weak feed] in
-                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
-                // The three things that decide whether this driver may claim
-                // the drag at all, said before it tries: a refusal and a
-                // failure look identical from the outside.
-                let kind = (feed as? any ZoomTransitionDestination)?.zoomDismissalKind
-                // Both axes carry this driver now, so a run has to be able to
-                // ask for either — the defect that put them back was one axis
-                // silently having no tenant at all.
-                let axis: ZoomDismissAxis = arguments
-                    .contains("-tile-card-close-demo-horizontal") ? .horizontal : .vertical
-                let driven = await close?.debugPerformSwipe(
-                    peakProgress: CGFloat(peak), axis: axis
-                )
-                let settled = (feed as? any SnapFeedSettleReporting)?.settledPostID
-                print("[tile-card-close] peak=\(peak) axis=\(axis) settled=\(settled?.rawValue ?? "nil")"
-                    + " kind=\(kind.map(String.init(describing:)) ?? "nil")"
-                    + " geometry=\(close?.revealGeometry != nil) driven=\(driven ?? false)")
-            }
-        }
-        #endif
-    }
-
-    /// A BACKSTOP that shows the dock once the screen landed on is the one
-    /// on top — a completed return, a reversed opening. Through UIKit, one
-    /// turn after the callback it is called from (UIKit's own
-    /// end-of-transition bookkeeping was measured to swallow an inline
-    /// un-hide), and idempotently: the close's commit has normally shown the
-    /// bar already, and a tab ROOT asserts its own on the far side of a
-    /// committed scrub (`ProfileViewController.revealDock`).
-    private static func restoreTabBar(on nav: UINavigationController?) {
-        #if DEBUG
-        // `-grab-log`: the bar's TWO states at the one moment it is supposed
-        // to be back. `hidden=false viewHidden=true` is the defect a bar
-        // un-hidden inside a transition leaves — a bar every API reports as
-        // shown and nothing draws — and it is invisible from anywhere else.
-        if LaunchArgument.grabLog.isPassed() {
-            print("[pop] restoreTabBar top="
-                + (nav?.topViewController.map { String(describing: type(of: $0)) } ?? "nil")
-                + " hidden=\(String(describing: nav?.tabBarController?.isTabBarHidden))"
-                + " alpha=\(String(describing: nav?.tabBarController?.tabBar.alpha))"
-                + " viewHidden=\(String(describing: nav?.tabBarController?.tabBar.isHidden))")
-        }
-        #endif
-        guard let nav, let tabs = nav.tabBarController,
-              nav.showsAppTabBar(for: nav.topViewController)
-        else { return }
-        tabs.showTabBarNativelyNextTurn()
-    }
-
-    public func makeSnapFeedViewController(
-        postIDs: [PostID],
-        ownsInteractiveDismissal: Bool
-    ) -> UIViewController {
-        makeSnapFeedViewController(postIDs: postIDs, ownsInteractiveDismissal: ownsInteractiveDismissal, continuation: nil)
-    }
-
-    public func makeSnapFeedViewController(
-        postIDs: [PostID],
-        ownsInteractiveDismissal: Bool,
-        sourceIsComplete: Bool
-    ) -> UIViewController {
-        makeSnapFeedViewController(
-            postIDs: postIDs, ownsInteractiveDismissal: ownsInteractiveDismissal,
-            continuation: nil, isCompleteSet: sourceIsComplete
-        )
-    }
-
-    /// The feed over a window of posts — and, with `continuation`, on past it
-    /// into the source's next posts (#638). `isCompleteSet`: the window is the
-    /// whole source, so its last post is the end (#628).
-    func makeSnapFeedViewController(
-        postIDs: [PostID],
-        ownsInteractiveDismissal: Bool,
-        continuation: SnapFeedContinuation?,
-        isCompleteSet: Bool = false
-    ) -> UIViewController {
-        // ⚠️ THE LAST RESORT (#2002): every opener builds its feed here, so a
-        // post whose tile never warmed it (a link, a notification, a tap
-        // that beat the warm) asks for its first comments now. Late for the
-        // flight, early for the landing; a post already held asks nothing.
-        if let opened = postIDs.first { postOpenWarm?.warmNow([opened]) }
-        let feed = makeSnapFeed(
-            viewModel: FeedViewModel(
-                // One kind per feed (#1421): the opening post's, through the
-                // window and every continuation page.
-                repository: FixedPostsFeedProvider(
-                    base: repository, ids: postIDs, continuation: continuation, isCompleteSet: isCompleteSet,
-                    keepsToOpeningKind: true,
-                    // The kind it was opened as, should the opening post not
-                    // come back (#2048).
-                    openingKind: postIDs.first.flatMap(heldEntry).map(SnapFeedKindScope.init)
-                ),
-                engagementProvider: engagementProvider,
-                commentsProvider: commentsProvider,
-                router: router,
-                entities: entities,
-                unavailablePosts: unavailablePosts
-            )
-        )
-        (feed as? SnapFeedViewController)?.zoomOwnsInteractiveDismissal = ownsInteractiveDismissal
-        // Seed the projection the way For You's hero push does — and for
-        // the same measured symptom: the push begins in the SAME runloop
-        // turn this factory returns in, and the nav bar lays its incoming
-        // chrome out at that instant. For You's bar arrives fully formed
-        // because its grid seeds synchronously; a pin-opened feed used to
-        // fill in from a fetch (then from an awaited cache read — still one
-        // hop too late), so its header visibly re-laid itself INSIDE the
-        // animation. `peekPost` is the synchronous read of the same warmed
-        // cache: everything it can answer is seeded before the push exists.
-        // Additive like every seed: a real render replaces it, a seed
-        // landing after one is ignored.
-        if let snapFeed = feed as? SnapFeedViewController {
-            // The store answers what the mirror does not (#1862): a push or a
-            // link to a post held on the device opens on the post.
-            let cached = postIDs.compactMap { heldEntry($0) }
-            #if DEBUG
-            let maySeed = !Self.isColdOpenForced
-            #else
-            let maySeed = true
-            #endif
-            if maySeed, let opening = postIDs.first, cached.first?.post.id == opening {
-                // ⚠️ WHAT IS KNOWN, AS LONG AS THE OPENING POST IS (#1863). A
-                // cluster with one cold member used to take the whole async
-                // path. The seed is the set's held members in its order; the
-                // view model's own first page (`FixedPostsFeedProvider`, the
-                // whole window, concurrently) then replaces it and the late
-                // members arrive in their places through the snapshot — the
-                // "second seed is ignored" contract never has to admit them
-                // (`SnapFeedViewController.seedProjection`).
-                snapFeed.seedProjection(SnapFeedViewController.keepingOpeningKind(
-                    FeedDisplayModelBuilder().build(cached, relativeTo: Date())
-                ))
-            } else {
-                // The opening post is unknown: its loading page, as before.
-                // A feed pushed before its corpus has nothing to draw for as
-                // long as this Task takes. Arm the ARRIVAL screen's own loading
-                // state; the text-reveal installer is what draws it. For a
-                // cluster this is the representative, which leads `memberIDs` —
-                // one skeleton page, never N.
-                if let head = postIDs.first { snapFeed.armLoadingPage(for: head) }
-                let repository = repository
-                Task { @MainActor [weak snapFeed] in
-                    // Concurrently (#1863): five cold members were five round
-                    // trips in a row.
-                    let entries = await Self.loadConcurrently(postIDs, from: repository)
-                    guard !entries.isEmpty else { return }
-                    snapFeed?.seedProjection(SnapFeedViewController.keepingOpeningKind(
-                        FeedDisplayModelBuilder().build(entries, relativeTo: Date())
-                    ))
-                }
-            }
-        }
-        return feed
-    }
-
-    /// The single construction truth for BOTH feed surfaces — the timeline
-    /// pushed from the bar's Feed button and the pin-opened contextual feed.
-    /// They must stay visually and behaviorally identical; the only sanctioned
-    /// difference is the view model's data scope (full timeline vs. the pin's
-    /// posts, plus the live channels only an open-ended timeline consumes).
-    /// Add screen configuration here, never in one caller.
-    private func makeSnapFeed(viewModel: FeedViewModel) -> UIViewController {
-        let repository = repository
-        let engagementProvider = engagementProvider
-        let commentsProvider = commentsProvider
-        let router = router
-        let imagePipeline = imagePipeline
-        // Hoisted like the rest: the panel factory escapes, and reaching for
-        // a stored property inside it would capture the whole builder.
-        let makeProfileSwitcher = makeProfileSwitcher
-        let wallet = wallet
-        let makeWalletSheet = makeWalletSheet
-        let viewerEvents = unavailablePosts.viewerEvents
-        let makePanel: (PostID, Bool) -> UIViewController = { postID, threadChrome in
-            Self.makeCommentsPanel(
-                viewModel: PostDetailViewModel(
-                    postID: postID,
-                    repository: repository,
-                    engagementProvider: engagementProvider,
-                    commentsProvider: commentsProvider,
-                    router: router,
-                    entities: entities
-                ),
-                threadChrome: threadChrome,
-                imagePipeline: imagePipeline,
-                makeProfileSwitcher: makeProfileSwitcher,
-                wallet: wallet,
-                viewerEvents: viewerEvents
-            )
-        }
-        let feed = SnapFeedViewController(
-            viewModel: viewModel,
-            imagePipeline: imagePipeline,
-            videoPlayback: videoPlayback,
-            // Every page's comments are this one panel (`.comments` opens the
-            // vertical feed with them up, #1577). Text-only pages host the
-            // SAME panel (their engaged card
-            // carries the post, exactly like media pages).
-            makeCommentsPanelContent: { postID in makePanel(postID, false) },
-            // A TEXT page's resting comments carry the day pills and the lifted
-            // menu; media pages keep the panel above.
-            makeRestingCommentsPanelContent: { postID in makePanel(postID, true) },
-            wallet: wallet,
-            makeWalletSheet: makeWalletSheet,
-            showsBalance: showsBalance(),
-            // For the ⋯ menu's Report row, which withholds itself when there is
-            // nobody to file with — the same rule the grid's card menu follows.
-            reporting: reporting,
-            // The author pill's "+": offered to someone the viewer does not
-            // follow yet, and a tap follows them — the same repositories the
-            // profile's Follow button writes through.
-            socialGraph: socialGraph,
-            followRelations: followRelations,
-            followEvents: followEvents,
-            entities: entities,
-            bookmarks: bookmarks,
-            savedSounds: savedSounds,
-            viewer: viewerProfile,
-            soundProvider: soundProvider,
-            useSound: useSound,
-            // The sound sheet's grid opens a NEW feed of the posts with that
-            // sound, with the same hero every grid in the app flies.
-            openFeedHero: { [self] ids, presenter, origin in
-                presentSnapFeedHero(postIDs: ids, from: presenter, origin: origin)
-            },
-            galleryPost: { [self] id in heldEntry(id).map(DiscoverRepository.galleryPost(from:)) },
-            // …and the posts the grid lists from outside the feed: loaded into
-            // the same cache, which `galleryPost` then answers from.
-            prewarmPosts: { ids in await repository.prewarm(ids) }
-        )
-        // Every vertical feed records what the viewer viewed (#1344).
-        feed.viewHistory = viewHistory
-        // The side list's posts (#1425, #1473): the Discover pool
-        // (`DiscoveryFeedRepository`) as the app already holds it, else as it
-        // loads; the feed's own repository when there is no pool.
-        let source: any FeedProviding = discovery ?? repository
-        // Its share sheet's people (#1710).
-        feed.shareTargeting = shareTargeting
-        feed.sideListEntries = {
-            if let cached = await source.cachedFirstPage(), !cached.isEmpty { return cached }
-            return (try? await source.loadFirstPage())?.entries ?? []
-        }
-        // The side list's and the sound sheet's posts warm their first
-        // comments (#2002).
-        feed.postOpenWarm = postOpenWarm
-        return feed
-    }
-
-    /// The comments panel every snap page embeds. ONE construction, so the
-    /// Text Post page's draft panel is the text page's panel by definition
-    /// rather than by resemblance.
-    private static func makeCommentsPanel(
-        viewModel: PostDetailViewModel,
-        threadChrome: Bool,
-        imagePipeline: ImagePipeline,
-        makeProfileSwitcher: @MainActor () -> (any ProfileSwitcherPresenting)?,
-        wallet: (any WalletStaking)?,
-        viewerEvents: ViewerEvents
-    ) -> PostDetailViewController {
-        PostDetailViewController(
-            viewModel: viewModel,
-            imagePipeline: imagePipeline,
-            profileSwitcher: makeProfileSwitcher(),
-            wallet: wallet,
-            // The app's viewer channel, which the record of withheld posts
-            // already hears (#2376): the composer's face follows a switch.
-            viewerEvents: viewerEvents,
-            threadChrome: threadChrome,
-            // Every snap page's comments group by day under Recent (#757).
-            groupsByDay: true
-        )
-    }
-
-    /// The "+" menu's Text Post: a text post's own page, born empty, in an
-    /// expandable sheet — the content of an empty page is one invitation, and
-    /// a full screen of it was mostly air.
-    ///
-    /// ⚠️ THE PANEL IS THE TEXT PAGE'S REAL ONE, built by `makeCommentsPanel`
-    /// like every page's, over a DRAFT: no post, nothing fetched, and a first
-    /// send that publishes the post instead of commenting on one. Everything
-    /// the published page reads is primed before the panel turns into it — the
-    /// entry held so it is never fetched back, its empty first page of
-    /// comments — and from then on the sheet is that post's.
+    // The text post screen: `TextPostAssembly`.
     public func makeTextPostScreen(publisher: any TextPostPublishing) -> UIViewController {
-        makeTextPostScreen(publisher: publisher, bookmarks: bookmarks)
+        textPost.makeTextPostScreen(publisher: publisher)
     }
 
-    /// A channel's "Share as a Post" (#2216): the same screen, its card
-    /// attached above the composer — removable — with an optional place.
-    /// Opened at its full height: the card and the words need the room the
-    /// keyboard would ask for anyway. Without `-channels`, the plain screen.
     public func makeTextPostScreen(publisher: any TextPostPublishing, attaching embed: PostEmbed) -> UIViewController {
-        makeTextPostScreen(publisher: publisher, bookmarks: bookmarks, attaching: embed)
+        textPost.makeTextPostScreen(publisher: publisher, attaching: embed)
     }
 
-    /// The same, over `bookmarks` — the app's one pile outside tests.
-    /// `showsEmbeds`: whether a card can be attached (`-channels`);
-    /// `recordsVoice`: whether the first message can be a voice
-    /// (`-voice-posts`).
     func makeTextPostScreen(
         publisher: any TextPostPublishing, bookmarks: PostBookmarkStore, attaching embed: PostEmbed? = nil,
         showsEmbeds: Bool = PostEmbeds.areDrawn, recordsVoice: Bool = VoicePosts.areDrawn
     ) -> UIViewController {
-        let repository = repository
-        let commentsProvider = commentsProvider
-        // A showcase (#2216): the same priming as a text post's; none
-        // without `-channels`.
-        let publishShowcase: (@Sendable (String, PostEmbed, TextPostPlace?, AuthorSummary?) async throws -> FeedEntry)?
-        if showsEmbeds {
-            publishShowcase = { text, embed, place, author in
-                let entry = try await publisher.publishTextPost(text, embed: embed, place: place, as: author)
-                await repository.remember(entry)
-                commentsProvider?.seedTopComments([], for: entry.post.id)
-                return entry
-            }
-        } else {
-            publishShowcase = nil
-        }
-        let attached: PostEmbed? = showsEmbeds ? embed : nil
-        // A voice post (#2209): the same priming as a text post's; none
-        // without `-voice-posts`.
-        let publishVoice: (@Sendable (String, TextPostVoice, AuthorSummary?) async throws -> FeedEntry)?
-        if recordsVoice {
-            publishVoice = { text, voice, author in
-                let entry = try await publisher.publishTextPost(text, voice: voice, as: author)
-                await repository.remember(entry)
-                commentsProvider?.seedTopComments([], for: entry.post.id)
-                return entry
-            }
-        } else {
-            publishVoice = nil
-        }
-        let draft = PostDetailDraft(publish: { text, author in
-            let entry = try await publisher.publishTextPost(text, as: author)
-            await repository.remember(entry)
-            commentsProvider?.seedTopComments([], for: entry.post.id)
-            return entry
-        }, publishVoice: publishVoice, publishShowcase: publishShowcase)
-        let panel = Self.makeCommentsPanel(
-            viewModel: PostDetailViewModel(
-                draft: draft,
-                repository: repository,
-                engagementProvider: engagementProvider,
-                commentsProvider: commentsProvider,
-                router: router,
-                entities: entities
-            ),
-            threadChrome: true,
-            imagePipeline: imagePipeline,
-            makeProfileSwitcher: makeProfileSwitcher,
-            wallet: wallet,
-            viewerEvents: unavailablePosts.viewerEvents
+        textPost.makeTextPostScreen(
+            publisher: publisher, bookmarks: bookmarks, attaching: embed,
+            showsEmbeds: showsEmbeds, recordsVoice: recordsVoice
         )
-        let composer = TextPostComposerViewController(
-            panel: panel,
-            drafts: postDrafts,
-            imagePipeline: imagePipeline,
-            router: router,
-            // The composer's wallet is its badge alone: none for a guest.
-            wallet: balanceWallet,
-            makeWalletSheet: makeWalletSheet,
-            // A save made elsewhere while the page shows the post (#1067).
-            entities: entities,
-            bookmarks: bookmarks,
-            attaching: attached
-        )
-        let navigation = UINavigationController(rootViewController: composer)
-        navigation.modalPresentationStyle = .pageSheet
-        if let sheet = navigation.sheetPresentationController {
-            // Half height for an empty page — taller only when the invitation
-            // cannot show whole there — and the whole screen for a thread and
-            // for the keyboard, which the composer grows the sheet for.
-            sheet.detents = [composer.makeRestingDetent(), .large()]
-            sheet.prefersGrabberVisible = true
-            // A showcase opens full height (#2216): its card is taller than
-            // the invitation it stands in for.
-            if attached != nil { sheet.selectedDetentIdentifier = .large }
-        }
-        return navigation
     }
-
-    public func makePostFeedViewController(for postID: PostID, opensComments: Bool) -> UIViewController {
-        let feed = makeSnapFeedViewController(postIDs: [postID], ownsInteractiveDismissal: false)
-        // Before the push, so the page opens already in its thread
-        // (`openComments`'s own rule).
-        if opensComments { (feed as? SnapFeedViewController)?.openComments(for: postID) }
-        return feed
-    }
-}
-
-/// Keeps what is armed beside a hero flight — its card close and that close's
-/// landing — for as long as the flight. The flight itself is kept by its
-/// `HeroPushSession`; `FeedFeatureBuilder` is a value type and holds neither.
-@MainActor
-final class HeroTransitionRetainer {
-    /// The VERTICAL card-shaped close of a gallery-opened post — the way back
-    /// for a page the viewer swiped onto that has no media to fly. Nil'd by
-    /// both close-outs, because the flight's return and the escape's landing
-    /// are two different exits and either can be the last one.
-    var cardClose: InteractiveSlideDismissal?
-    /// The landing that close stages, when it is not a screen the stack
-    /// already owns — a surface's own ROW, described by its `TextRevealOrigin`
-    /// (`RowCardCloseLanding`). The close holds its landing weakly, as it must
-    /// for a screen, so an object nothing else owns has to be kept here.
-    var cardCloseLanding: (any CardCloseLanding)?
-}
-
-/// Keeps a plain push's swipe-to-dismiss alive for the length of the screen.
-///
-/// Same reason as above, different object: a navigation controller's delegate
-/// is weak, a gesture recognizer does not retain its target, and the builder
-/// that wires both is a value type. Without this the dismissal would be gone
-/// before the first touch — which looks identical to never having attached one.
-@MainActor
-final class SlideDismissalRetainer {
-    var dismissal: InteractiveSlideDismissal?
 }

@@ -53,7 +53,6 @@ struct FileSizeGuardTests {
         "Packages/Core/VoiceKit/Sources/VoiceKitUI/VoiceView.swift": 2271,
         "Packages/Features/Chat/Sources/Chat/Data/ChatRepository.swift": 1044,
         "Packages/Features/Chat/Sources/Chat/Thread/ConversationThreadViewController.swift": 3033,
-        "Packages/Features/Feed/Sources/Feed/FeedFeatureBuilder.swift": 1769,
         "Packages/Features/Feed/Sources/Feed/PostDetail/CommentStream.swift": 2495,
         "Packages/Features/Feed/Sources/Feed/PostDetail/PostDetailViewController.swift": 2047,
         "Packages/Features/Feed/Sources/Feed/PostDetail/PostDetailViewModel.swift": 1388,

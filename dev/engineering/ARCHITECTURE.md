@@ -42,6 +42,7 @@ Value types, builder protocols and routes. No views, and no dependency heavier t
 ```
 Sources/<Feature>/
   <Feature>FeatureBuilder.swift     the one entry: builds screens for the router
+  <Surface>Assembly.swift           what one surface's screens are built from, a struct the builder makes once and calls
   Data/                             repositories, stores, caches, wire mapping
   DisplayModels/                    what a row or a header shows, built from models
   ViewModels/                       one per screen, @MainActor, UIKit-free when possible
