@@ -29,6 +29,18 @@ Some areas have a specification of their own in `dev/`. These pages link to them
 | [Cache audit](../CACHE_AUDIT.md) | The device cache's measured budgets |
 | [Video capture and upload](../IOS_VIDEO_CAPTURE_UPLOAD.md) | The capture, edit and upload pipeline for video |
 
+## Where agents meet these rules
+
+| Entry point | Read by | What it does |
+|---|---|---|
+| [`AGENTS.md`](../../AGENTS.md) | every coding agent (Codex, Cursor, Copilot…) | points here and to `CLAUDE.md`, with the rules in short |
+| [`CLAUDE.md`](../../CLAUDE.md) | Claude Code, every session | imports `AGENTS.md`, opens with *Before you code*, then the process rules |
+| `.claude/rules/*.md` | Claude Code, when it reads or edits a matching file | the rules of the layer being edited: Kit, Core, interfaces, features, app, tests, guards, CI |
+| `.claude/skills/design-first/` | Claude Code, for a core or large change | the research → design doc → owner's approval procedure |
+| `.github/pull_request_template.md` | every pull request | the checklist, including the *Similar code* line |
+
+When a rule here changes, update the entry point that repeats it.
+
 ## How the rules are held
 
 A rule that a machine can check runs as a test. The rest is held in review.
