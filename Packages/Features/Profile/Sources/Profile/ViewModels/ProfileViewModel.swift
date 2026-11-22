@@ -3,9 +3,7 @@ import CoreNavigation
 import CoreNetworking
 import CoreStorage
 import Foundation
-import LaunchArguments
 import MapsInterface
-import OSLog
 import PostGrid
 import ProfileData
 import ProfileInterface
@@ -81,29 +79,46 @@ public final class ProfileViewModel {
     private var phase: Phase = .loading {
         didSet { onPhaseChange?(phase) }
     }
-    private(set) var followButton: FollowButton = .hidden {
-        didSet {
-            // ⚠️ AN ANSWER THAT AGREES WITH THE SCREEN SAYS NOTHING. Every
-            // refresh reads the relationship again, and each identical answer
-            // used to re-pose the tray's capsule, cross-dissolve the whole
-            // navigation bar and re-ask the map pin — a landing turn's worth
-            // of work, on a pull-to-refresh, to arrive where it already was.
-            guard followButton != oldValue else { return }
-            onFollowButtonChange?(followButton)
-            // The pin is offered only while the viewer follows, so the two
-            // move together — including the optimistic flip a follow tap makes
-            // before the server has answered. A newly-followed profile has
-            // never been asked about, so ask now.
-            refreshMapPinButton()
-            loadMapPinState()
+    /// The relationship (`ProfileViewerRelation`, #2522): follow, request, block
+    /// and the read that answers them.
+    private(set) lazy var relation = ProfileViewerRelation(host: self, repository: repository, cache: cache)
+    var followButton: FollowButton { relation.followButton }
+    var isMutual: Bool { relation.isMutual }
+    var isMutualFollow: Bool { relation.isMutualFollow }
+    var isFollowing: Bool { relation.isFollowing }
+    var followInFlight: Bool { relation.followInFlight }
+    public var isBlocked: Bool { relation.isBlocked }
+    var isLoadingRelationship: Bool { relation.isLoadingRelationship }
+    public var isRelationshipSettled: Bool { relation.isRelationshipSettled }
+    public var canMessage: Bool { relation.canMessage }
+    public var canModerate: Bool { relation.canModerate }
+    var isPrivateToViewer: Bool { relation.isPrivateToViewer }
+
+    /// The gallery's half of a follow change (`ProfileViewerRelation.isFollowing`).
+    func viewerFollowDidChange() {
+        let privateToOthers = profile?.visibility.isPrivate == true && !isOwnProfile
+        // Unfollowed: what the follow let in goes, and the tabs with it
+        // (#1422) — a read still on its way would bring it back.
+        if privateToOthers, !isFollowing {
+            galleryLoad?.cancel()
+            galleryLoad = nil
+            galleryMoreLoad?.cancel()
+            galleryMoreLoad = nil
+            engagementTabsLoad?.cancel()
+            engagementTabsLoad = nil
+            galleryStore.withholdAuthored()
+        }
+        renderGallery()
+        // Followed (a request accepted): the pages the server withheld are
+        // the viewer's now, so they are read again — and the tabs come back
+        // as they fill, without leaving the screen (#1422). A read already
+        // on its way was asked as a stranger: it starts again.
+        if privateToOthers, isFollowing, let profile {
+            galleryLoad?.cancel()
+            galleryLoad = nil
+            loadGallery(for: profile, reset: false)
         }
     }
-    /// Whether they follow back. Only a mutual may be kept on the Friends
-    /// rail, so only a mutual is offered the choice.
-    private(set) var isMutual = false
-    /// Whether the viewer and the profile follow each other: the bar's
-    /// badge reads friends then (#1451).
-    var isMutualFollow: Bool { isMutual }
 
     /// The currently rendered profile — retained so a follow toggle can nudge
     /// its follower count without a full reload.
@@ -118,41 +133,6 @@ public final class ProfileViewModel {
             mapPin.subjectChanged()
         }
     }
-    private var isFollowing = false {
-        // A private profile's pages lock and unlock with the follow (#447).
-        didSet {
-            guard isFollowing != oldValue else { return }
-            let privateToOthers = profile?.visibility.isPrivate == true && !isOwnProfile
-            // Unfollowed: what the follow let in goes, and the tabs with it
-            // (#1422) — a read still on its way would bring it back.
-            if privateToOthers, !isFollowing {
-                galleryLoad?.cancel()
-                galleryLoad = nil
-                galleryMoreLoad?.cancel()
-                galleryMoreLoad = nil
-                engagementTabsLoad?.cancel()
-                engagementTabsLoad = nil
-                galleryStore.withholdAuthored()
-            }
-            renderGallery()
-            // Followed (a request accepted): the pages the server withheld are
-            // the viewer's now, so they are read again — and the tabs come back
-            // as they fill, without leaving the screen (#1422). A read already
-            // on its way was asked as a stranger: it starts again.
-            if privateToOthers, isFollowing, let profile {
-                galleryLoad?.cancel()
-                galleryLoad = nil
-                loadGallery(for: profile, reset: false)
-            }
-        }
-    }
-    /// Internal for tests: a follow, request or withdrawal still on its way.
-    private(set) var followInFlight = false
-    /// The viewer's outbound block on this profile, from the relationship read
-    /// and kept current by `setBlocked`. Drives which of Block / Unblock the
-    /// overflow menu offers.
-    public private(set) var isBlocked = false
-    private var blockInFlight = false
     /// Mute, restrict and reports (`ProfileModeration`, #2522).
     private(set) lazy var moderation = ProfileModeration(host: self, repository: repository, reporting: reporting)
     public var muteScopes: MuteScopes { moderation.muteScopes }
@@ -163,21 +143,11 @@ public final class ProfileViewModel {
     public var canMute: Bool { moderation.canMute }
     public var isRestricted: Bool { moderation.isRestricted }
     public var canRestrict: Bool { moderation.canRestrict }
+    func readMuteAndRestrict(for id: ProfileID, relationship: ProfileRelationship) async {
+        await moderation.readMuteAndRestrict(for: id, relationship: relationship)
+    }
 
     private var load: Task<Void, Never>?
-    private var relationshipLoad: Task<Void, Never>?
-    /// Whether a relationship read is out — for tests that wait on its answer.
-    var isLoadingRelationship: Bool { relationshipLoad != nil }
-    /// Whether the follow state on screen is an answer rather than a wait:
-    /// a relationship read has come back (or failed), or a cache seeded one.
-    public private(set) var isRelationshipSettled = false {
-        didSet {
-            guard isRelationshipSettled, !oldValue else { return }
-            onRelationshipSettled?()
-            // A private profile not followed locks its pages now (#1900).
-            if isPrivateToViewer { renderGallery() }
-        }
-    }
 
     // MARK: Gallery state
 
@@ -238,54 +208,20 @@ public final class ProfileViewModel {
             galleryStore.filter = GalleryFilter(format: .activity, source: stored.source)
         }
         followSubscription = followEvents?.subscribeOnMain { [weak self] change in
-            self?.followGraphDidChange(change)
+            self?.relation.followGraphDidChange(change)
         }
         requestSubscription = followEvents?.subscribeToRequestsOnMain { [weak self] change in
-            self?.followRequestDidChange(change)
+            self?.relation.followRequestDidChange(change)
         }
     }
 
     private var requestSubscription: FollowGraphSubscription?
-    /// Follow, request and withdraw failures, with the server's code (#1450).
-    private static let logger = Logger(subsystem: "cn.wynn.core-platform-ios", category: "profile")
-
-    /// A request made or withdrawn ANYWHERE — a list row, a suggestion — for
-    /// this profile (#1450): its button reads "Requested" when the viewer
-    /// comes back to it, so its next tap is no refused duplicate. Its own
-    /// request in flight answers for itself.
-    private func followRequestDidChange(_ change: FollowRequestChange) {
-        guard let profile, change.profileID == profile.id, !followInFlight, !isFollowing else { return }
-        if change.isPending, followButton == .follow {
-            showRequested(true)
-        } else if !change.isPending, followButton == .requested {
-            showRequested(false)
-        }
-    }
 
     /// Keeps the Follow button agreeing with a follow accepted ANYWHERE —
     /// the "+" on this person's post in a feed pushed from here, an Unfollow
     /// in a card's menu, a followers list's row — for as long as this profile
     /// lives. See `FollowGraphEvents` for why this is heard, not re-read.
     private var followSubscription: FollowGraphSubscription?
-
-    /// Takes a change about THIS profile the way its own toggle would —
-    /// button, and the follower count nudged by one — unless the button says
-    /// so already (which is how its own accepted toggle comes back), or its
-    /// own toggle is still in flight and about to answer for itself.
-    private func followGraphDidChange(_ change: FollowChange) {
-        guard let profile, change.profileID == profile.id,
-              followButton == .follow || followButton == .following,
-              change.isFollowing != isFollowing, !followInFlight else { return }
-        applyFollow(change.isFollowing, on: profile)
-    }
-
-    /// Whether the "Message" action applies (another user's profile).
-    public var canMessage: Bool { followButton.isOtherProfile }
-
-    /// Whether the moderation actions (Block / Report) apply. False for the
-    /// viewer's own profile, and false until the relationship is known — a
-    /// menu opened mid-load offers sharing only rather than guessing.
-    public var canModerate: Bool { followButton.isOtherProfile }
 
     /// Everything the share sheet renders, resolved together so the QR code,
     /// the card, and the system share sheet's link preview cannot disagree
@@ -449,8 +385,8 @@ public final class ProfileViewModel {
     /// states ride on it. Pull-to-refresh always refetches everything.
     private func revalidateRelationshipOnly() {
         guard let profile else { return }
-        relationshipLoad?.cancel()
-        loadRelationship(for: profile.id)
+        relation.relationshipLoad?.cancel()
+        relation.loadRelationship(for: profile.id)
         // Someone else's Saved is kept nowhere (#411), and Liked's stored copy
         // (#1776) is only the tab's first frame: both are read again now.
         loadEngagementTabs(for: profile)
@@ -506,7 +442,7 @@ public final class ProfileViewModel {
         // a revisit that knew "Following" a minute ago must not open on a
         // placeholder for it. The read in `reload` still runs and corrects.
         if case .profile(let id) = source, let relationship = cache?.relationship(for: id) {
-            apply(relationship)
+            relation.apply(relationship)
         }
         return fresh
     }
@@ -577,118 +513,11 @@ public final class ProfileViewModel {
     public func toggleMapCategory(_ category: MapFavoriteCategory) { mapPin.toggleMapCategory(category) }
     public func setMapCategories(_ categories: Set<MapFavoriteCategory>) { mapPin.setMapCategories(categories) }
     public var isMapPinSettled: Bool { mapPin.isMapPinSettled }
-    private func refreshMapPinButton() { mapPin.refreshMapPinButton() }
-    private func loadMapPinState() { mapPin.loadMapPinState() }
+    func refreshMapPinButton() { mapPin.refreshMapPinButton() }
+    func loadMapPinState() { mapPin.loadMapPinState() }
 
-    /// Follow-button tapped. No-op for the viewer's own profile ("Edit"); an
-    /// optimistic toggle otherwise — flip immediately, roll back if the server
-    /// rejects. One mutation in flight at a time.
-    ///
-    /// A private profile is asked rather than followed (#396): Follow turns
-    /// into Requested (no follower count moves), and Requested withdraws the
-    /// request. The server has the last word: a profile that turned public
-    /// meanwhile is followed, one that turned private is asked.
-    ///
-    /// Answers whether the tap turned the follow ON (a request counts): the
-    /// view plays `toggleOn` then (#1886), and nothing for turning it off.
     @discardableResult
-    public func toggleFollow() -> Bool {
-        guard let profile, !followInFlight else { return false }
-        guard followButton.isOtherProfile, followButton != .unavailable else { return false }
-        if let requests = repository as? any FollowRequestSending {
-            switch followButton {
-            case .requested:
-                withdrawRequest(on: profile, through: requests)
-                return false
-            case .follow:
-                follow(profile, through: requests)
-                return true
-            default: break
-            }
-        }
-
-        let target = !isFollowing
-        applyFollow(target, on: profile)
-        followInFlight = true
-
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                try await self.repository.setFollowing(target, for: profile.id)
-            } catch {
-                Self.logger.error("\(target ? "follow" : "unfollow") \(profile.id.rawValue, privacy: .public) failed: \(String(describing: error), privacy: .public)")
-                // Roll back to the pre-tap state — and say so (#802): a button
-                // that flips back on its own reads as a glitch.
-                if let current = self.profile {
-                    self.applyFollow(!target, on: current)
-                }
-                self.onActionResult?(.followFailed(message: Self.followFailureMessage(
-                    handle: self.handle, change: target ? .follow : .unfollow
-                )))
-            }
-            self.followInFlight = false
-        }
-        return target
-    }
-
-    private func follow(_ profile: UserProfile, through requests: any FollowRequestSending) {
-        let asks = profile.visibility == .private
-        if asks { showRequested(true) } else { applyFollow(true, on: profile) }
-        followInFlight = true
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                let outcome = try await requests.follow(profile.id)
-                switch (outcome, asks) {
-                case (.requested, false):
-                    if let current = self.profile { self.applyFollow(false, on: current) }
-                    self.showRequested(true)
-                case (.following, true):
-                    if let current = self.profile { self.applyFollow(true, on: current) }
-                default:
-                    break
-                }
-            } catch {
-                // What the server said (#1450): a device run that failed
-                // could not tell which code came back.
-                Self.logger.error("follow \(profile.id.rawValue, privacy: .public) failed: \(String(describing: error), privacy: .public)")
-                if asks {
-                    self.showRequested(false)
-                } else if let current = self.profile {
-                    self.applyFollow(false, on: current)
-                }
-                self.onActionResult?(.followFailed(message: Self.followFailureMessage(
-                    handle: self.handle, change: asks ? .request : .follow
-                )))
-            }
-            self.followInFlight = false
-        }
-    }
-
-    private func withdrawRequest(on profile: UserProfile, through requests: any FollowRequestSending) {
-        showRequested(false)
-        followInFlight = true
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                try await requests.cancelFollowRequest(to: profile.id)
-            } catch {
-                Self.logger.error("withdraw \(profile.id.rawValue, privacy: .public) failed: \(String(describing: error), privacy: .public)")
-                self.showRequested(true)
-                self.onActionResult?(.followFailed(message: Self.followFailureMessage(
-                    handle: self.handle, change: .withdraw
-                )))
-            }
-            self.followInFlight = false
-        }
-    }
-
-    /// Requested ⇄ Follow. Neither follows, so no count moves.
-    private func showRequested(_ requested: Bool) {
-        isFollowing = false
-        followButton = requested ? .requested : .follow
-        rememberRelationship()
-    }
+    public func toggleFollow() -> Bool { relation.toggleFollow() }
 
     /// "Message" tapped — open a DM with this profile via routing. Profile never
     /// imports Chat; it only emits a route.
@@ -710,68 +539,8 @@ public final class ProfileViewModel {
 
     // MARK: - Overflow menu
 
-    /// Block this profile, or the whole account behind it.
-    ///
-    /// Unlike follow, this is NOT optimistic: a block is a safety action whose
-    /// UI consequence is leaving the screen, so it must not be shown as done
-    /// and then silently rolled back. The state changes only once the server
-    /// accepts. One mutation in flight at a time.
-    public func block(_ scope: ProfileBlockScope) {
-        guard let profile, canModerate, !blockInFlight, !isBlocked else { return }
-        blockInFlight = true
-
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                let count: Int
-                switch scope {
-                case .profile:
-                    try await self.repository.setBlocked(true, for: profile.id)
-                    count = 1
-                case .account:
-                    count = try await self.repository.blockAccount(behind: profile.id).count
-                }
-                self.isBlocked = true
-                // Blocking severs the follow edge server-side; mirror that so
-                // a re-entry before the next relationship read agrees.
-                self.isFollowing = false
-                self.followButton = .follow
-                self.rememberRelationship()
-                // A block hides their posts both ways: no revisit opens on
-                // them (#887).
-                self.cache?.removeGallery(for: profile.id)
-                self.onActionResult?(.blocked(handle: "@" + profile.handle, profileCount: count))
-                self.onDismissRequested?()
-            } catch {
-                self.onActionResult?(.failed(message: "Couldn't block this profile."))
-            }
-            self.blockInFlight = false
-        }
-    }
-
-    /// Lift a block on this profile. Account-scoped blocks are NOT undone as a
-    /// set: the viewer unblocks whichever profile they navigated to, because
-    /// the client can't tell which of the account's profiles were blocked
-    /// together versus individually — and silently unblocking aliases the user
-    /// never asked about is the wrong way to be wrong about a safety action.
-    public func unblock() {
-        guard let profile, canModerate, !blockInFlight, isBlocked else { return }
-        blockInFlight = true
-
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                try await self.repository.setBlocked(false, for: profile.id)
-                self.isBlocked = false
-                self.rememberRelationship()
-                self.cache?.removeGallery(for: profile.id)
-                self.onActionResult?(.unblocked(handle: "@" + profile.handle))
-            } catch {
-                self.onActionResult?(.failed(message: "Couldn't unblock this profile."))
-            }
-            self.blockInFlight = false
-        }
-    }
+    public func block(_ scope: ProfileBlockScope) { relation.block(scope) }
+    public func unblock() { relation.unblock() }
 
     public func toggleMute(_ scope: MuteScope) { moderation.toggleMute(scope) }
     public func toggleRestrict() { moderation.toggleRestrict() }
@@ -1166,7 +935,7 @@ public final class ProfileViewModel {
     /// Recomputes the snapshot — Posts, Reposts, Tagged, the media of the page
     /// on screen, Saved — from the caches. Every data landing and page change
     /// funnels here.
-    private func renderGallery() {
+    func renderGallery() {
         guard gallery != nil else { return }
         var snapshot = galleryStore.snapshot(isOwnProfile: isOwnProfile)
         // Known private and not followed: locked from the first frame
@@ -1401,7 +1170,7 @@ public final class ProfileViewModel {
 
     private func reload(galleryRevalidates: Bool = false) {
         load?.cancel()
-        relationshipLoad?.cancel()
+        relation.relationshipLoad?.cancel()
         if case .lookup(let reference) = source {
             resolve(reference)
             return
@@ -1418,7 +1187,7 @@ public final class ProfileViewModel {
         // viewer's own profile, whose id the fetch resolves, still chains.
         let readsRelationshipUpFront: Bool
         if case .profile(let id) = source {
-            loadRelationship(for: id)
+            relation.loadRelationship(for: id)
             readsRelationshipUpFront = true
         } else {
             readsRelationshipUpFront = false
@@ -1440,7 +1209,7 @@ public final class ProfileViewModel {
                     self.phase = .content(ProfileDisplayModel(profile: profile))
                 }
                 if !readsRelationshipUpFront {
-                    self.loadRelationship(for: profile.id)
+                    self.relation.loadRelationship(for: profile.id)
                 }
                 // Every (re)load refreshes the grid too: the caches reset so
                 // pull-to-refresh picks up new posts alongside the header —
@@ -1518,12 +1287,6 @@ public final class ProfileViewModel {
         }
     }
 
-    /// Someone else's private profile the viewer doesn't follow — what a
-    /// guest always is (#447). Its pages come back empty from the server.
-    var isPrivateToViewer: Bool {
-        !isOwnProfile && profile?.visibility.isPrivate == true && !isFollowing
-    }
-
     nonisolated static let restrictedTitle = "This Account Is Private"
     nonisolated static let restrictedMessage = "Follow this account to see their posts."
 
@@ -1555,85 +1318,10 @@ public final class ProfileViewModel {
         }
     }
 
-    /// The relationship is best-effort: if it can't be read, the button simply
-    /// stays hidden rather than failing the whole screen.
-    private func loadRelationship(for id: ProfileID) {
-        relationshipLoad = Task { [weak self] in
-            guard let self else { return }
-            #if DEBUG
-            // Dev convenience: `-profile-relationship-delay` holds the
-            // relationship answer for a few seconds, making the nav-bar
-            // skeleton capsule and its cross-fade to Follow/Following
-            // observable (the mock otherwise answers mid-push).
-            if LaunchArgument.profileRelationshipDelay.isPassed() {
-                try? await Task.sleep(for: .seconds(3))
-            }
-            #endif
-            let relationship: ProfileRelationship
-            do {
-                relationship = try await self.repository.relationship(for: id)
-            } catch {
-                // Superseded by a newer read: that one answers. Otherwise a
-                // failure is still an answer — the button stays as it is.
-                guard !Task.isCancelled else { return }
-                self.isRelationshipSettled = true
-                self.relationshipLoad = nil
-                return
-            }
-            guard !Task.isCancelled else { return }
-            self.apply(relationship)
-            self.cache?.store(relationship, for: id)
-            self.relationshipLoad = nil
-            await self.moderation.readMuteAndRestrict(for: id, relationship: relationship)
-        }
-    }
-
-    /// Puts a relationship on screen — the read's answer or the cache's.
-    private func apply(_ relationship: ProfileRelationship) {
-        switch relationship {
-        case .me:
-            isFollowing = false
-            isBlocked = false
-            followButton = .edit
-        case .other(let following, let mutual, let blocked):
-            isFollowing = following
-            isMutual = mutual
-            isBlocked = blocked
-            followButton = following ? .following : .follow
-        case .requested:
-            isFollowing = false
-            isMutual = false
-            isBlocked = false
-            followButton = .requested
-        case .cannotFollow:
-            isFollowing = false
-            isMutual = false
-            isBlocked = false
-            followButton = .unavailable
-        }
-        isRelationshipSettled = true
-    }
-
-    /// The relationship as this screen now holds it, for the cache — so the
-    /// next visit opens on what the viewer last saw here, including a follow
-    /// they just made.
-    private func rememberRelationship() {
-        guard let id = profile?.id, followButton.isOtherProfile else { return }
-        let relationship: ProfileRelationship = switch followButton {
-        case .requested: .requested
-        case .unavailable: .cannotFollow
-        default: .other(isFollowing: isFollowing, isMutual: isMutual, isBlocked: isBlocked)
-        }
-        cache?.store(relationship, for: id)
-    }
-
-    /// Applies a follow state everywhere it shows: the button and the
-    /// optimistic follower count on the rendered profile.
-    private func applyFollow(_ following: Bool, on profile: UserProfile) {
-        isFollowing = following
-        followButton = following ? .following : .follow
-        defer { rememberRelationship() }
-
+    /// The optimistic follower count on the rendered profile, for a follow
+    /// change (`ProfileViewerRelation.applyFollow`): the view model stays the one
+    /// writer of `profile` and `phase`.
+    func nudgeFollowerCount(_ following: Bool, on profile: UserProfile) {
         let updated = UserProfile(
             id: profile.id,
             handle: profile.handle,
@@ -1667,3 +1355,5 @@ public final class ProfileViewModel {
 extension ProfileViewModel: ProfileMapPinHost {}
 
 extension ProfileViewModel: ProfileModerationHost {}
+
+extension ProfileViewModel: ProfileViewerRelationHost {}
