@@ -561,19 +561,19 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             videoPlayback.detachSurface(mirror, reason: "browse-mirror")
             guard videoPlayback.attachSurface(mirror, alongsideSurface: surface) else {
                 browseMirrorPage = nil
-                chrome.setBrowseLiveSurface(nil, page: page)
+                chrome.mediaStrip.setBrowseLiveSurface(nil, page: page)
                 return
             }
         }
         browseMirrorPage = page
-        chrome.setBrowseLiveSurface(mirror, page: page)
+        chrome.mediaStrip.setBrowseLiveSurface(mirror, page: page)
     }
 
     private func tearDownBrowseMirror() {
         guard let mirror = browseMirror else { return }
         videoPlayback?.detachSurface(mirror, reason: "browse-mirror")
         browseMirrorPage = nil
-        chrome.setBrowseLiveSurface(nil, page: 0)
+        chrome.mediaStrip.setBrowseLiveSurface(nil, page: 0)
     }
 
     // MARK: Comments engagement
@@ -833,11 +833,11 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // gets the continuous signal; everything else here acts on a PAGE and
         // gets the discrete one below.
         mediaCard.onScrollPosition = { [weak self] position in
-            self?.chrome.setMediaScrollPosition(position)
+            self?.chrome.mediaStrip.setMediaScrollPosition(position)
         }
         mediaCard.onPageChanged = { [weak self] page in
             guard let self else { return }
-            self.chrome.setMediaPage(page)
+            self.chrome.mediaStrip.setMediaPage(page)
             self.reconcilePagePlayback()
             // A page that is a clip draws the strip as its bar; one that is not
             // takes the bar away. Both are decided by what is under the viewer.
@@ -852,49 +852,49 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // lands on the playback: the bar and the clip meet here.
         playback.onPlayhead = { [weak self] fraction, seconds in
             guard let self else { return }
-            chrome.setMediaPlayhead(fraction, seconds: seconds)
+            chrome.mediaStrip.setMediaPlayhead(fraction, seconds: seconds)
             // A clip browsed onto may only start after the page turned: its
             // preview joins it as soon as it has a player.
             if isBrowsingMedia, browseMirrorPage != mediaCard.currentPage,
                mediaCard.videoPageIndices.contains(mediaCard.currentPage) { refreshBrowseMirror() }
         }
         playback.onLoading = { [weak self] loading in
-            self?.chrome.setMediaLoading(loading)
+            self?.chrome.mediaStrip.setMediaLoading(loading)
         }
         playback.onScrubPreviewLoading = { [weak self] loading in
-            self?.chrome.setScrubPreviewLoading(loading)
+            self?.chrome.mediaStrip.setScrubPreviewLoading(loading)
         }
         playback.onScrubPreviewPicture = { [weak self] image in
-            self?.chrome.setScrubPreviewPicture(image)
+            self?.chrome.mediaStrip.setScrubPreviewPicture(image)
         }
         #if DEBUG
         playback.debugCurrentPage = { [weak self] in self?.mediaCard.currentPage ?? 0 }
         playback.debugPostID = { [weak self] in self?.representedID?.rawValue ?? "nil" }
         #endif
-        chrome.onScrubPreviewRequested = { [weak self] fraction in
+        chrome.mediaStrip.onScrubPreviewRequested = { [weak self] fraction in
             self?.playback.updateScrubPreview(fraction)
         }
         // A tap on the bar, exact — see `SnapCellPlayback.seek(toFraction:)`.
         // A drag seeks only at its release (`endScrub(at:)`, #2150).
-        chrome.onMediaSeekRequested = { [weak self] fraction in
+        chrome.mediaStrip.onMediaSeekRequested = { [weak self] fraction in
             self?.playback.seek(toFraction: fraction)
         }
-        chrome.onMediaScrubBegan = { [weak self] in self?.playback.beginScrub() }
-        chrome.onMediaScrubEnded = { [weak self] fraction in self?.playback.endScrub(at: fraction) }
+        chrome.mediaStrip.onMediaScrubBegan = { [weak self] in self?.playback.beginScrub() }
+        chrome.mediaStrip.onMediaScrubEnded = { [weak self] fraction in self?.playback.endScrub(at: fraction) }
         // Browsing (#1734): the carousel jumps to the page under the finger,
         // and a clip landed on PLAYS at once — in the post and in its preview,
         // one player for both (the owner, 2026-10-25; `refreshBrowseMirror`).
-        chrome.onMediaBrowseBegan = { [weak self] in
+        chrome.mediaStrip.onMediaBrowseBegan = { [weak self] in
             guard let self else { return }
             isBrowsingMedia = true
             refreshBrowseMirror()
         }
-        chrome.onMediaBrowse = { [weak self] page in
+        chrome.mediaStrip.onMediaBrowse = { [weak self] page in
             guard let self else { return }
             mediaCard.setPage(page, animated: false)
             refreshBrowseMirror()
         }
-        chrome.onMediaBrowseEnded = { [weak self] page in
+        chrome.mediaStrip.onMediaBrowseEnded = { [weak self] page in
             guard let self else { return }
             isBrowsingMedia = false
             tearDownBrowseMirror()
@@ -902,7 +902,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             reconcilePagePlayback()
             updatePlayheadFeed()
         }
-        chrome.onMediaPageRequested = { [weak self] page in
+        chrome.mediaStrip.onMediaPageRequested = { [weak self] page in
             guard let self else { return }
             // ⚠️ A NEIGHBOUR IS A PAGE TURN; ANYTHING FURTHER IS A JUMP.
             //
@@ -2103,7 +2103,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
                 current: mediaCard.currentPage,
                 clipPages: Set(mediaCard.videoPageIndices)
             )
-            chrome.setMediaPreviews(
+            chrome.mediaStrip.setMediaPreviews(
                 thumbnails: model.mediaPages.map(\.thumbnailURL),
                 videoPages: Set(mediaCard.videoPageIndices), pipeline: pipeline
             )
@@ -2144,7 +2144,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // the strip is drawn for one page and becomes that clip's bar. A lone
         // photograph reports nothing and keeps no strip.
         chrome.setMediaPageCount(isVideo ? 1 : 0, current: 0, clipPages: isVideo ? [0] : [])
-        chrome.setMediaPreviews(thumbnails: [], videoPages: [], pipeline: nil)
+        chrome.mediaStrip.setMediaPreviews(thumbnails: [], videoPages: [], pipeline: nil)
         updatePlayheadFeed()
 
         if isImage {
@@ -3118,7 +3118,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     }
 
     /// The page indicator's scrub, so the screen can make its dismissal yield.
-    var mediaScrubGesture: UIGestureRecognizer { chrome.mediaScrubGesture }
+    var mediaScrubGesture: UIGestureRecognizer { chrome.mediaStrip.mediaScrubGesture }
     /// The caption's slide, which drives the strip on a post with one (#2269).
     var captionSlideGesture: UIGestureRecognizer { chrome.captionSlide }
 
@@ -3273,7 +3273,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// Asks for a page exactly as the strip's tap does, so a spec drives the
     /// cell's own answer to that request rather than a route nobody uses.
     func debugRequestMediaPage(_ page: Int) {
-        chrome.onMediaPageRequested?(page)
+        chrome.mediaStrip.onMediaPageRequested?(page)
     }
 
     /// Every page instruction this cell has sent its card, in order — see the

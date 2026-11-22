@@ -18,7 +18,7 @@ import UIKit
 /// either side of it, running off the edges when there are many.
 ///
 /// The view spans the chrome's width; the chrome places it so the counter sits
-/// on the strip's line (`SnapChromeView.placeBrowseStrip`).
+/// on the strip's line (`SnapChromeMediaStrip.placeBrowseStrip`).
 final class SnapBrowseStripView: UIView {
     /// A tile at rest, portrait like the reference's.
     static let tileSize = CGSize(width: 36, height: 50)
