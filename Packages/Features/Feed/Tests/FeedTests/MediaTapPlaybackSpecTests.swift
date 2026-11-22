@@ -164,8 +164,8 @@ struct MediaTapPlaybackSpecTests {
         cell.mediaTaps.tapMedia(at: Self.mediaPoint(cell))
         #expect(cell.debugIsShowingPauseGlyph)
 
-        cell.setOwnsViewport(false) // paged away
-        cell.setOwnsViewport(true)  // and back: the page starts it again
+        cell.clipStart.setOwnsViewport(false) // paged away
+        cell.clipStart.setOwnsViewport(true)  // and back: the page starts it again
 
         #expect(cell.debugIsShowingPauseGlyph == false)
     }

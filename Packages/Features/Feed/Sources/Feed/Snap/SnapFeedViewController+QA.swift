@@ -233,7 +233,7 @@ extension SnapFeedViewController {
             guard let cell = collectionView.cellForItem(
                 at: IndexPath(item: index, section: 0)
             ) as? SnapFeedCell else { continue }
-            if cell.debugOwnsPlayback { return id }
+            if cell.clipStart.debugOwnsPlayback { return id }
         }
         return nil
     }

@@ -2025,11 +2025,11 @@ final class SnapFeedViewController: UIViewController {
         )
         guard owner != playbackOwner else { return }
         if let previous = playbackOwner {
-            (lifecycleCell(at: previous) as? SnapFeedCell)?.setOwnsViewport(false)
+            (lifecycleCell(at: previous) as? SnapFeedCell)?.clipStart.setOwnsViewport(false)
         }
         playbackOwner = owner
         if let owner {
-            (lifecycleCell(at: owner) as? SnapFeedCell)?.setOwnsViewport(true)
+            (lifecycleCell(at: owner) as? SnapFeedCell)?.clipStart.setOwnsViewport(true)
         }
         // The sound changes hands in this same turn (#1791).
         soundPlayback.refreshAudibleSurface()

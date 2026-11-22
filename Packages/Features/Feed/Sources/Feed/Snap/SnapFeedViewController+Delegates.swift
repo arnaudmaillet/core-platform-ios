@@ -53,7 +53,7 @@ extension SnapFeedViewController: UICollectionViewDelegate {
         // it is still being realized, and the hand-over reaches nothing. The
         // page that owns the viewport is a fact about the SCROLL, so it is
         // re-stated to every cell as it appears.
-        (cell as? SnapFeedCell)?.setOwnsViewport(playbackOwner == indexPath.item)
+        (cell as? SnapFeedCell)?.clipStart.setOwnsViewport(playbackOwner == indexPath.item)
         // And the sound follows the picture's owner, for the same reason.
         if playbackOwner == indexPath.item { soundPlayback.refreshAudibleSurface(ownerCell: cell as? SnapFeedCell) }
         if lifecycle.activeIndex == indexPath.item {
