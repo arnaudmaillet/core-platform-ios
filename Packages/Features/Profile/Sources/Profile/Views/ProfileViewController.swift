@@ -44,7 +44,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     private let makeSettingsViewController: (() -> UIViewController)?
     /// Builds the reusable profile-switcher menu (own profile only). Nil for
     /// other users — switching is a viewer affordance.
-    private let switcherFactory: ProfileSwitcherMenuFactory?
+    let switcherFactory: ProfileSwitcherMenuFactory?
     /// Builds the followers / following screen for a subject and a starting
     /// tab. Nil when the app wasn't wired with a relationships repository, in
     /// which case the counters stay inert rather than opening an empty screen.
@@ -208,14 +208,11 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     /// cannot work it out for itself (a nav root inside a tab bar and a pushed
     /// screen look identical from in here).
     private let trayPlacement: ProfileTrayPlacement
-    /// True between an account switch and the incoming profile landing. While
-    /// set, the skeleton is withheld and updates cross-dissolve.
-    private var isSwitchingProfile = false
     /// The app's viewer channel (#2376), whose profile switches this screen
     /// follows, whichever switcher made them. Nil (tests): none is heard.
-    private let viewerEvents: ViewerEvents?
-    /// The switch subscription, for this screen's lifetime: it ends with it.
-    private var activeProfileSubscription: ViewerEventSubscription?
+    let viewerEvents: ViewerEvents?
+    /// The account switcher on the own profile's name (`ProfileAccountSwitcher`, #2522).
+    private(set) lazy var accountSwitcher = ProfileAccountSwitcher(host: self)
 
     init(
         viewModel: ProfileViewModel,
@@ -347,10 +344,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     override func viewDidLoad() {
         // The hero page's layout, bar dress and travel (#1655).
         super.viewDidLoad()
-        // Kept on this screen, so it ends with it — no `deinit` to remember.
-        activeProfileSubscription = viewerEvents?.onActiveProfileChange { [weak self] id in
-            self?.activeProfileSwitched(to: id)
-        }
+        accountSwitcher.subscribe()
         configureNavigationBar()
         // Compose the bar before first layout so the push animation carries a
         // finished toolbar (the title and action slot fill in when the data
@@ -446,7 +440,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         }
         viewModel.onLoadSettled = { [weak self] in
             HeroScreenCost.measure("landing.settled") {
-                self?.isSwitchingProfile = false
+                self?.accountSwitcher.isSwitchingProfile = false
                 // A refresh that brought nothing new publishes no phase, so
                 // the spinner stops here — where every load ends, however it
                 // ended.
@@ -912,25 +906,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         settings.tintColor = .label
         settingsItem = settings
 
-        // ⚠️ THE SWITCHER IS THE NAME'S, NOT THE BAR'S (the owner,
-        // 2026-11-08): the own profile's name wears a chevron, and a tap on
-        // it opens the app's one switcher (#2034), anchored to the name. The
-        // switch itself is picked up through `viewerEvents`, so
-        // this screen refreshes whichever switcher was used.
-        if switcherFactory != nil {
-            headerView.onTitleTapped = { [weak self] in self?.presentSwitcherFromName() }
-            // Pre-load profiles, avatars and counts, so the switcher opens
-            // complete on its first frame.
-            reloadSwitcherMenu()
-        }
-    }
-
-    /// The own profile's name was tapped: the switcher, from the name.
-    private func presentSwitcherFromName() {
-        switcherFactory?.present(
-            from: .view(headerView.titleAnchor), over: self, includesAddProfile: true,
-            onSwitch: {}, onAddProfile: { [weak self] in self?.presentAddProfilePlaceholder() }
-        )
+        accountSwitcher.configureNameSwitcher()
     }
 
     /// Installs (or clears) the shell's trailing accessory. Safe before the
@@ -1024,57 +1000,6 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     var debugSelectorTitles: [String] { selectorBar.currentTitles }
     var debugActivePageIndex: Int { galleryPager.activePageIndex }
     #endif
-
-    /// Pre-fetches the switcher snapshot and installs a synchronous menu on the
-    /// switcher item. Re-run after a switch so the active marker updates.
-    ///
-    /// `onSwitch` is empty on purpose. Refreshing is driven by
-    /// `viewerEvents` instead, so it happens no matter WHICH switcher
-    /// was used — this screen's own, or the Profile tab's long-press menu, which
-    /// is built by the shell and cannot call back into here.
-    private func reloadSwitcherMenu() {
-        guard let switcherFactory else { return }
-        Task { await switcherFactory.reload() }
-    }
-
-    /// The active profile changed — from any switcher anywhere.
-    ///
-    /// Refetches unconditionally, including on someone ELSE's profile: the
-    /// viewer changed, so the follow state and relationship button this screen
-    /// shows are now answers to a different question, not just the identity at
-    /// the top.
-    private func activeProfileSwitched(to profile: ProfileID) {
-        // Cache-first: a profile already seen renders on THIS turn, and the
-        // fetch behind it becomes a silent revalidation. A miss has nothing
-        // truthful to show for the new identity, so it redacts rather than
-        // leaving the previous profile's name and numbers on screen.
-        // Armed BEFORE the seed: `revalidate` publishes cached content on this
-        // same turn, so the stagger has to be in place already or the cached
-        // profile snaps in. It is closed out by `onLoadSettled`, NOT by a
-        // phase arriving — a revalidation that agrees with the cache publishes
-        // no phase at all, and hanging the reset off one that may never come
-        // is what stranded this screen in a skeleton.
-        isSwitchingProfile = true
-        if !viewModel.revalidate(after: profile) {
-            // Nothing known about the new identity: bones are the honest state,
-            // and their un-redact reveal is the animation — no stagger over it.
-            isSwitchingProfile = false
-            headerView.render(.loading, profileKnown: false, animated: false)
-        }
-        // Re-read the snapshot so the menu's active marker moves to the profile
-        // just switched to.
-        reloadSwitcherMenu()
-    }
-
-    private func presentAddProfilePlaceholder() {
-        let alert = UIAlertController(
-            title: "Add Profile",
-            message: "Creating a new profile isn't available yet.",
-            preferredStyle: .alert
-        )
-        alert.addAction(UIAlertAction(title: "OK", style: .default))
-        present(alert, animated: true)
-    }
 
     func pushSettings() {
         guard let settingsViewController = makeSettingsViewController?() else { return }
@@ -1569,7 +1494,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
             // became the transition — a diagonal wipe across the identity.
             // The GALLERY still redacts, because its rows are genuinely
             // unknown until the fetch lands and bones are the honest answer.
-            headerView.render(phase, profileKnown: viewModel.profile != nil, switching: isSwitchingProfile, animated: false)
+            headerView.render(phase, profileKnown: viewModel.profile != nil, switching: accountSwitcher.isSwitchingProfile, animated: false)
             if viewModel.hasGallery {
                 galleryPager.render(ProfileViewModel.GallerySnapshot(
                     activity: .loading, media: .loading, isComplete: false,
@@ -1618,7 +1543,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
             // lightly staggered, so one identity becomes another rather than
             // the whole screen blinking over at once.
             headerView.render(
-                phase, profileKnown: true, switching: isSwitchingProfile, animated: view.window != nil
+                phase, profileKnown: true, switching: accountSwitcher.isSwitchingProfile, animated: view.window != nil
             )
             updateBannerVideo()
 
@@ -1808,3 +1733,5 @@ extension ProfileViewController: ProfileTabPagesHost {}
 extension ProfileViewController: ProfileHistorySelectionHost {}
 
 extension ProfileViewController: ProfilePostOpeningHost {}
+
+extension ProfileViewController: ProfileAccountSwitcherHost {}
