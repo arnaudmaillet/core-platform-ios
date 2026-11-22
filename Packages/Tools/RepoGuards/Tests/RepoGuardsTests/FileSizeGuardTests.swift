@@ -71,7 +71,7 @@ struct FileSizeGuardTests {
         "Packages/Features/Maps/Sources/Maps/Views/MapSubFilterBarView.swift": 1032,
         "Packages/Features/Maps/Sources/Maps/Views/PinCardView.swift": 2094,
         "Packages/Features/Place/Sources/Place/PlaceProfileViewController.swift": 2577,
-        "Packages/Features/Profile/Sources/Profile/Views/ProfileViewController.swift": 1739,
+        "Packages/Features/Profile/Sources/Profile/Views/ProfileViewController.swift": 1170,
         "Packages/Features/Search/Sources/Search/ViewModels/SearchViewModel.swift": 1239,
         "Packages/Features/Search/Sources/Search/Views/SearchResultsViewController.swift": 1021,
         "Packages/Features/Search/Sources/Search/Views/SearchViewController.swift": 1213,
