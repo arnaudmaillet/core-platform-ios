@@ -18,7 +18,7 @@ extension SnapFeedCell {
     /// Whether anything is animating the grab's stages or its window (#2362).
     var debugGrabAnimates: Bool {
         stages.contains { $0.layer.animationKeys() != nil }
-            || flightMask?.layer.animationKeys() != nil
+            || pageGrab.flightMask?.layer.animationKeys() != nil
     }
     var debugChromeInsets: UIEdgeInsets { frozenInsets }
 
