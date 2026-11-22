@@ -571,10 +571,10 @@ struct SnapSideListTests {
         let feed = try await openableFeed(["p1", "p2"], others: ["m1", "m2"])
         let sideList = try await open(feed)
         let cell = try #require(feed.collectionView.visibleCells.compactMap { $0 as? SnapFeedCell }.first)
-        #expect(cell.interceptsMediaTap?() == true, "the card's tap did not go to the list")
+        #expect(cell.mediaTaps.interceptsMediaTap?() == true, "the card's tap did not go to the list")
         #expect(sideList.isSettling || !sideList.isOpen, "the list did not close")
         sideList.settle(open: false, animated: false)
-        #expect(cell.interceptsMediaTap?() == false, "a closed list still takes the card's taps")
+        #expect(cell.mediaTaps.interceptsMediaTap?() == false, "a closed list still takes the card's taps")
     }
 
     /// The post on show's own tile toggles its clip in place (#1550): the

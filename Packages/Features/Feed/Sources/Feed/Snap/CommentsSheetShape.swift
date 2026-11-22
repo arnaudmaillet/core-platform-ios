@@ -10,7 +10,7 @@ import Foundation
 /// THE SHAPES ARE DATA, NOT CASES (#2195 § 5, the owner 2026-11-08): one
 /// ordered `catalogue`, and nothing outside it names a shape. The resting
 /// height (`SnapCommentsSheetSession.restingHeight`), the expanded detent
-/// (`offersExpandedDetent`), the cut (`SnapFeedCell.commentsSheetCut`) and the
+/// (`offersExpandedDetent`), the cut (`CommentsSheetShape.commentsSheetCut`) and the
 /// media's growth under the sheet read an entry's properties — `aspect`,
 /// `layout`, `offersExpandedDetent` — never which entry it is.
 ///
@@ -180,7 +180,7 @@ struct CommentsSheetLayout: Equatable, Sendable {
     /// square on an iPhone SE.
     var minimumSheetHeight: CGFloat = 300
     /// The most the cut takes off a picture's width or height, half on each
-    /// side (`SnapFeedCell.commentsSheetCut`): a 9:16 clip reaches 3:4 by it
+    /// side (`CommentsSheetShape.commentsSheetCut`): a 9:16 clip reaches 3:4 by it
     /// exactly; a picture beyond the catalogue's ends (a screenshot, a
     /// panorama) keeps the rest — no bands, no harder cut.
     var mostCut: CGFloat = 0.25
@@ -197,4 +197,38 @@ struct CommentsSheetLayout: Equatable, Sendable {
     var mediaGap: CGFloat = Spacing.sm
 
     static let standard = CommentsSheetLayout()
+}
+
+extension CommentsSheetShape {
+    /// The part of the picture `whole` (the card's coordinates) the comments
+    /// sheet shows, centred in it (#2184, #2195): the picture sorted into the
+    /// catalogue's shape nearest its ratio (`CommentsSheetShape.of`) and cut
+    /// to that shape's ratio — across its width or its height, whichever is
+    /// in excess — by `CommentsSheetLayout.mostCut` of that dimension at
+    /// most. Within the catalogue's ends the cut stays under that bound (13 %
+    /// at worst between today's neighbours); a picture beyond them (a
+    /// screenshot, a panorama) keeps the rest. A picture wider than tall also
+    /// loses at least `CommentsSheetLayout.landscapeSideTrim` on each side.
+    static func commentsSheetCut(
+        of whole: CGRect,
+        catalogue: [CommentsSheetShape] = CommentsSheetShape.catalogue,
+        layout: CommentsSheetLayout = .standard
+    ) -> CGRect {
+        guard let shape = CommentsSheetShape.of(whole.size, in: catalogue) else { return whole }
+        let ratio = whole.width / whole.height
+        let keeps = 1 - layout.mostCut
+        var cut = whole
+        if ratio > shape.aspect {
+            let kept = max(whole.height * shape.aspect, whole.width * keeps)
+            cut = whole.insetBy(dx: max(0, (whole.width - kept) / 2), dy: 0)
+        } else if ratio < shape.aspect {
+            let kept = max(whole.width / shape.aspect, whole.height * keeps)
+            cut = whole.insetBy(dx: 0, dy: max(0, (whole.height - kept) / 2))
+        }
+        let trim = layout.landscapeSideTrim
+        if whole.width > whole.height, whole.maxX - cut.maxX < trim {
+            cut = CGRect(x: whole.minX + trim, y: cut.minY, width: whole.width - 2 * trim, height: cut.height)
+        }
+        return cut
+    }
 }

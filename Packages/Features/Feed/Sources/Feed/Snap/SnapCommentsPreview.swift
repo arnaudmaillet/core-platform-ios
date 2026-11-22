@@ -5,7 +5,7 @@ import UIKit
 /// The post's media floating over the comments sheet once the sheet has
 /// grown over it (#2087, the owner, 2026-11-03): in the media's own shape,
 /// at the screen's top right under the sheet's bar, a clip playing on in it
-/// (`SnapFeedCell.makeCommentsPreviewContent`).
+/// (`SnapCommentsSheetPose.makeCommentsPreviewContent`).
 ///
 /// It pops in at its corner as the shrunk media scales out above the rising
 /// sheet — one picture at a time — and back (`SnapCommentsSheetSession`).

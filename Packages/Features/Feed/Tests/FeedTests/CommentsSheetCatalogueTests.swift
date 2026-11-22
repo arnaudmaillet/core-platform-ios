@@ -26,7 +26,7 @@ struct CommentsSheetCatalogueTests {
     private static let safeArea = UIEdgeInsets(top: 62, left: 0, bottom: 34, right: 0)
 
     private func cut(_ size: CGSize, in catalogue: [CommentsSheetShape]) -> CGRect {
-        SnapFeedCell.commentsSheetCut(of: CGRect(origin: .zero, size: size), catalogue: catalogue)
+        CommentsSheetShape.commentsSheetCut(of: CGRect(origin: .zero, size: size), catalogue: catalogue)
     }
 
     /// A picture of `ratio`, 6 000 pt tall: the side trim is lost in it.

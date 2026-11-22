@@ -15,7 +15,7 @@ struct CommentsSheetCutTests {
     private typealias Shape = CommentsSheetShape
 
     private func cut(_ width: CGFloat, _ height: CGFloat) -> CGRect {
-        SnapFeedCell.commentsSheetCut(of: CGRect(x: -10, y: 20, width: width, height: height))
+        CommentsSheetShape.commentsSheetCut(of: CGRect(x: -10, y: 20, width: width, height: height))
     }
 
     private func ratio(_ rect: CGRect) -> CGFloat { rect.width / rect.height }
@@ -123,7 +123,7 @@ struct CommentsSheetCutTests {
 
     @Test func aThreeFourPictureStaysWhole() {
         let whole = CGRect(x: -10, y: 20, width: 750, height: 1000)
-        #expect(SnapFeedCell.commentsSheetCut(of: whole) == whole)
+        #expect(CommentsSheetShape.commentsSheetCut(of: whole) == whole)
     }
 
     /// The worst cut within the catalogue is about 13 %, on either side of

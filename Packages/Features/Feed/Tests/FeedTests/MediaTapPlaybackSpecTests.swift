@@ -108,7 +108,7 @@ struct MediaTapPlaybackSpecTests {
         let (cell, pool, tile) = await Self.landedPage()
         #expect(pool.isAdvancing(in: tile))
 
-        cell.tapMedia(at: Self.mediaPoint(cell))
+        cell.mediaTaps.tapMedia(at: Self.mediaPoint(cell))
 
         #expect(pool.isAdvancing(in: tile) == false)
         #expect(cell.debugIsShowingPauseGlyph)
@@ -116,9 +116,9 @@ struct MediaTapPlaybackSpecTests {
 
     @Test func aSecondTapStartsItAgainAndTakesTheGlyphAway() async {
         let (cell, pool, tile) = await Self.landedPage()
-        cell.tapMedia(at: Self.mediaPoint(cell))
+        cell.mediaTaps.tapMedia(at: Self.mediaPoint(cell))
 
-        cell.tapMedia(at: Self.mediaPoint(cell))
+        cell.mediaTaps.tapMedia(at: Self.mediaPoint(cell))
 
         #expect(pool.isAdvancing(in: tile))
         #expect(cell.debugIsShowingPauseGlyph == false)
@@ -130,11 +130,11 @@ struct MediaTapPlaybackSpecTests {
     @Test func holdingStopsTheClipSilentlyAndLettingGoResumesIt() async {
         let (cell, pool, tile) = await Self.landedPage()
 
-        cell.beginMediaHold(at: Self.mediaPoint(cell))
+        cell.mediaTaps.beginMediaHold(at: Self.mediaPoint(cell))
         #expect(pool.isAdvancing(in: tile) == false)
         #expect(cell.debugIsShowingPauseGlyph == false)
 
-        cell.endMediaHold()
+        cell.mediaTaps.endMediaHold()
         #expect(pool.isAdvancing(in: tile))
         #expect(cell.debugIsShowingPauseGlyph == false)
     }
@@ -144,10 +144,10 @@ struct MediaTapPlaybackSpecTests {
     /// because a finger rested on it.
     @Test func aHoldOnAClipTheViewerPausedLeavesItPaused() async {
         let (cell, pool, tile) = await Self.landedPage()
-        cell.tapMedia(at: Self.mediaPoint(cell)) // paused, glyph up
+        cell.mediaTaps.tapMedia(at: Self.mediaPoint(cell)) // paused, glyph up
 
-        cell.beginMediaHold(at: Self.mediaPoint(cell))
-        cell.endMediaHold()
+        cell.mediaTaps.beginMediaHold(at: Self.mediaPoint(cell))
+        cell.mediaTaps.endMediaHold()
 
         #expect(pool.isAdvancing(in: tile) == false)
         #expect(cell.debugIsShowingPauseGlyph)
@@ -161,11 +161,11 @@ struct MediaTapPlaybackSpecTests {
     /// already looks paused.
     @Test func comingBackToAPausedPageTakesTheGlyphWithTheStop() async {
         let (cell, _, _) = await Self.landedPage()
-        cell.tapMedia(at: Self.mediaPoint(cell))
+        cell.mediaTaps.tapMedia(at: Self.mediaPoint(cell))
         #expect(cell.debugIsShowingPauseGlyph)
 
-        cell.setOwnsViewport(false) // paged away
-        cell.setOwnsViewport(true)  // and back: the page starts it again
+        cell.clipStart.setOwnsViewport(false) // paged away
+        cell.clipStart.setOwnsViewport(true)  // and back: the page starts it again
 
         #expect(cell.debugIsShowingPauseGlyph == false)
     }
@@ -214,7 +214,7 @@ struct MediaTapPlaybackSpecTests {
     /// where a drag can be expressed as an offset rather than a page.
     @Test func theMarkSitsOnTheStoppedPageAndLeavesWithIt() async throws {
         let (cell, _) = await Self.landedGallery(pages: 3)
-        cell.tapMedia(at: Self.mediaPoint(cell))
+        cell.mediaTaps.tapMedia(at: Self.mediaPoint(cell))
 
         let onThePicture = try #require(cell.debugPausedMarkFrame(onPage: 0))
         #expect(abs(onThePicture.midX - cell.bounds.midX) < 1)
@@ -236,7 +236,7 @@ struct MediaTapPlaybackSpecTests {
     /// the card is the picture there, so the two coincide.
     @Test func aSinglePicturesMarkSitsOnThatPicture() async throws {
         let (cell, _, _) = await Self.landedPage()
-        cell.tapMedia(at: Self.mediaPoint(cell))
+        cell.mediaTaps.tapMedia(at: Self.mediaPoint(cell))
 
         let mark = try #require(cell.debugPausedMarkFrame(onPage: 0))
         #expect(abs(mark.midX - cell.bounds.midX) < 1)
@@ -249,8 +249,8 @@ struct MediaTapPlaybackSpecTests {
         let (cell, pool, tile) = await Self.landedPage()
         let inTheHeader = CGPoint(x: cell.bounds.midX, y: 60) // beside the back arrow
 
-        #expect(cell.playbackTapRegionContains(inTheHeader) == false)
-        cell.tapMedia(at: inTheHeader)
+        #expect(cell.mediaTaps.playbackTapRegionContains(inTheHeader) == false)
+        cell.mediaTaps.tapMedia(at: inTheHeader)
         #expect(pool.isAdvancing(in: tile))
         #expect(cell.debugIsShowingPauseGlyph == false)
     }
@@ -261,8 +261,8 @@ struct MediaTapPlaybackSpecTests {
         let (cell, pool, tile) = await Self.landedPage()
         let onTheCaption = CGPoint(x: cell.bounds.midX, y: cell.bounds.height - 90)
 
-        #expect(cell.playbackTapRegionContains(onTheCaption) == false)
-        cell.tapMedia(at: onTheCaption)
+        #expect(cell.mediaTaps.playbackTapRegionContains(onTheCaption) == false)
+        cell.mediaTaps.tapMedia(at: onTheCaption)
         #expect(pool.isAdvancing(in: tile))
     }
 
@@ -282,7 +282,7 @@ struct MediaTapPlaybackSpecTests {
         // The strip's own band, just above the bar: the page talking, not the
         // picture.
         let onTheStrip = CGPoint(x: gallery.bounds.midX, y: gallery.bounds.height - 40)
-        #expect(gallery.playbackTapRegionContains(onTheStrip) == false)
+        #expect(gallery.mediaTaps.playbackTapRegionContains(onTheStrip) == false)
     }
 
     /// Both ends of the region are the screen's own thresholds, not numbers of
@@ -294,7 +294,7 @@ struct MediaTapPlaybackSpecTests {
 
         #expect(region.minY == 103)
         #expect(region.maxY > region.minY)
-        #expect(cell.playbackTapRegionContains(CGPoint(x: 200, y: 104)))
-        #expect(cell.playbackTapRegionContains(CGPoint(x: 200, y: 102)) == false)
+        #expect(cell.mediaTaps.playbackTapRegionContains(CGPoint(x: 200, y: 104)))
+        #expect(cell.mediaTaps.playbackTapRegionContains(CGPoint(x: 200, y: 102)) == false)
     }
 }

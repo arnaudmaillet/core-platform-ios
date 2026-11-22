@@ -15,7 +15,9 @@ import UIKit
 ///   resume once the seeks have landed, and the preview frame above it.
 ///
 /// What it does NOT own, and why: starting, warming, parking, donating,
-/// adopting and reclaiming the page's player stay in the cell. Those move
+/// adopting and reclaiming the page's player stay out of it — a carousel's
+/// in `SnapCarouselPlayback`, a single clip's start and stop in
+/// `SnapPageClipStart` (#2521), the flight's handoff with the cell. Those move
 /// players and pool loans between the page, a hero flight's card and the
 /// grid tile, and their order is the whole of their correctness.
 ///

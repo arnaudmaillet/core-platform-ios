@@ -132,7 +132,7 @@ struct CommentsSheetCloseTests {
         window.isHidden = false
         let cell = SnapFeedCell(frame: window.bounds)
         feed.view.addSubview(cell)
-        cell.debugFrameClip(aspect: CGSize(width: 9, height: 16))
+        cell.commentsSheetPose.debugFrameClip(aspect: CGSize(width: 9, height: 16))
         let ended = Count()
         let session = SnapCommentsSheetSession(
             postID: PostID("p"), panel: UIViewController(), cell: cell, feed: feed,
@@ -155,7 +155,7 @@ struct CommentsSheetCloseTests {
         let moves = !UIAccessibility.isReduceMotionEnabled
         session.debugBeginLanding(from: Self.collapsed, now: 0, duration: 0.35)
         #expect(session.phase == .landing)
-        #expect(cell.debugCommentsSheetClears == 0)
+        #expect(cell.commentsSheetPose.debugCommentsSheetClears == 0)
         var now: CFTimeInterval = 0
         var frames = 0
         while session.phase == .landing, frames < 200 {
@@ -163,21 +163,21 @@ struct CommentsSheetCloseTests {
             frames += 1
             if frames == 12 {
                 session.debugSheetDidGo()
-                #expect(cell.debugCommentsSheetClears == 0, "the sheet's end put the page back mid-way")
+                #expect(cell.commentsSheetPose.debugCommentsSheetClears == 0, "the sheet's end put the page back mid-way")
                 #expect(ended.value == 0, "the session ended with the media in flight")
             }
             session.debugFollowLanding(now: now)
             if session.phase == .landing {
-                #expect(cell.debugCommentsSheetClears == 0, "cleared at frame \(frames) with the media moving")
+                #expect(cell.commentsSheetPose.debugCommentsSheetClears == 0, "cleared at frame \(frames) with the media moving")
                 // Still visibly on its way over the first two thirds: the
                 // curve's last frames are within a hair of home anyway.
                 if moves, now < 0.35 * 2 / 3 {
-                    #expect(!Self.isIdentity(cell.debugCommentsSheetCardTransform), "the media was snapped home at \(now)")
+                    #expect(!Self.isIdentity(cell.commentsSheetPose.debugCommentsSheetCardTransform), "the media was snapped home at \(now)")
                 }
             }
         }
         #expect(session.phase == .landed)
-        #expect(cell.debugCommentsSheetClears == 1, "the page was put back \(cell.debugCommentsSheetClears) times")
+        #expect(cell.commentsSheetPose.debugCommentsSheetClears == 1, "the page was put back \(cell.commentsSheetPose.debugCommentsSheetClears) times")
         #expect(ended.value == 1)
     }
 
@@ -191,21 +191,21 @@ struct CommentsSheetCloseTests {
         defer { window.isHidden = true }
         guard !UIAccessibility.isReduceMotionEnabled else { return }
         // The sheet at rest, collapsed, as `follow` draws it.
-        cell.setCommentsSheetLayout(Self.collapsed, sheetCornerRadius: 0, previewCornerRadius: SnapCommentsPreview.cornerRadius)
-        let resting = try #require(cell.commentsSheetPictureFrame)
-        let restingRadius = cell.commentsSheetPictureRadius
+        cell.commentsSheetPose.setCommentsSheetLayout(Self.collapsed, sheetCornerRadius: 0, previewCornerRadius: SnapCommentsPreview.cornerRadius)
+        let resting = try #require(cell.commentsSheetPose.commentsSheetPictureFrame)
+        let restingRadius = cell.commentsSheetPose.commentsSheetPictureRadius
         let near = { (a: CGRect, b: CGRect) in
             abs(a.minX - b.minX) < 1 && abs(a.minY - b.minY) < 1 && abs(a.width - b.width) < 1
                 && abs(a.height - b.height) < 1
         }
 
         session.debugBeginLanding(from: Self.collapsed, now: 0, duration: 0.35)
-        let started = try #require(cell.commentsSheetPictureFrame)
+        let started = try #require(cell.commentsSheetPose.commentsSheetPictureFrame)
         #expect(near(started, resting), "the way back began at \(started), the card rested at \(resting)")
         session.debugFollowLanding(now: Self.frame)
-        let first = try #require(cell.commentsSheetPictureFrame)
+        let first = try #require(cell.commentsSheetPose.commentsSheetPictureFrame)
         #expect(near(first, resting), "the first frame jumped: \(resting) → \(first)")
-        #expect(abs(cell.commentsSheetPictureRadius - restingRadius) < 1)
+        #expect(abs(cell.commentsSheetPose.commentsSheetPictureRadius - restingRadius) < 1)
 
         var previous = first
         var now = Self.frame
@@ -215,7 +215,7 @@ struct CommentsSheetCloseTests {
             now += Self.frame
             frames += 1
             session.debugFollowLanding(now: now)
-            guard session.phase == .landing, let shown = cell.commentsSheetPictureFrame else { break }
+            guard session.phase == .landing, let shown = cell.commentsSheetPose.commentsSheetPictureFrame else { break }
             widest = max(widest, abs(shown.width - previous.width))
             previous = shown
         }
@@ -236,11 +236,11 @@ struct CommentsSheetCloseTests {
             session.debugFollowLanding(now: now)
         }
         #expect(session.phase == .landed)
-        #expect(cell.debugCommentsSheetClears == 1)
+        #expect(cell.commentsSheetPose.debugCommentsSheetClears == 1)
         #expect(ended.value == 0, "the session ended before its sheet had gone")
         session.debugSheetDidGo()
         #expect(ended.value == 1)
-        #expect(cell.debugCommentsSheetClears == 1, "the page was put back twice")
+        #expect(cell.commentsSheetPose.debugCommentsSheetClears == 1, "the page was put back twice")
     }
 
     /// THE MOTION'S LAST FRAME IS THE RESTING CELL: the picture's frame and
@@ -251,9 +251,9 @@ struct CommentsSheetCloseTests {
     @Test func theMotionsLastFrameIsTheCellsRestingFrameAndCrop() throws {
         let (_, cell, window, _) = makeSession()
         defer { window.isHidden = true }
-        let resting = try #require(cell.commentsSheetRestingPictureFrame)
-        cell.setCommentsSheetLayout(Self.collapsed, sheetCornerRadius: 38, previewCornerRadius: 20)
-        let shrunk = try #require(cell.commentsSheetPictureFrame)
+        let resting = try #require(cell.commentsSheetPose.commentsSheetRestingPictureFrame)
+        cell.commentsSheetPose.setCommentsSheetLayout(Self.collapsed, sheetCornerRadius: 38, previewCornerRadius: 20)
+        let shrunk = try #require(cell.commentsSheetPose.commentsSheetPictureFrame)
         #expect(shrunk.height < resting.height - 100, "the media never shrank: \(shrunk) for \(resting)")
 
         var landing = CommentsSheetLanding(from: Self.collapsed, start: 0, duration: 0.35)
@@ -263,10 +263,10 @@ struct CommentsSheetCloseTests {
         while !landing.hasLanded, frames < 100 {
             now += Self.frame
             frames += 1
-            cell.setCommentsSheetLayout(
+            cell.commentsSheetPose.setCommentsSheetLayout(
                 landing.advance(to: now, sheetRemaining: nil), sheetCornerRadius: 38, previewCornerRadius: 20
             )
-            let shown = try #require(cell.commentsSheetPictureFrame)
+            let shown = try #require(cell.commentsSheetPose.commentsSheetPictureFrame)
             let step = max(
                 abs(shown.minX - previous.minX), abs(shown.minY - previous.minY),
                 abs(shown.maxX - previous.maxX), abs(shown.maxY - previous.maxY)
@@ -274,21 +274,21 @@ struct CommentsSheetCloseTests {
             #expect(step < 60, "a jump of \(step) pt at frame \(frames)")
             previous = shown
         }
-        let landed = try #require(cell.commentsSheetPictureFrame)
+        let landed = try #require(cell.commentsSheetPose.commentsSheetPictureFrame)
         let close = { (a: CGRect, b: CGRect) in
             abs(a.minX - b.minX) < 0.5 && abs(a.minY - b.minY) < 0.5 && abs(a.width - b.width) < 0.5
                 && abs(a.height - b.height) < 0.5
         }
         #expect(close(landed, resting), "landed on \(landed), the page rests on \(resting)")
-        #expect(Self.isIdentity(cell.debugCommentsSheetCardTransform))
-        #expect(cell.debugCommentsSheetCardAlpha == 1)
-        #expect(cell.debugCommentsSheetInterfaceAlpha == 1)
+        #expect(Self.isIdentity(cell.commentsSheetPose.debugCommentsSheetCardTransform))
+        #expect(cell.commentsSheetPose.debugCommentsSheetCardAlpha == 1)
+        #expect(cell.commentsSheetPose.debugCommentsSheetInterfaceAlpha == 1)
         // A filling clip wears the screen's corners at rest, as the page does.
-        #expect(abs(cell.commentsSheetPictureRadius - ScreenGeometry.cornerRadius(behind: cell)) < 0.5)
+        #expect(abs(cell.commentsSheetPose.commentsSheetPictureRadius - ScreenGeometry.cornerRadius(behind: cell)) < 0.5)
 
-        cell.clearCommentsSheetLayout()
-        let cleared = try #require(cell.commentsSheetRestingPictureFrame)
+        cell.commentsSheetPose.clearCommentsSheetLayout()
+        let cleared = try #require(cell.commentsSheetPose.commentsSheetRestingPictureFrame)
         #expect(close(cleared, landed), "clearing the layout moved the picture: \(landed) → \(cleared)")
-        #expect(Self.isIdentity(cell.debugCommentsSheetCardTransform))
+        #expect(Self.isIdentity(cell.commentsSheetPose.debugCommentsSheetCardTransform))
     }
 }
