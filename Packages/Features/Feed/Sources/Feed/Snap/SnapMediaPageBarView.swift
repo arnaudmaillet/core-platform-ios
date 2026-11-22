@@ -66,7 +66,7 @@ final class SnapMediaPageBarView: UIView {
     /// card's dot) and the caption kept a seat above it, 22 pt higher than
     /// on a single photo — the whole stack over the caption jumped between
     /// posts. Now the strip lies in the gap that already exists between the
-    /// caption and the bottom bar (`SnapChromeView.pageBarCenterOffset`) and
+    /// caption and the bottom bar (`SnapChromeGeometry.pageBarCenterOffset`) and
     /// reserves nothing, as TikTok's and Instagram's do.
     static let thickness: CGFloat = 2
 

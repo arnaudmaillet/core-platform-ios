@@ -466,7 +466,7 @@ struct SnapShortcutRailViewTests {
         // One unified anchor across formats, a media page's standing the
         // column's lift higher at rest, on the caption's line (#2326): the
         // same "+", the rail's bottom on it.
-        let lift = SnapChromeView.columnLineLift()
+        let lift = SnapChromeGeometry.columnLineLift()
         #expect(SnapActionColumnLayoutTests.same(media.compose.offsetBy(dx: 0, dy: lift), text.compose))
         #expect(media.rail.minX == text.rail.minX && media.rail.width == text.rail.width)
         #expect(abs(text.rail.maxY - media.rail.maxY - lift) < 0.5)

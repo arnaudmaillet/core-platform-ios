@@ -279,7 +279,7 @@ struct SnapActionColumnLayoutTests {
         chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true))
         chrome.layoutIfNeeded()
         let lift = chrome.debugColumnLineLift
-        #expect(abs(lift - SnapChromeView.columnLineLift()) < 0.5)
+        #expect(abs(lift - SnapChromeGeometry.columnLineLift()) < 0.5)
         #expect(lift > 0)
         let station = chrome.debugSoundStationFrame
         func column() -> (like: CGRect, sound: CGRect) {

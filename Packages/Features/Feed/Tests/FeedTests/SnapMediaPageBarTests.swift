@@ -1301,7 +1301,7 @@ struct SnapMediaPageBarTests {
 
     /// The bottom of the caption's letters: its last baseline.
     private func lettersBottom(_ view: SnapChromeView) -> CGFloat {
-        view.debugCaptionFrame.maxY - SnapChromeView.captionLetterDrop
+        view.debugCaptionFrame.maxY - SnapChromeGeometry.captionLetterDrop
     }
 
     /// The top of the toolbar's glass.
@@ -1368,9 +1368,9 @@ struct SnapMediaPageBarTests {
         #expect(abs(column.maxY - lettersBottom(view)) < 0.5)
         // The composer's line, less the column's lift.
         let composerLine = Self.barLine - SnapActionColumn.bottomBreath - SnapActionColumn.inputRestingGap
-        let lift = SnapChromeView.columnLineLift()
+        let lift = SnapChromeGeometry.columnLineLift()
         #expect(abs(column.maxY - (composerLine - lift)) < 0.5)
-        #expect(lift > SnapChromeView.coverLineLift(), "the column rose less than the caption")
+        #expect(lift > SnapChromeGeometry.coverLineLift(), "the column rose less than the caption")
         // The like pill rises with it: same height, same gap over the cover.
         let like = view.debugFrame(of: view.debugBoostButton)
         #expect(abs(like.height - SnapActionColumn.likePillHeight) < 0.5)
@@ -1624,7 +1624,7 @@ struct SnapMediaPageBarTests {
         }
         // The cover's line, raised by the seat's lift (#2301).
         let line = Self.barLine - SnapActionColumn.bottomBreath - SnapActionColumn.inputRestingGap
-            - SnapChromeView.coverLineLift()
+            - SnapChromeGeometry.coverLineLift()
         #expect(abs(photo.debugCaptionFrame.maxY - line) < 0.5, "the caption is off its seat")
     }
 
@@ -1640,7 +1640,7 @@ struct SnapMediaPageBarTests {
             nil,
         ]
         let reference = chrome(pages: 0, caption: captions[0]).debugCaptionFrame
-        let twoLines = SnapChromeView.captionBlockHeight(scale: 3)
+        let twoLines = SnapChromeGeometry.captionBlockHeight(scale: 3)
         #expect(abs(reference.height - twoLines) < 0.5, "the block is \(reference.height) tall, not two lines")
         let formats: [(pages: Int, clips: Set<Int>)] = [(0, []), (3, []), (1, [0])]
         for caption in captions {
