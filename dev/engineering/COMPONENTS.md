@@ -120,4 +120,5 @@ Look here before writing any of these. Add a row when you create a shared piece.
 | A font | the scaled type scale | DesignSystem | `ScaledFontGuardTests` |
 | A haptic | the haptic roles | DesignSystem | `HapticsGuardTests` |
 | A comment or message input | `CommentsInputBar` | ThreadKit | |
+| Recording a voice take in a composer, and the microphone's Settings alert | `VoiceComposer`, `offersMicrophoneSettings(from:message:)` | ThreadKit | |
 

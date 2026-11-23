@@ -180,7 +180,8 @@ final class TextPostComposerViewController: UIViewController {
             guard let self else { return }
             Feedback.info(hint, symbol: "mic", from: self)
         }
-        composer.onPermissionDenied = { [weak self] in self?.offerMicrophoneSettings() }
+        // Once refused, a hold offers Settings, the thread's (#2102).
+        composer.offersMicrophoneSettings(from: self, message: "Allow microphone access to record a voice post.")
         // A take recorded or thrown away changes what leaving would lose.
         composer.onPhaseChange = { [weak self] _ in self?.refreshSwipeGuard() }
         composer.attach(to: panel.composeBar, host: view)
@@ -200,19 +201,6 @@ final class TextPostComposerViewController: UIViewController {
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
         alert.addAction(UIAlertAction(title: "Try Again", style: .default) { [weak self] _ in
             self?.panel.viewModel.publishVoice(voice, text: text)
-        })
-        present(alert, animated: true)
-    }
-
-    /// Once refused, a hold offers Settings — the thread's (#2102).
-    private func offerMicrophoneSettings() {
-        let alert = UIAlertController(
-            title: "Microphone Access", message: "Allow microphone access to record a voice post.",
-            preferredStyle: .alert
-        )
-        alert.addAction(UIAlertAction(title: "Not Now", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Open Settings", style: .default) { _ in
-            if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
         })
         present(alert, animated: true)
     }

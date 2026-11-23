@@ -3013,21 +3013,9 @@ extension ConversationThreadViewController {
             guard let self else { return }
             Feedback.info(hint, symbol: "mic", from: self)
         }
-        composer.onPermissionDenied = { [weak self] in self?.offerMicrophoneSettings() }
+        // Once refused, a hold offers Settings (#2102).
+        composer.offersMicrophoneSettings(from: self, message: "Allow microphone access to record voice messages.")
         composer.attach(to: composeBar, host: view)
         voiceComposer = composer
-    }
-
-    /// Once refused, a hold offers Settings (#2102).
-    private func offerMicrophoneSettings() {
-        let alert = UIAlertController(
-            title: "Microphone Access", message: "Allow microphone access to record voice messages.",
-            preferredStyle: .alert
-        )
-        alert.addAction(UIAlertAction(title: "Not Now", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Open Settings", style: .default) { _ in
-            if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
-        })
-        present(alert, animated: true)
     }
 }
