@@ -54,7 +54,7 @@ struct FileSizeGuardTests {
         "Packages/Features/Chat/Sources/Chat/Data/ChatRepository.swift": 1044,
         "Packages/Features/Chat/Sources/Chat/Thread/ConversationThreadViewController.swift": 3033,
         "Packages/Features/Feed/Sources/Feed/PostDetail/CommentStream.swift": 2495,
-        "Packages/Features/Feed/Sources/Feed/PostDetail/PostDetailViewController.swift": 1377,
+        "Packages/Features/Feed/Sources/Feed/PostDetail/PostDetailViewController.swift": 1122,
         "Packages/Features/Feed/Sources/Feed/PostDetail/PostDetailViewModel.swift": 1388,
         "Packages/Features/Feed/Sources/Feed/Snap/SnapChromeView.swift": 1178,
         "Packages/Features/Feed/Sources/Feed/Snap/SnapCommentTickerView.swift": 1311,
