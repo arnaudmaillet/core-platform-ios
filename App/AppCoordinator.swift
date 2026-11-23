@@ -17,6 +17,7 @@ import VoiceKit
 import VoiceKitUI
 #if DEBUG
 import CoreNetworkingMocks
+import MediaPlaybackFixtures
 #endif
 #if DEBUG
 import ChatInterface

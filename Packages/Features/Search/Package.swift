@@ -48,6 +48,8 @@ let package = Package(
         .testTarget(
             name: "SearchTests",
             dependencies: [
+                // Mock media (#2516): the offline fetchers the suites draw with.
+                .product(name: "MediaCoreFixtures", package: "MediaCore"),
                 "Search",
                 "AuthInterface",
                 "CoreNavigation",

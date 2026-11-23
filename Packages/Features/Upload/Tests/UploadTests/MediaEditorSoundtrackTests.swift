@@ -1,6 +1,7 @@
 import AVFoundation
 import DesignSystem
 import MediaPlayback
+import MediaPlaybackFixtures
 import Testing
 import UIKit
 @testable import Upload

@@ -1,5 +1,6 @@
 import CoreModels
 import CoreNavigation
+import MediaCoreFixtures
 import PostSurfaces
 import Transitions
 import CoreStorage

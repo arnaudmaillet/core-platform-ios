@@ -33,6 +33,13 @@ let package = Package(
             "LaunchArguments",
             "DesignSystem", "PostGrid", "MediaCore", .product(name: "MediaUI", package: "MediaCore"), "MediaPlayback", "EmoteKit", "CoreNavigation"
         ]),
-        .testTarget(name: "HeroPageTests", dependencies: ["HeroPage", "DesignSystem", "PostGrid", "MediaCore", .product(name: "MediaUI", package: "MediaCore")])
+        .testTarget(
+            name: "HeroPageTests",
+            dependencies: [
+                "HeroPage", "DesignSystem", "PostGrid", "MediaCore", .product(name: "MediaUI", package: "MediaCore"),
+                // Mock media (#2516): the offline fetchers the suites draw with.
+                .product(name: "MediaCoreFixtures", package: "MediaCore")
+            ]
+        )
     ]
 )

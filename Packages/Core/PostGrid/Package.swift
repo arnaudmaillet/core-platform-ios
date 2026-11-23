@@ -47,6 +47,8 @@ let package = Package(
         .testTarget(
             name: "PostGridTests",
             dependencies: [
+                // Mock media (#2516): the offline fetchers the suites draw with.
+                .product(name: "MediaCoreFixtures", package: "MediaCore"),
                 .product(name: "MediaUI", package: "MediaCore"),
                 "PostGrid", "CoreStorage", "EntityStore", "EmoteKit", .product(name: "VoiceKitUI", package: "VoiceKit")
             ]

@@ -1,5 +1,6 @@
 import CacheKit
 import Foundation
+import MediaCoreFixtures
 import Synchronization
 import Testing
 import UIKit

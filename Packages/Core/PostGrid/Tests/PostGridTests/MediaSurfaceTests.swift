@@ -1,4 +1,5 @@
 import MediaCore
+import MediaCoreFixtures
 import MediaPlayback
 import MediaUI
 import Testing

@@ -8,10 +8,10 @@ import Testing
 ///   target in Release). It links the mocks and compiles with `MOCK_BACKEND`.
 /// - `core-platform-ios-production`, the production build: Release only, the
 ///   real backend only — no `CoreNetworkingMocks`, no `CoreRealtimeMocks`, no
-///   mock media, and no `DebugTools` (DEBUG-only, and the target never builds
-///   Debug).
+///   mock media (`MediaCoreFixtures`, `MediaPlaybackFixtures`, #2516), and no
+///   `DebugTools` (DEBUG-only, and the target never builds Debug).
 ///
-/// One `App` folder, so the two must link the same packages but those three:
+/// One `App` folder, so the two must link the same packages but those five:
 /// a package added to one target alone breaks the other's build — at link
 /// time when they share a products folder, which reads far worse than this.
 struct TargetParityGuardTests {
@@ -19,7 +19,9 @@ struct TargetParityGuardTests {
     static let mockTarget = "core-platform-ios"
     static let productionTarget = "core-platform-ios-production"
     /// What only the mock target links.
-    static let mockOnly: Set<String> = ["CoreNetworkingMocks", "CoreRealtimeMocks", "DebugTools"]
+    static let mockOnly: Set<String> = [
+        "CoreNetworkingMocks", "CoreRealtimeMocks", "MediaCoreFixtures", "MediaPlaybackFixtures", "DebugTools"
+    ]
 
     static func pbxproj() throws -> String {
         try String(contentsOf: RepoRoot.url.appendingPathComponent(project), encoding: .utf8)

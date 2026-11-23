@@ -7,7 +7,9 @@ import CoreStorage
 import Foundation
 import LaunchArguments
 import MediaCore
+import MediaCoreFixtures
 import MediaPlayback
+import MediaPlaybackFixtures
 import UIKit
 
 // Media's mock half (#2391): the image fetcher and the video source that read

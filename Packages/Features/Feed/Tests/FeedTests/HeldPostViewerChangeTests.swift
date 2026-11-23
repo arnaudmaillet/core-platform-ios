@@ -7,6 +7,7 @@ import CoreStorage
 import EntityStore
 import Foundation
 import MediaCore
+import MediaCoreFixtures
 import PostSurfaces
 import Testing
 @testable import Feed

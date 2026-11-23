@@ -5,7 +5,11 @@ let package = Package(
     name: "MediaPlayback",
     platforms: [.iOS("26.0")],
     products: [
-        .library(name: "MediaPlayback", targets: ["MediaPlayback"])
+        .library(name: "MediaPlayback", targets: ["MediaPlayback"]),
+        // Mock media (#2516): `PlaceholderVideoFetcher`, which synthesises a
+        // clip for a `mock://` URL. The mock app target and the tests link
+        // it; the production target never does.
+        .library(name: "MediaPlaybackFixtures", targets: ["MediaPlaybackFixtures"])
     ],
     dependencies: [
         // The device cache (#891): video bytes live in its `.video` disk pool
@@ -25,6 +29,7 @@ let package = Package(
         // framework — a dependency on our `MediaCore` module would shadow it
         // and cycle.
         .target(name: "MediaPlayback", dependencies: ["CacheKit", "CoreModels", "LaunchArguments"]),
-        .testTarget(name: "MediaPlaybackTests", dependencies: ["MediaPlayback", "CacheKit"])
+        .target(name: "MediaPlaybackFixtures", dependencies: ["MediaPlayback", "LaunchArguments"]),
+        .testTarget(name: "MediaPlaybackTests", dependencies: ["MediaPlayback", "MediaPlaybackFixtures", "CacheKit"])
     ]
 )

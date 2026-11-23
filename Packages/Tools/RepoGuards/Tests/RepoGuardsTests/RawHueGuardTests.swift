@@ -34,8 +34,8 @@ struct RawHueGuardTests {
         "LensLab.swift": "the DEBUG lens bench's test backgrounds (#1748)",
         "SimulatedCaptureSource.swift": "the simulator camera's synthetic frames",
         "DebugMediaLibrary.swift": "the DEBUG media library's synthetic pictures",
-        "ImageFetching.swift": "the placeholder fetcher's synthetic pictures",
-        "VideoSource.swift": "the synthetic video source's frames",
+        "PlaceholderImageFetcher.swift": "the placeholder fetcher's synthetic pictures (mock media, #2516)",
+        "PlaceholderVideoFetcher.swift": "the synthetic video source's frames (mock media, #2516)",
         // Conventions the palette keeps on purpose.
         "PersonListCell.swift": "the verified seal stays blue (the platform convention)",
         "RelationshipListCell.swift": "the verified seal stays blue (the platform convention)",

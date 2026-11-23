@@ -1,4 +1,5 @@
 import AVFoundation
+import MediaPlaybackFixtures
 import Testing
 import UIKit
 @testable import MediaPlayback

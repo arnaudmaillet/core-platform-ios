@@ -3,6 +3,7 @@ import CoreStorage
 import DesignSystem
 import Foundation
 import MediaCore
+import MediaCoreFixtures
 import PostGrid
 import ProfileInterface
 import Testing

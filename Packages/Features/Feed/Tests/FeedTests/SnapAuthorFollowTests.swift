@@ -2,6 +2,7 @@ import CoreModels
 import CoreStorage
 import DesignSystem
 import MediaCore
+import MediaCoreFixtures
 import MediaUI
 import Testing
 import UIKit

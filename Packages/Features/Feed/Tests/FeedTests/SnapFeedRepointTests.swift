@@ -4,6 +4,7 @@ import CoreStorage
 import DesignSystem
 import Foundation
 import MediaCore
+import MediaCoreFixtures
 import MediaPlayback
 import PostSurfaces
 import Testing

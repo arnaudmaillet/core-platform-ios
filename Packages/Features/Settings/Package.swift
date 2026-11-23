@@ -72,6 +72,8 @@ let package = Package(
         .testTarget(
             name: "SettingsTests",
             dependencies: [
+                // Mock media (#2516): the offline fetchers the suites draw with.
+                .product(name: "MediaCoreFixtures", package: "MediaCore"),
                 "Settings",
                 "SettingsInterface",
                 "ProfileData",

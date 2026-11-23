@@ -4,6 +4,7 @@ import CoreStorage
 import FeedInterface
 import Foundation
 import MediaCore
+import MediaCoreFixtures
 import PostGrid
 import PostSurfaces
 import Testing

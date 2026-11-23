@@ -84,6 +84,8 @@ let package = Package(
         .testTarget(
             name: "ProfileTests",
             dependencies: [
+                // Mock media (#2516): the offline fetchers the suites draw with.
+                .product(name: "MediaCoreFixtures", package: "MediaCore"),
                 "LaunchArguments",
                 "Profile",
                 "ProfileData",

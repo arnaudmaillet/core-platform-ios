@@ -4,6 +4,7 @@ import CoreModels
 import CoreNavigation
 import DesignSystem
 import MediaCore
+import MediaCoreFixtures
 import MediaPlayback
 import MediaUI
 import PostGrid

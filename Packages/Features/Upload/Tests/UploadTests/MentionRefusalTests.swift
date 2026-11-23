@@ -6,6 +6,7 @@ import CoreModels
 import CoreNetworking
 import CoreNetworkingMocks
 import Foundation
+import MediaCoreFixtures
 import Testing
 import UIKit
 @testable import Upload

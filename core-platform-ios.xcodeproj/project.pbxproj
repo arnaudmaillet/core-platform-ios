@@ -20,6 +20,8 @@
 		5F00000000000000000000B8 /* AuthInterface in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000C8 /* AuthInterface */; };
 		5F00000000000000000000B9 /* Auth in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000C9 /* Auth */; };
 		5F00000000000000000000BA /* CoreNetworkingMocks in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000CA /* CoreNetworkingMocks */; };
+		5F0000000000000000251601 /* MediaCoreFixtures in Frameworks */ = {isa = PBXBuildFile; productRef = 5F0000000000000000251602 /* MediaCoreFixtures */; };
+		5F0000000000000000251603 /* MediaPlaybackFixtures in Frameworks */ = {isa = PBXBuildFile; productRef = 5F0000000000000000251604 /* MediaPlaybackFixtures */; };
 		5F00000000000000000000BB /* MediaCore in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000CB /* MediaCore */; };
 		5F0000000000000000238402 /* MediaUI in Frameworks */ = {isa = PBXBuildFile; productRef = 5F0000000000000000238403 /* MediaUI */; };
 		5F00000000000000000000BC /* Feed in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000CC /* Feed */; };
@@ -168,6 +170,8 @@
 				5F00000000000000000000B8 /* AuthInterface in Frameworks */,
 				5F00000000000000000000B9 /* Auth in Frameworks */,
 				5F00000000000000000000BA /* CoreNetworkingMocks in Frameworks */,
+				5F0000000000000000251601 /* MediaCoreFixtures in Frameworks */,
+				5F0000000000000000251603 /* MediaPlaybackFixtures in Frameworks */,
 				5F00000000000000000000BB /* MediaCore in Frameworks */,
 				5F0000000000000000238402 /* MediaUI in Frameworks */,
 				5F00000000000000000010B2 /* MediaPlayback in Frameworks */,
@@ -318,6 +322,8 @@
 				5F00000000000000000000C8 /* AuthInterface */,
 				5F00000000000000000000C9 /* Auth */,
 				5F00000000000000000000CA /* CoreNetworkingMocks */,
+				5F0000000000000000251602 /* MediaCoreFixtures */,
+				5F0000000000000000251604 /* MediaPlaybackFixtures */,
 				5F00000000000000000000CB /* MediaCore */,
 				5F0000000000000000238403 /* MediaUI */,
 				5F00000000000000000010B1 /* MediaPlayback */,
@@ -1191,6 +1197,14 @@
 		5F00000000000000000000CA /* CoreNetworkingMocks */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = CoreNetworkingMocks;
+		};
+		5F0000000000000000251602 /* MediaCoreFixtures */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MediaCoreFixtures;
+		};
+		5F0000000000000000251604 /* MediaPlaybackFixtures */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MediaPlaybackFixtures;
 		};
 		5F00000000000000000000CB /* MediaCore */ = {
 			isa = XCSwiftPackageProductDependency;

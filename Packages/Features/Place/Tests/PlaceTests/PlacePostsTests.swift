@@ -3,6 +3,7 @@ import CoreModels
 import CoreNetworking
 import CoreNetworkingMocks
 import CoreStorage
+import MediaCoreFixtures
 import PlaceInterface
 import Foundation
 import MediaCore

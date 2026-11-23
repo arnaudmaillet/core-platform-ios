@@ -3,11 +3,13 @@ import AVFoundation
 import AuthInterface
 import CoreContracts
 import MediaCore
+import MediaCoreFixtures
 import MediaPlayback
 import CoreModels
 import CoreNetworking
 import CoreNetworkingMocks
 import Foundation
+import MediaPlaybackFixtures
 import Testing
 import UIKit
 @testable import Upload

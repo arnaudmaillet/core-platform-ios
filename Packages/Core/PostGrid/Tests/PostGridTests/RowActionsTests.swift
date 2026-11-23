@@ -1,6 +1,7 @@
 import DesignSystem
 import CoreModels
 import MediaCore
+import MediaCoreFixtures
 import MediaUI
 import UIKit
 import Testing

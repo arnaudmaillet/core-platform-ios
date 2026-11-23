@@ -4,6 +4,7 @@ import CoreStorage
 import Foundation
 import LocalStore
 import MediaCore
+import MediaCoreFixtures
 import Testing
 @testable import Settings
 

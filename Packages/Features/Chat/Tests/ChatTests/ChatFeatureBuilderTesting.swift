@@ -4,6 +4,7 @@ import CoreStorage
 import EntityStore
 import Foundation
 import MediaCore
+import MediaCoreFixtures
 import UIKit
 @testable import Chat
 

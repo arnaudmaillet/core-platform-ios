@@ -1,4 +1,5 @@
 import Foundation
+import MediaCoreFixtures
 import Testing
 import UIKit
 @testable import MediaCore

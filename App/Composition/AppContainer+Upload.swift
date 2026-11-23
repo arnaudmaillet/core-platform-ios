@@ -7,6 +7,7 @@ import CoreModels
 import CoreNetworking
 #if MOCK_BACKEND
 import CoreNetworkingMocks
+import MediaPlaybackFixtures
 #endif
 import FeedInterface
 import Foundation
@@ -40,7 +41,20 @@ extension AppContainer {
     /// The builder itself: Chat's send picker (`chatMediaPicker`) takes its
     /// picks, which the interface does not carry.
     var uploadBuilder: UploadFeatureBuilder {
-        UploadFeatureBuilder(composer: postComposer, textPostScreens: { [unowned self] in self.feedFeature })
+        UploadFeatureBuilder(
+            composer: postComposer, textPostScreens: { [unowned self] in self.feedFeature },
+            fakeLibraryClips: Self.fakeLibraryClips
+        )
+    }
+
+    /// `-upload-fake-library`'s clips (DEBUG): the mock's synthesised ones
+    /// (#2516). The production app ships no synthetic media.
+    private static var fakeLibraryClips: FakeLibraryClips? {
+        #if MOCK_BACKEND
+        return { seconds in PlaceholderVideoFetcher(durationSeconds: seconds) }
+        #else
+        return nil
+        #endif
     }
 
     /// Where media bytes go: the mock's blob store, or the fleet's object

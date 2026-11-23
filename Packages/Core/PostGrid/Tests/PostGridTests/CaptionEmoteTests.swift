@@ -1,6 +1,7 @@
 import CoreModels
 import EmoteKit
 import MediaCore
+import MediaCoreFixtures
 import Testing
 import UIKit
 @testable import PostGrid

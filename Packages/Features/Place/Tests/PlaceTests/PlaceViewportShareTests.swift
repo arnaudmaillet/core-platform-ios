@@ -3,6 +3,7 @@ import CoreNavigation
 import CoreStorage
 import Foundation
 import MediaCore
+import MediaCoreFixtures
 import PostGrid
 import PostSurfaces
 import Testing

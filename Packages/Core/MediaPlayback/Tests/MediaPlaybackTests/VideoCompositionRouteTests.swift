@@ -1,6 +1,7 @@
 import AVFoundation
 import CoreImage
 import Foundation
+import MediaPlaybackFixtures
 import Testing
 @testable import MediaPlayback
 

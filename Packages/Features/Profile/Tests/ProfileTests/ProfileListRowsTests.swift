@@ -4,6 +4,7 @@ import DesignSystem
 import FeedInterface
 import HeroPage
 import MediaCore
+import MediaCoreFixtures
 import PostGrid
 import Testing
 import UIKit

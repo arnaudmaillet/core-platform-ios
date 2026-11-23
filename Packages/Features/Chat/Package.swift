@@ -76,6 +76,8 @@ let package = Package(
         .testTarget(
             name: "ChatTests",
             dependencies: [
+                // Mock media (#2516): the offline fetchers the suites draw with.
+                .product(name: "MediaCoreFixtures", package: "MediaCore"),
                 "Chat",
                 "TestSupport",
                 "CoreModels",

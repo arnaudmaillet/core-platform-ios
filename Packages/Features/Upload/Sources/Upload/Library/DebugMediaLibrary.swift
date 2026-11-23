@@ -1,5 +1,6 @@
 #if DEBUG
-// `PlaceholderVideoFetcher` — the feed's mock video source, reused here so a
+// Its clips come from `clips` — the feed's mock video source, MediaPlaybackFixtures'
+// `PlaceholderVideoFetcher`, handed in by the mock composition (#2516) — so a
 // picked debug video is a real clip rather than a promise of one.
 import LaunchArguments
 import MediaPlayback
@@ -20,6 +21,8 @@ final class DebugMediaLibrary: MediaLibraryReading {
     /// What each album actually holds, built once — see the note in `init`.
     private let contents: [String: [MediaLibraryItem]]
 
+    /// Makes the clips: a source for clips of a given length (`FakeLibraryClips`).
+    private let clips: FakeLibraryClips
     /// How long a synthesised clip runs, and how big its long edge is.
     private let clipSeconds: Double
     private let clipLongEdge: Int
@@ -44,7 +47,8 @@ final class DebugMediaLibrary: MediaLibraryReading {
     /// first run of these tests took 105-137 seconds EACH there against six
     /// locally, and timed out mid-publish. Shrinking the fixture is the half of
     /// the fix that lowers the cost rather than just waiting longer for it.
-    init(count: Int, clipSeconds: Double = 2.5, clipLongEdge: Int = 960) {
+    init(count: Int, clips: @escaping FakeLibraryClips, clipSeconds: Double = 2.5, clipLongEdge: Int = 960) {
+        self.clips = clips
         self.clipSeconds = clipSeconds
         self.clipLongEdge = clipLongEdge
         let total = max(count, 1)
@@ -259,7 +263,7 @@ final class DebugMediaLibrary: MediaLibraryReading {
     /// Two routes, and both end in a local file:
     ///
     /// - **A real public encode** under `-rich-media` (`realClips`), downloaded
-    ///   once and cached by `PlaceholderVideoFetcher`. This is the one that
+    ///   once and cached by the clip source (`PlaceholderVideoFetcher`). This is the one that
     ///   finds things a fixture cannot: it is what showed that
     ///   `VideoExporter.posterImage` sampled at exactly t=0 and therefore
     ///   published a black `thumbnail_url` for any film that fades in.
@@ -276,7 +280,7 @@ final class DebugMediaLibrary: MediaLibraryReading {
     func videoFile(for item: MediaLibraryItem.ID) async -> URL? {
         guard items.first(where: { $0.id == item })?.isVideo == true else { return nil }
         let index = Self.index(of: item)
-        let fetcher = PlaceholderVideoFetcher()
+        let fetcher = clips(clipSeconds)
 
         // ⚠️ **A REAL ENCODE UNDER `-rich-media`, AND ONE CHECK COVERS BOTH WAYS
         // OF NOT GETTING ONE.** `playableURL` hands an http(s) URL to the
@@ -303,8 +307,7 @@ final class DebugMediaLibrary: MediaLibraryReading {
         guard let source = URL(string: "mock://video/\(item)?w=\(width)&h=\(height)") else {
             return nil
         }
-        return try? await PlaceholderVideoFetcher(durationSeconds: clipSeconds)
-            .playableURL(for: source)
+        return try? await fetcher.playableURL(for: source)
     }
 
     // MARK: - Real clips

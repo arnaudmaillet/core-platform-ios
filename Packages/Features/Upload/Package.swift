@@ -67,6 +67,9 @@ let package = Package(
         .testTarget(
             name: "UploadTests",
             dependencies: [
+                // Mock media (#2516): the offline fetchers the suites draw with.
+                .product(name: "MediaCoreFixtures", package: "MediaCore"),
+                .product(name: "MediaPlaybackFixtures", package: "MediaPlayback"),
                 "Upload",
                 "FeedInterface",
                 // Declared because the tests import it: the editor's tests read
@@ -78,8 +81,9 @@ let package = Package(
                 // rather than fixing a break.
                 "DesignSystem",
                 // Same reason: `NewPostTests` synthesises a real clip with
-                // `PlaceholderVideoFetcher` so the publish path opens genuine
-                // H.264 bytes rather than a URL that merely looks like one.
+                // `PlaceholderVideoFetcher` (MediaPlaybackFixtures, below) so the
+                // publish path opens genuine H.264 bytes rather than a URL that
+                // merely looks like one.
                 "MediaPlayback",
                 "CoreNetworking",
                 .product(name: "CoreNetworkingMocks", package: "CoreNetworking")
