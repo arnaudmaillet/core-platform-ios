@@ -560,6 +560,17 @@ jobs:
               for (rule, severity), count in by_rule.most_common():
                   summary.write(f"| {rule} | {severity} | {count} |\n")
           PY
+      # The summary can't be read through the API; the raw report can, with
+      # `gh run download <run> -n swiftlint-report` (#2543: tuning the rules
+      # to develop's count before the job blocks).
+      - name: Keep the report
+        if: steps.files.outputs.count != '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: swiftlint-report
+          path: lint.json
+          if-no-files-found: ignore
+          retention-days: 14
 
   # ── The required check ───────────────────────────────────────────────────
   # `develop`'s branch protection requires a status check literally named
