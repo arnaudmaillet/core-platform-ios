@@ -22,12 +22,16 @@ public protocol AnimatedAvatarResolving: Sendable {
 ///
 /// Resolution is asynchronous and cached: the first ask for a sheet starts
 /// it, and every view waiting on it is told.
+///
+/// **One per app, built by the composition root with its resolver**
+/// (#2506): the app's image pipeline holds it (`ImagePipeline.sheetAvatars`)
+/// and serves a sheet avatar's still from it, and every `AvatarView` drawn
+/// through that pipeline plays its sheet from the same instance. One shared
+/// cache keyed by URL pays: a face shown in a list, its bubble and its
+/// profile header decodes its 48-frame sheet once (3 MB at 128 px), not once
+/// per view.
 @MainActor
 public final class AnimatedAvatars {
-    /// Nonisolated: the image pipeline, which serves a sheet avatar's still,
-    /// takes it from any thread.
-    public nonisolated static let shared = AnimatedAvatars()
-
     /// The fragment that marks a sheet avatar's URL. Mirrored by the mock
     /// (`MockSocialDataset.sheetAvatarFragment`); the app checks the two agree.
     public nonisolated static let sheetFragment = "avatar-sheet"
@@ -60,8 +64,9 @@ public final class AnimatedAvatars {
         let rung: Rung
     }
 
-    /// Set once at launch by the app. Nil: no avatar animates.
-    public var resolver: (any AnimatedAvatarResolving)?
+    /// Where the sheets come from, given at construction. Nil: no avatar
+    /// animates.
+    public nonisolated let resolver: (any AnimatedAvatarResolving)?
 
     /// The decoded sheets and their stills, by avatar and rung — on
     /// CacheKit, budgeted by bytes like the map's previews
@@ -83,7 +88,12 @@ public final class AnimatedAvatars {
         let still: UIImage?
     }
 
-    nonisolated init(registry: UIAssetCaches? = .shared) {
+    /// - Parameters:
+    ///   - resolver: where the sheets come from; nil, no avatar animates.
+    ///   - registry: the asset caches the sheets' memory is announced to
+    ///     (nil in a test, which keeps its cache to itself).
+    public nonisolated init(resolver: (any AnimatedAvatarResolving)?, registry: UIAssetCaches? = .shared) {
+        self.resolver = resolver
         arts = UIAssetCaches.memoryCache(
             "UIAssets.avatarSheets", budget: .fixed(bytes: 64 * CacheBytes.mebibyte), priorityClass: .standard
         )

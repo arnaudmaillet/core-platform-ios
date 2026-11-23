@@ -48,7 +48,6 @@ struct SharedInstanceGuardTests {
         "Packages/Core/EmoteKit/Sources/EmoteKit/EmoteVisibility.swift": 1,
         "Packages/Core/EmoteKit/Sources/EmoteKit/Picker/EmoteKeyboardHeight.swift": 1,
         "Packages/Core/EmoteKit/Sources/EmoteKit/Picker/EmoteRecents.swift": 1,
-        "Packages/Core/MediaCore/Sources/MediaCore/AnimatedAvatar/AnimatedAvatars.swift": 1,
         "Packages/Core/MediaPlayback/Sources/MediaPlayback/Editing/EditingRenderContext.swift": 1,
         "Packages/Core/MediaPlayback/Sources/MediaPlayback/Editing/OverlayRasterCache.swift": 1,
         "Packages/Core/MediaPlayback/Sources/MediaPlayback/FeedSoundSession.swift": 1,

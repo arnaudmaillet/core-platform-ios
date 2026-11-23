@@ -140,8 +140,6 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
         #endif
         window.rootViewController = LaunchViewController()
         window.makeKeyAndVisible()
-        // Which avatars have a sprite sheet (#1358).
-        container.installAnimatedAvatars()
         // What a channel showcase's card does (#2216), made on its first tap:
         // a trait every card under the window reads when tapped (#2506).
         window.traitOverrides.channelEmbedActions = container.channelEmbedActions

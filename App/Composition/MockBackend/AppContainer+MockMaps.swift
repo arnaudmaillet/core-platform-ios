@@ -65,12 +65,11 @@ extension AppContainer {
         )
     }
 
-    /// Animated avatars (`installAnimatedAvatars`) from the mock's clips.
-    @MainActor
-    func installMockAnimatedAvatars() {
+    /// Animated avatars (`makeAnimatedAvatars`) from the mock's clips.
+    func mockAnimatedAvatarResolver() -> any AnimatedAvatarResolving {
         // The mock and MediaCore must mark a sheet avatar's URL alike.
         assert(MockSocialDataset.sheetAvatarFragment == AnimatedAvatars.sheetFragment)
-        AnimatedAvatars.shared.resolver = MockAnimatedAvatarResolver(catalog: Self.mapPreviewCatalog)
+        return MockAnimatedAvatarResolver(catalog: Self.mapPreviewCatalog)
     }
 
     static func mockPreviewSheets(

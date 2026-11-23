@@ -152,16 +152,22 @@ extension AppContainer {
     static let previewsUnavailable = false
     #endif
 
-    /// Animated avatars (#1358, #1444): the sheets of the authors the mock
-    /// declares animated (about half), baked from the map's clip previews in
-    /// the geometry the backend is asked to bake (core-platform-backend#945,
-    /// #948). An animated avatar has no photo. Off the mock, none until the
-    /// sheet rendition ships.
-    @MainActor
-    func installAnimatedAvatars() {
+    /// Animated avatars (#1358, #1444): the app's one sheet cache, built
+    /// with its resolver and held by the image pipeline (#2506). On the mock,
+    /// the sheets of the authors it declares animated (about half), baked
+    /// from the map's clip previews in the geometry the backend is asked to
+    /// bake (core-platform-backend#945, #948). An animated avatar has no
+    /// photo. Off the mock, none until the sheet rendition ships.
+    func makeAnimatedAvatars() -> AnimatedAvatars {
+        AnimatedAvatars(resolver: animatedAvatarResolver)
+    }
+
+    private var animatedAvatarResolver: (any AnimatedAvatarResolving)? {
         #if MOCK_BACKEND
-        guard environment == .mock, !Self.previewsUnavailable else { return }
-        installMockAnimatedAvatars()
+        guard environment == .mock, !Self.previewsUnavailable else { return nil }
+        return mockAnimatedAvatarResolver()
+        #else
+        return nil
         #endif
     }
 
