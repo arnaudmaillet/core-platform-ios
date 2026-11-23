@@ -34,3 +34,24 @@ file_length:
 identifier_name:
   min_length: 2
   excluded: [x, y, i]
+
+# ── Blocking (#2543) ─────────────────────────────────────────────────────────
+# CI fails a pull request on an ERROR on a line it adds or modifies; warnings
+# never block. Tuned on develop's count of 2026-11-23 (7,249 findings, 327
+# errors, all on existing lines). The rules left at error are the ones a new
+# line should never need: force_cast, force_try, a function over 100 lines,
+# cyclomatic complexity over 20, more than 8 parameters, a malformed name.
+# A justified exception is silenced in place:
+#   // swiftlint:disable:next force_cast — layerClass guarantees the type
+
+# `count == 0` is flagged on any `count` compared to zero, whatever its type
+# (70 findings on develop): advice, not a gate.
+empty_count:
+  severity: warning
+
+# Three- and four-member tuples are common here (67 errors on develop at the
+# default, which blocks from 3). The values are the most members allowed:
+# flag from 3 members, block from 5.
+large_tuple:
+  warning: 2
+  error: 4
