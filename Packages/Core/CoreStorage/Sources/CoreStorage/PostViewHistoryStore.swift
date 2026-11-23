@@ -42,6 +42,12 @@ public final class PostViewHistoryStore: @unchecked Sendable {
     }
     private var _onChange: (() -> Void)?
 
+    /// Sent when the pile `views` reads becomes another viewer's: the
+    /// scope's owner changed. ⚠️ On a cold start the active profile resolves
+    /// AFTER the profile screen first reads History, under the account's key
+    /// (empty); without this the tab waited for the next appearance (#2549).
+    public var viewerChanges: StoreChanges<Void> { scope.ownerChanges }
+
     public init(
         defaults: UserDefaults = .standard, scope: StorageScope,
         now: @escaping @Sendable () -> Date = Date.init
