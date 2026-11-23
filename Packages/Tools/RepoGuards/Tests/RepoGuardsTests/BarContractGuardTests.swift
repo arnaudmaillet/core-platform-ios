@@ -56,6 +56,9 @@ struct BarContractGuardTests {
     static let keptBarHosts: Set<String> = [
         "Packages/Features/Profile/Sources/Profile/Views/ProfileCardViewController.swift",
         "Packages/Features/Notifications/Sources/Notifications/Views/NotificationsViewController+Mute.swift",
+        // The profile page's bar (#2531), and the conversation info page's.
+        "Packages/Features/Profile/Sources/Profile/Views/ProfileNavigationBarComposer.swift",
+        "Packages/Features/Chat/Sources/Chat/Info/ConversationInfoPageViewController.swift",
     ]
 
     /// Where custom-view items are MADE: the contract's own factory.
