@@ -1,0 +1,1 @@
+Before/after captures for issue #2523.
