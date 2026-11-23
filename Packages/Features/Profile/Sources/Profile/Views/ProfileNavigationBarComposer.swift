@@ -41,9 +41,14 @@ protocol ProfileNavigationBarComposerHost: UIViewController {
 /// button's mode and the large title's. The @handle title is
 /// `ProfileBarTitle`'s, which this composer asks to draw.
 ///
-/// ⚠️ MADE ONCE, NEVER REBUILT (the bar contract, R3, #2331): Follow,
-/// Requested, the three spaces, the gear and the day's binding keep their
-/// instances, and every identical-group guard compares them by reference.
+/// ⚠️ MADE ONCE, NEVER REBUILT (the bar contract, R3, #2331): the three
+/// spaces and the day's binding keep their instances, and every
+/// identical-group guard compares them by reference.
+///
+/// ⚠️ ITS GROUPS ARE KEPT BY A `BarItemStore` (#2531): Follow, Requested and
+/// the gear are the trailing store's, the same instance while they stay in
+/// the group, and every group is handed to the bar through its store
+/// (`apply(leading:/trailing:)`), never by a `set…Items` of this file's own.
 ///
 /// ⚠️ SYNCHRONOUS WITH ITS SCREEN: `applyNavigationState` runs in the
 /// caller's turn — `viewDidLoad` before the first layout, `viewWillAppear`
@@ -57,8 +62,18 @@ final class ProfileNavigationBarComposer {
         self.host = host
     }
 
-    /// The own-profile settings gear; pushes Settings (`SettingsFeatureBuilding`).
-    private var settingsItem: UIBarButtonItem?
+    /// Whether the own profile wears the settings gear, which pushes
+    /// Settings (`SettingsFeatureBuilding`). The item is the trailing
+    /// store's (`settingsItem`).
+    private var hasSettingsItem = false
+    /// The trailing group's own items — Follow, Requested, the gear — kept by
+    /// identifier (#2331, #2531): the same instance while it stays in the
+    /// group, dropped when it leaves. The group goes to the bar through it.
+    private let trailingStore = BarItemStore()
+    /// The leading group — the shell's bell — handed to the bar through its
+    /// own store (#2531): a store drops what left the group it applies, so
+    /// each group has one.
+    private let leadingStore = BarItemStore()
     /// Keeps the corner item — Follow or Requested (#2248) — and the shell's
     /// balance two bubbles: iOS 26 groups adjacent bar items into one platter
     /// (the feed's note on `setEngagedChrome`). One space for both, since
@@ -95,6 +110,9 @@ final class ProfileNavigationBarComposer {
     /// The bar's Follow, in the corner where the bell stands once the
     /// profile is followed (#2248, the owner 2026-11-10) — replacing the
     /// identity pill whose "+" was the bar's only Follow (#1451).
+    /// Requested, on a private profile the viewer asked to follow: its own
+    /// item under its own identifier, so the bar morphs Follow into it
+    /// (#1679, R3). A tap withdraws the request, as the tray's does.
     ///
     /// **A stock titled item (`BarItems.title`) — deliberately not a
     /// custom-view item, and not a `UIButton` of any kind.** Two independent
@@ -110,13 +128,14 @@ final class ProfileNavigationBarComposer {
     ///    hosted view is just a subview it has to carry, which is what makes
     ///    custom bar items snap while native ones interpolate.
     ///
-    /// Kept, as the bell is: the trailing run is compared by reference (the
-    /// bar's identical-group guard), so a fresh item would be a rebuild.
-    private lazy var followBarItem = makeRelationshipBarItem(requested: false)
-    /// Requested, on a private profile the viewer asked to follow: its own
-    /// item under its own identifier, so the bar morphs Follow into it
-    /// (#1679, R3). A tap withdraws the request, as the tray's does.
-    private lazy var requestedBarItem = makeRelationshipBarItem(requested: true)
+    /// Kept by the trailing store while it stays in the group: the trailing
+    /// run is compared by reference (the bar's identical-group guard), so a
+    /// fresh item would be a rebuild.
+    private func relationshipBarItem(requested: Bool) -> UIBarButtonItem {
+        trailingStore.item(requested ? Self.requestedItemID : Self.followItemID) {
+            makeRelationshipBarItem(requested: requested)
+        }
+    }
 
     // MARK: - Follow in the corner (#2248)
 
@@ -145,8 +164,8 @@ final class ProfileNavigationBarComposer {
     private var cornerItem: UIBarButtonItem? {
         guard showsRelationshipItem else { return nil }
         switch host.followButtonState {
-        case .follow: return followBarItem
-        case .requested: return requestedBarItem
+        case .follow: return relationshipBarItem(requested: false)
+        case .requested: return relationshipBarItem(requested: true)
         default: return nil
         }
     }
@@ -161,7 +180,13 @@ final class ProfileNavigationBarComposer {
 
     /// Whether the bar wears Follow or Requested right now.
     private var isShowingRelationshipItem: Bool {
-        host.ownTrailingBarItems.contains { $0 === followBarItem || $0 === requestedBarItem }
+        host.ownTrailingBarItems.contains { Self.isRelationshipItem($0) }
+    }
+
+    /// Whether `item` is Follow or Requested: by identifier, the store's
+    /// key — only this composer makes an item under either.
+    private static func isRelationshipItem(_ item: UIBarButtonItem?) -> Bool {
+        item?.identifier == followItemID || item?.identifier == requestedItemID
     }
 
     /// Follow, or Requested: a titled native item (the bar contract, #1679)
@@ -186,14 +211,25 @@ final class ProfileNavigationBarComposer {
     /// The own profile's settings gear, from the screen's
     /// `configureNavigationBar`.
     func configureSettingsItem() {
-        // Settings gear — the viewer's account entry point. A plain trailing
-        // item (no leading item, so it never disturbs the edge-swipe pop),
-        // tinted `.label` to read as primary dark chrome over the banner.
-        let settings = BarItems.icon(id: "profile.settings", image: UIImage(systemName: "gearshape"), label: "Settings") {
-            [weak self] in self?.host.pushSettings()
+        hasSettingsItem = true
+    }
+
+    static let settingsItemID = "profile.settings"
+
+    /// The gear, kept by the trailing store while it stays in the group.
+    private var settingsItem: UIBarButtonItem? {
+        guard hasSettingsItem else { return nil }
+        return trailingStore.item(Self.settingsItemID) {
+            // Settings gear — the viewer's account entry point. A plain
+            // trailing item (no leading item, so it never disturbs the
+            // edge-swipe pop), tinted `.label` to read as primary dark chrome
+            // over the banner.
+            let settings = BarItems.icon(
+                id: Self.settingsItemID, image: UIImage(systemName: "gearshape"), label: "Settings"
+            ) { [weak self] in self?.host.pushSettings() }
+            settings.tintColor = .label
+            return settings
         }
-        settings.tintColor = .label
-        settingsItem = settings
     }
 
     /// Installs (or clears) the shell's trailing accessory. Safe before the
@@ -296,8 +332,9 @@ final class ProfileNavigationBarComposer {
             // at once, as below, and only if it changed.
             sectionBinding.leadingPrefix = leading
             sectionBinding.placeNow()
-        } else if !(host.navigationItem.leftBarButtonItems ?? []).elementsEqual(leading, by: ===) {
-            host.navigationItem.leftBarButtonItems = leading
+        } else {
+            // Through the store, which writes only if the group changed.
+            leadingStore.apply(leading: leading, to: host.navigationItem, animated: false)
         }
         // ⚠️ **WITHOUT THIS THE ITEM REPLACES THE BACK BUTTON**, and UIKit
         // disables the interactive pop along with it, silently. Harmless on the
@@ -434,7 +471,7 @@ final class ProfileNavigationBarComposer {
         // (#2248): Follow added mid-push would pop in unanimated at the end
         // (#756) — and so would Follow taken away.
         let cornerArrives = corner.map { item in !host.ownTrailingBarItems.contains { $0 === item } } ?? false
-        let relationshipLeaves = isShowingRelationshipItem && corner !== followBarItem && corner !== requestedBarItem
+        let relationshipLeaves = isShowingRelationshipItem && !Self.isRelationshipItem(corner)
         // So does the own profile's corner changing hands (#2307) — Done
         // leaving as the screen does (`viewWillDisappear`), Select or the gear
         // coming back: a write mid-push lands unanimated at its end (#756).
@@ -493,10 +530,12 @@ final class ProfileNavigationBarComposer {
         #endif
         if host.dayLeads {
             // The day is leading here (#1642): the trailing group is all ours.
-            host.setOwnTrailingBarItems(items, animated: animated)
+            trailingStore.apply(trailing: items, to: host, animated: animated)
         } else {
+            // The contract keeps our items around the day it places on its
+            // own; the group, the day after them, goes through the store.
             sectionBinding.trailingItems = items
-            sectionBinding.placeNow(animated: animated)
+            trailingStore.apply(trailing: group, to: host, animated: animated)
         }
     }
 
@@ -533,7 +572,7 @@ final class ProfileNavigationBarComposer {
     }
     /// The bar's Follow or Requested, if it shows one (#2248).
     var debugBarRelationshipItem: UIBarButtonItem? {
-        host.ownTrailingBarItems.first { $0 === followBarItem || $0 === requestedBarItem }
+        host.ownTrailingBarItems.first { Self.isRelationshipItem($0) }
     }
     /// Every write of the bar's trailing group, in order: whether it was
     /// animated, so UIKit could morph it (#1903). A test reads how Follow

@@ -193,20 +193,26 @@ class ConversationInfoPageViewController: HeroPageViewController<ConversationInf
     static let bellID = "conversation-info.bell"
     static let moreID = "conversation-info.more"
 
+    /// The trailing group's items — the "⋯" and the bell — kept by
+    /// identifier (#2331, #2531): the same instance while it stays in the
+    /// group, its state dressed in place; the group goes to the bar through
+    /// it, only when its list changed.
+    private let trailingStore = BarItemStore()
+
     /// The "⋯": resolved when it opens, so it says the state then.
-    private(set) lazy var moreItem: UIBarButtonItem = {
+    private func makeMoreItem() -> UIBarButtonItem {
         let menu = UIMenu(children: [UIDeferredMenuElement.uncached { [weak self] completion in
             completion(self?.moreMenuElements() ?? [])
         }])
         let item = BarItems.icon(id: Self.moreID, image: UIImage(systemName: "ellipsis"), label: "More", menu: menu)
         item.tintColor = .label
         return item
-    }()
+    }
 
     /// The bell: a tap toggles the mute it shows, a long press offers how
-    /// long — the thread's bell, the same menu (`MuteMenu`). Made once; its
-    /// glyph and menu follow the mute (`applyBellLook`).
-    private(set) lazy var bellItem: UIBarButtonItem = {
+    /// long — the thread's bell, the same menu (`MuteMenu`). Made once while
+    /// it stays; its glyph and menu follow the mute (`applyBellLook`).
+    private func makeBellItem() -> UIBarButtonItem {
         let item = UIBarButtonItem(
             title: nil, image: UIImage(systemName: MuteMenu.symbol(muted: false)),
             primaryAction: UIAction { [weak self] _ in
@@ -219,7 +225,7 @@ class ConversationInfoPageViewController: HeroPageViewController<ConversationInf
         item.tintColor = .label
         item.accessibilityLabel = "Notifications"
         return item
-    }()
+    }
 
     /// The trailing group for `muted` (nil: no bell): the "⋯" in the
     /// corner while it has something to offer, the bell inboard. A new set
@@ -229,10 +235,14 @@ class ConversationInfoPageViewController: HeroPageViewController<ConversationInf
     func applyBar(muted: Bool?) {
         let had = bellMuted
         bellMuted = muted
-        if let muted { applyBellLook(muted: muted, animated: had != nil && had != muted) }
+        let bell = muted.map { muted in
+            trailingStore.item(Self.bellID, make: makeBellItem) { [self] bell in
+                applyBellLook(bell, muted: muted, animated: had != nil && had != muted)
+            }
+        }
         var items: [UIBarButtonItem] = []
-        if !moreMenuElements().isEmpty { items.append(moreItem) }
-        if muted != nil { items.append(bellItem) }
+        if !moreMenuElements().isEmpty { items.append(trailingStore.item(Self.moreID, make: makeMoreItem)) }
+        if let bell { items.append(bell) }
         guard !ownTrailingBarItems.elementsEqual(items, by: ===) else { return }
         if transitionCoordinator != nil, let navigationController {
             navigationController.whenAtRest { [weak self] in
@@ -241,18 +251,18 @@ class ConversationInfoPageViewController: HeroPageViewController<ConversationInf
             }
             return
         }
-        setOwnTrailingBarItems(items, animated: view.window != nil)
+        trailingStore.apply(trailing: items, to: self, animated: view.window != nil)
     }
 
-    private func applyBellLook(muted: Bool, animated: Bool) {
+    private func applyBellLook(_ bell: UIBarButtonItem, muted: Bool, animated: Bool) {
         let image = UIImage(systemName: MuteMenu.symbol(muted: muted))
         if animated, let image {
-            bellItem.setSymbolImage(image, contentTransition: .replace)
+            bell.setSymbolImage(image, contentTransition: .replace)
         } else {
-            bellItem.image = image
+            bell.image = image
         }
-        bellItem.accessibilityValue = MuteMenu.accessibilityValue(muted: muted)
-        bellItem.menu = MuteMenu.make(muted: muted) { [weak self] duration in
+        bell.accessibilityValue = MuteMenu.accessibilityValue(muted: muted)
+        bell.menu = MuteMenu.make(muted: muted) { [weak self] duration in
             self?.setMute(true, until: duration.end())
         } onUnmute: { [weak self] in
             self?.setMute(false, until: nil)
@@ -328,7 +338,9 @@ class ConversationInfoPageViewController: HeroPageViewController<ConversationInf
     /// The bar's trailing items. Tests.
     var debugTrailingItemIDs: [String] { ownTrailingBarItems.compactMap(\.identifier) }
     /// The bell's menu. Tests.
-    var debugBellMenu: UIMenu? { bellMuted == nil ? nil : bellItem.menu }
+    var debugBellMenu: UIMenu? {
+        bellMuted == nil ? nil : ownTrailingBarItems.first { $0.identifier == Self.bellID }?.menu
+    }
     #endif
 }
 
