@@ -2716,97 +2716,13 @@ public final class CommentsInputBar: UIView {
         )
     }
 
-    /// The refund's receipt: the confirmation float mirrored — a cool "−N"
-    /// sinking off the button. White, not gold: an undo is not a payout.
-    public func playBoostRefund(amount: Int) {
-        guard boostButton.bounds.width > 0 else { return }
-        let label = UILabel()
-        label.text = "−\(amount)"
-        label.font = .scaledMonospacedDigitSystemFont(
-            ofSize: 17, weight: .heavy, relativeTo: .headline, maximumPointSize: 24
-        )
-        label.textColor = UIColor.white.withAlphaComponent(0.9)
-        label.layer.shadowColor = UIColor.black.cgColor
-        label.layer.shadowOpacity = 0.5
-        label.layer.shadowRadius = 3
-        label.layer.shadowOffset = .zero
-        label.sizeToFit()
-        label.center = CGPoint(x: boostButton.center.x, y: boostButton.frame.minY - Spacing.sm)
-        label.alpha = 0
-        label.isUserInteractionEnabled = false
-        addSubview(label)
-        UIView.animateKeyframes(withDuration: 0.9, delay: 0, options: [.calculationModeCubic]) {
-            UIView.addKeyframe(withRelativeStartTime: 0, relativeDuration: 0.2) {
-                label.alpha = 1
-                label.center.y += 14
-            }
-            UIView.addKeyframe(withRelativeStartTime: 0.2, relativeDuration: 0.55) {
-                label.center.y += 20
-            }
-            UIView.addKeyframe(withRelativeStartTime: 0.55, relativeDuration: 0.45) {
-                label.alpha = 0
-            }
-        } completion: { _ in
-            label.removeFromSuperview()
-        }
-    }
-
-    /// The spend's visible receipt: a gold "+N" born on the boost button that
-    /// rises and dissolves, plus a press-bounce on the button — the rail
-    /// anchor's theatre (`SnapChromeView.playBoostConfirmation`), replayed on
-    /// this surface so one spend looks the same wherever it was made. The bar
-    /// doesn't clip, so the label may rise past its top edge by design.
-    public func playBoostConfirmation(amount: Int) {
-        guard boostButton.bounds.width > 0 else { return }
-        let label = UILabel()
-        label.text = "+\(amount)"
-        label.font = .scaledMonospacedDigitSystemFont(
-            ofSize: 17, weight: .heavy, relativeTo: .headline, maximumPointSize: 24
-        )
-        label.textColor = LikesSymbol.tint
-        label.layer.shadowColor = UIColor.black.cgColor
-        label.layer.shadowOpacity = 0.5
-        label.layer.shadowRadius = 3
-        label.layer.shadowOffset = .zero
-        label.sizeToFit()
-        label.center = CGPoint(x: boostButton.center.x, y: boostButton.frame.minY - Spacing.sm)
-        label.alpha = 0
-        label.isUserInteractionEnabled = false
-        addSubview(label)
-        UIView.animateKeyframes(withDuration: 0.9, delay: 0, options: [.calculationModeCubic]) {
-            UIView.addKeyframe(withRelativeStartTime: 0, relativeDuration: 0.2) {
-                label.alpha = 1
-                label.center.y -= 18
-            }
-            UIView.addKeyframe(withRelativeStartTime: 0.2, relativeDuration: 0.55) {
-                label.center.y -= 26
-            }
-            UIView.addKeyframe(withRelativeStartTime: 0.55, relativeDuration: 0.45) {
-                label.alpha = 0
-            }
-        } completion: { _ in
-            label.removeFromSuperview()
-        }
-        boostButton.transform = CGAffineTransform(scaleX: 0.82, y: 0.82)
-        UIView.animate(
-            withDuration: 0.5, delay: 0,
-            usingSpringWithDamping: 0.45, initialSpringVelocity: 4,
-            options: [.allowUserInteraction]
-        ) {
-            self.boostButton.transform = .identity
-        }
-    }
-
-    /// The refusal: a head-shake on the boost button — the wallet couldn't
-    /// cover the spend, nothing changed, and no label flies (a "-0" would
-    /// read as a payout). The host pairs it with the error haptic.
-    public func playBoostDenied() {
-        let shake = CAKeyframeAnimation(keyPath: "transform.translation.x")
-        shake.values = [0, -7, 6, -4, 3, -1, 0]
-        shake.duration = 0.4
-        shake.timingFunction = CAMediaTimingFunction(name: .easeOut)
-        boostButton.layer.add(shake, forKey: "boost.denied")
-    }
+    /// The boost bubble's receipts, DesignSystem's `StakeReceipt` (#2529):
+    /// the "+N" rising, the "−N" sinking, the refusal's shake. The bar does
+    /// not clip, so the number may pass its top edge by design.
+    private lazy var boostReceipts = StakeReceipt(anchor: boostButton, host: self, style: .regular, ground: .media)
+    public func playBoostConfirmation(amount: Int) { boostReceipts.spend(amount) }
+    public func playBoostRefund(amount: Int) { boostReceipts.refund(amount) }
+    public func playBoostDenied() { boostReceipts.refuse() }
 
     /// The own bubble's two faces (#2308, every host):
     ///   has text (or a send in flight) → ↑ send

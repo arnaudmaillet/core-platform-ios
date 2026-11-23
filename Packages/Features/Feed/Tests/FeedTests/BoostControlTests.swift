@@ -275,7 +275,7 @@ struct BoostControlTests {
         let chrome = SnapChromeView()
         chrome.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
         chrome.layoutIfNeeded()
-        chrome.boostReceipts.playBoostConfirmation(amount: 1)
+        chrome.boostReceipts.spend(1)
         #expect(chrome.debugBoostButtonTransform == .identity)
     }
 

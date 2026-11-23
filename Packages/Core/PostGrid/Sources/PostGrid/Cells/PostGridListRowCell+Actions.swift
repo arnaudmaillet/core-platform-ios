@@ -96,30 +96,26 @@ extension PostGridListRowCell {
     /// The stake landed: "+N" rises off the chip in the points' red and the
     /// heart pops — the rail's confirmation, on a card.
     public func playStakeConfirmation(amount: Int) {
-        floatReceipt("+\(amount)", color: LikesSymbol.tint, rising: true)
+        stakeReceipt.spend(amount)
         StakeReceipt.pop(likesAction.imageView ?? likesAction)
     }
 
     /// An undo's receipt: "−N" sinking, in grey — an undo is not a payout.
     public func playStakeRefund(amount: Int) {
-        floatReceipt("−\(amount)", color: .secondaryLabel, rising: false)
-    }
-
-    /// A number floating off the like chip, then dissolving. Drawn in the
-    /// cell's content view rather than in the chip, which clips to its
-    /// capsule. Pure theatre over state the wallet already changed, so it can
-    /// be dropped (hidden chip, mid-reuse) without anything going wrong.
-    private func floatReceipt(_ text: String, color: UIColor, rising: Bool) {
-        guard !likesAction.isHidden, likesAction.window != nil else { return }
-        StakeReceipt.float(text, color: color, rising: rising, from: likesAction, in: contentView)
+        stakeReceipt.refund(amount)
     }
 
     /// The wallet refused (balance, or the post's cap): the chip shakes its
-    /// head. Additive, so it composes with the press still springing back.
+    /// head.
     public func playStakeDenied() {
-        StakeReceipt.shake(likesAction)
+        stakeReceipt.refuse()
     }
 
+    /// The chip's receipts, DesignSystem's (#2529), floating in the cell's
+    /// content view rather than in the chip, which clips to its capsule.
+    private var stakeReceipt: StakeReceipt {
+        StakeReceipt(anchor: likesAction, host: contentView, style: .compact, ground: .page)
+    }
 
     public var postLikeCount: Int64? { configuredReactionCount }
 
