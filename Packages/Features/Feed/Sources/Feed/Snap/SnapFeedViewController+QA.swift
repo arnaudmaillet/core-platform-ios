@@ -207,7 +207,7 @@ extension SnapFeedViewController {
         for cell in collectionView.visibleCells {
             guard let path = collectionView.indexPath(for: cell),
                   orderedIDs.indices.contains(path.item),
-                  let snap = cell as? SnapFeedCell, snap.isShowingComments else { continue }
+                  let snap = cell as? SnapFeedCell, snap.commentsEngagement.isShowingComments else { continue }
             showing.insert(orderedIDs[path.item])
         }
         return showing

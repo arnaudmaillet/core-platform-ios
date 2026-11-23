@@ -31,7 +31,8 @@ protocol SnapCarouselPlaybackHost: AnyObject {
 /// ⚠️ ORDER IS CORRECTNESS (#857): starting, warming and releasing move
 /// players and pool loans between the page, a hero flight's card and the
 /// grid tile. Each sequence moved here whole, in its order; a single
-/// attachment's start and the flight's handoff stay with the page.
+/// attachment's start is `SnapPageClipStart`'s and the flight's handoff
+/// `SnapFlightHandoff`'s.
 @MainActor
 final class SnapCarouselPlayback {
     private unowned let host: any SnapCarouselPlaybackHost

@@ -8,7 +8,8 @@ import UIKit
 /// What a page's clip start asks of its page (#2521): its media card, chrome,
 /// pool and playback, its carousel's warm-ups, its state (active, available,
 /// a clip, the clip's URL and scope, the flight's deferral and hold), the
-/// surface it plays on, and the flight's warm attach and resume point.
+/// surface it plays on, the flight's resume point, and the flight's handoff
+/// (its deferral and warm attach).
 @MainActor
 protocol SnapPageClipStartHost: AnyObject {
     var mediaCard: SnapMediaCardView { get }
@@ -25,10 +26,9 @@ protocol SnapPageClipStartHost: AnyObject {
     var isChromeHeldForFlight: Bool { get }
     var audibleSurface: VideoRenderView? { get }
     var isClipAdvancing: Bool { get }
-    var hasDeferredPlayback: Bool { get set }
     var flightMediaStartTime: TimeInterval? { get set }
+    var flightHandoff: SnapFlightHandoff { get }
     func setPauseGlyphVisible(_ visible: Bool)
-    func warmAttachForFlight(url: URL)
 }
 
 /// A page's own clip, out of `SnapFeedCell` (#2521): the viewport door (a clip
@@ -39,7 +39,7 @@ protocol SnapPageClipStartHost: AnyObject {
 /// ⚠️ ORDER IS CORRECTNESS (#857): starting, warming and stopping move
 /// players and pool loans between the page, a hero flight's card and the
 /// grid tile. Each sequence moved here whole, in its order; the flight's
-/// warm attach is still the cell's, and this calls it where it did.
+/// warm attach is `SnapFlightHandoff`'s, and this calls it where it did.
 @MainActor
 final class SnapPageClipStart {
     private unowned let host: any SnapPageClipStartHost
@@ -64,15 +64,15 @@ final class SnapPageClipStart {
     private var audibleSurface: VideoRenderView? { host.audibleSurface }
     private var isClipAdvancing: Bool { host.isClipAdvancing }
     private var hasDeferredPlayback: Bool {
-        get { host.hasDeferredPlayback }
-        set { host.hasDeferredPlayback = newValue }
+        get { host.flightHandoff.hasDeferredPlayback }
+        set { host.flightHandoff.hasDeferredPlayback = newValue }
     }
     private var flightMediaStartTime: TimeInterval? {
         get { host.flightMediaStartTime }
         set { host.flightMediaStartTime = newValue }
     }
     private func setPauseGlyphVisible(_ visible: Bool) { host.setPauseGlyphVisible(visible) }
-    private func warmAttachForFlight(url: URL) { host.warmAttachForFlight(url: url) }
+    private func warmAttachForFlight(url: URL) { host.flightHandoff.warmAttachForFlight(url: url) }
 
     /// "Don't Cover People" (#484): segments this page's clip while it owns
     /// the screen, and masks the band where people are.

@@ -205,37 +205,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// whole engaged layer (which rides inside this cell) follows the finger
     /// in real time, settling on release.
     var onRequestCommentsPageDrive: ((CommentsInputBar.PageSwipePhase, CGFloat, CGFloat) -> Void)?
-    /// Whether the cell is in the comments-engaged layout (media docked in
-    /// the strip's slot, chrome faded out, caption re-homed beside the
-    /// media). Pure layout state: playback is deliberately untouched.
-    private(set) var isCommentsEngaged = false
     /// The frozen screen thresholds (`applyChromeInsets`) — also the strip's
     /// vertical datum, so the slot math shares the chrome's inset authority.
     private(set) var frozenInsets: UIEdgeInsets = .zero
-    /// The engaged state's comments region: a cell-owned container spanning
-    /// the strip's bottom to the cell's bottom edge. The comments UI itself
-    /// is NOT cell state — the feed VC installs a child controller's view
-    /// via `installComments` on engage and reclaims it on disengage, so
-    /// thread data, scroll position, and a half-typed reply never live in a
-    /// recycled cell. Z-order: above the media (which vacates the region),
-    /// below the chrome (the action rail floats over it).
-    /// The window a masked-hero opening is seen through — see
-    /// `beginMaskedRevealForFlight`. Non-nil only for the length of a flight.
-    private(set) var flightMask: UIView?
-    private var alphaForMaskedReveal: CGFloat = 1
-    private var groundForMaskedReveal: UIColor?
-    /// ⚠️ ITS OWN FLAG, not a re-read of `groundForMaskedReveal`.
-    ///
-    /// The opening and the dismissal borrow the same two preparations — the
-    /// media hidden, the ground cleared — and the first version guarded the
-    /// dismissal on the stored ground being nil. A masked OPENING leaves that
-    /// ground stored, so the dismissal that followed it declined to run and
-    /// the thread stopped receding on exactly the pages that opened with one.
-    private var isEngagedDismissing = false
-    /// Whether the grab moving the page is a live grab (#1915): the page's
-    /// whole interface rides it, untouched until the release commits — not
-    /// the engaged thread, which recedes with the finger.
-    private(set) var isLiveGrab = false
     /// Everything the page draws, in one frame-managed view — see
     /// `buildLayout`. A transition moves this and nothing inside it.
     let pageStage = UIView()
@@ -252,31 +224,13 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     let columnStage = SnapActionColumnLayer()
     /// The page's two stages, which every transition writes as one.
     var stages: [UIView] { [pageStage, columnStage] }
-    /// The grab's current mapping of page onto card — the scale, and the rect
-    /// it is mapping onto — held so a layout pass cannot be the last word on
-    /// where the page is.
-    /// What each travelling layer's opacity was when the grab began — an
-    /// abandoned one has to put back exactly that, and a starting one has to
-    /// begin from it.
-    private var restingAlphas: [CGFloat] = []
-    private let commentsContainer = SnapCommentsContainerView()
-    private var commentsContainerConstraints: [NSLayoutConstraint] = []
-    /// The engaged header's frost: a dissolving blur band across the top
-    /// inset, so the nav chrome stays legible where comment rows glide
-    /// under it. A SIBLING of the comments container, not a child, so it
-    /// never rides the stream's transform.
-    private let headerFrost = ProgressiveFrostView(
-        maskColors: SnapCommentsLayout.headerFrostMaskColors,
-        maskLocations: SnapCommentsLayout.headerFrostMaskLocations
-    )
-    private var headerFrostConstraints: [NSLayoutConstraint] = []
     /// The glass card's interactive exit pan — the composer bar's
     /// finger-connected swipe, mirrored onto the ENTIRE top floating
     /// card (media tile, caption column, music line, metrics row: one
     /// object, one gesture). Attached to the CELL (not the content view)
     /// so the cell's own `gestureRecognizerShouldBegin` override is its
     /// begin-time gate, exactly the bar's mechanism.
-    private let cardSwipeRecognizer = UIPanGestureRecognizer()
+    let cardSwipeRecognizer = UIPanGestureRecognizer()
 
     /// The viewer paged this post's collection. The screen forwards it to
     /// whatever opened the feed, so the card behind can follow.
@@ -525,19 +479,19 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // black until the background-media layout: that one colour was the
         // curtain that hid the post for the whole engagement.) No internal
         // header: the mutation itself says "comments".
-        commentsContainer.backgroundColor = .clear
+        commentsEngagement.commentsContainer.backgroundColor = .clear
         // SQUARE and UNCLIPPED. A screen-matched corner was tried twice:
         // `containerConcentricRadius` resolves to ~0 for a view flush with
         // its container, and reading `UIScreen._displayCornerRadius` meant
         // private API for something that was visually inert anyway — the
         // container is transparent, so a radius only clips content, and no
         // content reaches those corners.
-        headerFrost.isHidden = true
-        headerFrost.translatesAutoresizingMaskIntoConstraints = false
-        commentsContainer.isHidden = true
-        commentsContainer.translatesAutoresizingMaskIntoConstraints = false
-        pageStage.addSubview(commentsContainer)
-        pageStage.addSubview(headerFrost)
+        commentsEngagement.headerFrost.isHidden = true
+        commentsEngagement.headerFrost.translatesAutoresizingMaskIntoConstraints = false
+        commentsEngagement.commentsContainer.isHidden = true
+        commentsEngagement.commentsContainer.translatesAutoresizingMaskIntoConstraints = false
+        pageStage.addSubview(commentsEngagement.commentsContainer)
+        pageStage.addSubview(commentsEngagement.headerFrost)
 
         // ⚠️ ON THE STAGE (#1915): a grab moves the live page, its interface
         // included — the streams, the ticker, the wheel, the caption. Pinned to
@@ -559,243 +513,29 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
 
     // MARK: - Comments engagement
 
-    /// Installs the comments UI (a child controller's view, owned by the
-    /// feed VC) into the region below the strip, settled and ready BEFORE
-    /// the engagement animates: the container starts invisible with a
-    /// small downward offset so the one spring block lifts it in with the
-    /// rest of the mutation.
-    func installComments(_ view: UIView) {
-        commentsContainer.isHidden = false
-        // Pure crossfade, no translation: the bottom band's geometry must
-        // hold dead-still while the old footer and the composer swap.
-        commentsContainer.alpha = 0
-        NSLayoutConstraint.deactivate(commentsContainerConstraints)
-        // FULL height: the stream spans the whole cell and slides under the
-        // strip (the hosted scroll view rests its content below the strip
-        // via inset — `setEngagedInsets` on the child).
-        commentsContainerConstraints = [
-            commentsContainer.topAnchor.constraint(equalTo: pageStage.topAnchor),
-            commentsContainer.leadingAnchor.constraint(equalTo: pageStage.leadingAnchor),
-            commentsContainer.trailingAnchor.constraint(equalTo: pageStage.trailingAnchor),
-            commentsContainer.bottomAnchor.constraint(equalTo: pageStage.bottomAnchor),
-        ]
-        NSLayoutConstraint.activate(commentsContainerConstraints)
-        // The header band spans EXACTLY its container — screen top to where
-        // the stream's content begins — and ramps across all of it: opaque
-        // at the screen's edge, fully clear at the container's inner edge.
-        // Nothing spills past the chrome the band exists to serve.
-        headerFrost.isHidden = false
-        // The veil, on the pages where the blur alone cannot be seen.
-        headerFrost.setVeilOpacity(SnapCommentsLayout.frostVeilOpacity(hasMedia: mediaURL != nil))
-        NSLayoutConstraint.deactivate(headerFrostConstraints)
-        headerFrostConstraints = [
-            headerFrost.topAnchor.constraint(equalTo: pageStage.topAnchor),
-            headerFrost.leadingAnchor.constraint(equalTo: pageStage.leadingAnchor),
-            headerFrost.trailingAnchor.constraint(equalTo: pageStage.trailingAnchor),
-            headerFrost.heightAnchor.constraint(
-                equalToConstant: SnapCommentsLayout.commentsTopInset(topInset: frozenInsets.top)
-            ),
-        ]
-        NSLayoutConstraint.activate(headerFrostConstraints)
-        // NOTE: no caption card is installed here. The caption is the
-        // hosted stream's FIRST ROW now, so it scrolls with the comments
-        // instead of floating above them — which is what removed the
-        // measured caption height, the reserved strip rectangle, and the
-        // job of keeping a fixed card in sync with a moving list.
-        // NOTE: the media card is NOT z-lifted here. It stays at the back
-        // of the stack for the whole engagement — the stream reads over it
-        // through the backdrop, which is the entire point of this layout.
-        // (It used to be raised above the frost so the docked tile could
-        // float over the comments; that lift is what made its invisible
-        // full-bleed frame eat stream touches, and it is gone with the
-        // tile.)
-        view.translatesAutoresizingMaskIntoConstraints = false
-        commentsContainer.addSubview(view)
-        view.pin(to: commentsContainer)
-        contentView.layoutIfNeeded()
+    /// The comments' engagement: the install, the frost, the progress, the
+    /// placeholder and the card swipe (#2521). The coordinator, the zoom
+    /// destination and the tests ask the page.
+    private(set) lazy var commentsEngagement = SnapCommentsEngagement(host: self)
+    var isCommentsEngaged: Bool { commentsEngagement.isCommentsEngaged }
+    func installComments(_ view: UIView) { commentsEngagement.installComments(view) }
+    func engagedCommentsTopInset(safeAreaTop: CGFloat) -> CGFloat {
+        commentsEngagement.engagedCommentsTopInset(safeAreaTop: safeAreaTop)
     }
+    func setCommentsEngagementProgress(_ progress: CGFloat) { commentsEngagement.setCommentsEngagementProgress(progress) }
+    func setCommentsEngaged(_ engaged: Bool) { commentsEngagement.setCommentsEngaged(engaged) }
+    func cardSwipeRegionContains(_ point: CGPoint) -> Bool { commentsEngagement.cardSwipeRegionContains(point) }
 
-    /// **THE LIVE GRAB (#1915)**: the page follows the card as the engaged
-    /// dismissal's does — one stage transform, under a window shaped like the
-    /// card — with its whole interface on it, alive. Only the media leaves the
-    /// page: the card carries it (the donated surface, still playing).
-    ///
-    /// - Nothing fades while the finger is down. On the release, a commit
-    ///   fades the interface inside the release's spring, and a cancel
-    ///   leaves it as it was (`setEngagedDismissal`).
-    /// - The page takes no touch while held: the grab owns the finger.
-    /// - The interface does not reflow under its transform: its insets are
-    ///   the frozen ones (`applyChromeInsets`), never the stage's safe area.
-    func beginLiveGrab() {
-        guard !isEngagedDismissing else { return }
-        isEngagedDismissing = true
-        isLiveGrab = true
-        // Alpha, never `isHidden`: a hidden surface stops feeding the card's
-        // sibling surface (`beginEngagedDismissal`).
-        alphaForMaskedReveal = mediaCard.alpha
-        mediaCard.alpha = 0
-        groundForMaskedReveal = contentView.backgroundColor
-        contentView.backgroundColor = .clear
-        restingAlphas = dismissalTravellers.map(\.alpha)
-        stages.forEach { $0.isUserInteractionEnabled = false }
-    }
+    // MARK: - The live grab and the engaged dismissal
 
-    /// ⚠️ A PURE FUNCTION OF THE FINGER, never an animation.
-    ///
-    /// The grab can be pushed forward, dragged back and abandoned; anything
-    /// that animated towards a target here would be chasing a value that has
-    /// already moved, and a cancelled grab would leave the page mid-flight.
-    /// The dim and the toolbar recede on exactly these terms. (The RELEASE is
-    /// the exception, and it is not one: the same call is made from inside the
-    /// release's own animation block, so UIKit interpolates it on the card's
-    /// spring rather than on a second one.)
-    func setEngagedDismissal(_ state: ZoomDismissState) {
-        guard isEngagedDismissing else { return }
-        let settling = state.isSettling
-        let t = min(max(state.progress, 0), 1)
-        // The thread and its wash recede together, on one value — each from
-        // where it already was. The photograph is the card's and is not this
-        // method's business at all — see `beginEngagedDismissal`.
-        //
-        // A live grab's interface does not recede under the finger (#1915):
-        // it is the page, held. It fades only on the release's way home, in
-        // its spring — `t` is 1 there, and 0 on a cancel's.
-        let fade = isLiveGrab ? (settling ? t : 0) : t
-        for (view, resting) in zip(dismissalTravellers, restingAlphas) {
-            view.alpha = resting * (1 - fade)
-        }
-        guard state.card.width > 0, state.card.height > 0 else { return }
-        // ⚠️ THE PAGE OVERHANGS THE CARD BY A HAIR, and this is the answer to a
-        // light leak rather than a cosmetic tweak.
-        //
-        // Nothing here can be exact. The page FOLLOWS the card — told its rect
-        // on a channel, applied a hop later, from another view hierarchy — and
-        // a follower can be made arbitrarily close and never identical. (Being
-        // a passenger inside the card would be exact, and is not available: the
-        // thread is a hosted child controller's view, and UIKit throws
-        // `UIViewControllerHierarchyInconsistency` the moment such a view is
-        // moved out of its parent's hierarchy. Tried; it crashes on the first
-        // grab.)
-        //
-        // What a fraction of a point exposed was a BRIGHT edge: inside the
-        // window the card's photograph carries the page's wash, outside it the
-        // card is undimmed, so any gap read as a sliver of light on a dark
-        // page. So the page is drawn a little larger than the card it covers.
-        // The error is still there and now falls the other way — a hair of wash
-        // over the dimmed feed.
-        //
-        // ⚠️ HALF A POINT, AND ONLY WHILE THE FINGER IS DOWN.
-        //
-        // Two points was visible on both counts: the wash overhung the
-        // photograph on all four sides, and a cancelled grab animated to a page
-        // two points too large and then snapped to its real size when the
-        // gesture was torn down. A bleed exists to swallow SUB-PIXEL error —
-        // fractional rects, one rounding — and half a point is already three
-        // device pixels. Anything a bleed would have to be to hide a real lag
-        // is a bleed you can see.
-        //
-        // The release carries none: `settling` means the card is going to a
-        // known rect and the page must arrive exactly there, so a cancelled
-        // grab lands on its own size and the teardown has nothing to correct.
-        let card = settling
-            ? state.card
-            : state.card.insetBy(dx: -Self.dismissalBleed, dy: -Self.dismissalBleed)
-        // ⚠️ FILL, NOT FIT — and it moves the THREAD now, which is all that is
-        // left to move.
-        //
-        // The arithmetic is kept because it is why the photograph is no longer
-        // here. Three mappings were tried while the page still drew its own:
-        // by WIDTH it ended a different shape from the card (`x=0.776 y=0.495`
-        // at the release — 57% too tall); by BOTH AXES the frames agreed and
-        // the image was squashed; FILL kept the ratio and still re-cropped,
-        // because a crop of a crop is not the crop. Only removing the second
-        // copy settles it.
-        //
-        // Fill stays for the thread: it keeps the text's proportions while the
-        // window takes the overflow.
-        let fill = max(
-            card.width / max(contentView.bounds.width, 1),
-            card.height / max(contentView.bounds.height, 1)
-        )
-        // ⚠️ ONE VIEW, ONE TRANSFORM. Everything the page draws is inside
-        // `pageStage`, so the mapping is applied once, about one centre, in one
-        // assignment — and a layout pass cannot erase it, because nothing but
-        // this cell writes that view's geometry.
-        //
-        // It was a transform per layer before, which is correct arithmetic (a
-        // view transform is applied about its own centre, so each needed its
-        // own translation) and a permanent source of one-frame disagreements: a
-        // layout pass, a spring in flight and a gesture event are three
-        // different moments, and four layers told the same thing at three
-        // moments is four chances to be told late.
-        // ⚠️ TWO CHANNELS, BECAUSE THE CARD HAS TWO — and folding them into one
-        // transform is what put the page BEHIND the card.
-        //
-        // The flight's grab drives the card's POSITION directly on every pan
-        // event and its SIZE on a spring (the detach dip). A single affine
-        // carrying both meant the page's position was animating toward a centre
-        // the card had already left: told inside the dip's block, it chased a
-        // moving target and lagged it by the whole of the dip. On screen that
-        // is the comments and the wash sitting a few dozen points behind the
-        // photograph — the same numbers, arriving late.
-        //
-        // So the page is decomposed exactly as the card is: the centre is
-        // assigned, live, and only the scale is left to whatever animation is
-        // in flight.
-        // ⚠️ AND THE CENTRE IS ASSIGNED OUTSIDE ANY ANIMATION while the finger
-        // is down. Inside the dip's block it animated like everything else, so
-        // it was interpolating toward a position the card had already left —
-        // measured trailing it by 7pt across and 12pt down at a tenth of the
-        // gesture, which is the comments and the wash sitting visibly behind
-        // the photograph. The release is the one time it should spring, and
-        // that is what `settling` says.
-        let centre = CGPoint(x: card.midX, y: card.midY)
-        // ⚠️ A HELD STATE DROPS WHAT A RELEASE LEFT IN FLIGHT (#2362). A grab
-        // during a cancel's spring catches the card where it is and says so
-        // here, as a held state, mid-spring: the stages and the window still
-        // carry the release's animations — additive ones on position and
-        // transform, which would keep adding what they had left onto the
-        // caught pose, the page parting from the card until the spring ended.
-        // A held grab animates nothing here, so whatever is in flight is the
-        // release's; a layer without animations costs a nil check.
-        if !settling {
-            stages.forEach { if $0.layer.animationKeys() != nil { $0.layer.removeAllAnimations() } }
-            if let mask = flightMask, mask.layer.animationKeys() != nil { mask.layer.removeAllAnimations() }
-        }
-        if settling {
-            stages.forEach { $0.center = centre }
-        } else {
-            UIView.performWithoutAnimation { stages.forEach { $0.center = centre } }
-        }
-        stages.forEach { $0.transform = CGAffineTransform(scaleX: fill, y: fill) }
-        // ⚠️ THE CARD'S RADIUS, HANDED OVER — never a second copy of the curve.
-        //
-        // The window computed its own interpolation from the display's corner
-        // to the row's, which is the right shape and was not the card's: the
-        // card held the display's radius flat for the whole drag, so the two
-        // silhouettes were rounded differently for the length of the gesture.
-        // The card interpolates now (`grabCornerRadius`) and passes the number
-        // it used, so there is one curve and no way to disagree about it.
-        let window = flightMask ?? makeDismissalWindow()
-        window.frame = card
-        window.layer.cornerRadius = state.cornerRadius
-        #if DEBUG
-        if LaunchArgument.grabLog.isPassed() {
-            // The two rects that must be the same rect: where the window is,
-            // and where the page actually landed after its transform. A gap
-            // between them is the gap on screen, and nothing else can be.
-            // The card's PRESENTATION frame beside the page's, in the same
-            // space — the only comparison that can catch one lagging the
-            // other. Comparing the window's rect to the page's proved nothing:
-            // both are derived from the same converted number in the same
-            // breath, so they agreed while the card was somewhere else.
-            print(String(format: "[grab] t=%.2f fill=%.3f card=%@ stage=%@",
-                         t, fill, NSCoder.string(for: card),
-                         NSCoder.string(for: pageStage.layer.presentation()?.frame
-                                            ?? pageStage.frame)))
-        }
-        #endif
-    }
+    /// The live grab and the engaged dismissal (#1915, #2362, #2521). The zoom
+    /// destination and the tests ask the page; `layoutSubviews` reads the flag.
+    private(set) lazy var pageGrab = SnapPageGrab(host: self)
+    var isLiveGrab: Bool { pageGrab.isLiveGrab }
+    private var isEngagedDismissing: Bool { pageGrab.isEngagedDismissing }
+    func beginLiveGrab() { pageGrab.beginLiveGrab() }
+    func setEngagedDismissal(_ state: ZoomDismissState) { pageGrab.setEngagedDismissal(state) }
+    func endEngagedDismissal() { pageGrab.endEngagedDismissal() }
 
     /// ⚠️ `bounds` AND `center`, NEVER `frame`.
     ///
@@ -813,92 +553,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // back to the middle of the screen between two events.
         guard !isEngagedDismissing else { return }
         stages.forEach { $0.center = CGPoint(x: contentView.bounds.midX, y: contentView.bounds.midY) }
-    }
-
-    /// The views the grab moves and fades: the two stages, the whole page —
-    /// its media already handed to the card (#1915).
-    private var dismissalTravellers: [UIView] { stages }
-
-    /// How far the page overhangs the card it covers. Small enough to be
-    /// invisible where it spills, large enough to swallow a follower's error.
-    private static let dismissalBleed: CGFloat = 0.5
-
-    /// The dismissal's window, made on the first event that has a card to
-    /// follow rather than at `begin` — a mask installed at a rect nobody has
-    /// computed yet is a blank page.
-    private func makeDismissalWindow() -> UIView {
-        let mask = UIView()
-        // Opaque: a mask reads its alpha channel, so a clear view masks
-        // everything away — a blank screen rather than a clipped one.
-        mask.backgroundColor = .black
-        mask.layer.cornerCurve = .continuous
-        contentView.mask = mask
-        flightMask = mask
-        return mask
-    }
-
-    /// Puts the page back, on either outcome. An abandoned grab returns to a
-    /// page that must be exactly what it was.
-    func endEngagedDismissal() {
-        guard isEngagedDismissing else { return }
-        isEngagedDismissing = false
-        stages.forEach {
-            $0.transform = .identity
-            $0.center = CGPoint(x: contentView.bounds.midX, y: contentView.bounds.midY)
-        }
-        for (view, resting) in zip(dismissalTravellers, restingAlphas) {
-            view.alpha = resting
-        }
-        restingAlphas = []
-        if isLiveGrab {
-            isLiveGrab = false
-            stages.forEach { $0.isUserInteractionEnabled = true }
-        }
-        // The wash comes back with everything else: an abandoned grab returns
-        // to a page that has to be readable again.
-        contentView.mask = nil
-        flightMask = nil
-        mediaCard.alpha = alphaForMaskedReveal
-        contentView.backgroundColor = groundForMaskedReveal
-        groundForMaskedReveal = nil
-    }
-
-    /// The engaged stream's top inset — where its content rests, just
-    /// below the screen chrome. A pure function of the safe area now: the
-    /// caption scrolls inside the stream, so nothing above it has to be
-    /// measured. The VC threads this into `setEngagedInsets`.
-    func engagedCommentsTopInset(safeAreaTop: CGFloat) -> CGFloat {
-        SnapCommentsLayout.commentsTopInset(topInset: safeAreaTop)
-    }
-
-    /// The engagement's INTERPOLATABLE state, as one function of progress:
-    /// 0 = fully engaged, 1 = fully dismissed. Every leg that can be driven
-    /// continuously lives here and nowhere else, which is what lets the
-    /// finger-driven pull-down and the animated engage/disengage share one
-    /// definition of what the two ends look like.
-    ///
-    /// (The blur bands and the bubble's glass are NOT here: a material
-    /// materializes through the `effect` property, which has no fractional
-    /// state. They switch at the ends and are hidden behind the fading
-    /// stream while the drag is in flight.)
-    func setCommentsEngagementProgress(_ progress: CGFloat) {
-        let t = min(max(0, progress), 1)
-        commentsContainer.alpha = 1 - t
-        // NO transform here. The shrink belongs to the STREAM alone (the
-        // hosted list scales itself), because the footer's blur band lives
-        // inside this container and a band that scales stops sitting at the
-        // screen's edge — it drifts inward and reads as part of the moving
-        // layer instead of as fixed chrome.
-        // The header band is a SIBLING, so it never scaled; it fades on its
-        // own alpha to leave with everything else. (Alpha on an effect view
-        // cannot MATERIALIZE a blur, which is why the band still switches
-        // its `effect` at the ends — but fading an already-built one out is
-        // exactly what alpha is for.)
-        headerFrost.alpha = 1 - t
-        // The page's own chrome returns as the stream leaves — the ticker
-        // and caption fade back IN as the comments fade out, one crossfade
-        // rather than two sequential ones.
-        chrome.setCommentsEngagedProgress(t)
     }
 
     /// The ground this page owns, remembered so a transition-scoped tint can
@@ -924,101 +578,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     func setRevealGroundTint(_ color: UIColor?) {
         revealGroundTint = color
         contentView.backgroundColor = color ?? restingGround
-    }
-
-    /// Reclaims the region after disengagement settles (the VC removes the
-    /// child's view; this clears the cell-side scaffolding).
-    /// Whether this cell is currently showing a comments panel.
-    ///
-    /// The one question a caller can ask about the DISPLAY without knowing how
-    /// the panel got here — which is what a specification has to be written
-    /// against, since every defect in this area has been a difference between
-    /// the bookkeeping and the pixels.
-    var isShowingComments: Bool {
-        // ⚠️ AND VISIBLE. A panel is installed at alpha 0 and revealed by the
-        // engagement, so a media page's parked tap-to-comments WARM is hosted
-        // here too — present, and showing nothing. Counting it would make the
-        // specification claim a media page displays a thread it does not.
-        !commentsContainer.isHidden
-            && commentsContainer.alpha > 0
-            && !commentsContainer.subviews.isEmpty
-    }
-
-    func clearComments() {
-        // The comments gone, the column unfolds onto the record (#1929).
-        chrome.setSoundShowsReturn(false, animated: false)
-        commentsContainer.subviews.forEach { $0.removeFromSuperview() }
-        commentsContainer.isHidden = true
-        NSLayoutConstraint.deactivate(commentsContainerConstraints)
-        commentsContainerConstraints = []
-        headerFrost.isHidden = true
-        headerFrost.alpha = 1
-        headerFrost.effect = nil
-        NSLayoutConstraint.deactivate(headerFrostConstraints)
-        headerFrostConstraints = []
-    }
-
-    /// Applies or reverses the comments-engaged layout. Call inside a
-    /// single `UIView.animate` spring block — every mutation here is
-    /// animatable (the backdrop's dim and blur, the media's recede, chrome
-    /// surface alphas, the card's glass and content), which is what keeps
-    /// the whole state change ONE motion on ONE surface. The player is
-    /// untouched by construction: nothing here re-hosts it, and after the
-    /// dock's removal nothing here even moves its surfaces.
-    /// A stand-in for the resting panel, shown at once (charter PR 5b): the
-    /// same container, the same frost, the same engaged chrome, so the page
-    /// looks as it will once the real panel is mounted over it.
-    func installRestingPlaceholder(_ placeholder: UIView) {
-        installComments(placeholder)
-        // The engaged LOOK — container and frost up, backdrop dimmed, the
-        // chrome's rail down — WITHOUT marking the cell engaged: the real
-        // panel's mount goes through `installComments` (alpha 0) and then
-        // `setCommentsEngaged(true)` to show it, and a cell already marked
-        // engaged would skip that second step and leave both invisible. The
-        // rail matters: with the look applied by hand the page flew in with
-        // its reaction bubbles showing, which the real panel then hid.
-        setCommentsEngagementProgress(0)
-        if window != nil, headerFrost.effect == nil {
-            headerFrost.effect = UIBlurEffect(style: SnapCommentsLayout.frostStyle)
-        }
-    }
-
-    /// The real panel has been mounted above it: the stand-in fades and goes.
-    func removeRestingPlaceholder(_ placeholder: UIView, animated: Bool = true) {
-        guard placeholder.superview != nil else { return }
-        if animated {
-            placeholder.fadeOutSkeleton(removing: true)
-        } else {
-            placeholder.removeFromSuperview()
-        }
-    }
-
-    func setCommentsEngaged(_ engaged: Bool) {
-        guard engaged != isCommentsEngaged else { return }
-        isCommentsEngaged = engaged
-        // The card's page-drive pan exists ONLY while engaged — the state
-        // seam is the recognizer's power switch, so no teardown path can
-        // strand an armed pan in the default feed. Armed on EVERY engaged
-        // post (media AND text): a vertical swipe on the card drives the
-        // pager interactively, exactly like the composer bar's — it pages,
-        // it never dismisses, so it's the right gesture on a text post's
-        // permanent resting interface too.
-        cardSwipeRecognizer.isEnabled = engaged
-
-        if engaged {
-            // One interpolatable set (see `setCommentsEngagementProgress`),
-            // so the boolean legs and any driven one can never diverge.
-            setCommentsEngagementProgress(0)
-            // The band materializes on the same beat and the same supported
-            // path (the `effect` property — alpha on an effect view is not,
-            // which is also why the blur cannot ride the interactive drag).
-            if window != nil, headerFrost.effect == nil {
-                headerFrost.effect = UIBlurEffect(style: SnapCommentsLayout.frostStyle)
-            }
-        } else {
-            setCommentsEngagementProgress(1)
-            headerFrost.effect = nil
-        }
     }
 
     // MARK: - The comments sheet (#2087)
@@ -1373,7 +932,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
 
     /// Re-decides whether the page is announcing a wait — called from every
     /// place the answer can change (`SnapMediaWait.refresh`).
-    private func refreshMediaLoader() {
+    func refreshMediaLoader() {
         mediaWait.refresh()
     }
 
@@ -1387,345 +946,28 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// The clip's start, pause and stop, its playhead feed and the occlusion (#2521).
     private(set) lazy var clipStart = SnapPageClipStart(host: self)
 
-    /// Set while a presenting hero flight is staging, so this page's first
-    /// activation does not steal the render slot from the flying card.
-    var defersPlaybackForFlight = false
-    var hasDeferredPlayback = false
-    private var isWarmAttached = false
+    // MARK: - Hero-flight live media
 
-    /// Attaches the page's own surface to the parked player and keeps it
-    /// hidden, so it decodes during the flight instead of after it.
-    func warmAttachForFlight(url: URL) {
-        guard let videoPlayback else { return }
-        let view = mediaCard.renderView
-        #if DEBUG
-        view.debugTracksFlight = true
-        view.debugLabel = "page"
-        #endif
-        if VideoRenderFlags.usesSampleBufferLayer {
-            // N-surface: joining costs the flying card nothing, so this page's
-            // surface is live AND visible from the moment it exists. The whole
-            // hidden-warm-up-then-reveal dance below is a workaround for one
-            // player having one render slot, and it has nothing to work around
-            // here — the card, the tile and this page all draw the same frames
-            // at the same time.
-            guard videoPlayback.attachSurface(view, to: url, scope: playbackScope) else { return }
-            // The tile's thumbnail-rung cap is NOT lifted here, deliberately.
-            // An uncap invites an ABR switch, a switch changes the decoded
-            // buffer's dimensions, and the layer re-fits the new buffer into
-            // its bounds in a single frame — a discrete crop/sharpness pop
-            // that this timing aimed squarely at the flight. The lift happens
-            // in `startDeferredPlayback`, at `zoomTransitionDidEnd`, so
-            // switch points land on a resting page.
-            view.revealOnFirstFrame()
-            hasDeferredPlayback = false
-            isWarmAttached = true
-            return
-        }
-        view.isHidden = true
-        guard videoPlayback.unparkPlayback(to: view, mediaURL: url) else { return }
-        hasDeferredPlayback = false
-        isWarmAttached = true
+    /// The hero flight's handoff of the clip (#2521). The zoom destination,
+    /// the screen and the tests ask the page; each answer is the handoff's.
+    private(set) lazy var flightHandoff = SnapFlightHandoff(host: self)
+    var defersPlaybackForFlight: Bool {
+        get { flightHandoff.defersPlaybackForFlight }
+        set { flightHandoff.defersPlaybackForFlight = newValue }
     }
-
-    /// Reveals the warmed surface at landing. A visibility flip only — no
-    /// re-parenting, so the layer never leaves the render tree.
-    func revealWarmAttachedSurface() -> Bool {
-        guard isWarmAttached else { return false }
-        isWarmAttached = false
-        defersPlaybackForFlight = false
-        mediaCard.renderView.isHidden = false
-        return true
-    }
-
-    /// Starts the playback that activation held back, once the flight is over.
-    /// The pool hands back the player the card was flying — same item, same
-    /// playhead — so the page continues rather than restarting.
-    func startDeferredPlayback() {
-        defersPlaybackForFlight = false
-        guard isActive, !isPostUnavailable, let url = activeVideoURL, let videoPlayback else { return }
-        // The flight is over: lift the tile's thumbnail-rung cap NOW, at
-        // rest, whether playback was warm-attached or is about to start. The
-        // lift used to ride the warm attach — flight staging — which invited
-        // the ladder's next switch point (a one-frame dimension re-fit on the
-        // layer) to land mid-flight.
-        videoPlayback.setPeakBitRate(0, for: url, scope: playbackScope)
-        guard hasDeferredPlayback else { return }
-        hasDeferredPlayback = false
-        let view = mediaCard.renderView
-        // The warm attach at activation loses a race on cold opens: the
-        // tile's own `play` is still resolving then, so there is no active
-        // player to join and the attach silently fails. Falling straight to
-        // `play` here minted a SECOND AVPlayer for the same asset — two
-        // decoders on two clocks for the whole feed session, a dismissal
-        // card primed from whichever of them a URL lookup happened to find
-        // (the frame-0 jump at the start of a dismiss), and a landing that
-        // restarted at zero. By landing time the tile's play has resolved,
-        // so try the join again first — it is the very player the flight
-        // card was flying, which is what makes this a continuation. Mint
-        // only when there is genuinely nothing to join.
-        if VideoRenderFlags.usesSampleBufferLayer, videoPlayback.attachSurface(view, to: url, scope: playbackScope) {
-            view.revealOnFirstFrame()
-            return
-        }
-        let scope = playbackScope
-        let peakBitRate = MediaPlaybackPolicy.peakBitRate
-        // ⚠️ NOT HELD WHEN AUTOPLAY IS OFF (#702). The full-screen post is the
-        // one the viewer opened: it plays whatever Autoplay and Low Power Mode
-        // say, which govern grids, rails and previews (#409 held it here
-        // under the pause mark).
-        Task {
-            await videoPlayback.play(url, in: view, peakBitRate: peakBitRate, scope: scope)
-        }
-    }
-
-    /// Whether this page's media area has something REAL on screen — the
-    /// landing-side twin of the grid's `isLandingPlaybackReady`.
-    ///
-    /// The present landing reveals the feed and unmounts the flight card in
-    /// one commit, and it used to do so on a DATA answer alone (the feed has
-    /// posts). Measured on device as the run-2 black beat: card removed, feed
-    /// revealed, and the page's media area compositing nothing yet. A video
-    /// page answers for its surface OR its poster — a page that has not
-    /// started playing but shows its poster is presentable; one with neither
-    /// is the black the card must keep covering. Text pages have no media
-    /// area and nothing to wait for.
-    var isMediaContentRendering: Bool {
-        guard mediaURL != nil else { return true }
-        // ⚠️ A COLLECTION ANSWERS FOR THE PAGE IT IS LANDING ON, not for the
-        // carousel — and the difference is a whole class of reported defect.
-        //
-        // Resting on a photograph, the landing is presentable the moment that
-        // photograph is: asking the render surface would make the page wait on
-        // a decode only one of its pages needs. That was the original rule, and
-        // it is still the right one for a still page.
-        //
-        // Resting on a CLIP it is the opposite. The card in the air is carrying
-        // live video — the tile's own player, mid-playback — and this answer is
-        // what lets the animator drop it. Answered from the image alone, the
-        // card is dropped the instant the page's POSTER is up, so a moving
-        // picture is replaced by a still one at the end of every flight. It
-        // reads as "the player does not attach", it happens ONLY to galleries
-        // (a single-video page already waits, below), and it is at its most
-        // brutal under `-rich-media`, where a clip's poster is deliberately an
-        // unrelated photograph — the media appears to change entirely.
-        //
-        // The hold is bounded by the animator's `maximumHydrationHold`, so a
-        // clip that never draws still lands; it just no longer hands over to a
-        // still while it had something better to show.
-        // ⚠️ HAS A FRAME, not "is compositing" — the difference is a deadlock.
-        //
-        // `isCompositingContent` also asks whether the surface is VISIBLE, and
-        // during a flight this page is deliberately hidden: the card is
-        // standing in for it. Gating the card's removal on visibility means the
-        // page cannot show until the card leaves and the card cannot leave
-        // until the page shows, so every gallery landing ran to the animator's
-        // ceiling. Measured as `render[hidden=Y frames=18]` — eighteen decoded
-        // frames, reported as "not rendering". What the hand-over needs is that
-        // there is a PICTURE to hand over to.
-        if mediaCard.showsCollection {
-            return mediaCard.currentPageVideoURL == nil
-                ? mediaCard.isImageReady
-                : mediaCard.renderView.hasFrame
-        }
-        switch mediaKind {
-        case .video:
-            return mediaCard.renderView.isCompositingContent
-        case .image:
-            return mediaCard.isImageReady
-        }
-    }
-
-
-    /// Detaches this page's player and parks it for the next play of the same
-    /// asset — the grid tile a dismissal is flying home to.
-    @discardableResult
-    func parkPlayback() -> Bool {
-        guard playsVideo, let videoPlayback else { return false }
-        if VideoRenderFlags.usesSampleBufferLayer {
-            // Parking would detach this page's surface and stop it drawing,
-            // and under N-surface there is no reason to: the landing tile takes
-            // the loan directly via `transferOwnership` when the card lands, so
-            // the player stays owned — and rendering — right up to that moment.
-            // Reported as handled so the caller does not fall back to a park.
-            return true
-        }
-        return videoPlayback.parkPlayback(from: mediaCard.renderView)
-    }
-
-    /// Hands the page's already-rendering surface to a dismissal's flight card,
-    /// parking the player behind it.
-    ///
-    /// The card then flies the layer that is mid-playback instead of a mirror,
-    /// which is blank for ~70ms — the flash at the start of a back-tap. The
-    /// page keeps the view in its hierarchy but hands rendering over; on a
-    /// cancelled grab `reclaimDonatedPlayback` puts everything back.
-    func donateLiveRenderView() -> VideoRenderView? {
-        guard playsVideo, let videoPlayback else { return nil }
-        if VideoRenderFlags.usesSampleBufferLayer {
-            // Nothing is donated: the card gets a surface of its own on the
-            // same playback, primed with the current frame, and this page keeps
-            // rendering behind it. A cancelled grab therefore has nothing to
-            // put back — see `reclaimDonatedPlayback`.
-            //
-            // ALONGSIDE this page's own surface, by identity — never by URL.
-            // Two players can exist for one asset (the cold-open race), and a
-            // URL lookup answers from dictionary order: the card could prime
-            // from the other player's playhead, which is the frame-0 jump at
-            // the start of a dismiss. The sibling is what the viewer is
-            // watching, so the card provably flies the same frames.
-            let card = VideoRenderView()
-            // ⚠️ NO OPAQUE GROUND ON A FLIGHT CARD'S SURFACE. The card carries
-            // the picture ladder underneath — cover, sheet, thumbnail — and a
-            // black ground on the live rung turns the one frame where this
-            // layer has nothing to show into a black screen. See
-            // `VideoRenderView.paintsOpaqueGround`.
-            card.paintsOpaqueGround = false
-            #if DEBUG
-            card.debugLabel = "card"
-            card.debugTracksFlight = true
-            #endif
-            let attached = videoPlayback.attachSurface(card, alongsideSurface: mediaCard.renderView)
-            #if DEBUG
-            if LaunchArgument.zoomLiveLog.isPassed() {
-                print(String(format: "[zoom-live] %.3f producer FEED donateLiveRenderView -> %@ %@",
-                             CACurrentMediaTime(), attached ? "attached" : "REFUSED",
-                             card.debugSurfaceState))
-            }
-            #endif
-            guard attached else { return nil }
-            return card
-        }
-        guard videoPlayback.parkPlayback(from: mediaCard.renderView, keepingSurfaceAttached: true)
-        else { return nil }
-        let view = mediaCard.renderView
-        // Same rule as the row's donation: a carousel page has to be TOLD the
-        // surface is gone, or it refuses to take the same one back at landing.
-        mediaCard.releaseRenderViewFromPages()
-        view.removeFromSuperview()
-        // ⚠️ BACK TO FILL ON ITS WAY OUT. This very view is about to be a grid
-        // tile's (the dismissal adopts it at the landing), and grids fill. The
-        // flight lays it out at the picture's own aspect, where fit and fill
-        // draw the same pixels, so the switch is invisible here and saves a
-        // letterboxed clip in a mosaic later. A no-op when the page fills. (The
-        // sample-buffer branch above donates a fresh view, which is born fill.)
-        // Unconditional: whether THIS page fitted is the page's business, and
-        // a grid wants fill either way. Its ground goes back on with it, if the
-        // page took it off for a fitted clip's bands.
-        view.videoGravity = .resizeAspectFill
-        view.posterAspect = nil
-        mediaCard.restoreGround(of: view)
-        return view
-    }
-
-    /// Installs the flight card's live surface as this page's own, at landing.
-    ///
-    /// The view arrives already rendering the frame the card was showing, so
-    /// the page has nothing to wait for. The parked player is claimed here too,
-    /// which is what makes the deferred start unnecessary — there is no
-    /// separate `play` to blank the screen.
-    /// Whether a landing keeps this page's own surface instead of adopting the
-    /// card's (#639): the card's has nothing to continue, and this page is
-    /// already showing something. Pure, for tests.
+    func revealWarmAttachedSurface() -> Bool { flightHandoff.revealWarmAttachedSurface() }
+    func startDeferredPlayback() { flightHandoff.startDeferredPlayback() }
+    var isMediaContentRendering: Bool { flightHandoff.isMediaContentRendering }
+    @discardableResult func parkPlayback() -> Bool { flightHandoff.parkPlayback() }
+    func donateLiveRenderView() -> VideoRenderView? { flightHandoff.donateLiveRenderView() }
     static func keepsOwnSurface(incomingHasFrame: Bool, ownIsShowing: Bool) -> Bool {
-        !incomingHasFrame && ownIsShowing
+        SnapFlightHandoff.keepsOwnSurface(incomingHasFrame: incomingHasFrame, ownIsShowing: ownIsShowing)
     }
-
-    func adoptLiveRenderView(_ view: VideoRenderView) {
-        defersPlaybackForFlight = false
-        // ⚠️ ASKED BEFORE THE SWAP, not after. A card can land carrying a
-        // player this page's pool does not own — a map pin mirrors the MAPS
-        // pool's preview, which the map retires the moment the feed shows. The
-        // swap used to happen first, so the page showed that dead surface and
-        // its own (playing) one was thrown away; the post opened from a live
-        // pin sat blank until paged away and back. Refusing keeps the page's
-        // own surface, which is already rendering or about to.
-        if VideoRenderFlags.usesSampleBufferLayer, let videoPlayback,
-           !videoPlayback.canAdoptSurface(view) {
-            refreshMediaLoader()
-            return
-        }
-        #if DEBUG
-        if LaunchArgument.zoomLiveLog.isPassed() {
-            print(String(format: "[landing-adopt] %.3f alpha=%.2f pres=%.2f hidden=%@ anims=%@ frames=%d",
-                         CACurrentMediaTime(), view.alpha, view.layer.presentation()?.opacity ?? -1,
-                         view.isHidden ? "Y" : "N", (view.layer.animationKeys() ?? []).joined(separator: ","),
-                         view.enqueuedFrameCount))
-        }
-        #endif
-        // ⚠️ A SURFACE WITH NO FRAME HANDS NOTHING OVER (#639). The landing
-        // adopts the card's surface to continue the frame it was showing; a card
-        // whose mirror never drew has no frame to continue. Swapped in anyway,
-        // it replaced a page that was already showing its poster — the gate
-        // opens on that poster — and the viewer got black and the spinner for
-        // as long as the adopted surface took to draw (probed: `frames=0` at
-        // the gate, 0.4 s of black filmed). The page keeps its own surface: it
-        // is joined to the same player and draws the next frame itself.
-        if Self.keepsOwnSurface(incomingHasFrame: view.isReadyForDisplay,
-                                ownIsShowing: mediaCard.renderView.isCompositingContent) {
-            #if DEBUG
-            if LaunchArgument.zoomLiveLog.isPassed() {
-                print(String(format: "[landing-adopt] %.3f refused: the card's surface has no frame, the page shows its own",
-                             CACurrentMediaTime()))
-            }
-            #endif
-            refreshMediaLoader()
-            return
-        }
-        // Read BEFORE the restore: it is the surface the restore throws away,
-        // and under N-surface it is the one holding this page's pool loan.
-        let replaced = mediaCard.renderView
-        mediaCard.restoreRenderView(view)
-        // ⚠️ RE-ASKED, because the adopted surface's announcement is IN THE
-        // PAST. It arrives already rendering — that is the point of adopting it
-        // — so `onPictureAvailabilityChange` fired while the flight owned it and
-        // will not fire again: the signal is an edge, and this page missed it.
-        //
-        // That is the second half of the filmed defect and the half that
-        // re-pointing the closure alone does not fix. The flight carries the
-        // live player, so the page defers its own playback; its own surface
-        // therefore sits at zero frames while the 0.25s grace runs out and the
-        // spinner goes up; then the landing hands over a surface that already
-        // has a picture, and nothing ever re-decides. A cold open is exactly
-        // when the landing loses that race — measured at 11 stuck runs in 19,
-        // and 0 in 5 when the grace was widened to 3s so the re-check happened
-        // to land after the adoption.
-        refreshMediaLoader()
-        guard let videoPlayback else { return }
-        if VideoRenderFlags.usesSampleBufferLayer {
-            // ⚠️ THE LOAN MOVES WITH THE SURFACE. Nothing is parked under
-            // N-surface, so the unpark below claims nothing here — and the
-            // adopted view arrives JOINED to the page's player, while the loan
-            // stays filed under the view the restore just discarded. The pool
-            // then retires that player at its next dead-surface sweep, under
-            // this page and under any card a grab has joined to it: the
-            // early-grab stall, a black page after the cancel, and a refused
-            // second donation. See `VideoPlaybackController.adoptSurface`.
-            videoPlayback.adoptSurface(view, replacing: replaced)
-            return
-        }
-        guard let url = activeVideoURL else { return }
-        videoPlayback.unparkPlayback(to: view, mediaURL: url)
-    }
-
-    /// Puts a donated surface back and un-parks its player — the abandoned
-    /// dismissal. No-op when the park was already claimed.
-    func reclaimDonatedPlayback(_ view: VideoRenderView) {
-        if VideoRenderFlags.usesSampleBufferLayer {
-            // This page never gave anything up, so there is nothing to restore
-            // — the abandoned card's surface is simply released. That is the
-            // whole of "cancel" under N-surface, and it cannot leave the page
-            // blank because the page's own surface never stopped drawing.
-            videoPlayback?.detachSurface(view)
-            return
-        }
-        mediaCard.restoreRenderView(view)
-        // Same reason as `adoptLiveRenderView`: the surface coming back is the
-        // one that was drawing all along, and its announcement is behind us.
-        refreshMediaLoader()
-        guard let url = mediaURL, let videoPlayback else { return }
-        videoPlayback.unparkPlayback(to: view, mediaURL: url)
-    }
+    func adoptLiveRenderView(_ view: VideoRenderView) { flightHandoff.adoptLiveRenderView(view) }
+    func reclaimDonatedPlayback(_ view: VideoRenderView) { flightHandoff.reclaimDonatedPlayback(view) }
+    func mirrorPlayback(to surface: VideoRenderView) -> Bool { flightHandoff.mirrorPlayback(to: surface) }
+    func reclaimPlayback() { flightHandoff.reclaimPlayback() }
+    func releasePlaybackForDeparture() { flightHandoff.releasePlaybackForDeparture() }
 
     // MARK: - Play/pause toggle
 
@@ -1739,48 +981,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         guard gestureRecognizer === cardSwipeRecognizer else {
             return super.gestureRecognizerShouldBegin(gestureRecognizer)
         }
-        guard isCommentsEngaged else { return false }
-        let velocity = cardSwipeRecognizer.velocity(in: self)
-        guard abs(velocity.y) > abs(velocity.x) else { return false }
-        return cardSwipeRegionContains(cardSwipeRecognizer.location(in: contentView))
+        return commentsEngagement.cardSwipeShouldBegin()
     }
 
-    /// The page-drive swipe's territory: the HEADER BAND — everything above
-    /// where the stream's content begins.
-    ///
-    /// It used to be the floating caption card. With the caption scrolling
-    /// as a list row there is no non-scrolling card left to grab, and the
-    /// band above the stream is the only cell territory a drag can start in
-    /// without fighting the list: below this line a vertical drag scrolls
-    /// the comments, which is exactly what it should do. Internal (not
-    /// private) so the boundary stays unit-testable.
-    func cardSwipeRegionContains(_ point: CGPoint) -> Bool {
-        guard point.y >= 0 else { return false }
-        return point.y <= SnapCommentsLayout.commentsTopInset(topInset: frozenInsets.top)
-    }
-
-    /// A vertical swipe on the glass card drives the feed pager
-    /// INTERACTIVELY (same as the composer bar's page-swipe). The whole
-    /// engaged layer — docked media card, glass, comments — lives inside
-    /// THIS cell, so once the host hand-moves the pager's `contentOffset`
-    /// the entire assembly rides the finger for free; the cell only
-    /// forwards the pan's phase + raw translation/velocity. No self-nudge
-    /// (that would double the motion), no commit-only settle.
-    @objc private func handleCardSwipe(_ pan: UIPanGestureRecognizer) {
-        guard isCommentsEngaged else { return }
-        let dy = pan.translation(in: self).y
-        let vy = pan.velocity(in: self).y
-        switch pan.state {
-        case .began:
-            onRequestCommentsPageDrive?(.began, 0, 0)
-        case .changed:
-            onRequestCommentsPageDrive?(.changed, dy, vy)
-        case .ended, .cancelled, .failed:
-            onRequestCommentsPageDrive?(.ended, dy, vy)
-        default:
-            break
-        }
-    }
+    @objc private func handleCardSwipe(_ pan: UIPanGestureRecognizer) { commentsEngagement.handleCardSwipe(pan) }
 
     /// What a tap or a hold on the page means (#2521).
     private(set) lazy var mediaTaps = SnapMediaTapArbiter(host: self)
@@ -1957,37 +1161,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         mediaCard.setPausedMark(visible)
     }
 
-    // MARK: - Hero-flight live media
-
-    /// Attaches this cell's video player (if one is active) onto `surface` as
-    /// an additional render layer — same player, same clock — so a dismissal
-    /// flight carries the live video instead of a frozen cover. Returns
-    /// whether a mirror was actually made.
-    func mirrorPlayback(to surface: VideoRenderView) -> Bool {
-        guard playsVideo, let videoPlayback else { return false }
-        return videoPlayback.mirror(from: mediaCard.renderView, to: surface)
-    }
-
-    /// Re-asserts this cell as its player's display surface after a mirror
-    /// surface goes away (a cancelled flight) — with multiple layers on one
-    /// player, only the most recently attached is guaranteed to display.
-    func reclaimPlayback() {
-        guard playsVideo, let videoPlayback else { return }
-        videoPlayback.reclaim(mediaCard.renderView)
-    }
-
-    /// The page is leaving with the flight that ended
-    /// (`SnapFeedViewController.zoomTransitionWillDepart`): nothing deferred
-    /// will start on it, and the deferral is cleared so a later visit of the
-    /// reused screen does not inherit it. Its surface is deliberately left as
-    /// it is: a reused screen keeps its clip paused in place for the next
-    /// opening of the same post, and the grid repairs its own player at the
-    /// landing.
-    func releasePlaybackForDeparture() {
-        defersPlaybackForFlight = false
-        hasDeferredPlayback = false
-    }
-
     /// The still this page is actually drawing — the picture a presenter's
     /// flight home has to dissolve away when the viewer is leaving from HERE
     /// rather than from the post that opened the feed.
@@ -2138,13 +1311,13 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // a released dismissal's spring may still be fading the layers it
         // drives: neither may play out on the next post.
         stages.forEach { $0.layer.removeAllAnimations() }
-        dismissalTravellers.forEach { $0.layer.removeAllAnimations() }
+        pageGrab.dismissalTravellers.forEach { $0.layer.removeAllAnimations() }
         mediaCard.isHidden = false
         mediaCard.alpha = 1
         // Instant (unanimated) disengage: a recycled cell must come back
         // full-bleed. Ordered before the media/chrome resets it restores.
         setCommentsEngaged(false)
-        clearComments()
+        commentsEngagement.clearComments()
         onRequestComments = nil
         onReactionsRunningLow = nil
         mediaTaps.onPostTrackTap = nil
@@ -2218,7 +1391,7 @@ extension SnapFeedCell {
                     .prefix(8).map { "\(type(of: $0))(\(Int($0.frame.minY)))" }
                     .joined(separator: "<-")
             } ?? "nil"
-            let bar = commentsContainer.subviews.first.map { child in
+            let bar = commentsEngagement.commentsContainer.subviews.first.map { child in
                 child.subviews.compactMap { $0 as? CommentsInputBar }.first
                     .map { "barFrame=\($0.frame)" } ?? "no-bar-in-child"
             } ?? "no-child"
