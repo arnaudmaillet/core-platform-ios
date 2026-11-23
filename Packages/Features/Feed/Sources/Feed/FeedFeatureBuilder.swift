@@ -82,9 +82,6 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         /// Discover's own corpus (`GetDiscoveryFeed`). Nil (a test):
         /// Discover is the following timeline.
         public var discovery: (any FeedProviding)?
-        /// For You's corpora on the device (#893). Nil when the device store
-        /// can't be opened: the tab opens on skeletons.
-        public var localCache: FeedLocalCache?
         /// The app's one post and profile per id (#896).
         public var entities: any EntityReading & EntityWriting
         /// The post share sheet's quick-send row (#1710). Nil (a test): the
@@ -121,7 +118,6 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             soundProvider: (any PostSoundProviding)?,
             useSound: (@MainActor (PostSound) -> Void)?,
             discovery: (any FeedProviding)?,
-            localCache: FeedLocalCache?,
             entities: any EntityReading & EntityWriting,
             shareTargeting: (any ShareTargeting)?,
             bookmarks: PostBookmarkStore,
@@ -151,7 +147,6 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             self.soundProvider = soundProvider
             self.useSound = useSound
             self.discovery = discovery
-            self.localCache = localCache
             self.entities = entities
             self.shareTargeting = shareTargeting
             self.bookmarks = bookmarks

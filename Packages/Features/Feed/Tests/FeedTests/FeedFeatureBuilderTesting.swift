@@ -50,7 +50,6 @@ extension FeedFeatureBuilder.Dependencies {
             soundProvider: nil,
             useSound: nil,
             discovery: nil,
-            localCache: nil,
             entities: entities ?? EntityStore(),
             shareTargeting: nil,
             bookmarks: bookmarks,
