@@ -142,8 +142,9 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
         window.makeKeyAndVisible()
         // Which avatars have a sprite sheet (#1358).
         container.installAnimatedAvatars()
-        // What a channel showcase's card does (#2216), made on its first tap.
-        container.installChannelEmbedActions()
+        // What a channel showcase's card does (#2216), made on its first tap:
+        // a trait every card under the window reads when tapped (#2506).
+        window.traitOverrides.channelEmbedActions = container.channelEmbedActions
         // The blur behind the status bar, on every screen and through every
         // transition: one band in the window, over everything the app draws —
         // see `StatusBarBlurView`. Root swaps replace the root's view only.

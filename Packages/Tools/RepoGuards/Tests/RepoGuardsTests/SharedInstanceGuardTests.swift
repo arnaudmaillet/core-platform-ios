@@ -55,7 +55,6 @@ struct SharedInstanceGuardTests {
         "Packages/Core/MediaPlayback/Sources/MediaPlayback/VideoFrameClock.swift": 1,
         "Packages/Core/MediaPlayback/Sources/MediaPlayback/VideoPlaybackController+PictureInPicture.swift": 1,
         "Packages/Core/PostGrid/Sources/PostGrid/Cells/LiveMediaBackdrop.swift": 1,
-        "Packages/Core/PostGrid/Sources/PostGrid/Embeds/EmbedCatalogViewController.swift": 1,
         "Packages/Core/StickerKit/Sources/StickerKit/StickerFrameBaker.swift": 1,
         "Packages/Core/VoiceKit/Sources/VoiceKit/VoiceAudioSession.swift": 1,
         "Packages/Core/VoiceKit/Sources/VoiceKit/VoiceFileCache.swift": 1,

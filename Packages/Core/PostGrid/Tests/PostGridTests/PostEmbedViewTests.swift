@@ -5,7 +5,9 @@ import UIKit
 
 /// The shared embed card (#2216), its channel case: the action and its words
 /// per viewer state, each unavailable drawing, each size, VoiceOver, and the
-/// writes through the registered seam.
+/// writes through the seam its trait environment carries (#2506). Serialized
+/// for `ChannelEmbedLocalState` and the cards' change notes, which are
+/// process-wide.
 @MainActor
 @Suite(.serialized)
 struct PostEmbedViewTests {
@@ -45,19 +47,21 @@ struct PostEmbedViewTests {
                      lastMessagePreview: "The ferry's late again")
     }
 
-    private func card(_ channel: ChannelEmbed, size: PostEmbeds.Size = .full) -> PostEmbedView {
+    /// A card showing `channel`; with `actions`, carried by its own trait
+    /// environment, as the app's window carries the app's (#2506).
+    private func card(
+        _ channel: ChannelEmbed, size: PostEmbeds.Size = .full, actions: SpyActions? = nil
+    ) -> PostEmbedView {
         let view = PostEmbedView()
+        if let actions { view.traitOverrides.channelEmbedActions = ChannelEmbedActionsSource(actions) }
         view.show(.channel(channel), size: size, pipeline: nil)
         return view
     }
 
-    /// Runs `body` with `actions` registered, then puts back what was there.
-    private func with(_ actions: SpyActions, _ body: () async -> Void) async {
-        let previous = PostEmbedView.channelActions
-        PostEmbedView.channelActions = actions
+    /// Runs `body` on a clean session record, and leaves it clean.
+    private func withCleanSession(_ body: () async -> Void) async {
         ChannelEmbedLocalState.reset()
         await body()
-        PostEmbedView.channelActions = previous
         ChannelEmbedLocalState.reset()
     }
 
@@ -150,8 +154,8 @@ struct PostEmbedViewTests {
 
     @Test func joinWritesAndTheButtonTurnsToOpen() async {
         let spy = SpyActions()
-        await with(spy) {
-            let view = card(channel(.none, id: "ch-harbour"))
+        await withCleanSession {
+            let view = card(channel(.none, id: "ch-harbour"), actions: spy)
             var told: PostEmbed?
             view.onEmbedChange = { told = $0 }
             view.performAction()
@@ -169,34 +173,68 @@ struct PostEmbedViewTests {
 
     /// SEEN ON THE SIMULATOR: the actions used to be registered when the
     /// Messages tab was built, so on a launch that opened a post first, Join
-    /// did nothing. The app now registers a maker at launch, asked on the
-    /// first tap.
-    @Test func theFirstTapMakesTheActionsWhenNoneWereSet() async {
+    /// did nothing. The app's source makes them on the first tap, once.
+    @Test func theFirstTapMakesTheActionsOnce() async {
         let spy = SpyActions()
-        let previous = (PostEmbedView.channelActions, PostEmbedView.makeChannelActions)
-        PostEmbedView.channelActions = nil
         var made = 0
-        PostEmbedView.makeChannelActions = { made += 1; return spy }
-        ChannelEmbedLocalState.reset()
-        let view = card(channel(.none, id: "ch-harbour"))
-        #expect(made == 0, "made before anyone tapped")
-        view.performAction()
-        await view.debugSettle()
-        #expect(made == 1)
-        #expect(spy.calls == ["join ch-harbour"])
-        // Made once: the next tap uses them.
-        view.performAction()
-        #expect(made == 1)
-        #expect(spy.calls.last == "open ch-harbour")
-        PostEmbedView.channelActions = previous.0
-        PostEmbedView.makeChannelActions = previous.1
-        ChannelEmbedLocalState.reset()
+        let source = ChannelEmbedActionsSource { made += 1; return spy }
+        await withCleanSession {
+            let view = PostEmbedView()
+            view.traitOverrides.channelEmbedActions = source
+            view.show(.channel(channel(.none, id: "ch-harbour")), size: .full, pipeline: nil)
+            #expect(made == 0, "made before anyone tapped")
+            view.performAction()
+            await view.debugSettle()
+            #expect(made == 1)
+            #expect(spy.calls == ["join ch-harbour"])
+            // Made once: the next tap uses them.
+            view.performAction()
+            #expect(made == 1)
+            #expect(spy.calls.last == "open ch-harbour")
+        }
+    }
+
+    /// The channels off: the source answers nothing, the tap does nothing,
+    /// and it is asked again next time.
+    @Test func aSourceWithNothingToActWithLeavesTheCardAlone() async {
+        var asked = 0
+        let source = ChannelEmbedActionsSource { asked += 1; return nil }
+        await withCleanSession {
+            let view = PostEmbedView()
+            view.traitOverrides.channelEmbedActions = source
+            view.show(.channel(channel(.none, id: "ch-off")), size: .full, pipeline: nil)
+            view.performAction()
+            #expect(view.debugActionTitle == "Join")
+            #expect(view.embed?.channel?.viewerState == ChannelEmbed.ViewerState.none)
+            view.performAction()
+            #expect(asked == 2, "a nil answer was kept")
+        }
+    }
+
+    /// The app's shape (#2506): the source is set on the window, and a card
+    /// anywhere under it acts through it.
+    @Test func aCardActsThroughTheSourceItsWindowCarries() async {
+        let spy = SpyActions()
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.traitOverrides.channelEmbedActions = ChannelEmbedActionsSource(spy)
+        let page = UIView(frame: window.bounds)
+        window.addSubview(page)
+        await withCleanSession {
+            let view = card(channel(.none, id: "ch-windowed"))
+            page.addSubview(view)
+            // What the layout pass before any finger lands does.
+            window.updateTraitsIfNeeded()
+            view.performAction()
+            await view.debugSettle()
+            #expect(spy.calls == ["join ch-windowed"], "the card did not read its window's actions")
+        }
+        page.removeFromSuperview()
     }
 
     @Test func requestThenCancel() async {
         let spy = SpyActions()
-        await with(spy) {
-            let view = card(channel(.none, visibility: .onRequest, id: "ch-printroom"))
+        await withCleanSession {
+            let view = card(channel(.none, visibility: .onRequest, id: "ch-printroom"), actions: spy)
             spy.answer = .requested
             view.performAction()
             await view.debugSettle()
@@ -215,8 +253,8 @@ struct PostEmbedViewTests {
     @Test func aRefusalLeavesTheCardAsItWas() async {
         let spy = SpyActions()
         spy.fails = true
-        await with(spy) {
-            let view = card(channel(.none, id: "ch-refused"))
+        await withCleanSession {
+            let view = card(channel(.none, id: "ch-refused"), actions: spy)
             view.performAction()
             await view.debugSettle()
             #expect(view.debugActionTitle == "Join")
@@ -228,9 +266,9 @@ struct PostEmbedViewTests {
     /// a read that moved on is believed.
     @Test func thisSessionsAnswerOutlivesTheCard() async {
         let spy = SpyActions()
-        await with(spy) {
+        await withCleanSession {
             let stale = channel(.none, id: "ch-remembered")
-            let first = card(stale)
+            let first = card(stale, actions: spy)
             first.performAction()
             await first.debugSettle()
             #expect(card(stale).debugActionTitle == "Open", "a recycled card forgot the join")

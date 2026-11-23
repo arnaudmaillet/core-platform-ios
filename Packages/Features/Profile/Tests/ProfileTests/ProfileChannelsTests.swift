@@ -132,7 +132,7 @@ struct ProfileChannelsTests {
     ) -> ProfileChannelsViewModel {
         ProfileChannelsViewModel(
             provider: provider, isOwnProfile: own, offersCreation: creation,
-            actions: { actions },
+            actions: ChannelEmbedActionsSource { actions },
             announce: { id, from, to in announcements?.changes.append((id, from, to)) }
         )
     }

@@ -84,9 +84,10 @@ final class ProfileChannelsViewModel: NSObject {
     }
 
     private let provider: any ProfileChannelsProviding
-    /// The card's actions, asked when a button is tapped — the app's, made
-    /// on the first tap like the card's (`PostEmbedView.resolvedChannelActions`).
-    private let actions: @MainActor () -> (any ChannelEmbedActing)?
+    /// The card's actions, asked when a button is tapped — the app's one
+    /// source (#2506), the same the cards read from their trait, made on the
+    /// first tap.
+    private let actionsSource: ChannelEmbedActionsSource
     /// Tells every card of a channel its new standing.
     private let announce: @MainActor (ConversationID, ChannelEmbed.ViewerState, ChannelEmbed.ViewerState) -> Void
     /// Which read is current: an answer for an earlier owner is dropped.
@@ -96,7 +97,7 @@ final class ProfileChannelsViewModel: NSObject {
         provider: any ProfileChannelsProviding,
         isOwnProfile: Bool,
         offersCreation: Bool,
-        actions: @escaping @MainActor () -> (any ChannelEmbedActing)? = { PostEmbedView.resolvedChannelActions },
+        actions: ChannelEmbedActionsSource,
         announce: @escaping @MainActor (ConversationID, ChannelEmbed.ViewerState, ChannelEmbed.ViewerState) -> Void = {
             PostEmbedView.announceChannelStanding($0, from: $1, to: $2)
         }
@@ -104,7 +105,7 @@ final class ProfileChannelsViewModel: NSObject {
         self.provider = provider
         self.isOwnProfile = isOwnProfile
         self.offersCreation = offersCreation && isOwnProfile
-        self.actions = actions
+        actionsSource = actions
         self.announce = announce
         super.init()
         // A card's tap on one of these channels — a showcase on this very
@@ -224,13 +225,13 @@ final class ProfileChannelsViewModel: NSObject {
     /// A tap on the row: the channel's thread, which offers Join or Request
     /// to a non-member — what `core-platform.click/c/<id>` opens.
     func open(_ id: ConversationID) {
-        actions()?.open(id)
+        actionsSource.actions?.open(id)
     }
 
     private typealias Write = @MainActor (any ChannelEmbedActing, ConversationID) async throws -> ChannelEmbed.ViewerState
 
     private func write(_ id: ConversationID, _ write: @escaping Write) {
-        guard let actions = actions(), !pending.contains(id), let before = channel(id)?.channel.viewerState else { return }
+        guard let actions = actionsSource.actions, !pending.contains(id), let before = channel(id)?.channel.viewerState else { return }
         pending.insert(id)
         onChange?()
         Task { [weak self] in

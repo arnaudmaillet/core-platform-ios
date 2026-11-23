@@ -25,35 +25,17 @@ import UIKit
 /// the surface's alone (open the post, the hold's preview) — a host's tap
 /// recognizer asks `keepsTouch(_:)`. A mark takes no touch at all.
 ///
-/// **Writes** go through `channelActions`, the seam Chat implements and the
-/// app registers once (`ChannelEmbedActing`): Feed, Maps and PostGrid can't
-/// depend on Chat. The answer shows at once, and is remembered for the
-/// session (`ChannelEmbedLocalState`) so a card drawn again from a read made
-/// before the tap shows the new state too.
+/// **Writes** go through Chat's seam (`ChannelEmbedActing`), which Feed,
+/// Maps and PostGrid can't depend on. The card reads it from its trait
+/// environment when its button is tapped (`ChannelEmbedActionsTrait`, #2506):
+/// the composition root sets the app's one on its window, a test or the
+/// catalogue its own on the view it hosts the card in. The answer shows at
+/// once, and is remembered for the session (`ChannelEmbedLocalState`) so a
+/// card drawn again from a read made before the tap shows the new state too.
 ///
 /// ⚠️ Lives in PostGrid, not VoiceKitUI as #2216 asks: see `PostEmbeds`.
 @MainActor
 public final class PostEmbedView: UIView {
-    /// What the channel card's button does — Chat's, registered by the app
-    /// (`AppContainer`). Nil (a test, a preview, the channels off): the
-    /// button shows, and a tap does nothing.
-    public static var channelActions: (any ChannelEmbedActing)?
-
-    /// Where `channelActions` comes from when nothing set it yet: the app
-    /// registers this at launch, and it is asked on the first tap — so the
-    /// card acts on a launch that never opened Messages, without building
-    /// Chat before anyone taps (#2216).
-    public static var makeChannelActions: (@MainActor () -> (any ChannelEmbedActing)?)?
-
-    /// The actions a tap uses: the ones set, or the ones made now. Public
-    /// for a profile's Channels rows (#2232), which act as the card does —
-    /// through the same instance, so Chats reloads the same catalog.
-    public static var resolvedChannelActions: (any ChannelEmbedActing)? {
-        if let channelActions { return channelActions }
-        channelActions = makeChannelActions?()
-        return channelActions
-    }
-
     /// The embed shown, as last drawn (a tap's answer included); nil while
     /// nothing is.
     public private(set) var embed: PostEmbed?
@@ -321,7 +303,7 @@ public final class PostEmbedView: UIView {
         guard case .channel(let channel)? = embed, let action = channel.action else { return }
         switch action {
         case .open:
-            Self.resolvedChannelActions?.open(channel.conversationID)
+            tapActions()?.open(channel.conversationID)
         case .join:
             run(on: channel) { actions, id in try await actions.join(id) }
         case .requestToJoin:
@@ -337,12 +319,28 @@ public final class PostEmbedView: UIView {
         run(on: channel) { actions, id in try await actions.cancelJoinRequest(id) }
     }
 
+    /// The actions a tap uses, from this card's trait environment (#2506).
+    /// Nil with the channels off: the button shows, and a tap does nothing.
+    ///
+    /// ⚠️ NO SOURCE AT ALL IS A WIRING FAULT — a card tapped outside a
+    /// window, or under a view nobody set one on. The tap does nothing, and
+    /// a DEBUG build stops here; a Release build never crashes for it.
+    private func tapActions() -> (any ChannelEmbedActing)? {
+        // An override set since the last layout is applied now.
+        updateTraitsIfNeeded()
+        guard let source = traitCollection.channelEmbedActions else {
+            assertionFailure("A channel card was tapped with no ChannelEmbedActionsTrait in its environment (#2506)")
+            return nil
+        }
+        return source.actions
+    }
+
     private typealias Write = @MainActor (any ChannelEmbedActing, ConversationID) async throws -> ChannelEmbed.ViewerState
 
     /// One write: the button loads, the answer shows; a refusal shakes the
     /// button and leaves the card as it was.
     private func run(on channel: ChannelEmbed, _ write: @escaping Write) {
-        guard let actions = Self.resolvedChannelActions, pendingAction == nil else { return }
+        guard pendingAction == nil, let actions = tapActions() else { return }
         actionButton.setPhase(.loading, animated: window != nil)
         let id = channel.conversationID
         actionGeneration += 1

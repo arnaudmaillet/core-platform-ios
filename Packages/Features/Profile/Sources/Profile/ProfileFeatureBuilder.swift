@@ -81,6 +81,9 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
         /// Channels tab's "Create a Channel" (#2232). Nil with `-channels`
         /// off: the row isn't offered.
         public var makeChannelCreation: (@MainActor () -> UIViewController?)?
+        /// What a Channels row's Join / Request / Open does: the app's one
+        /// source, the showcase cards' own (#2506).
+        public var channelActions: ChannelEmbedActionsSource
         /// The gallery cards' like chips: the app's one wallet, with its
         /// live post counts (#896).
         public var makeCardStaking: @MainActor () -> PostCardStaking
@@ -121,6 +124,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
             makePostGridPage: @escaping (_ style: PostGridPageStyle, _ savesPosts: Bool) -> any PostGridPage,
             makeProfileChannels: (@MainActor () -> (any ProfileChannelsProviding)?)?,
             makeChannelCreation: (@MainActor () -> UIViewController?)?,
+            channelActions: ChannelEmbedActionsSource,
             makeCardStaking: @escaping @MainActor () -> PostCardStaking,
             knownIdentity: @escaping @MainActor (ProfileID, ProfileIdentityStub?) -> ProfileIdentityStub?,
             followEvents: FollowGraphEvents,
@@ -148,6 +152,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
             self.makePostGridPage = makePostGridPage
             self.makeProfileChannels = makeProfileChannels
             self.makeChannelCreation = makeChannelCreation
+            self.channelActions = channelActions
             self.makeCardStaking = makeCardStaking
             self.knownIdentity = knownIdentity
             self.followEvents = followEvents
@@ -212,6 +217,8 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
     /// The new channel's sheet, for the own Channels tab's "Create a
     /// Channel" (#2232). Nil: the row isn't offered.
     private let makeChannelCreation: (@MainActor () -> UIViewController?)?
+    /// What a Channels row's buttons do (#2506).
+    private let channelActions: ChannelEmbedActionsSource
     /// Builds a gallery's card staking with the app's live post counts
     /// (#896): a like in the feed shows on the profile's cards.
     private let makeCardStaking: @MainActor () -> PostCardStaking
@@ -255,6 +262,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
         gridPageFactory = dependencies.makePostGridPage
         makeProfileChannels = dependencies.makeProfileChannels
         makeChannelCreation = dependencies.makeChannelCreation
+        channelActions = dependencies.channelActions
         makeCardStaking = dependencies.makeCardStaking
         knownIdentity = dependencies.knownIdentity
         followEvents = dependencies.followEvents
@@ -371,7 +379,8 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
     private func makeChannelsModel(isOwnProfile: Bool) -> ProfileChannelsViewModel? {
         guard let provider = makeProfileChannels?() else { return nil }
         return ProfileChannelsViewModel(
-            provider: provider, isOwnProfile: isOwnProfile, offersCreation: makeChannelCreation != nil
+            provider: provider, isOwnProfile: isOwnProfile, offersCreation: makeChannelCreation != nil,
+            actions: channelActions
         )
     }
 

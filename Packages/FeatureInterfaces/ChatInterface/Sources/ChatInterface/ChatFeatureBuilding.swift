@@ -52,7 +52,8 @@ public protocol ChatFeatureBuilding {
     /// What a channel showcase's card does (#2216) — Join, Request to join,
     /// cancel, Open — over the conversations Chat owns, for Feed, Maps and
     /// PostGrid, which draw the card and can't depend on Chat. Nil with the
-    /// channels off. The shell registers it once (`PostEmbedView`).
+    /// channels off. The composition root asks for it on the first tap and
+    /// hands it to every card as a trait (`ChannelEmbedActionsSource`, #2506).
     func makeChannelEmbedActions() -> (any ChannelEmbedActing)?
 
     /// The channels a profile owns (#2232), for the profile's Channels tab,

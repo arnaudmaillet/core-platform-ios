@@ -25,6 +25,7 @@ Records 0001 to 0011, and 0013 to 0015, were written on 2026-11-21 from decision
 | [0013](0013-a-sound-belongs-to-the-post.md) | A sound belongs to the post, never to one of its media | Accepted |
 | [0014](0014-viewport-share-decides-playback.md) | A clip plays while its screen holds half of the display | Accepted |
 | [0015](0015-map-clustering-computed-by-the-app.md) | Map clustering is computed by the app, not by MapKit | Accepted |
+| [0016](0016-app-wide-actions-through-a-trait.md) | An app-wide service a view uses only when touched reaches it through a UIKit trait | Accepted |
 
 ## Template
 

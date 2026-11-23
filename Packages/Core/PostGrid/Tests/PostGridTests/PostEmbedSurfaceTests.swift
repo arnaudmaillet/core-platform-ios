@@ -221,22 +221,18 @@ struct PostEmbedSurfaceTests {
 
 /// State follows (#2216, part 2): a tap on one card changes every card on
 /// screen showing the same channel — in `PostEmbedViewTests`' suite, which
-/// is serialized, since both set the registered actions.
+/// is serialized, since both reset the session's record.
 extension PostEmbedViewTests {
     @Test func aJoinOnOneCardShowsOnTheSameChannelsOtherCards() async {
         let spy = SpyActions()
         spy.answer = .subscriber
-        let previous = PostEmbedView.channelActions
-        PostEmbedView.channelActions = spy
         ChannelEmbedLocalState.reset()
-        defer {
-            PostEmbedView.channelActions = previous
-            ChannelEmbedLocalState.reset()
-        }
+        defer { ChannelEmbedLocalState.reset() }
         let id = ConversationID("ch-follow-\(UUID().uuidString)")
         let channel = ChannelEmbed(conversationID: id, name: "Harbour notes", subscriberCount: 3,
                                    visibility: .public, viewerState: .none)
         let tapped = PostEmbedView()
+        tapped.traitOverrides.channelEmbedActions = ChannelEmbedActionsSource(spy)
         tapped.show(.channel(channel), size: .full, pipeline: nil)
         let elsewhere = PostEmbedView()
         elsewhere.show(.channel(channel), size: .compact, pipeline: nil)

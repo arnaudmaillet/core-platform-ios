@@ -71,6 +71,7 @@ B never imports A.
 ## Dependency injection
 
 - **Inject through the initializer.** A type receives what it uses; it does not reach for it.
+  - One exception: an app-wide service that views use only at interaction time and that never varies per page is set once on the window as a UIKit trait, and read when the view is touched (the channel card's actions, [ADR 0016](decisions/0016-app-wide-actions-through-a-trait.md)). Anything a view needs to lay out or render, and anything per page, stays explicit.
 - **Depend on a protocol at every boundary**: between modules, toward a service (network, storage, cache, media playback, clock), and wherever a test needs a stand-in. Inside one module, a concrete type is fine until a second implementation or a test needs the seam. See [Components § Interfaces](COMPONENTS.md#interfaces).
 - **No new `shared` instance for anything that holds state a viewer or a test cares about.** A store that holds the viewer's data is built once by the composition root and handed to whoever needs it (`ViewerStoreGuardTests`).
   - A process-wide resource with no viewer state may stay shared: a render context, a hardware-bound player, a log. Its declaration says why.

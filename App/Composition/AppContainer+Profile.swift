@@ -133,7 +133,7 @@ extension AppContainer {
         // profile owns, and its new channel's sheet for "Create a Channel".
         // Only with `-channels` — off, no profile asks, and opening one
         // never builds Chat. The rows' Join / Request / Open are the
-        // showcase card's (`PostEmbedView.makeChannelActions`, above).
+        // showcase card's (`channelEmbedActions`), the same instance.
         var makeProfileChannels: (@MainActor () -> (any ProfileChannelsProviding)?)?
         var makeChannelCreation: (@MainActor () -> UIViewController?)?
         if DebugFlags.isOn("-channels") {
@@ -182,6 +182,7 @@ extension AppContainer {
             },
             makeProfileChannels: makeProfileChannels,
             makeChannelCreation: makeChannelCreation,
+            channelActions: channelEmbedActions,
             // The gallery cards' like chips stake from the app's one wallet, and
             // draw their posts' live counts (#896).
             makeCardStaking: { [unowned self] in

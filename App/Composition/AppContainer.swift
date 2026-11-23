@@ -32,6 +32,7 @@ import MapsInterface
 import Notifications
 import NotificationsInterface
 import PlaceInterface
+import PostGrid
 import PostSurfaces
 import Profile
 import ProfileData
@@ -834,6 +835,11 @@ final class AppContainer {
     private(set) lazy var inboxRelations: InboxRelations = makeInboxRelations()
 
     private(set) lazy var chatFeature: any ChatFeatureBuilding = makeChatFeature()
+
+    /// What a channel showcase's card does (#2216): Chat's actions, made on
+    /// the first tap. Set on the window as a trait (#2506), and handed to
+    /// the profile's Channels rows.
+    private(set) lazy var channelEmbedActions: ChannelEmbedActionsSource = makeChannelEmbedActionsSource()
 
     // MARK: - Routing
 

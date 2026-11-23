@@ -143,8 +143,9 @@ public struct ChannelEmbed: Sendable, Equatable, Hashable, Codable {
 
 /// What a showcase card's button does (#2216), behind a seam: Feed, Maps and
 /// PostGrid draw the card and cannot depend on Chat, which owns the
-/// conversations. Chat implements it over its repository; the app registers
-/// it once (`ChannelEmbedView.actions`).
+/// conversations. Chat implements it over its repository; the app builds
+/// one source of it and sets it on its window as a trait, which every card
+/// reads when tapped (`ChannelEmbedActionsTrait`, PostGrid, #2506).
 ///
 /// Each write answers the viewer's new standing, which the card shows at
 /// once.
