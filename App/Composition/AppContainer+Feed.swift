@@ -129,7 +129,6 @@ extension AppContainer {
             // tap, because the shell sets it after this builder exists.
             useSound: { [unowned self] sound in self.onUseSound?(sound) },
             discovery: discoveryRepository,
-            localCache: feedLocalCache,
             entities: entityStore,
             // A post's share sheet sends to the profile sheet's people (#1710).
             shareTargeting: profileShareTargetsRepository,
