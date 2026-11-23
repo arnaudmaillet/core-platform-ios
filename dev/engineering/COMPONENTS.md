@@ -19,7 +19,7 @@ How code is cut into pieces. **More files, each small and with one job, beat one
 | A function | 60 lines | |
 
 - These are signals, not targets: a 400-line file with three jobs still needs a split.
-- SwiftLint warns at 500 lines a file and 300 lines a type body (`.swiftlint.yml`). CI runs it on the changed files, report-only for now.
+- SwiftLint warns at 500 lines a file and 300 lines a type body (`.swiftlint.yml`). CI runs it on the changed files: an error on a line a pull request adds or modifies fails `build-test`, warnings don't (#2543).
 - **On 2026-11-21, 64 source files pass 1,000 lines** (generated contracts aside). The largest is `SnapFeedViewController` at 5,382. None of them may grow. A change that touches one leaves it smaller or the same size, and moves what it adds into a new type. `FileSizeGuardTests` holds this: a new file past 1,000 lines fails, and so does a baseline file that grew. A file that got shorter lowers its baseline number in the same change.
 
 ## Splitting a large controller: collaborators with a host

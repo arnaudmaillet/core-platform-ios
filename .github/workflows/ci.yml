@@ -503,15 +503,24 @@ jobs:
             exit 1
           fi
 
-  # ── SwiftLint (#2519) ────────────────────────────────────────────────────
-  # Ubuntu and SwiftLint's own container: no macOS runner is spent. A pull
-  # request lints the Swift files it adds or changes; a push to develop lints
-  # every file and writes the count per rule to the job summary, the debt to
-  # pay down. REPORT-ONLY for now: findings show as annotations on the diff,
-  # and the job is not part of `build-test`. It becomes blocking for errors
-  # once develop's count is known and the rules are tuned to it.
+  # ── SwiftLint (#2519, blocking since #2543) ──────────────────────────────
+  # Ubuntu and SwiftLint's own container: no macOS runner is spent.
+  # - A pull request lints the Swift files it adds or changes. An ERROR on a
+  #   line the pull request adds or modifies fails this job, and with it
+  #   `build-test`. Warnings, and errors on lines it doesn't touch (develop's
+  #   existing debt), stay annotations. Fix the line, or silence one finding
+  #   with `// swiftlint:disable:next <rule>` and say why beside it.
+  # - A push to develop lints every file and never fails: the count per rule
+  #   goes to the job summary and the report to the `swiftlint-report`
+  #   artifact (`gh run download <run> -n swiftlint-report`), the debt to pay
+  #   down.
+  # - Findings are anchored where SwiftLint reports them: a length or
+  #   complexity rule on its declaration's line, so it blocks only when that
+  #   line changes.
+  # - If SwiftLint itself produces no report, the job warns and passes: a
+  #   broken linter doesn't stop the queue.
   lint:
-    name: swiftlint (report-only)
+    name: swiftlint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -530,6 +539,9 @@ jobs:
           echo "count=$(wc -l < lint-files.txt | tr -d ' ')" >> "$GITHUB_OUTPUT"
       - name: Lint
         if: steps.files.outputs.count != '0'
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
         run: |
           set -uo pipefail
           # The list goes in through the environment, as SwiftLint's
@@ -541,30 +553,62 @@ jobs:
           echo "SCRIPT_INPUT_FILE_COUNT=$i" >> "$ENVFILE"
           docker run --rm --env-file "$ENVFILE" -v "$PWD:/work" -w /work ghcr.io/realm/swiftlint:0.57.0 \
             swiftlint lint --use-script-input-files --config .swiftlint.yml --reporter json > lint.json || true
+          # The lines each file adds or modifies, from the zero-context diff.
+          if [ "$EVENT" = "pull_request" ]; then
+            git diff -U0 --diff-filter=AMR "$BASE"...HEAD -- '*.swift' > lint-diff.txt
+          else
+            : > lint-diff.txt
+          fi
           python3 - <<'PY'
-          import json, collections, os
+          import json, collections, os, re
+          pull_request = os.environ["EVENT"] == "pull_request"
           try:
               findings = json.load(open("lint.json"))
           except Exception as error:
               print(f"::warning::SwiftLint produced no report: {error}")
               raise SystemExit(0)
+          touched = collections.defaultdict(set)
+          path = None
+          for line in open("lint-diff.txt", errors="replace"):
+              if line.startswith("+++ "):
+                  path = line[4:].strip()
+                  path = path[2:] if path.startswith("b/") else None
+              elif line.startswith("@@") and path:
+                  hunk = re.match(r"@@ -\S+ \+(\d+)(?:,(\d+))? @@", line)
+                  if hunk:
+                      first, count = int(hunk.group(1)), int(hunk.group(2) or "1")
+                      touched[path].update(range(first, first + count))
           root = os.getcwd() + "/"
-          for f in findings[:500]:
-              path = (f.get("file") or "").replace("/work/", "").replace(root, "")
-              level = "error" if f.get("severity") == "Error" else "warning"
+          blocking, existing = [], []
+          for f in findings:
+              f["path"] = (f.get("file") or "").replace("/work/", "").replace(root, "")
+              line = f.get("line") or 1
+              if f.get("severity") == "Error" and pull_request and line in touched[f["path"]]:
+                  blocking.append(f)
+              else:
+                  existing.append(f)
+          def annotate(f, level, suffix=""):
               message = f.get("reason", "").replace("\n", " ")
-              print(f"::{level} file={path},line={f.get('line') or 1},title=SwiftLint {f.get('rule_id')}::{message}")
+              print(f"::{level} file={f['path']},line={f.get('line') or 1},title=SwiftLint {f.get('rule_id')}{suffix}::{message}")
+          for f in blocking:
+              annotate(f, "error")
+          for f in existing[: max(0, 500 - len(blocking))]:
+              annotate(f, "warning", " (existing error, not blocking)" if f.get("severity") == "Error" else "")
           by_rule = collections.Counter((f.get("rule_id"), f.get("severity")) for f in findings)
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
-              summary.write(f"### SwiftLint (report-only): {len(findings)} findings\n\n| Rule | Severity | Count |\n|---|---|---|\n")
+              summary.write(f"### SwiftLint: {len(findings)} findings, {len(blocking)} blocking\n\n")
+              summary.write("| Rule | Severity | Count |\n|---|---|---|\n")
               for (rule, severity), count in by_rule.most_common():
                   summary.write(f"| {rule} | {severity} | {count} |\n")
+          if blocking:
+              print(f"::error::SwiftLint: {len(blocking)} error(s) on lines this pull request adds or modifies")
+              raise SystemExit(1)
           PY
       # The summary can't be read through the API; the raw report can, with
-      # `gh run download <run> -n swiftlint-report` (#2543: tuning the rules
-      # to develop's count before the job blocks).
+      # `gh run download <run> -n swiftlint-report`. Kept even when the lint
+      # step fails.
       - name: Keep the report
-        if: steps.files.outputs.count != '0'
+        if: ${{ !cancelled() && steps.files.outputs.count != '0' }}
         uses: actions/upload-artifact@v4
         with:
           name: swiftlint-report
@@ -578,7 +622,7 @@ jobs:
   # gated on anything.
   build-test:
     name: build-test
-    needs: [discover, build-app, test, test-hosted, compile-tests]
+    needs: [discover, build-app, test, test-hosted, compile-tests, lint]
     # !cancelled(), not always(): with always() a cancelled run would still
     # report a red required check instead of no check at all.
     if: ${{ !cancelled() }}
@@ -592,6 +636,7 @@ jobs:
           echo "test:      ${{ needs.test.result }}"   # aggregate of the Mac's lanes
           echo "test-hosted: ${{ needs.test-hosted.result }}"   # and the hosted ones
           echo "compile-tests: ${{ needs.compile-tests.result }}"
+          echo "lint:      ${{ needs.lint.result }}"
           FAILED=()
           [ "${{ needs.discover.result }}"  = "success" ] || FAILED+=("discover")
           # "skipped" is a pass ONLY when discover said so (documentation-only
@@ -617,6 +662,10 @@ jobs:
             success|skipped) ;;
             *) FAILED+=("compile-tests") ;;
           esac
+          # SwiftLint (#2543): red only for an error on a line the pull
+          # request adds or modifies. It never skips; "skipped" would mean
+          # the workflow changed, so it is not a pass.
+          [ "${{ needs.lint.result }}" = "success" ] || FAILED+=("lint")
           if [ ${#FAILED[@]} -ne 0 ]; then
             echo "::error::Failed: ${FAILED[*]} — open the job list above for the failing lane"
             exit 1
