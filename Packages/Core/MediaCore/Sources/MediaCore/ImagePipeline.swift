@@ -180,8 +180,10 @@ public final class ImagePipeline: Sendable {
 
     private let fetcher: any ImageFetching
     /// Where a sheet avatar's still comes from (#1444): never the fetcher —
-    /// an animated avatar has no photo.
-    private let sheetAvatars: AnimatedAvatars?
+    /// an animated avatar has no photo. Also where an `AvatarView` drawn
+    /// through this pipeline plays its sheet from (#2506). Nil: no avatar
+    /// animates (a test's pipeline, a layout's measuring one).
+    public let sheetAvatars: AnimatedAvatars?
     private let maxPixelSize: Int
     private let memory: MemoryCache<ImageKey, UIImage>
     private let smallMemory: MemoryCache<ImageKey, UIImage>
@@ -217,7 +219,7 @@ public final class ImagePipeline: Sendable {
         coordinator: CacheCoordinator? = nil,
         clock: any CacheClock = SystemCacheClock(),
         negativeLifetime: TimeInterval = ImagePipeline.defaultNegativeLifetime,
-        sheetAvatars: AnimatedAvatars? = .shared
+        sheetAvatars: AnimatedAvatars? = nil
     ) {
         self.fetcher = fetcher
         self.sheetAvatars = sheetAvatars

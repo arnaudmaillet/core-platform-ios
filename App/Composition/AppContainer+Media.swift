@@ -30,7 +30,11 @@ extension AppContainer {
         case .remote:
             fetcher = URLSessionImageFetcher(hostRewrite: HostRewrite(from: "minio:9000", to: "localhost:9000"))
         }
-        return ImagePipeline(fetcher: fetcher, disk: Self.imageDisk, coordinator: cacheCoordinator)
+        return ImagePipeline(
+            fetcher: fetcher, disk: Self.imageDisk, coordinator: cacheCoordinator,
+            // The app's one sheet cache, its resolver given here (#2506).
+            sheetAvatars: makeAnimatedAvatars()
+        )
     }
 
     /// The images' disk cache (#894). DEBUG `-slow-media` turns it off: that

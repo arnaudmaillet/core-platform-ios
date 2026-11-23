@@ -27,15 +27,15 @@ import Upload
 // built here.
 extension AppContainer {
     /// What a channel showcase's card does (#2216) — Join, Request to join,
-    /// cancel, Open — registered at launch on the card (`PostEmbedView`),
-    /// which Feed, Maps and Profile draw and which can't reach Chat: Chat's
-    /// own, over the repository and the catalog Chats reads (#2230). Made
-    /// on the first tap, not here: building Chat is no launch's business,
-    /// and a launch that lands on a post never opens Messages. Nil with
-    /// `-channels` off (`ChatFeatureBuilder.makeChannelEmbedActions`).
-    @MainActor
-    func installChannelEmbedActions() {
-        PostEmbedView.makeChannelActions = { [unowned self] in chatFeature.makeChannelEmbedActions() }
+    /// cancel, Open — on the card (`PostEmbedView`), which Feed, Maps and
+    /// Profile draw and which can't reach Chat: Chat's own, over the
+    /// repository and the catalog Chats reads (#2230). Made on the first
+    /// tap, not here: building Chat is no launch's business, and a launch
+    /// that lands on a post never opens Messages. Nil with `-channels` off
+    /// (`ChatFeatureBuilder.makeChannelEmbedActions`). The app's window
+    /// carries it as a trait (#2506, `AppCoordinator`).
+    func makeChannelEmbedActionsSource() -> ChannelEmbedActionsSource {
+        ChannelEmbedActionsSource { [unowned self] in chatFeature.makeChannelEmbedActions() }
     }
 
     func makeChatRepository() -> ChatRepository {

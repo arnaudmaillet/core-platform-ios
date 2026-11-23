@@ -79,8 +79,9 @@ public final class AnimatedAvatarPlayer: UIView {
     public var trigger: Trigger = .rounds {
         didSet { updateMembership() }
     }
-    /// Where sheets come from — the app's, or a test's own.
-    var registry = AnimatedAvatars.shared
+    /// Where sheets come from: the pipeline's the avatar is drawn through
+    /// (`AvatarView.setPicture`), or a test's own. Nil: nothing animates.
+    var registry: AnimatedAvatars?
     /// The sheet's rung (#1444): set by a view that knows the size it draws
     /// at (`AvatarView`: its picture's bucket); nil, from this player's own
     /// drawn size when the avatar is set.
@@ -161,6 +162,7 @@ public final class AnimatedAvatarPlayer: UIView {
         guard let url else { return }
         if case .change = trigger, replacesOne, window != nil { owesPlay = true }
         if case .arrival = trigger { owesPlay = true }
+        guard let registry else { return }
         let rung = resolvedRung
         registry.sheet(for: url, rung: rung) { [weak self] sheet in
             guard let self, self.url == url else { return }
@@ -175,7 +177,7 @@ public final class AnimatedAvatarPlayer: UIView {
             updateMembership()
             return
         }
-        stillImage = url.flatMap { registry.cachedStill(for: $0, rung: resolvedRung) } ?? AnimatedAvatars.lastFrame(of: sheet)
+        stillImage = url.flatMap { registry?.cachedStill(for: $0, rung: resolvedRung) } ?? AnimatedAvatars.lastFrame(of: sheet)
         sheetView.layer.contents = sheet.sheet.cgImage
         sheetView.layer.contentsRect = last
         isHidden = false

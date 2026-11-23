@@ -52,9 +52,7 @@ struct AnimatedAvatarTests {
     }
 
     private func makeRegistry() -> AnimatedAvatars {
-        let registry = AnimatedAvatars(registry: nil)
-        registry.resolver = OneFace(animated: Self.face)
-        return registry
+        AnimatedAvatars(resolver: OneFace(animated: Self.face), registry: nil)
     }
 
     private func color(of image: UIImage?) -> UIColor? {
@@ -401,10 +399,11 @@ struct AnimatedAvatarTests {
         defer { window.isHidden = true }
         let avatar = AvatarView(diameter: 48, size: .avatar)
         avatar.frame = CGRect(x: 20, y: 100, width: 48, height: 48)
-        avatar.animation.registry = makeRegistry()
+        // The avatar plays the sheets of the pipeline it is drawn through.
+        let pipeline = ImagePipeline(fetcher: CountingFetcher(), sheetAvatars: makeRegistry())
         avatar.animation.rounds = makeRounds()
         window.addSubview(avatar)
-        avatar.setPicture(Self.face, pipeline: nil)
+        avatar.setPicture(Self.face, pipeline: pipeline)
         #expect(await eventually { avatar.picture.image != nil }, "the still never became the picture")
         let still = avatar.animation.still
         #expect(still != nil && avatar.picture.image === still, "the picture is not the still")
@@ -413,7 +412,7 @@ struct AnimatedAvatarTests {
         // A recycled row showing the face again: the still at once, in the
         // configure pass — never the photo first.
         avatar.reset()
-        avatar.setPicture(Self.face, pipeline: nil)
+        avatar.setPicture(Self.face, pipeline: pipeline)
         #expect(avatar.picture.image === still, "a reconfigure did not draw the still at once")
     }
 
@@ -529,13 +528,11 @@ struct AnimatedAvatarTests {
         let window = makeWindow()
         defer { window.isHidden = true }
         let resolver = GatedFace()
-        let registry = AnimatedAvatars(registry: nil)
-        registry.resolver = resolver
+        let registry = AnimatedAvatars(resolver: resolver, registry: nil)
         let fetcher = CountingFetcher()
         let pipeline = ImagePipeline(fetcher: fetcher, sheetAvatars: registry)
         let avatar = AvatarView(diameter: 96, size: .px512)
         avatar.frame = CGRect(x: 20, y: 100, width: 96, height: 96)
-        avatar.animation.registry = registry
         avatar.animation.rounds = makeRounds()
         window.addSubview(avatar)
 

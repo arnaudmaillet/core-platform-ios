@@ -168,7 +168,8 @@ public final class AvatarView: UIView {
         // After the new item has begun: a sheet already resolved hands its
         // still over now, as the picture (`adoptStill`). At the rung the
         // picture is decoded at: the profile header's 512 px picture takes
-        // the 256 px sheet (#1444).
+        // the 256 px sheet (#1444). The sheets are the pipeline's (#2506).
+        animation.registry = pipeline?.sheetAvatars
         animation.rung = AnimatedAvatars.Rung(bucket: slot.size)
         animation.setAvatar(url)
         var warm = false

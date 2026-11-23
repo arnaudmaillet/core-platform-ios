@@ -11,9 +11,9 @@ import UIKit
 /// dark, on a text face. `-embed-catalog` at launch, or the debug
 /// dashboard's Screens.
 ///
-/// Its buttons work: with no actions registered (a launch straight into
-/// the catalogue), a stand-in answers after a beat, so each state's tap can
-/// be seen.
+/// Its buttons work: a stand-in answers after a beat, so each state's tap
+/// can be seen. It is set on the catalogue's own view (#2506), over the
+/// app's: its channels are made up, and reach no server.
 public final class EmbedCatalogViewController: UIViewController {
     /// `-embed-catalog` at launch.
     public static var isRequested: Bool { LaunchArgument.embedCatalog.isPassed() }
@@ -60,7 +60,7 @@ public final class EmbedCatalogViewController: UIViewController {
     public override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
-        if PostEmbedView.channelActions == nil { PostEmbedView.channelActions = StandInActions.shared }
+        view.traitOverrides.channelEmbedActions = ChannelEmbedActionsSource(StandInActions())
         scroll.translatesAutoresizingMaskIntoConstraints = false
         column.axis = .vertical
         column.spacing = Spacing.lg
@@ -118,12 +118,10 @@ public final class EmbedCatalogViewController: UIViewController {
         return section
     }
 
-    /// The catalogue's own answers, when the app registered none: a beat,
-    /// then the state a server would give.
+    /// The catalogue's own answers: a beat, then the state a server would
+    /// give.
     @MainActor
     private final class StandInActions: ChannelEmbedActing {
-        static let shared = StandInActions()
-
         func join(_ id: ConversationID) async throws -> ChannelEmbed.ViewerState {
             try await Task.sleep(for: .milliseconds(600))
             return .subscriber

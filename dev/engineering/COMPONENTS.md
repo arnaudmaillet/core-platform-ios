@@ -100,6 +100,7 @@ Look here before writing any of these. Add a row when you create a shared piece.
 | Loader timing | `LoaderGate` | DesignSystem | `LoaderTimerGuardTests` |
 | A short count ("1.2k") | `CountFormatter` | DesignSystem | `SharedHelperGuardTests` |
 | Waiting in a test for main-actor work | `settle(looks:isolation:until:)` | TestSupport | `SharedHelperGuardTests` |
+| An app-wide service views use only when touched | a custom trait set on the window (`ChannelEmbedActionsTrait`), [ADR 0016](decisions/0016-app-wide-actions-through-a-trait.md) | PostGrid | |
 
 ### Views
 
