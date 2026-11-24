@@ -32,7 +32,16 @@ final class ProfileViewerPiles {
         self.gallery = gallery
         self.bookmarks = bookmarks
         self.viewHistory = viewHistory
+        // A new viewer's pile (the active profile resolving after the first
+        // read, a profile switch): History shows it now, holding nothing of
+        // the last one's.
+        viewerObservation = viewHistory?.viewerChanges.observeOnMain { [weak self] in
+            self?.refreshHistory()
+        }
     }
+
+    /// Ends with this object (`StoreObservation`).
+    private var viewerObservation: StoreObservation?
 
     /// Rebuilds the Saved page from the pile the viewer has curated, then
     /// from the server's list (#837) when it brings anything new.

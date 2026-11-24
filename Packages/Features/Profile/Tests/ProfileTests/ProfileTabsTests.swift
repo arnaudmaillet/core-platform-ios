@@ -719,4 +719,39 @@ struct ProfileHistoryDaysTests {
         try await settle(on: ["c", "d", "a"])
         #expect(!viewModel.holdsHistory)
     }
+
+    /// On a cold start the active profile resolves after the profile screen
+    /// first read History, under the account's key, which holds nothing
+    /// (#2549): the profile's pile shows as soon as it resolves, without
+    /// waiting for the screen's next appearance.
+    @Test func historyFollowsTheProfileResolvingAfterTheFirstRead() async throws {
+        let name = "history-scope-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        let earlier = Self.now.addingTimeInterval(-3_600)
+        let profilesPile = PostViewHistoryStore(
+            defaults: defaults, scope: StorageScope(owner: .member(account: "A", profile: "P")), now: { earlier }
+        )
+        profilesPile.record("a")
+        profilesPile.record("b")
+        let scope = StorageScope(owner: .member(account: "A", profile: nil))
+        let store = PostViewHistoryStore(defaults: defaults, scope: scope, now: { earlier })
+        let viewModel = ProfileViewModel(
+            repository: NoProfiles(), gallery: HistoryGallery(["a", "b"].map(post)), viewHistory: store
+        )
+        let now = Self.now
+        viewModel.now = { now }
+        var latest: ProfileViewModel.GallerySnapshot?
+        viewModel.onGalleryChange = { latest = $0 }
+        func shown() -> [String] {
+            if case .content(let posts) = latest?.history { posts.map(\.id.rawValue) } else { [] }
+        }
+        viewModel.loadHistory()
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(shown().isEmpty, "the account's pile holds nothing")
+
+        scope.owner = .member(account: "A", profile: "P")
+        for _ in 0..<200 where shown() != ["b", "a"] { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(shown() == ["b", "a"])
+    }
 }
