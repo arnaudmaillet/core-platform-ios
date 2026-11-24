@@ -15,6 +15,11 @@ import Testing
 ///   `StakeReceipt` for a stake control's refusal, `AppControl.fail()` for a
 ///   button's failed action. The feed rail, the comments bar and the list
 ///   card each shook their own way until #2529.
+/// - Staking likes with an undo toast is PostGrid's `StakeSession` (#2532,
+///   ADR 0017): only it takes a stake back (`.undoBoost(`), commits one
+///   (`.commitStakes(`), raises the stake's undo toast or numbers its
+///   bursts. The post detail, the Snap page and the cards each staked their
+///   own way until #2532.
 struct SharedHelperGuardTests {
     /// Where the strength blur is made.
     static let progressBlur = "Packages/Core/DesignSystem/Sources/DesignSystem/Components/ProgressBlurView.swift"
@@ -27,6 +32,25 @@ struct SharedHelperGuardTests {
         "Packages/Core/DesignSystem/Sources/DesignSystem/Components/StakeReceipt.swift",
         "Packages/Core/DesignSystem/Sources/DesignSystem/Components/AppControl.swift",
     ]
+
+    /// Where a stake is taken back, committed and given its undo toast.
+    static let stakeSession = "Packages/Core/PostGrid/Sources/PostGrid/Staking/StakeSession.swift"
+
+    /// The Snap page's copy, until it moves onto the session (#2532, 2/2).
+    /// May only shrink: nothing is added here.
+    static let stakeCopiesPending: Set<String> = [
+        "Packages/Features/Feed/Sources/Feed/Snap/SnapBoostController.swift",
+        "Packages/Features/Feed/Sources/Feed/Snap/SnapBoostDrive.swift",
+    ]
+
+    /// Whether `text`, comments and string literals left out, stakes by hand:
+    /// it takes a stake back or commits one through the wallet, raises a
+    /// stake's undo toast, or numbers a burst's toasts.
+    static func stakesByHand(_ text: String) -> Bool {
+        let code = EmptyActionGuardTests.strippingLineComments(text)
+            .replacingOccurrences(of: #""(?:[^"\\\n]|\\.)*""#, with: "\"\"", options: .regularExpression)
+        return [".undoBoost(", ".commitStakes(", "StakeMenu.undoToast(", "StakeMenu.Burst("].contains { code.contains($0) }
+    }
 
     /// Whether `text`, comments left out, animates a horizontal shake.
     static func shakesItsHead(_ text: String) -> Bool {
@@ -88,6 +112,28 @@ struct SharedHelperGuardTests {
             if Self.shakesItsHead(text) { copies.append(file) }
         }
         #expect(copies.isEmpty, "a head-shake outside StakeReceipt and AppControl: \(copies)")
+    }
+
+    @Test func stakingIsTheStakeSessionsAlone() throws {
+        let root = RepoRoot.url
+        var copies: [String] = []
+        for file in try Self.sources() where file != Self.stakeSession && !Self.stakeCopiesPending.contains(file) {
+            // CoreStorage defines the wallet's calls; it does not stake.
+            guard !file.hasPrefix("Packages/Core/CoreStorage/") else { continue }
+            let text = try String(contentsOf: root.appendingPathComponent(file), encoding: .utf8)
+            if Self.stakesByHand(text) { copies.append(file) }
+        }
+        #expect(copies.isEmpty, "staking outside StakeSession (spend through a StakeSession): \(copies)")
+    }
+
+    @Test func theStakePatternSeesACopyAndNotACommentOrAString() {
+        #expect(Self.stakesByHand("_ = wallet.undoBoost(targetID: key, amount: 1)"))
+        #expect(Self.stakesByHand("wallet?.commitStakes(on: id.rawValue)"))
+        #expect(Self.stakesByHand("let burst = StakeMenu.Burst()"))
+        #expect(Self.stakesByHand("toast = StakeMenu.undoToast(staked: 1, on: key, from: self) {}"))
+        #expect(!Self.stakesByHand("// wallet.undoBoost(targetID: key, amount: 1)"))
+        #expect(!Self.stakesByHand(#"let hint = "call StakeMenu.undoToast( from the session""#))
+        #expect(!Self.stakesByHand("stakes.undo(on: postID)"))
     }
 
     @Test func theShakePatternSeesACopyAndNotAComment() {
