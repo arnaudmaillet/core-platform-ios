@@ -424,7 +424,7 @@ final class SnapChromeActionColumn {
         soundBubble.setFace(nil, pipeline: nil)
         soundBubble.setSharesPost(false)
         soundBubble.isHidden = true
-        // Back to the unwired default (enabled, nothing undoable) — the
+        // Back to the unwired default (every amount, nothing undoable) — the
         // next configure pushes the real context.
         boostButton.setWalletContext(balance: .max, undoableAmount: 0)
     }
@@ -460,8 +460,8 @@ final class SnapChromeActionColumn {
     }
 
     /// The anchor's wallet context: what the balance can still afford and
-    /// how much of this post's spend is session-undoable — the enable state
-    /// and the menu's live contents both derive from it.
+    /// how much of this post's spend is session-undoable — the menu's live
+    /// contents derive from it; the pill stays live whatever it says (#2554).
     func setBoostContext(balance: Int, undoable: Int, stakeShots: Int = 0) {
         boostButton.setWalletContext(balance: balance, undoableAmount: undoable, stakeShots: stakeShots)
     }

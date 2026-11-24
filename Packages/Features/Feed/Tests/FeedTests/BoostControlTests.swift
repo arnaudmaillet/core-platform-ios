@@ -105,13 +105,13 @@ struct BoostControlTests {
         #expect(received == [.shot])
     }
 
-    /// A full post disables everything but Undo: the control itself only
-    /// stays enabled while a session spend is takeable.
+    /// A full post disables every amount but Undo in the menu, and the pill
+    /// itself stays live (#2554): the wallet refuses the tap, with the shake.
     @Test func aFullPostRefusesEverythingButUndo() {
         let button = SnapRailBoostButton()
         button.setSpentTotal(WalletStore.Policy.perTargetBoostCap)
         button.setWalletContext(balance: 500, undoableAmount: 0, stakeShots: 5)
-        #expect(!button.isEnabled)
+        #expect(button.isEnabled)
 
         button.setWalletContext(balance: 500, undoableAmount: 30, stakeShots: 5)
         #expect(button.isEnabled)
@@ -122,21 +122,26 @@ struct BoostControlTests {
 
     // MARK: - Affordability & session undo
 
-    /// The control disables only when it has NOTHING to offer: tap
-    /// unaffordable AND nothing to undo — a disabled button delivers no
-    /// long-press, and the menu is the undo's only door.
-    @Test func railAnchorDisablesOnlyWhenBrokeWithNothingToUndo() {
+    /// An empty wallet leaves the pill live, as a card's chip is (#2554): a
+    /// tap still asks for the default amount (the wallet refuses it, with the
+    /// shake), and the menu still offers the way to the Shop. A disabled
+    /// button delivers no long press, so disabling it hid the Shop.
+    @Test func railAnchorStaysLiveOnAnEmptyWalletAndKeepsTheShop() throws {
+        let screen = ShopOpenerSpy()
         let button = SnapRailBoostButton()
-        #expect(button.isEnabled) // unwired default: historical affordance
+        screen.view.addSubview(button)
+        var received: [WalletStakeSpend] = []
+        button.onBoost = { received.append($0) }
+        button.setWalletContext(balance: 0, undoableAmount: 0, stakeShots: 0)
 
-        button.setWalletContext(balance: 0, undoableAmount: 0)
-        #expect(!button.isEnabled)
-
-        button.setWalletContext(balance: 0, undoableAmount: 10)
         #expect(button.isEnabled)
+        button.sendActions(for: .primaryActionTriggered)
+        #expect(received == [.likes(WalletStore.Policy.defaultStakeAmount)])
 
-        button.setWalletContext(balance: WalletStore.Policy.defaultStakeAmount, undoableAmount: 0)
-        #expect(button.isEnabled)
+        let shop = try #require(button.currentMenuActions().first as? UIAction)
+        #expect(shop.attributes.contains(.disabled) == false)
+        shop.performWithSender(nil, target: nil)
+        #expect(screen.asked == 1)
     }
 
     /// The Undo entry exists exactly while a session spend is takeable, and
@@ -164,8 +169,10 @@ struct BoostControlTests {
             bar.subviews.compactMap { $0 as? UIButton }
                 .first { $0.accessibilityLabel == "Boost post" }
         )
+        // Live on an empty wallet, as the rail's pill and a card's chip are
+        // (#2554).
         bar.setBoostContext(balance: 0, undoableAmount: 0)
-        #expect(!boost.isEnabled)
+        #expect(boost.isEnabled)
         bar.setBoostContext(balance: 0, undoableAmount: 50)
         #expect(boost.isEnabled)
 

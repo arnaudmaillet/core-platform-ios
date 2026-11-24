@@ -2610,9 +2610,6 @@ public final class CommentsInputBar: UIView {
         boostSpentTotal = total
         applyBoostFace()
         applyLikeBadge(animated: animated)
-        // The receipt moves the cap's remainder, and the remainder moves
-        // the enable state (a full post refuses even the tap).
-        refreshBoostEnabled()
     }
 
     private func applyBoostFace() {
@@ -2662,31 +2659,25 @@ public final class CommentsInputBar: UIView {
     private var boostSpentTotal = 0
     /// The wallet context the host pushes (`setBoostContext`): what the
     /// balance can still afford, and how much of this post's spend is
-    /// session-undoable. `Int.max` at rest so an unwired host keeps the
-    /// historical always-enabled affordance.
+    /// session-undoable — the menu's contents. `Int.max` at rest, so an
+    /// unwired host's menu offers every amount.
     private var boostBalance = Int.max
     private var boostUndoableAmount = 0
     /// Shots left in the viewer's ×100 cartridge pack — the menu's loaded face.
     private var boostStakeShots = 0
 
-    /// The affordability + undo state, pushed on configure and on every
-    /// wallet change. Disables the button only when it has NOTHING to
-    /// offer — tap unaffordable AND nothing to undo — because a disabled
-    /// `UIButton` delivers no long-press either, and the menu is the
-    /// undo's only door.
+    /// The menu's state, pushed on configure and on every wallet change.
+    ///
+    /// ⚠️ IT NEVER DISABLES THE BUBBLE (#2554): an empty wallet or a full
+    /// post leaves it live, as a card's like chip is. A tap the wallet
+    /// refuses shakes it (`playBoostDenied`), and the long press still
+    /// raises the menu, whose empty pack's row is the way to the Shop. A
+    /// disabled `UIButton` delivers no long press, so disabling it hid the
+    /// Shop exactly when the viewer needed it.
     public func setBoostContext(balance: Int, undoableAmount: Int, stakeShots: Int = 0) {
         boostBalance = balance
         boostUndoableAmount = undoableAmount
         boostStakeShots = stakeShots
-        refreshBoostEnabled()
-    }
-
-    private func refreshBoostEnabled() {
-        let remaining = max(0, WalletStore.Policy.perTargetBoostCap - boostSpentTotal)
-        // A tap near the cap costs only the remainder (the store clamps),
-        // so affordability is judged against that, not the flat tap price.
-        let tapCost = min(WalletStore.Policy.defaultStakeAmount, remaining)
-        boostButton.isEnabled = boostUndoableAmount > 0 || (remaining > 0 && boostBalance >= tapCost)
     }
 
     /// Internal, not private: the deferred menu resolves only at present
