@@ -1,6 +1,7 @@
 import CoreModels
 import CoreStorage
 import MediaCore
+import MediaCoreFixtures
 import MediaPlayback
 import Testing
 import UIKit

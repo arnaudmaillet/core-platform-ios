@@ -74,6 +74,8 @@ let package = Package(
         .testTarget(
             name: "MapsTests",
             dependencies: [
+                // Mock media (#2516): the offline fetchers the suites draw with.
+                .product(name: "MediaCoreFixtures", package: "MediaCore"),
                 .product(name: "MediaUI", package: "MediaCore"),
                 "LaunchArguments",
                 "Maps",

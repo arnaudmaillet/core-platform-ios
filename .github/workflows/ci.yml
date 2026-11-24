@@ -250,7 +250,9 @@ jobs:
       # ⚠️ THE PRODUCTION APP SHIPS NO MOCK (#2391). Its target does not list
       # the mock products, so this holds by construction; the step is what
       # notices the day it stops: a mock product added to the target, or a
-      # package that starts depending on one.
+      # package that starts depending on one. The mock media count as mocks
+      # (#2516): `MediaCoreFixtures` and `MediaPlaybackFixtures`, and the
+      # `Placeholder*Fetcher` types they hold, by name.
       - name: Check the production app carries no mock
         run: |
           set -euo pipefail
@@ -262,16 +264,27 @@ jobs:
           if [ -n "$BUNDLES" ]; then
             echo "::error::mock resources in the production app: $BUNDLES"; exit 1
           fi
-          SYMBOLS=$(nm "$BIN" | xcrun swift-demangle | grep -cE '(CoreNetworkingMocks|CoreRealtimeMocks)\.' || true)
+          MOCK='(CoreNetworkingMocks|CoreRealtimeMocks|MediaCoreFixtures|MediaPlaybackFixtures)\.|Placeholder(Image|Video)Fetcher'
+          SYMBOLS=$(nm "$BIN" | xcrun swift-demangle | grep -cE "$MOCK" || true)
           if [ "$SYMBOLS" -ne 0 ]; then
             echo "::error::$SYMBOLS mock symbols in the production binary"
-            nm "$BIN" | xcrun swift-demangle | grep -E '(CoreNetworkingMocks|CoreRealtimeMocks)\.' | head -20
+            nm "$BIN" | xcrun swift-demangle | grep -E "$MOCK" | head -20
             exit 1
           fi
           LISTS=$(find "$DD/Build/Intermediates.noindex" -name 'YuyuProduction.LinkFileList')
           [ -n "$LISTS" ] || { echo "::error::no LinkFileList for the production app"; exit 1; }
-          if grep -hE '/(CoreNetworkingMocks|CoreRealtimeMocks)\.o$' $LISTS; then
+          if grep -hE '/(CoreNetworkingMocks|CoreRealtimeMocks|MediaCoreFixtures|MediaPlaybackFixtures)\.o$' $LISTS; then
             echo "::error::the production app links a mock object"; exit 1
+          fi
+          # The shipped binary is stripped (about a hundred symbols left), so
+          # the grep above can only catch a regression in the strip settings.
+          # The objects the linker was handed still carry every symbol: a
+          # mock type compiled into a production module shows here (#2516).
+          OBJECT_SYMBOLS=$(cat $LISTS | tr '\n' '\0' | xargs -0 nm 2>/dev/null | xcrun swift-demangle | grep -cE "$MOCK" || true)
+          if [ "$OBJECT_SYMBOLS" -ne 0 ]; then
+            echo "::error::$OBJECT_SYMBOLS mock symbols in the objects linked into the production app"
+            cat $LISTS | tr '\n' '\0' | xargs -0 nm 2>/dev/null | xcrun swift-demangle | grep -E "$MOCK" | head -20
+            exit 1
           fi
           echo "Production app: $(du -sh "$APP" | cut -f1), no mock bundle, 0 mock symbols, no mock object linked" \
             | tee -a "$GITHUB_STEP_SUMMARY"

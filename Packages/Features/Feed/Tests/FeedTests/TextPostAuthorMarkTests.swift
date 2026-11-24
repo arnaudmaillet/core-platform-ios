@@ -2,6 +2,7 @@ import CoreModels
 import EntityStore
 import Foundation
 import MediaCore
+import MediaCoreFixtures
 import MediaUI
 import PostGrid
 import Testing

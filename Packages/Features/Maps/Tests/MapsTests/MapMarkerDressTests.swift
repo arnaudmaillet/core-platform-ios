@@ -4,6 +4,7 @@ import DesignSystem
 import Foundation
 import MapKit
 import MediaCore
+import MediaCoreFixtures
 import Testing
 import UIKit
 @testable import Maps

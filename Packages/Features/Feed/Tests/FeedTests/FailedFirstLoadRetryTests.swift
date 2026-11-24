@@ -3,6 +3,7 @@ import CoreStorage
 import DesignSystem
 import Foundation
 import MediaCore
+import MediaCoreFixtures
 import PostSurfaces
 import Testing
 import UIKit

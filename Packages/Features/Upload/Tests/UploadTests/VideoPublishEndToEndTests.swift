@@ -6,7 +6,9 @@ import CoreNetworking
 import CoreNetworkingMocks
 import Foundation
 import MediaCore
+import MediaCoreFixtures
 import MediaPlayback
+import MediaPlaybackFixtures
 import Testing
 import UIKit
 @testable import Upload
@@ -101,7 +103,7 @@ struct VideoPublishEndToEndTests {
         edits: [String: MediaEdits] = [:]
     ) async -> Harness {
         let library = DebugMediaLibrary(
-            count: count, clipSeconds: clipSeconds, clipLongEdge: Self.clipLongEdge
+            count: count, clips: Self.clips, clipSeconds: clipSeconds, clipLongEdge: Self.clipLongEdge
         )
         let all = await library.items(in: "recents")
         let items = chosen.map { all[$0] }
@@ -149,6 +151,8 @@ struct VideoPublishEndToEndTests {
     /// eight other package lanes.
     static let clipSeconds = 0.4
     static let clipLongEdge = 160
+    /// The fake library's clips: the mock's synthesised ones (#2516).
+    static let clips: FakeLibraryClips = { seconds in PlaceholderVideoFetcher(durationSeconds: seconds) }
 
     /// ⚠️ **SIXTY SECONDS, AND THAT IS NOT PARANOIA — IT IS A MEASUREMENT.**
     /// This was twelve, which is generous against the six seconds the suite
@@ -179,7 +183,9 @@ struct VideoPublishEndToEndTests {
     /// enough to fool every test that only ever looked at the grid. Everything
     /// downstream opens the file for real.
     @Test func theDeviceMockVendsAPlayableClipForItsVideos() async throws {
-        let library = DebugMediaLibrary(count: 4, clipSeconds: Self.clipSeconds, clipLongEdge: Self.clipLongEdge)
+        let library = DebugMediaLibrary(
+            count: 4, clips: Self.clips, clipSeconds: Self.clipSeconds, clipLongEdge: Self.clipLongEdge
+        )
         let items = await library.items(in: "recents")
         let video = try #require(items.first(where: { $0.isVideo }))
 
@@ -194,7 +200,9 @@ struct VideoPublishEndToEndTests {
     /// The witness: a photograph answers nothing, so the line above is about
     /// videos and not about the method answering a file for anything at all.
     @Test func theDeviceMockVendsNoFileForAPhotograph() async throws {
-        let library = DebugMediaLibrary(count: 4, clipSeconds: Self.clipSeconds, clipLongEdge: Self.clipLongEdge)
+        let library = DebugMediaLibrary(
+            count: 4, clips: Self.clips, clipSeconds: Self.clipSeconds, clipLongEdge: Self.clipLongEdge
+        )
         let items = await library.items(in: "recents")
         let photo = try #require(items.first(where: { !$0.isVideo }))
 
@@ -212,7 +220,9 @@ struct VideoPublishEndToEndTests {
     /// So it is asked against a PHOTOGRAPH of the same parity: same rule, two
     /// independent implementations of it.
     @Test func aMockVideoFollowsTheSameShapeRuleAsAPhotographOfItsParity() async throws {
-        let library = DebugMediaLibrary(count: 8, clipSeconds: Self.clipSeconds, clipLongEdge: Self.clipLongEdge)
+        let library = DebugMediaLibrary(
+            count: 8, clips: Self.clips, clipSeconds: Self.clipSeconds, clipLongEdge: Self.clipLongEdge
+        )
         let items = await library.items(in: "recents")
         // 3 and 7 are the videos; one is odd-indexed, the other odd too — so
         // reach for a photograph whose index has the SAME parity as each.
@@ -243,7 +253,9 @@ struct VideoPublishEndToEndTests {
     ///
     /// Measured on the raw frame, before the tile's number is drawn over it.
     @Test func aMockVideosPosterHasActualColourInIt() async throws {
-        let library = DebugMediaLibrary(count: 4, clipSeconds: Self.clipSeconds, clipLongEdge: Self.clipLongEdge)
+        let library = DebugMediaLibrary(
+            count: 4, clips: Self.clips, clipSeconds: Self.clipSeconds, clipLongEdge: Self.clipLongEdge
+        )
         let items = await library.items(in: "recents")
         let video = try #require(items.first(where: { $0.isVideo }))
         let file = try #require(await library.videoFile(for: video.id))
@@ -330,7 +342,7 @@ struct VideoPublishEndToEndTests {
     /// built on ten seconds would resolve a cut that is not inside the file.
     @Test func aMockVideosDeclaredLengthMatchesTheClipItVends() async throws {
         let library = DebugMediaLibrary(
-            count: 4, clipSeconds: Self.clipSeconds, clipLongEdge: Self.clipLongEdge
+            count: 4, clips: Self.clips, clipSeconds: Self.clipSeconds, clipLongEdge: Self.clipLongEdge
         )
         let items = await library.items(in: "recents")
         let video = try #require(items.first(where: { $0.isVideo }))

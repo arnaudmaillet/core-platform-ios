@@ -2,6 +2,7 @@ import CoreContracts
 import CoreModels
 import CoreNavigation
 import CoreStorage
+import MediaCoreFixtures
 import Transitions
 import Foundation
 import MediaCore

@@ -7,5 +7,4 @@ extension LaunchArgument {
     static let avatarRounds = LaunchArgument("-avatar-rounds")
     static let cacheAudit = LaunchArgument("-cache-audit")
     static let launchLog = LaunchArgument("-launch-log")
-    static let slowMedia = LaunchArgument("-slow-media")
 }

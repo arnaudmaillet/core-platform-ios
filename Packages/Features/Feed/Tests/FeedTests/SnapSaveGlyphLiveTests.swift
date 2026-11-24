@@ -3,6 +3,7 @@ import CoreModels
 import CoreStorage
 import EntityStore
 import MediaCore
+import MediaCoreFixtures
 import PostSurfaces
 import Testing
 import UIKit

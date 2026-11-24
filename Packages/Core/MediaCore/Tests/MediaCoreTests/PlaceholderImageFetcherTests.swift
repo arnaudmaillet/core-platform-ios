@@ -1,4 +1,5 @@
 import Foundation
+@testable import MediaCoreFixtures
 import Testing
 @testable import MediaCore
 

@@ -177,7 +177,7 @@ extension PostGridListRowCell {
     private static var fixedHeights: [String: CGFloat] = [:]
     /// The measuring card's pipeline: its probe names no picture, so nothing
     /// is ever fetched through it.
-    private static let measuringPipeline = ImagePipeline(fetcher: PlaceholderImageFetcher())
+    private static let measuringPipeline = ImagePipeline(fetcher: UnavailableImageFetcher())
 
     /// The gap between the caption and whatever follows it — the closing
     /// line, the media preview — and between the preview and the line. The

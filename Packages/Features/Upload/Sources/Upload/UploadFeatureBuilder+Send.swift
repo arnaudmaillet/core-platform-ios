@@ -33,7 +33,7 @@ extension UploadFeatureBuilder {
         UploadMediaFile.sweepOrphans()
         switch source {
         case .library:
-            let library = Self.makeSendLibrary()
+            let library = makeSendLibrary()
             root = MediaPickerViewController(library: library, nextTitle: "Send") { chosen in
                 Task { @MainActor in
                     completion(await Self.resolve(chosen, edits: [:], library: library))
@@ -107,11 +107,11 @@ extension UploadFeatureBuilder {
     /// A message's photo is a post's size.
     static let sendPixels = CGSize(width: 1080, height: 1080)
 
-    private static func makeSendLibrary() -> any MediaLibraryReading {
+    private func makeSendLibrary() -> any MediaLibraryReading {
         #if DEBUG
         let arguments = ProcessInfo.processInfo.arguments
-        if let count = LaunchArgument.uploadFakeLibrary.intValue(in: arguments) {
-            return DebugMediaLibrary(count: count)
+        if let count = LaunchArgument.uploadFakeLibrary.intValue(in: arguments), let fakeLibraryClips {
+            return DebugMediaLibrary(count: count, clips: fakeLibraryClips)
         }
         #endif
         return PhotosMediaLibrary()

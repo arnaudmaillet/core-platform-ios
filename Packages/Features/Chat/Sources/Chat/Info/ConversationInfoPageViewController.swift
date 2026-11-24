@@ -49,8 +49,8 @@ class ConversationInfoPageViewController: HeroPageViewController<ConversationInf
         self.postsPage = postsPage
         self.imagePipeline = imagePipeline
         // The header needs a pipeline; a composition without one (a test)
-        // draws placeholders.
-        let pipeline = imagePipeline ?? ImagePipeline(fetcher: PlaceholderImageFetcher())
+        // fetches nothing, so each picture stays on its ground.
+        let pipeline = imagePipeline ?? ImagePipeline(fetcher: UnavailableImageFetcher())
         let groupPicture: GroupAvatarView? = channel ? nil : GroupAvatarView(diameter: 96, size: .px512)
         groupAvatarView = groupPicture
         let slot: HeroHeaderAvatar = groupPicture.map { HeroHeaderAvatar.custom($0) } ?? .person

@@ -2,6 +2,7 @@ import CoreModels
 import CoreStorage
 import Foundation
 import MediaCore
+import MediaCoreFixtures
 import MediaPlayback
 import PostSurfaces
 import Testing

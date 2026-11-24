@@ -7,6 +7,7 @@ import CoreNetworkingMocks
 import FeedInterface
 import Foundation
 import MediaCore
+import MediaCoreFixtures
 import MediaPlayback
 import Testing
 @testable import Upload

@@ -1,6 +1,7 @@
 import CoreModels
 import Foundation
 import MediaCore
+import MediaCoreFixtures
 import ProfileInterface
 import Testing
 import UIKit

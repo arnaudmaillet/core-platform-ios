@@ -45,6 +45,8 @@ let package = Package(
         .testTarget(
             name: "PlaceTests",
             dependencies: [
+                // Mock media (#2516): the offline fetchers the suites draw with.
+                .product(name: "MediaCoreFixtures", package: "MediaCore"),
                 "Place", "PlaceInterface", "CoreContracts", "CoreModels", "CoreNavigation", .product(name: "Transitions", package: "CoreNavigation"), "CoreNetworking",
                 .product(name: "CoreNetworkingMocks", package: "CoreNetworking"),
                 "CoreStorage", "DesignSystem", "HeroPage", "MediaCore", "MediaPlayback", "PostGrid", "PostSurfaces"

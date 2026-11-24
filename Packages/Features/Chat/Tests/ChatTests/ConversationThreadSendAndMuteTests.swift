@@ -4,6 +4,7 @@ import DesignSystem
 import EntityStore
 import Foundation
 import MediaCore
+import MediaCoreFixtures
 import Testing
 import UIKit
 @testable import Chat

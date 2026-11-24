@@ -5,6 +5,14 @@ import MediaPlayback
 import UIKit
 import UploadInterface
 
+/// The clips of the made-up library (`-upload-fake-library`, DEBUG): a video
+/// source for clips `seconds` long, which turns a `mock://video/…` URL into
+/// real H.264 bytes and a `-rich-media` encode into a local file. The mock
+/// composition hands MediaPlaybackFixtures' `PlaceholderVideoFetcher`
+/// (#2516); production has none, and the flag then opens the device's own
+/// library.
+public typealias FakeLibraryClips = @Sendable (_ seconds: Double) -> any VideoSource
+
 /// The screens behind the tab bar's "+" menu that belong to this package:
 /// Camera, Upload Media and Text Post.
 ///
@@ -38,13 +46,18 @@ public struct UploadFeatureBuilder: UploadFeatureBuilding {
     /// builder lazily, and the feed builder reaches the router, which reaches
     /// back here.
     private let textPostScreens: () -> any TextPostScreenBuilding
+    /// The made-up library's clips; nil outside the mock. Internal: the send
+    /// picker's library (`UploadFeatureBuilder+Send`) reads it too.
+    let fakeLibraryClips: FakeLibraryClips?
 
     public init(
         composer: any PostComposing,
-        textPostScreens: @escaping () -> any TextPostScreenBuilding
+        textPostScreens: @escaping () -> any TextPostScreenBuilding,
+        fakeLibraryClips: FakeLibraryClips?
     ) {
         self.composer = composer
         self.textPostScreens = textPostScreens
+        self.fakeLibraryClips = fakeLibraryClips
     }
 
     /// "Upload Media" — photos and videos from the library.
@@ -56,7 +69,7 @@ public struct UploadFeatureBuilder: UploadFeatureBuilding {
         // every thumbnail request looks its asset up in there — so an editor
         // handed a library of its own would be asking for pictures that library
         // has never fetched, and would draw nothing at all.
-        let library = Self.makeLibrary()
+        let library = makeLibrary()
         // Exports and flattened clips a process that died mid-flow left in
         // `tmp/UploadMedia` (#898); files a live flow holds are spared.
         UploadMediaFile.sweepOrphans()
@@ -113,7 +126,7 @@ public struct UploadFeatureBuilder: UploadFeatureBuilding {
         CaptureFolder.sweepOrphans()
         UploadMediaFile.sweepOrphans()
         let captures = CapturedMediaLibrary()
-        let recents = Self.makeLibrary()
+        let recents = makeLibrary()
         let composer = self.composer
         let camera = CaptureViewController(
             source: makeCaptureSource(),
@@ -241,11 +254,11 @@ public struct UploadFeatureBuilder: UploadFeatureBuilding {
     /// reason `-mock-compose-demo` draws its own gradient: a simulator's own
     /// library is six stock images deep, which is too few to photograph a
     /// numbered selection or a tray that scrolls.
-    private static func makeLibrary() -> any MediaLibraryReading {
+    private func makeLibrary() -> any MediaLibraryReading {
         #if DEBUG
         let arguments = ProcessInfo.processInfo.arguments
-        if let count = LaunchArgument.uploadFakeLibrary.intValue(in: arguments) {
-            return DebugMediaLibrary(count: count)
+        if let count = LaunchArgument.uploadFakeLibrary.intValue(in: arguments), let fakeLibraryClips {
+            return DebugMediaLibrary(count: count, clips: fakeLibraryClips)
         }
         #endif
         return PhotosMediaLibrary()

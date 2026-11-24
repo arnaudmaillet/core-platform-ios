@@ -4,8 +4,9 @@ import Testing
 
 /// The mock backend stays out of the production app (#2391, epic #2366).
 ///
-/// `CoreNetworkingMocks` (and `CoreRealtimeMocks`) is linked by the mock
-/// builds only: Debug, and Demo, the mock target built in Release. Their App
+/// `CoreNetworkingMocks` (and `CoreRealtimeMocks`, and the mock media of
+/// `MediaCoreFixtures` and `MediaPlaybackFixtures`, #2516) is linked by the
+/// mock builds only: Debug, and Demo, the mock target built in Release. Their App
 /// code compiles with `MOCK_BACKEND`. The production target links neither
 /// module and compiles without the condition, so an App file naming a mock
 /// outside `#if MOCK_BACKEND` breaks its build: "Unable to resolve module
@@ -17,7 +18,9 @@ import Testing
 /// written for the mock, the dashboard and the QA launch arguments, long
 /// before the production target existed.
 struct MockBackendGuardTests {
-    static let mockModules: Set<String> = ["CoreNetworkingMocks", "CoreRealtimeMocks"]
+    static let mockModules: Set<String> = [
+        "CoreNetworkingMocks", "CoreRealtimeMocks", "MediaCoreFixtures", "MediaPlaybackFixtures"
+    ]
 
     /// The folder of the App's mock half: every file in it is mock-only.
     static let mockFolder = "App/Composition/MockBackend"

@@ -1,6 +1,7 @@
 import CoreModels
 import CoreNavigation
 import MediaCore
+import MediaCoreFixtures
 import Testing
 import Transitions
 import UIKit

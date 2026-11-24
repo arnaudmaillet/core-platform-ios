@@ -7,6 +7,7 @@ import DesignSystem
 // `PlaceholderVideoFetcher` — the feed's mock video source, which synthesises
 // the real H.264 bytes the publish path then opens for real.
 import MediaPlayback
+import MediaPlaybackFixtures
 import Testing
 import UIKit
 @testable import Upload

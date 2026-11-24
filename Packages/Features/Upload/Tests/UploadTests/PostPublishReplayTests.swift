@@ -6,6 +6,7 @@ import CoreNetworking
 import CoreNetworkingMocks
 import Foundation
 import MediaCore
+import MediaCoreFixtures
 import MediaPlayback
 import Testing
 @testable import Upload

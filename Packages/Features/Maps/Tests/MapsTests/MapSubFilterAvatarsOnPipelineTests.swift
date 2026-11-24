@@ -2,6 +2,7 @@ import CacheKit
 import CoreModels
 import Foundation
 import MediaCore
+import MediaCoreFixtures
 import Synchronization
 import Testing
 import UIKit

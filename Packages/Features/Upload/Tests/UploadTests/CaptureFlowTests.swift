@@ -629,7 +629,9 @@ struct CaptureFlowTests {
     /// The shortcut opens the ordinary picker ON the camera's stack, with the
     /// chevron back to the camera instead of a Cancel that would close it.
     @Test func theLibraryShortcutPushesThePickerWithAWayBack() throws {
-        let builder = UploadFeatureBuilder(composer: RecordingComposer(), textPostScreens: { NoTextPosts() })
+        let builder = UploadFeatureBuilder(
+            composer: RecordingComposer(), textPostScreens: { NoTextPosts() }, fakeLibraryClips: nil
+        )
         let navigation = try #require(builder.makeCameraViewController() as? UINavigationController)
         let camera = try #require(navigation.viewControllers.first as? CaptureViewController)
         camera.debugTapLibrary()
@@ -641,7 +643,9 @@ struct CaptureFlowTests {
     /// "Use this sound": the camera names the sound it was opened with, and
     /// shows nothing when it was opened plainly.
     @Test func theCameraNamesTheSoundItWasOpenedWith() throws {
-        let builder = UploadFeatureBuilder(composer: RecordingComposer(), textPostScreens: { NoTextPosts() })
+        let builder = UploadFeatureBuilder(
+            composer: RecordingComposer(), textPostScreens: { NoTextPosts() }, fakeLibraryClips: nil
+        )
         let song = VideoSoundtrack(fileURL: URL(fileURLWithPath: "/tmp/song.m4a"), title: "Veridis Quo")
         let navigation = try #require(builder.makeCameraViewController(soundtrack: song) as? UINavigationController)
         let camera = try #require(navigation.viewControllers.first as? CaptureViewController)
@@ -1020,7 +1024,11 @@ struct CaptureFlowTests {
         let kept = live.newFile("clip", pathExtension: "mov")
         try Data([2]).write(to: kept)
 
-        let builder = UploadFeatureBuilder(composer: RecordingComposer(), textPostScreens: { NoTextPosts() })
+        let builder = UploadFeatureBuilder(
+
+            composer: RecordingComposer(), textPostScreens: { NoTextPosts() }, fakeLibraryClips: nil
+
+        )
         _ = builder.makeCameraViewController()
         try await settle(for: 5) { !FileManager.default.fileExists(atPath: orphan.path) }
         #expect(!FileManager.default.fileExists(atPath: orphan.path), "the orphan went")
@@ -1320,7 +1328,9 @@ struct CaptureFlowTests {
     /// Next to the finalisation screen, and Post publishes the picture.
     @Test func theCameraPublishesAPhotographThroughTheEditorAndFinalisation() async throws {
         let composer = RecordingComposer()
-        let builder = UploadFeatureBuilder(composer: composer, textPostScreens: { NoTextPosts() })
+        let builder = UploadFeatureBuilder(
+            composer: composer, textPostScreens: { NoTextPosts() }, fakeLibraryClips: nil
+        )
         let navigation = try #require(builder.makeCameraViewController() as? UINavigationController)
         #expect(navigation.modalPresentationStyle == .fullScreen)
         let camera = try #require(navigation.viewControllers.first as? CaptureViewController)
@@ -1360,7 +1370,9 @@ struct CaptureFlowTests {
     /// ⚠️ The builder has both screens a capture goes to — the editor and the
     /// finalisation screen — hold its file.
     @Test func theEditorAndTheFinalisationScreenHoldTheCapturesFile() async throws {
-        let builder = UploadFeatureBuilder(composer: RecordingComposer(), textPostScreens: { NoTextPosts() })
+        let builder = UploadFeatureBuilder(
+            composer: RecordingComposer(), textPostScreens: { NoTextPosts() }, fakeLibraryClips: nil
+        )
         let navigation = try #require(builder.makeCameraViewController() as? UINavigationController)
         let camera = try #require(navigation.viewControllers.first as? CaptureViewController)
         Self.closeOpened()

@@ -2,6 +2,7 @@ import CoreStorage
 import MediaCore
 import CoreModels
 import FeedInterface
+import MediaCoreFixtures
 import PostSurfaces
 import Testing
 @testable import Feed

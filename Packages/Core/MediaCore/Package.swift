@@ -9,12 +9,17 @@ import PackageDescription
 //   and relation marks, the loading slots and ladder, the animated icon and
 //   avatar players. They wear the design system's tokens, so DesignSystem
 //   comes in here and only here.
+// And MediaCoreFixtures (#2516), mock media: the placeholder fetcher that
+// draws a colour for a `mock://` URL and the scheme router that sends
+// `mock://` to it. The mock app target and the tests link it; the
+// production target never does, so the production app carries none of it.
 let package = Package(
     name: "MediaCore",
     platforms: [.iOS("26.0")],
     products: [
         .library(name: "MediaCore", targets: ["MediaCore"]),
-        .library(name: "MediaUI", targets: ["MediaUI"])
+        .library(name: "MediaUI", targets: ["MediaUI"]),
+        .library(name: "MediaCoreFixtures", targets: ["MediaCoreFixtures"])
     ],
     dependencies: [
         .package(path: "../../Kit/LaunchArguments"),
@@ -33,7 +38,11 @@ let package = Package(
     targets: [
         .target(name: "MediaCore", dependencies: ["LaunchArguments", "CacheKit", "CoreModels"]),
         .target(name: "MediaUI", dependencies: ["MediaCore", "DesignSystem", "LaunchArguments", "CacheKit"]),
-        .testTarget(name: "MediaCoreTests", dependencies: ["MediaCore", "CacheKit"]),
-        .testTarget(name: "MediaUITests", dependencies: ["MediaUI", "MediaCore", "DesignSystem", "CacheKit"])
+        .target(name: "MediaCoreFixtures", dependencies: ["MediaCore", "LaunchArguments", "CacheKit"]),
+        .testTarget(name: "MediaCoreTests", dependencies: ["MediaCore", "MediaCoreFixtures", "CacheKit"]),
+        .testTarget(
+            name: "MediaUITests",
+            dependencies: ["MediaUI", "MediaCore", "MediaCoreFixtures", "DesignSystem", "CacheKit"]
+        )
     ]
 )

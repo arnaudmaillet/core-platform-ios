@@ -40,7 +40,7 @@ struct UploadFeatureBuilderTests {
     @Test func theTextPostIsFeedsScreenPublishingThroughTheComposer() async throws {
         let screens = RecordingTextPostScreens()
         let composer = RecordingComposer()
-        let builder = UploadFeatureBuilder(composer: composer, textPostScreens: { screens })
+        let builder = UploadFeatureBuilder(composer: composer, textPostScreens: { screens }, fakeLibraryClips: nil)
 
         _ = builder.makeTextPostViewController()
         let publisher = try #require(screens.publisher)
@@ -60,7 +60,7 @@ struct UploadFeatureBuilderTests {
     /// drop a selection with — and a way out in its own bar.
     @Test func theMediaEntryOpensThePickerFullScreen() throws {
         let builder = UploadFeatureBuilder(
-            composer: RecordingComposer(), textPostScreens: { RecordingTextPostScreens() }
+            composer: RecordingComposer(), textPostScreens: { RecordingTextPostScreens() }, fakeLibraryClips: nil
         )
         let navigation = try #require(builder.makeMediaUploadViewController() as? UINavigationController)
         let root = try #require(navigation.viewControllers.first)
@@ -77,7 +77,7 @@ struct UploadFeatureBuilderTests {
     /// preview, as the system's Camera app.
     @Test func theCameraOpensFullScreenWithoutAStatusBar() throws {
         let builder = UploadFeatureBuilder(
-            composer: RecordingComposer(), textPostScreens: { RecordingTextPostScreens() }
+            composer: RecordingComposer(), textPostScreens: { RecordingTextPostScreens() }, fakeLibraryClips: nil
         )
         let navigation = try #require(builder.makeCameraViewController() as? UINavigationController)
         #expect(navigation.modalPresentationStyle == .fullScreen)

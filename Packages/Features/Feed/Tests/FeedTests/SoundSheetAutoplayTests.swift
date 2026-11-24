@@ -3,6 +3,7 @@ import CoreStorage
 import FeedInterface
 import Foundation
 import MediaCore
+import MediaCoreFixtures
 import MediaPlayback
 import PostGrid
 import Testing
