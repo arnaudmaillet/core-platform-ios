@@ -243,13 +243,15 @@ def entries(pkgs, dirs, hosted_only=False, mac_only=False):
     # MediaPlayback's AVSampleBufferDisplayLayer backing is the process default
     # and layerClass resolves once per process, so the lane above only ever
     # covers the new path. This second lane forwards AVSBDL_RENDER=0 for the
-    # legacy AVPlayerLayer backing. It pins the product scheme deliberately:
-    # the -Package scheme would drag in siblings this pass does not need.
+    # legacy AVPlayerLayer backing. It pins `MediaPlayback-Package`: since
+    # the package has a second library (`MediaPlaybackFixtures`, #2516), the
+    # `MediaPlayback` product scheme no longer carries the test target, and
+    # only the -Package scheme does.
     mp = "Packages/Core/MediaPlayback"
     if mp in dirs and pkgs[mp]["has_tests"]:
         out.append({"label": "MediaPlayback (legacy AVPlayerLayer)",
                     "name": "MediaPlayback", "dir": mp,
-                    "scheme": "MediaPlayback", "avsbdl": "0", "shard": ""})
+                    "scheme": "MediaPlayback-Package", "avsbdl": "0", "shard": ""})
     def jobs(lanes):
         # The legacy-backing lane keeps a job of its own (its environment differs).
         small = [e for e in lanes if not e.get("shard") and not e["avsbdl"]
