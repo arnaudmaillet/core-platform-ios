@@ -237,29 +237,32 @@ final class CommentStream: NSObject {
     var showsScrollAwayReturn: Bool { scrollAway.showsReturn }
 
     /// The engaged bottom inset with the composer at rest (`applyEngagedInsets`).
-    private var restingBottomInset: CGFloat?
+    private(set) var restingBottomInset: CGFloat?
+    /// Popular riding the keyboard for a reply (#2487, `ReplyKeyboardRise`).
+    var replyRise = ReplyKeyboardRise()
 
     /// ⚠️ RECENT RIDES THE KEYBOARD, as a conversation does (the owner,
     /// 2026-11-01): the composer's input row rising by `rise` lifts the
     /// conversation with it — its newest row stays just above the field, and
     /// a reader further up keeps the rows they were reading on screen. Popular
-    /// stays where it is, under the keyboard, as before. Each stream holds its
-    /// own inset, so the tabs change with the keyboard up and both stay right.
+    /// stays where it is, except for a reply (#2487, `ridesKeyboard`). Each
+    /// stream holds its own inset, so the tabs change with the keyboard up.
     ///
-    /// Called from the panel's layout pass (`viewDidLayoutSubviews`), which a
-    /// keyboard runs inside its own animation: the inset and the offset land
-    /// in that block and ride the keyboard's curve. The offset is read before
-    /// the inset is written, which clamps it (`ConversationThreadViewController.syncBottomClearance`),
-    /// and a finger dragging the keyboard down owns the offset itself.
+    /// Called from the panel's layout pass, which a keyboard runs inside its
+    /// own animation: the inset and the offset ride the keyboard's curve. The
+    /// offset is read before the inset is written, which clamps it, and a
+    /// finger dragging the keyboard down owns the offset itself.
     func syncKeyboardRise(_ rise: CGFloat) {
-        guard kind == .recent, let resting = restingBottomInset else { return }
+        guard let resting = restingBottomInset, ridesKeyboard(rise) else { return }
         let inset = resting + max(0, rise)
         let delta = inset - collectionView.contentInset.bottom
         guard abs(delta) > 0.5 else { return }
         let offsetBefore = collectionView.contentOffset.y
         collectionView.contentInset.bottom = inset
         guard hasAppliedStream, !collectionView.isTracking else { return }
-        if holdsRest {
+        if kind == .popular {
+            followReplyRise(to: offsetBefore + delta)
+        } else if holdsRest {
             pinToTail()
         } else {
             let insets = collectionView.adjustedContentInset
@@ -279,9 +282,6 @@ final class CommentStream: NSObject {
     private(set) var debugLastApplyAnimated = false
     /// The comments the stream holds. Tests.
     var debugCommentCount: Int { latestComments.count }
-    #endif
-
-    #if DEBUG
     /// Whether the empty page's row says the first page is taking longer.
     var debugShowsTakingLonger: Bool {
         streamItems().contains(.emptyState) && emptyPageCopy == PostDetailViewController.commentsTakingLongerPageCopy
@@ -364,7 +364,7 @@ final class CommentStream: NSObject {
         view.allowsSelection = false
         return view
     }()
-    private var streamDataSource: UICollectionViewDiffableDataSource<StreamSection, StreamItem>!
+    private(set) var streamDataSource: UICollectionViewDiffableDataSource<StreamSection, StreamItem>!
     /// Snapshot bookkeeping: the first apply lands without animation (a
     /// cold load has nothing to animate FROM); everything after — folds,
     /// sorts, submissions — animates natively.
@@ -2138,7 +2138,7 @@ final class CommentStream: NSObject {
         }
         row.onReplyTap = { [weak self] in
             guard let self else { return }
-            self.host.retireKeyboardOr { self.host.enterReplyState(for: model) }
+            self.host.retireKeyboardOr { self.enterReplyState(for: model) }
         }
         row.onShare = { [weak self] in self?.host.presentCommentShare(model) }
         // The viewer's voice comment on its way (#2309): a spinner where its
