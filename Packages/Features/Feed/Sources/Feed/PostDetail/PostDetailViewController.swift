@@ -7,6 +7,7 @@ import MediaCore
 import DesignSystem
 import FeedInterface
 import PostSurfaces
+import PostGrid
 import ProfileInterface
 import ThreadKit
 import UIKit
@@ -316,18 +317,16 @@ final class PostDetailViewController: UIViewController {
     /// binds to its top-level parent — comment.v1's two-depth contract)
     /// plus the tapped author's name for the placeholder.
     private(set) var replyTarget: (parentID: String, name: String)?
-    /// The viewer's point balance, handed to the composer's boost.
-    private let wallet: (any WalletStaking)?
-    /// The composer's boost: the stake, its toast, the session undo and the
-    /// wallet's observation (`PostDetailComposerBoost`). Built on first use;
-    /// building it does nothing else.
-    private(set) lazy var boost = PostDetailComposerBoost(host: self, wallet: wallet)
+    /// The composer's boost, wired to the stakes it spends through (#2532).
+    /// Built on first use; building it does nothing else.
+    private(set) lazy var boost = PostDetailComposerBoost(host: self, stakes: stakes)
+    private let stakes: PostDetailStakes?
 
     init(
         viewModel: PostDetailViewModel,
         imagePipeline: ImagePipeline,
         profileSwitcher: (any ProfileSwitcherPresenting)? = nil,
-        wallet: (any WalletStaking)? = nil,
+        stakes: PostDetailStakes? = nil,
         viewerEvents: ViewerEvents? = nil,
         threadChrome: Bool = false,
         groupsByDay: Bool = false
@@ -338,7 +337,7 @@ final class PostDetailViewController: UIViewController {
         self.threadChrome = threadChrome
         self.groupsByDay = threadChrome || groupsByDay
         self.profileSwitcher = profileSwitcher
-        self.wallet = wallet
+        self.stakes = stakes
         // A post's panel has its two tabs from birth (#2287: no threshold),
         // so it is BUILT on Popular — the pager's first page, mounted — and
         // never shows Recent first, waiting for a count. A draft (the text
@@ -365,7 +364,7 @@ final class PostDetailViewController: UIViewController {
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
-        boost.commitUnlessToastIsUp()
+        boost.end()
     }
 
     /// Rows re-measure on a genuine WIDTH change — rotation, iPad size
@@ -589,7 +588,7 @@ final class PostDetailViewController: UIViewController {
         composeBar.sendAccessibilityLabel = nil
         composeBar.visibilityMenu = nil
         rail.applyPublishedFace()
-        boost.refreshBoostTotal()
+        boost.bindStake()
         onPostPublished?(entry)
         // A post now: it has its two tabs and opens on Popular, the caption
         // first (#2287, no threshold) — the draft had none. Whatever the

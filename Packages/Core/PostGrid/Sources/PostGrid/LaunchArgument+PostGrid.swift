@@ -11,5 +11,7 @@ extension LaunchArgument {
     static let gridPlaybackLog = LaunchArgument("-grid-playback-log")
     static let liveBackdropLog = LaunchArgument("-live-backdrop-log")
     static let textRevealLog = LaunchArgument("-text-reveal-log")
+    /// One line per stake, refusal and undo (`StakeSession`), on every surface.
+    static let walletLog = LaunchArgument("-wallet-log")
     static let zoomLiveLog = LaunchArgument("-zoom-live-log")
 }

@@ -121,6 +121,7 @@ Look here before writing any of these. Add a row when you create a shared piece.
 | A font | the scaled type scale | DesignSystem | `ScaledFontGuardTests` |
 | A haptic | the haptic roles | DesignSystem | `HapticsGuardTests` |
 | A stake's receipt (the "+N", the "−N", the refusal's shake) | `StakeReceipt` | DesignSystem | `SharedHelperGuardTests` |
+| Staking likes with an undo toast (the gate, the wallet's verdict, the burst, its toast, the undo, the commit) | `StakeSession`, through `StakeControl` and `StakeTotalShowing`, [ADR 0017](decisions/0017-one-stake-session.md) | PostGrid | `SharedHelperGuardTests` |
 | A comment or message input | `CommentsInputBar` | ThreadKit | |
 | Recording a voice take in a composer, and the microphone's Settings alert | `VoiceComposer`, `offersMicrophoneSettings(from:message:)` | ThreadKit | |
 

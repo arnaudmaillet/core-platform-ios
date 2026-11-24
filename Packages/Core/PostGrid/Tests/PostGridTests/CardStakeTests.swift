@@ -91,8 +91,9 @@ struct CardStakeTests {
         #expect(staking.debugUndoable(on: PostID("post-1")) == 0)
     }
 
-    /// A burst of taps shows ONE toast with the burst so far, and its Undo
-    /// takes all of it back (#957).
+    /// A burst of taps on a card shows ONE toast, from the card's screen,
+    /// with the burst so far, and its Undo takes all of it back (#957). The
+    /// session's rules are `StakeSessionTests`'.
     @Test func aBurstShowsOneUndoToastThatTakesItAllBack() throws {
         let wallet = WalletStore(defaults: Self.defaults(), scope: StorageScope())
         let before = wallet.balance
@@ -125,52 +126,6 @@ struct CardStakeTests {
         #expect(staking.debugUndoable(on: PostID("post-1")) == 0)
     }
 
-    /// The toast is the undo window (#1375): leaving the screen (a push)
-    /// keeps the burst undoable while its toast is up, Undo still refunds it,
-    /// and the toast ending is what sends a burst.
-    @Test func leavingTheScreenKeepsTheToastsBurstUndoable() throws {
-        let defaults = Self.defaults()
-        let scope = StorageScope(owner: .member(account: "acct-1", profile: "prof-1"))
-        let wallet = WalletStore(defaults: defaults, scope: scope)
-        let outbox = LikeOutbox(defaults: defaults, scope: scope)
-        wallet.likeOutbox = outbox
-        let before = wallet.balance
-        let staking = PostCardStaking(wallet: wallet, saves: PostBookmarkStore(scope: StorageScope()))
-        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
-        let screen = UIViewController()
-        window.rootViewController = screen
-        window.isHidden = false
-        defer {
-            window.rootViewController = nil
-            window.isHidden = true
-        }
-        let cell = row()
-        screen.view.addSubview(cell)
-        staking.bind(cell, to: PostID("post-1"))
-        let post = PostID("post-1")
-
-        #expect(cell.debugTapLikesChip())
-        staking.endSession()
-        let amount = WalletStore.Policy.defaultStakeAmount
-        #expect(staking.debugUndoable(on: post) == amount, "a push does not commit the toast's burst")
-        #expect(outbox.batches.map(\.isSealed) == [false])
-
-        let toast = try #require(screen.view.subviews.compactMap { $0 as? ToastView }.first)
-        let undo = try #require(toast.accessibilityCustomActions?.first { $0.name == "Undo" })
-        _ = undo.actionHandler?(undo)
-        #expect(wallet.balance == before)
-        #expect(staking.debugUndoable(on: post) == 0)
-
-        // A second burst, left alone: the toast ending sends it.
-        #expect(cell.debugTapLikesChip())
-        staking.endSession()
-        let second = try #require(screen.view.subviews.compactMap { $0 as? ToastView }.first { !$0.isDismissing })
-        StakeMenu.closeUndoToast(second)
-        #expect(staking.debugUndoable(on: post) == 0)
-        #expect(outbox.batches.map(\.isSealed) == [true], "the toast ending sends the burst")
-        #expect(wallet.boostTotal(forTarget: "post-1") == amount)
-    }
-
     /// The card's menu reads the wallet's pack: the default only without one,
     /// "×100 — N left" with one.
     @Test func theCardMenuReadsThePack() {
@@ -192,38 +147,9 @@ struct CardStakeTests {
         #expect(loaded.canShoot)
     }
 
-    /// A stake is a weighty action (`commit`), a refusal the viewer's
-    /// error (`error`), and taking it back is silent (#1883).
-    @Test func aStakeCommitsARefusalErrsAndAnUndoIsSilent() throws {
-        let wallet = WalletStore(defaults: Self.defaults(), scope: StorageScope())
-        let staking = PostCardStaking(wallet: wallet, saves: PostBookmarkStore(scope: StorageScope()))
-        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
-        let screen = UIViewController()
-        window.rootViewController = screen
-        window.isHidden = false
-        defer {
-            window.rootViewController = nil
-            window.isHidden = true
-        }
-        let cell = row()
-        screen.view.addSubview(cell)
-        staking.bind(cell, to: PostID("post-1"))
-
-        let staked = HapticRecorder.recording { #expect(cell.debugTapLikesChip()) }
-        #expect(staked == [.commit])
-        // No pack: a shot is refused.
-        let refused = HapticRecorder.recording { staking.stake(.shot, on: "post-1", cell: cell, source: cell) }
-        #expect(refused == [.error])
-
-        let toast = try #require(screen.view.subviews.compactMap { $0 as? ToastView }.first)
-        let undo = try #require(toast.accessibilityCustomActions?.first { $0.name == "Undo" })
-        let undone = HapticRecorder.recording { _ = undo.actionHandler?(undo) }
-        #expect(undone.isEmpty, "an undo played \(undone)")
-        #expect(staking.debugUndoable(on: PostID("post-1")) == 0)
-    }
-
     /// A shot from a card: a hundred points in one gesture, one shot off the
-    /// pack, and the "+100" receipt's amount is what the wallet spent.
+    /// pack, and the "+100" receipt's amount is what the wallet spent. A shot
+    /// is final (#2532): nothing of it is left to take back.
     @Test func aShotFromACardStakesAHundredAndUsesOneShot() {
         let wallet = WalletStore(defaults: Self.defaults(), scope: StorageScope())
         wallet.buyStakePack()
@@ -238,7 +164,7 @@ struct CardStakeTests {
         #expect(wallet.balance == before - shot)
         #expect(wallet.boostTotal(forTarget: "post-1") == shot)
         #expect(wallet.stakeShots == WalletStore.Policy.StakePack.shots - 1)
-        #expect(staking.debugUndoable(on: PostID("post-1")) == shot)
+        #expect(staking.debugUndoable(on: PostID("post-1")) == 0, "a shot cannot be undone")
     }
 
     /// Two shots fill a post but for 50: a third would be clamped, so the

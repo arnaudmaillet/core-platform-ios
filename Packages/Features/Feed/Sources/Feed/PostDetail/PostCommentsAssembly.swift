@@ -3,6 +3,7 @@ import CoreNavigation
 import CoreStorage
 import EntityStore
 import MediaCore
+import PostGrid
 import PostSurfaces
 import ProfileInterface
 import UIKit
@@ -67,7 +68,8 @@ struct PostCommentsAssembly {
                 threadChrome: threadChrome,
                 imagePipeline: imagePipeline,
                 makeProfileSwitcher: makeProfileSwitcher,
-                wallet: wallet,
+                // Each panel its own stakes, ended when it leaves.
+                stakes: wallet.map { .own(StakeSession(wallet: $0)) },
                 viewerEvents: viewerEvents
             )
         }
@@ -82,14 +84,14 @@ struct PostCommentsAssembly {
         threadChrome: Bool,
         imagePipeline: ImagePipeline,
         makeProfileSwitcher: @MainActor () -> (any ProfileSwitcherPresenting)?,
-        wallet: (any WalletStaking)?,
+        stakes: PostDetailStakes?,
         viewerEvents: ViewerEvents
     ) -> PostDetailViewController {
         PostDetailViewController(
             viewModel: viewModel,
             imagePipeline: imagePipeline,
             profileSwitcher: makeProfileSwitcher(),
-            wallet: wallet,
+            stakes: stakes,
             // The app's viewer channel, which the record of withheld posts
             // already hears (#2376): the composer's face follows a switch.
             viewerEvents: viewerEvents,

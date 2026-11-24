@@ -6,8 +6,10 @@ import UIKit
 /// keeps current from the wallet: the list's card, whose like chip stakes
 /// (`bind`), and the compact cards, whose heart only reads (`bindReadout`).
 /// And the post's count, from the app's `EntityStore` (#896).
+///
+/// A `StakeTotalShowing` (#2532): the stake session draws its heart.
 @MainActor
-public protocol PostCardLikeReadout: UIView {
+public protocol PostCardLikeReadout: UIView, StakeTotalShowing {
     /// What the viewer has staked on the post: the heart's colour.
     func setViewerStake(_ total: Int)
     /// The post's like count as the app knows it now — a realtime tick, the
