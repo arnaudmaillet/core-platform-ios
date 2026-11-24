@@ -121,9 +121,9 @@ extension MainTabCoordinator {
                 DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                     guard let top = self?.debugToastSource() else { return }
                     if shot.isMultiple(of: 2) {
-                        Feedback.undoable("Notifications muted", symbol: "bell.slash.fill", from: top, commit: {}, undo: {})
+                        Feedback.undoable("Notifications muted", symbol: AppSymbol.bellSlashFill.rawValue, from: top, commit: {}, undo: {})
                     } else {
-                        Feedback.success("Notifications on", symbol: "bell.fill", from: top)
+                        Feedback.success("Notifications on", symbol: AppSymbol.bellFill.rawValue, from: top)
                     }
                 }
             }
@@ -135,9 +135,9 @@ extension MainTabCoordinator {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2.5 + Double(shot) * 2.5) { [weak self] in
                     guard let top = self?.debugToastSource() else { return }
                     if shot.isMultiple(of: 2) {
-                        Feedback.success("Notifications on", symbol: "bell.fill", from: top)
+                        Feedback.success("Notifications on", symbol: AppSymbol.bellFill.rawValue, from: top)
                     } else {
-                        Feedback.undoable("Notifications muted", symbol: "bell.slash.fill", from: top, commit: {}, undo: {})
+                        Feedback.undoable("Notifications muted", symbol: AppSymbol.bellSlashFill.rawValue, from: top, commit: {}, undo: {})
                     }
                 }
             }

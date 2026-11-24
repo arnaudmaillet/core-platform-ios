@@ -1,4 +1,5 @@
 import CoreModels
+import DesignSystem
 import Testing
 import UIKit
 @testable import Maps
@@ -157,16 +158,16 @@ struct MapSubFilterMenuTests {
         let expected: [MapSubFilterMenuAction: String] = [
             .viewProfile: "person.crop.circle",
             .sendMessage: "message",
-            .toggleMute: "bell.slash",
+            .toggleMute: AppSymbol.bellSlash.rawValue,
             .viewDetails: "info.circle",
             .share: "square.and.arrow.up",
             .unpin: "pin.slash"
         ]
         for (action, symbol) in expected {
             #expect(action.symbolName(isMuted: false) == symbol, "\(action)")
-            // Every one of them must actually exist in SF Symbols, or the row
-            // renders a hole.
-            #expect(UIImage(systemName: symbol) != nil, "\(symbol)")
+            // Every one of them must resolve (an SF Symbol or the app's own,
+            // `UIImage.symbol(named:)`), or the row renders a hole.
+            #expect(UIImage.symbol(named: symbol) != nil, "\(symbol)")
         }
     }
 
@@ -174,7 +175,7 @@ struct MapSubFilterMenuTests {
     func muteTitleFlips() {
         #expect(MapSubFilterMenuAction.toggleMute.title(isMuted: false) == "Mute")
         #expect(MapSubFilterMenuAction.toggleMute.title(isMuted: true) == "Unmute")
-        #expect(MapSubFilterMenuAction.toggleMute.symbolName(isMuted: true) == "bell")
+        #expect(MapSubFilterMenuAction.toggleMute.symbolName(isMuted: true) == AppSymbol.bell.rawValue)
         for action in MapSubFilterMenuAction.allCases where action != .toggleMute {
             #expect(action.title(isMuted: true) == action.title(isMuted: false), "\(action)")
         }

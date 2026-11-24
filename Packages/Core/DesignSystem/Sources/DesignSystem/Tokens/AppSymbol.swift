@@ -60,6 +60,14 @@ public enum AppSymbol: String, CaseIterable, Sendable {
     /// Search: the owner's magnifier (Lucide's "search", #2456), search
     /// fields included (`SearchFieldStyle`).
     case search = "core.search"
+    /// Notifications: the owner's bell (#2457); slashed when muted, and a
+    /// badge for unread (layer 0 the badge, layer 1 the bell, as the
+    /// system's `bell.badge`, for `NotificationsBell`'s palette).
+    case bell = "core.bell"
+    case bellFill = "core.bell.fill"
+    case bellSlash = "core.bell.slash"
+    case bellSlashFill = "core.bell.slash.fill"
+    case bellBadge = "core.bell.badge"
 
     // The tab bar's own glyphs (#1191): each an outline, a fill (the
     // selected tab), and both with a badge layer (unread) — palette layer 0
@@ -115,6 +123,8 @@ public enum AppSymbol: String, CaseIterable, Sendable {
         case .crown, .crownFilled: GemSymbol.name
         case .settings, .settingsFill: "Settings"
         case .search: "Search"
+        case .bell, .bellFill, .bellBadge: "Notifications"
+        case .bellSlash, .bellSlashFill: "Notifications muted"
         case .map, .mapFill, .mapBadge, .mapBadgeFill: "Explore"
         case .squarePlay, .squarePlayFill, .squarePlayBadge, .squarePlayBadgeFill: "For You"
         case .chats, .chatsFill, .chatsBadge, .chatsBadgeFill: "Messages"

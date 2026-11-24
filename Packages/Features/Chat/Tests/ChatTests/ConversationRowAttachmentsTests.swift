@@ -397,7 +397,7 @@ struct ConversationRowAttachmentsTests {
         let gap = items[bell + 1]
         #expect(gap.identifier == nil && gap.customView == nil && gap.primaryAction == nil)
         #expect(items[pin].image == UIImage(systemName: "pin"))
-        #expect(items[bell].image == UIImage(systemName: "bell"))
+        #expect(items[bell].image == AppSymbol.bell.image())
         #expect(items[pin].accessibilityLabel == "Pin conversation")
         #expect(items[bell].accessibilityLabel == "Notifications")
 
@@ -442,7 +442,7 @@ struct ConversationRowAttachmentsTests {
         #expect(driver.mutes == [true])
         let after = try #require(screen.toolbarItems?.first { $0.identifier == ConversationThreadViewController.bellID })
         #expect(after === bell, "a new item per state")
-        #expect(after.image == UIImage(systemName: "bell.slash"))
+        #expect(after.image == AppSymbol.bellSlash.image())
         #expect(after.accessibilityValue == "Muted")
     }
 

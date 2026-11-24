@@ -816,7 +816,7 @@ final class MapSubFilterBarView: UIView {
         let children = MapSubFilterMenuAction.actions(for: entity).map { action in
             UIAction(
                 title: action.title(isMuted: muted),
-                image: UIImage(systemName: action.symbolName(isMuted: muted)),
+                image: UIImage.symbol(named: action.symbolName(isMuted: muted)),
                 attributes: action.isDestructive ? .destructive : [],
                 handler: { [weak self] _ in self?.perform(action, on: subFilter) }
             )

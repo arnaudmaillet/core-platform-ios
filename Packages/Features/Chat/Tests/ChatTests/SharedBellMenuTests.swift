@@ -24,7 +24,7 @@ struct SharedBellMenuTests {
         let muted = MuteMenu.make(muted: true, onMute: { _ in }, onUnmute: {})
         #expect(muted.children.first?.title == "Unmute")
         #expect((muted.children.last as? UIMenu)?.title == "Mute Again")
-        #expect(MuteMenu.symbol(muted: true) == "bell.slash")
+        #expect(MuteMenu.symbol(muted: true) == .bellSlash)
         #expect(MuteMenu.durations.last?.end() == nil, "until turned back on: no end")
     }
 }

@@ -256,7 +256,7 @@ struct RelationshipFollowStatesTests {
         #expect(!follow.isHidden)
         header.configureAction(.following, bell: ProfileHeaderView.Bell(scopes: .none))
         #expect(follow.events.last == .blurMorph, "Follow → the bell did not morph")
-        #expect(follow.content.symbol == "bell")
+        #expect(follow.content.symbol == AppSymbol.bell.rawValue)
         #expect(follow.content.title == nil)
     }
 

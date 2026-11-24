@@ -1,3 +1,4 @@
+import DesignSystem
 import UIKit
 
 /// What a sub-filter pill actually stands for, resolved from its option.
@@ -121,7 +122,7 @@ enum MapSubFilterMenuAction: String, CaseIterable {
         switch self {
         case .viewProfile: "person.crop.circle"
         case .sendMessage: "message"
-        case .toggleMute: isMuted ? "bell" : "bell.slash"
+        case .toggleMute: MuteMenu.symbol(muted: !isMuted).rawValue
         case .viewDetails: "info.circle"
         case .share: "square.and.arrow.up"
         case .unpin: "pin.slash"

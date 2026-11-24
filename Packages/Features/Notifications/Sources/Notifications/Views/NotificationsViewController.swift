@@ -394,7 +394,7 @@ final class NotificationsViewController: UIViewController {
         case .empty:
             refreshControl.endRefreshing()
             emptyState.configure(
-                symbolName: "bell",
+                symbolName: AppSymbol.bell.rawValue,
                 title: "No notifications yet",
                 subtitle: "Likes, comments and mentions of your posts will show up here."
             )

@@ -562,7 +562,7 @@ final class ProfileCardViewController: UIViewController {
                 let scopes = viewModel.muteScopes
                 let symbol = ProfileRelationControl.bellSymbol(for: scopes)
                 if item.image == nil || shownBellSymbol != symbol {
-                    item.image = UIImage(systemName: symbol)
+                    item.image = UIImage.symbol(named: symbol)
                     shownBellSymbol = symbol
                 }
                 item.accessibilityValue = ProfileRelationControl.bellAccessibilityValue(for: scopes)

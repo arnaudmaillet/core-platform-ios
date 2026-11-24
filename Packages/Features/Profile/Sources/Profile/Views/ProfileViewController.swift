@@ -539,7 +539,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         if !hasLoggedFirstFrame, LaunchArgument.profileFirstFrameLog.isPassed() {
             hasLoggedFirstFrame = true
             print("[profile-first-frame] settled=\(isSettled) "
-                  + "redacted=\(debugIsHeaderRedacted) follow=\(debugFollowTitle ?? (debugMuteBell != nil ? "bell" : "placeholder")) "
+                  + "redacted=\(debugIsHeaderRedacted) follow=\(debugFollowTitle ?? (debugMuteBell != nil ? "mute-bell" : "placeholder")) "
                   + "avatar=\(debugHasAvatarPicture ? "picture" : "initials") "
                   + "banner=\(headerView.bannerFormat) gallerySettled=\(isGallerySettled)")
         }

@@ -1,3 +1,4 @@
+import DesignSystem
 import Foundation
 import ProfileData
 
@@ -50,9 +51,10 @@ nonisolated enum ProfileRelationControl: Equatable, Sendable {
         followButton == .following && canMute && !isGuest
     }
 
-    /// The bell's glyph for the muted scopes.
+    /// The bell's glyph for the muted scopes: the owner's bell (#2457), by
+    /// name, for `AppButton`'s `.symbol` and `UIImage.symbol(named:)`.
     static func bellSymbol(for scopes: MuteScopes) -> String {
-        scopes.isEmpty ? "bell" : "bell.slash"
+        MuteMenu.symbol(muted: !scopes.isEmpty).rawValue
     }
 
     /// What VoiceOver hears of the bell's state.

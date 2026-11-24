@@ -41,6 +41,7 @@ struct AppSymbolTests {
         for (outline, filled) in [
             (AppSymbol.like, AppSymbol.liked), (.save, .saved), (.comment, .commentFilled), (.crown, .crownFilled),
             (.settings, .settingsFill),
+            (.bell, .bellFill), (.bellSlash, .bellSlashFill),
         ] {
             let a = inked(try #require(outline.image(AppSymbol.fixed(20))))
             let b = inked(try #require(filled.image(AppSymbol.fixed(20))))
@@ -100,6 +101,7 @@ struct AppSymbolTests {
     /// never moves or resizes.
     @Test(arguments: [
         [AppSymbol.settings, .settingsFill],
+        [.bell, .bellFill, .bellSlash, .bellSlashFill, .bellBadge],
     ])
     func aFamilySharesOneBox(_ family: [AppSymbol]) throws {
         let configuration = AppSymbol.fixed(17)
@@ -109,6 +111,30 @@ struct AppSymbolTests {
             #expect(abs(image.size.height - first.size.height) <= 0.34, "\(symbol) \(image.size) vs \(family[0]) \(first.size)")
             #expect(abs(image.size.width - first.size.width) <= 0.34, "\(symbol) \(image.size) vs \(family[0]) \(first.size)")
         }
+    }
+
+    /// The badged bell draws its badge in the palette's first colour, as the
+    /// system's `bell.badge` (`NotificationsBell` bakes it in the accent).
+    @Test func theBadgedBellsFirstPaletteColourIsTheBadge() throws {
+        let configuration = AppSymbol.fixed(40).applying(UIImage.SymbolConfiguration(paletteColors: [.red, .black]))
+        let image = try #require(AppSymbol.bellBadge.image(configuration))
+        let size = image.size
+        let rendered = UIGraphicsImageRenderer(size: size).image { _ in image.draw(at: .zero) }
+        guard let cg = rendered.cgImage, let data = cg.dataProvider?.data, let bytes = CFDataGetBytePtr(data) else {
+            Issue.record("no bitmap"); return
+        }
+        var red = 0, black = 0
+        let stride = cg.bytesPerRow, step = cg.bitsPerPixel / 8
+        for y in 0..<cg.height {
+            for x in 0..<cg.width {
+                // RGBA or BGRA: red is the one bright outer channel.
+                let at = y * stride + x * step
+                let c0 = bytes[at], c1 = bytes[at + 1], c2 = bytes[at + 2]
+                guard bytes[at + 3] > 200 else { continue }
+                if max(c0, c2) > 200 && min(c0, c2) < 60 && c1 < 60 { red += 1 } else if max(c0, c1, c2) < 60 { black += 1 }
+            }
+        }
+        #expect(red > 0 && black > red, "badge \(red) px red, bell \(black) px black")
     }
 
     /// VoiceOver reads the play and the pause as what they do.
@@ -139,6 +165,8 @@ struct AppSymbolSizeTests {
         (.map, "map"), (.mapFill, "map.fill"),
         (.settings, "gearshape"), (.settingsFill, "gearshape.fill"),
         (.search, "magnifyingglass"),
+        (.bell, "bell"), (.bellFill, "bell.fill"), (.bellSlash, "bell.slash"), (.bellSlashFill, "bell.slash.fill"),
+        (.bellBadge, "bell.badge"),
     ])
     func aGlyphIsAsTallAsTheSystemsOwn(_ pair: (AppSymbol, String)) throws {
         let configuration = AppSymbol.fixed(12, weight: .semibold)

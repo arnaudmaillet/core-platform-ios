@@ -36,7 +36,7 @@ final class ConversationRowView: UIView {
     /// The last message's emotes animate (`EmoteLabel` marks plain `text`).
     private let previewLabel = EmoteLabel()
     private let timeLabel = UILabel()
-    private let mutedIcon = UIImageView(image: UIImage(systemName: "bell.slash.fill"))
+    private let mutedIcon = UIImageView(image: AppSymbol.bellSlashFill.image())
     private let pinnedIcon = UIImageView(image: UIImage(systemName: "pin.fill"))
     /// The unread count, under the time at the row's trailing edge (#2049).
     private let unreadPill = UnreadCountPill()

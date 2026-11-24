@@ -259,7 +259,7 @@ public final class DebugListViewController: UITableViewController {
             cell.accessoryView = UIImageView(image: UIImage(systemName: "rectangle.portrait.bottomhalf.inset.filled"))
         case .link(let title, let symbol, _):
             content.text = title
-            content.image = symbol.flatMap { UIImage(systemName: $0) }
+            content.image = symbol.flatMap { UIImage.symbol(named: $0) }
             cell.accessoryType = .disclosureIndicator
         }
         cell.contentConfiguration = content
