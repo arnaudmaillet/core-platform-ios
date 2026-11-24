@@ -61,8 +61,9 @@ final class ProfileTabCoordinator: TabCoordinator {
     /// the avatar arrives.
     private static let placeholder = TabFaces.system(outline: "person.crop.circle", fill: "person.crop.circle.fill")
     /// A guest's tab: Settings, wearing the gear the guest Profile page used to
-    /// carry in its header (#626) — its outline, and its fill when selected.
-    private static let guestSettingsFaces = TabFaces.system(outline: "gearshape", fill: "gearshape.fill")
+    /// carry in its header (#626) — its outline, and its fill when selected:
+    /// the owner's gear (#2433).
+    private static let guestSettingsFaces = TabFaces.app(outline: .settings, fill: .settingsFill)
     /// Whether the tab is a guest's Settings — so an avatar reset cannot put
     /// the person glyph back over the gear.
     private var showsGuestSettings = false

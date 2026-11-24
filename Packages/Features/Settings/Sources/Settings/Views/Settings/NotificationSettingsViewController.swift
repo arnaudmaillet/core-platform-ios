@@ -281,7 +281,7 @@ package final class NotificationSettingsViewController: UIViewController {
                 content.textProperties.color = .tintColor
             case .turnOnInSettings:
                 content.text = "Turn On in Settings"
-                content.image = UIImage(systemName: "gear")
+                content.image = AppSymbol.settings.image() // one gear app-wide (#2433)
                 content.textProperties.color = .tintColor
             case .allowed:
                 content = .valueCell()

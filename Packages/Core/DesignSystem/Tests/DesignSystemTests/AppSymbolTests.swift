@@ -38,7 +38,10 @@ struct AppSymbolTests {
 
     /// A filled glyph paints more than its outline.
     @Test func theFilledGlyphsAreFilled() throws {
-        for (outline, filled) in [(AppSymbol.like, AppSymbol.liked), (.save, .saved), (.comment, .commentFilled), (.crown, .crownFilled)] {
+        for (outline, filled) in [
+            (AppSymbol.like, AppSymbol.liked), (.save, .saved), (.comment, .commentFilled), (.crown, .crownFilled),
+            (.settings, .settingsFill),
+        ] {
             let a = inked(try #require(outline.image(AppSymbol.fixed(20))))
             let b = inked(try #require(filled.image(AppSymbol.fixed(20))))
             #expect(b > a, "\(filled) (\(b)) is not fuller than \(outline) (\(a))")
@@ -92,6 +95,22 @@ struct AppSymbolTests {
         }
     }
 
+    /// ⚠️ ONE BOX PER FAMILY (#2433, #2457): the owner's gear and bell swap
+    /// outline, fill, slash and badge in place — the same box, so the glyph
+    /// never moves or resizes.
+    @Test(arguments: [
+        [AppSymbol.settings, .settingsFill],
+    ])
+    func aFamilySharesOneBox(_ family: [AppSymbol]) throws {
+        let configuration = AppSymbol.fixed(17)
+        let first = try #require(family[0].image(configuration))
+        for symbol in family.dropFirst() {
+            let image = try #require(symbol.image(configuration))
+            #expect(abs(image.size.height - first.size.height) <= 0.34, "\(symbol) \(image.size) vs \(family[0]) \(first.size)")
+            #expect(abs(image.size.width - first.size.width) <= 0.34, "\(symbol) \(image.size) vs \(family[0]) \(first.size)")
+        }
+    }
+
     /// VoiceOver reads the play and the pause as what they do.
     @Test func thePlayAndPauseReadAsWhatTheyDo() {
         #expect(AppSymbol.play.accessibilityLabel == "Play")
@@ -118,6 +137,7 @@ struct AppSymbolSizeTests {
         (.share, "square.and.arrow.up"),
         (.play, "play.fill"), (.pause, "pause.fill"), (.playCircle, "play.circle.fill"),
         (.map, "map"), (.mapFill, "map.fill"),
+        (.settings, "gearshape"), (.settingsFill, "gearshape.fill"),
     ])
     func aGlyphIsAsTallAsTheSystemsOwn(_ pair: (AppSymbol, String)) throws {
         let configuration = AppSymbol.fixed(12, weight: .semibold)

@@ -51,6 +51,13 @@ public enum AppSymbol: String, CaseIterable, Sendable {
     /// Gems, filled — the glyph beside an amount (`GemSymbol.glyph`).
     case crownFilled = "core.crown.fill"
 
+    // The app's chrome, the owner's own glyphs, traced from their drawings
+    // (`dev/symbols/<name>`, `dev/symbols/owner-trace`): one gear, one
+    // magnifier and one bell everywhere, the system's never drawn.
+    /// Settings: the owner's gear, six rounded lobes round a ring (#2433).
+    case settings = "core.settings"
+    case settingsFill = "core.settings.fill"
+
     // The tab bar's own glyphs (#1191): each an outline, a fill (the
     // selected tab), and both with a badge layer (unread) — palette layer 0
     // the glyph, layer 1 the badge. Explore's is the owner's folded map with
@@ -103,6 +110,7 @@ public enum AppSymbol: String, CaseIterable, Sendable {
         case .saved: "Saved"
         case .share: "Share"
         case .crown, .crownFilled: GemSymbol.name
+        case .settings, .settingsFill: "Settings"
         case .map, .mapFill, .mapBadge, .mapBadgeFill: "Explore"
         case .squarePlay, .squarePlayFill, .squarePlayBadge, .squarePlayBadgeFill: "For You"
         case .chats, .chatsFill, .chatsBadge, .chatsBadgeFill: "Messages"

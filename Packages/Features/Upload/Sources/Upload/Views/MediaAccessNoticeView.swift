@@ -147,7 +147,7 @@ final class MediaAccessNoticeView: UIView {
             UIAction(title: "Select More Photos…", image: UIImage(systemName: "photo.badge.plus")) {
                 [weak self] _ in self?.onSelectMore?()
             },
-            UIAction(title: "Allow Access to All Photos", image: UIImage(systemName: "gear")) {
+            UIAction(title: "Allow Access to All Photos", image: AppSymbol.settings.image()) {
                 [weak self] _ in self?.onOpenSettings?()
             }
         ])

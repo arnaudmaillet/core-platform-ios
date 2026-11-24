@@ -220,12 +220,12 @@ final class ProfileNavigationBarComposer {
     private var settingsItem: UIBarButtonItem? {
         guard hasSettingsItem else { return nil }
         return trailingStore.item(Self.settingsItemID) {
-            // Settings gear — the viewer's account entry point. A plain
+            // Settings gear (the owner's, #2433) — the viewer's account entry point. A plain
             // trailing item (no leading item, so it never disturbs the
             // edge-swipe pop), tinted `.label` to read as primary dark chrome
             // over the banner.
             let settings = BarItems.icon(
-                id: Self.settingsItemID, image: UIImage(systemName: "gearshape"), label: "Settings"
+                id: Self.settingsItemID, image: AppSymbol.settings.image(), label: "Settings"
             ) { [weak self] in self?.host.pushSettings() }
             settings.tintColor = .label
             return settings
