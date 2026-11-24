@@ -388,6 +388,7 @@ final class SnapFeedViewController: UIViewController {
         makeCommentsPanelContent: ((PostID) -> UIViewController)? = nil,
         makeRestingCommentsPanelContent: ((PostID) -> UIViewController)? = nil,
         wallet: (any WalletStaking)? = nil,
+        stakes: StakeSession? = nil,
         makeWalletSheet: (@MainActor () -> UIViewController)? = nil,
         showsBalance: Bool = true,
         reporting: (any ContentReporting)? = nil,
@@ -415,7 +416,8 @@ final class SnapFeedViewController: UIViewController {
         self.makeCommentsPanelContent = makeCommentsPanelContent
         self.makeRestingCommentsPanelContent = makeRestingCommentsPanelContent
         self.wallet = wallet
-        self.stakes = wallet.map { StakeSession(wallet: $0) }
+        // The builder's, which the comments panels share; else the wallet's.
+        self.stakes = stakes ?? wallet.map { StakeSession(wallet: $0) }
         self.makeWalletSheet = makeWalletSheet
         self.showsBalance = showsBalance
         self.reporting = reporting

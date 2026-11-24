@@ -256,7 +256,9 @@ struct SnapFeedAssembly {
         let imagePipeline = imagePipeline
         let wallet = wallet
         let makeWalletSheet = makeWalletSheet
-        let makePanel = comments.makePanelFactory()
+        // One session for the page and the comments panels it embeds (#2532).
+        let stakes = wallet.map { StakeSession(wallet: $0) }
+        let makePanel = comments.makePanelFactory(sharing: stakes)
         let feed = SnapFeedViewController(
             viewModel: viewModel,
             imagePipeline: imagePipeline,
@@ -270,6 +272,7 @@ struct SnapFeedAssembly {
             // menu; media pages keep the panel above.
             makeRestingCommentsPanelContent: { postID in makePanel(postID, true) },
             wallet: wallet,
+            stakes: stakes,
             makeWalletSheet: makeWalletSheet,
             showsBalance: showsBalance(),
             // For the ⋯ menu's Report row, which withholds itself when there is

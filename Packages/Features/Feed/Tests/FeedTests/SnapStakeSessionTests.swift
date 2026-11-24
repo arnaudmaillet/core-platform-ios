@@ -13,8 +13,8 @@ import UIKit
 @testable import Feed
 @testable import PostSurfaces
 
-/// The Snap page's likes spend through its `StakeSession` (#2532). The
-/// session's own rules are
+/// The Snap page's likes spend through its `StakeSession` (#2532), which it
+/// shares with the comments panels it embeds. The session's own rules are
 /// PostGrid's `StakeSessionTests`; these pin the page's wiring (ADR 0011).
 ///
 /// Every test runs in one main-actor turn once its feed is up: no toast's
@@ -142,5 +142,45 @@ struct SnapStakeSessionTests {
         #expect(feed.stakes == nil)
         feed.debugTapBoost(on: PostID("a"), spend: .likes(1))
         withExtendedLifetime(feed) {}
+    }
+
+    /// The panels a Snap page embeds spend through the page's stakes (§ 3,
+    /// row 6): the bar's stake and the page's on one post are one burst, with
+    /// one toast.
+    @Test func anEmbeddedPanelSharesItsPagesStakes() throws {
+        let wallet = Self.wallet()
+        let stakes = StakeSession(wallet: wallet)
+        let assembly = PostCommentsAssembly(dependencies: .testing(
+            repository: Posts(),
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            postDrafts: PostDraftStore(scope: StorageScope()),
+            bookmarks: PostBookmarkStore(scope: StorageScope()),
+            viewHistory: PostViewHistoryStore(scope: StorageScope()),
+            unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents()),
+            savedSounds: SavedSoundStore(scope: StorageScope()),
+            viewerProfile: { nil }
+        ))
+        let panel = try #require(assembly.makePanelFactory(sharing: stakes)(PostID("a"), false) as? PostDetailViewController)
+        let page = UIViewController()
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        window.rootViewController = page
+        window.isHidden = false
+        defer {
+            window.rootViewController = nil
+            window.isHidden = true
+        }
+        page.addChild(panel)
+        page.view.addSubview(panel.view)
+        panel.view.frame = page.view.bounds
+        panel.didMove(toParent: page)
+        panel.view.layoutIfNeeded()
+
+        panel.debugBoost(.likes(1))
+        stakes.stake(.likes(1), on: PostID("a"), from: page)
+
+        #expect(stakes.menuState(for: PostID("a")).undoable == 2, "the panel spent through its own stakes")
+        let toasts = (panel.view.subviews + page.view.subviews).compactMap { $0 as? ToastView }.filter { !$0.isDismissing }
+        #expect(toasts.count == 1)
+        #expect(toasts.first?.message == StakeMenu.stakedToastMessage(2))
     }
 }
