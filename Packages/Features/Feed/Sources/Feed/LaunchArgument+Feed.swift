@@ -68,7 +68,6 @@ extension LaunchArgument {
     static let walletDemoBoost = LaunchArgument("-wallet-demo-boost")
     static let walletDemoShot = LaunchArgument("-wallet-demo-shot")
     static let walletDemoUndo = LaunchArgument("-wallet-demo-undo")
-    static let walletLog = LaunchArgument("-wallet-log")
     static let zoomBlendLog = LaunchArgument("-zoom-blend-log")
     static let zoomDemoGrabVertical = LaunchArgument("-zoom-demo-grab-vertical")
     static let zoomLiveLog = LaunchArgument("-zoom-live-log")

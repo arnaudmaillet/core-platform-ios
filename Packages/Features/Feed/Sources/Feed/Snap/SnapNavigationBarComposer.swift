@@ -24,7 +24,6 @@ protocol SnapNavigationBarComposerHost: UIViewController {
     var toolbarComposer: SnapToolbarComposer { get }
     var walletBadge: WalletBadgeButton { get }
     var makeWalletSheet: (@MainActor () -> UIViewController)? { get }
-    var boostDrive: SnapBoostDrive { get }
     func presentWalletSheet()
     func refreshWalletBadge()
 }
@@ -288,14 +287,12 @@ final class SnapNavigationBarComposer {
                 self.host.setOwnTrailingBarItems(items, animated: false)
             }
             host.refreshWalletBadge()
-            // The badge (and every visible boost control) re-renders on
-            // every store change — a rail spend, a comments-bar spend, or a
-            // claim taken on the map while this screen sits in the stack
-            // below.
+            // The badge re-renders on every store change — a rail spend, a
+            // comments-bar spend, or a claim taken on the map while this
+            // screen sits in the stack below. The like controls are the
+            // screen's stakes' to redraw (#2532).
             walletObservation = wallet?.changes.observeOnMain { [weak self] in
-                guard let self else { return }
-                self.host.refreshWalletBadge()
-                self.host.boostDrive.refreshVisibleBoostControls()
+                self?.host.refreshWalletBadge()
             }
         }
         // Both pills' widths BEFORE their items are handed over: the bar reads

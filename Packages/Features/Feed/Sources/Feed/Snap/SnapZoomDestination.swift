@@ -28,7 +28,7 @@ protocol SnapZoomDestinationHost: UIViewController {
     var flight: SnapFlightPhase { get set }
     var viewModel: FeedViewModel { get }
     var imagePipeline: ImagePipeline { get }
-    var boost: SnapBoostController { get }
+    var stakes: StakeSession? { get }
     var sideList: SnapSideListController? { get }
     var isKeyboardOnScreen: Bool { get }
     /// `SnapVerticalDragRouter`'s owner of a downward drag beginning now.
@@ -649,7 +649,7 @@ final class SnapZoomDestination {
         chrome.setSlotSharesPost(true, holdArmsShare: host.slotHoldArmsShare(model))
         // The replica's boost anchor wears the same face as the live one —
         // a boosted post must not flash back to the glyph mid-flight.
-        chrome.setBoostTotal(host.boost.boostTotal(on: model.id) ?? 0)
+        chrome.setBoostTotal(host.stakes?.total(on: model.id) ?? 0)
         #if DEBUG
         if LaunchArgument.zoomProfile.isPassed() {
             print("[flight-chrome] \(model.id.rawValue) hasMedia=\(model.mediaURL != nil)"
