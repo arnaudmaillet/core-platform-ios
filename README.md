@@ -1,0 +1,1 @@
+Captures for #2516 (before/after, Debug, iPhone 18 Pro simulator).
