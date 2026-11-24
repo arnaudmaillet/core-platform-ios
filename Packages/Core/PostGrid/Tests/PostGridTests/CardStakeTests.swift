@@ -31,6 +31,23 @@ struct CardStakeTests {
         return cell
     }
 
+    /// `root` as a visible window's root, taken down within the test
+    /// (TEST_TRAPS): a window released visible in the turn that dirtied it
+    /// is laid out after it is freed, and crashes the host in another suite.
+    private func hosting(_ root: UIViewController, _ body: () throws -> Void) rethrows {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        window.rootViewController = root
+        window.isHidden = false
+        window.layoutIfNeeded()
+        defer {
+            window.rootViewController = nil
+            window.subviews.forEach { $0.removeFromSuperview() }
+            window.isHidden = true
+            window.layoutIfNeeded()
+        }
+        try body()
+    }
+
     /// The chip's tap stakes the ONE default amount unless told otherwise.
     @Test func aTapStakesTheDefaultAmount() {
         let cell = row()
@@ -98,32 +115,27 @@ struct CardStakeTests {
         let wallet = WalletStore(defaults: Self.defaults(), scope: StorageScope())
         let before = wallet.balance
         let staking = PostCardStaking(wallet: wallet, saves: PostBookmarkStore(scope: StorageScope()))
-        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
         let screen = UIViewController()
-        window.rootViewController = screen
-        window.isHidden = false
-        defer {
-            window.rootViewController = nil
-            window.isHidden = true
+        try hosting(screen) {
+            let cell = row()
+            screen.view.addSubview(cell)
+            staking.bind(cell, to: PostID("post-1"))
+
+            #expect(cell.debugTapLikesChip())
+            #expect(cell.debugTapLikesChip())
+
+            let toasts = screen.view.subviews.compactMap { $0 as? ToastView }
+            let toast = try #require(toasts.first)
+            #expect(toasts.count == 1)
+            let burst = 2 * WalletStore.Policy.defaultStakeAmount
+            #expect(toast.message == StakeMenu.stakedToastMessage(burst))
+
+            let undo = try #require(toast.accessibilityCustomActions?.first { $0.name == "Undo" })
+            _ = undo.actionHandler?(undo)
+            #expect(wallet.balance == before)
+            #expect(wallet.boostTotal(forTarget: "post-1") == 0)
+            #expect(staking.debugUndoable(on: PostID("post-1")) == 0)
         }
-        let cell = row()
-        screen.view.addSubview(cell)
-        staking.bind(cell, to: PostID("post-1"))
-
-        #expect(cell.debugTapLikesChip())
-        #expect(cell.debugTapLikesChip())
-
-        let toasts = screen.view.subviews.compactMap { $0 as? ToastView }
-        let toast = try #require(toasts.first)
-        #expect(toasts.count == 1)
-        let burst = 2 * WalletStore.Policy.defaultStakeAmount
-        #expect(toast.message == StakeMenu.stakedToastMessage(burst))
-
-        let undo = try #require(toast.accessibilityCustomActions?.first { $0.name == "Undo" })
-        _ = undo.actionHandler?(undo)
-        #expect(wallet.balance == before)
-        #expect(wallet.boostTotal(forTarget: "post-1") == 0)
-        #expect(staking.debugUndoable(on: PostID("post-1")) == 0)
     }
 
     /// The card's menu reads the wallet's pack: the default only without one,
