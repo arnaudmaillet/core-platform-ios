@@ -36,13 +36,6 @@ struct SharedHelperGuardTests {
     /// Where a stake is taken back, committed and given its undo toast.
     static let stakeSession = "Packages/Core/PostGrid/Sources/PostGrid/Staking/StakeSession.swift"
 
-    /// The Snap page's copy, until it moves onto the session (#2532, 2/2).
-    /// May only shrink: nothing is added here.
-    static let stakeCopiesPending: Set<String> = [
-        "Packages/Features/Feed/Sources/Feed/Snap/SnapBoostController.swift",
-        "Packages/Features/Feed/Sources/Feed/Snap/SnapBoostDrive.swift",
-    ]
-
     /// Whether `text`, comments and string literals left out, stakes by hand:
     /// it takes a stake back or commits one through the wallet, raises a
     /// stake's undo toast, or numbers a burst's toasts.
@@ -117,7 +110,7 @@ struct SharedHelperGuardTests {
     @Test func stakingIsTheStakeSessionsAlone() throws {
         let root = RepoRoot.url
         var copies: [String] = []
-        for file in try Self.sources() where file != Self.stakeSession && !Self.stakeCopiesPending.contains(file) {
+        for file in try Self.sources() where file != Self.stakeSession {
             // CoreStorage defines the wallet's calls; it does not stake.
             guard !file.hasPrefix("Packages/Core/CoreStorage/") else { continue }
             let text = try String(contentsOf: root.appendingPathComponent(file), encoding: .utf8)
