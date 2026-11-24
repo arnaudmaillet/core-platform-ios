@@ -90,6 +90,8 @@ public enum AppSymbol: String, CaseIterable, Sendable {
     /// The megaphone's outline, derived from the fill (the "+" menu's New
     /// Channel, the empty Channels tab).
     case megaphone = "core.megaphone"
+    /// A guest's Sign in bubble: the owner's door, an arrow coming in (#2434).
+    case login = "core.login"
 
     /// The glyph as a template image, sized by `configuration` (a text style
     /// for a glyph beside text, a point size for fixed chrome — see
@@ -118,6 +120,7 @@ public enum AppSymbol: String, CaseIterable, Sendable {
         case .play, .playCircle: "Play"
         case .pause: "Pause"
         case .megaphone, .megaphoneFill: "Channel"
+        case .login: "Sign in"
         }
     }
 

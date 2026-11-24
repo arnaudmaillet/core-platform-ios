@@ -130,6 +130,7 @@ struct AppSymbolSizeTests {
         (.share, "square.and.arrow.up"),
         (.play, "play.fill"), (.pause, "pause.fill"), (.playCircle, "play.circle.fill"),
         (.megaphoneFill, "megaphone.fill"), (.megaphone, "megaphone"),
+        (.login, "person.crop.circle.badge.plus"),
         (.map, "map"), (.mapFill, "map.fill"),
     ])
     func aGlyphIsAsTallAsTheSystemsOwn(_ pair: (AppSymbol, String)) throws {
