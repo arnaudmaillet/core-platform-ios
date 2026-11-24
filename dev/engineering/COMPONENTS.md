@@ -116,7 +116,7 @@ Look here before writing any of these. Add a row when you create a shared piece.
 | A toast | `Feedback` | DesignSystem | `ToastGuardTests` |
 | A loading state | `AppLoaderView`, `AppRefreshControl`, skeleton rows | DesignSystem | `StockSpinnerGuardTests`, `LoadingTextGuardTests` |
 | A button | `AppButton`, `AppIconButton` | DesignSystem | |
-| A glyph the app owns | `AppSymbol`, `LikesSymbol`, `SaveStar` | DesignSystem | `OwnedSymbolGuardTests`, `SymbolContractGuardTests` |
+| A glyph the app owns | `AppSymbol`, `LikesSymbol`, `SaveStar`; a search field's magnifier: `SearchFieldStyle` | DesignSystem | `OwnedSymbolGuardTests`, `SymbolContractGuardTests` |
 | A colour | `Palette` | DesignSystem | `RawHueGuardTests` |
 | A font | the scaled type scale | DesignSystem | `ScaledFontGuardTests` |
 | A haptic | the haptic roles | DesignSystem | `HapticsGuardTests` |

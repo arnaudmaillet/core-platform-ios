@@ -150,7 +150,7 @@ public struct SearchRowDisplayModel: Equatable, Sendable, Identifiable {
             monogram = ""
         } else {
             action = .search
-            subject = .symbol("magnifyingglass")
+            subject = .symbol(AppSymbol.search.rawValue)
             avatarURL = nil
             monogram = ""
         }

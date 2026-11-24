@@ -174,7 +174,7 @@ final class GroupMemberPickerViewController: UIViewController {
         renderChips(state.selected)
         renderedSelection = state.selected
         if state.showsNoResults {
-            statusView.configure(symbol: "magnifyingglass", title: "No Results", message: "No one matches that name.")
+            statusView.configure(symbol: AppSymbol.search.rawValue, title: "No Results", message: "No one matches that name.")
             statusView.isHidden = false
         } else {
             statusView.isHidden = true

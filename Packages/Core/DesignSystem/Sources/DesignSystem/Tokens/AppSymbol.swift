@@ -57,6 +57,9 @@ public enum AppSymbol: String, CaseIterable, Sendable {
     /// Settings: the owner's gear, six rounded lobes round a ring (#2433).
     case settings = "core.settings"
     case settingsFill = "core.settings.fill"
+    /// Search: the owner's magnifier (Lucide's "search", #2456), search
+    /// fields included (`SearchFieldStyle`).
+    case search = "core.search"
 
     // The tab bar's own glyphs (#1191): each an outline, a fill (the
     // selected tab), and both with a badge layer (unread) — palette layer 0
@@ -111,6 +114,7 @@ public enum AppSymbol: String, CaseIterable, Sendable {
         case .share: "Share"
         case .crown, .crownFilled: GemSymbol.name
         case .settings, .settingsFill: "Settings"
+        case .search: "Search"
         case .map, .mapFill, .mapBadge, .mapBadgeFill: "Explore"
         case .squarePlay, .squarePlayFill, .squarePlayBadge, .squarePlayBadgeFill: "For You"
         case .chats, .chatsFill, .chatsBadge, .chatsBadgeFill: "Messages"

@@ -138,6 +138,7 @@ struct AppSymbolSizeTests {
         (.play, "play.fill"), (.pause, "pause.fill"), (.playCircle, "play.circle.fill"),
         (.map, "map"), (.mapFill, "map.fill"),
         (.settings, "gearshape"), (.settingsFill, "gearshape.fill"),
+        (.search, "magnifyingglass"),
     ])
     func aGlyphIsAsTallAsTheSystemsOwn(_ pair: (AppSymbol, String)) throws {
         let configuration = AppSymbol.fixed(12, weight: .semibold)

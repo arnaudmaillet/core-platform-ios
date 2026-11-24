@@ -172,7 +172,7 @@ final class InboxSearchResultsViewController: UIViewController {
         > { cell, _, text in
             var content = cell.defaultContentConfiguration()
             content.text = text
-            content.image = UIImage(systemName: "magnifyingglass")
+            content.image = AppSymbol.search.image()
             content.imageProperties.tintColor = .secondaryLabel
             cell.contentConfiguration = content
             cell.accessories = []
@@ -261,7 +261,7 @@ final class InboxSearchResultsViewController: UIViewController {
         case .prompt:
             apply([])
             showStatus(
-                symbol: "magnifyingglass",
+                symbol: AppSymbol.search.rawValue,
                 title: "Search Messages",
                 message: "Find a conversation, a request, or someone new by name or handle."
             )
@@ -281,7 +281,7 @@ final class InboxSearchResultsViewController: UIViewController {
         case .noResults(let query):
             apply([])
             showStatus(
-                symbol: "magnifyingglass",
+                symbol: AppSymbol.search.rawValue,
                 title: "No Results",
                 message: "Nothing matches “\(query)”."
             )

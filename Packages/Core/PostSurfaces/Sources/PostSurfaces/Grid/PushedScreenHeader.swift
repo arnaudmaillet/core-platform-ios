@@ -67,7 +67,7 @@ final public class PushedScreenHeader: NSObject {
 
     private(set) lazy var searchItem: UIBarButtonItem = {
         let item = UIBarButtonItem(
-            image: UIImage(systemName: "magnifyingglass"),
+            image: AppSymbol.search.image(),
             primaryAction: UIAction { [weak self] _ in self?.router?.route(to: .search) }
         )
         item.accessibilityLabel = "Search"

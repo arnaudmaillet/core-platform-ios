@@ -116,7 +116,8 @@ public final class MonogramAccessoryHost: UIView {
         avatar?.isHidden = true
         monogramView.isHidden = false
         monogramView.setMonogram("")
-        symbolView.image = UIImage(systemName: systemName)
+        // The app's own glyphs too (`core.search`, #2456).
+        symbolView.image = UIImage.symbol(named: systemName)
         symbolView.isHidden = false
     }
 

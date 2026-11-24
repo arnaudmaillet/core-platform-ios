@@ -60,7 +60,9 @@ final class InboxStatusView: UIView {
         symbol: String, title: String, message: String,
         actionTitle: String? = nil, action: (() -> Void)? = nil
     ) {
-        symbolView.image = UIImage(systemName: symbol)
+        // The app's own glyphs too (`core.search`, #2456): by name, through
+        // `UIImage.symbol(named:)`, which `UIImage(systemName:)` never finds.
+        symbolView.image = UIImage.symbol(named: symbol)
         titleLabel.text = title
         messageLabel.text = message
         self.action = action

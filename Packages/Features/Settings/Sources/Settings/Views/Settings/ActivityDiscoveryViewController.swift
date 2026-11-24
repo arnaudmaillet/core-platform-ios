@@ -142,7 +142,7 @@ package final class ActivityDiscoveryViewController: UIViewController {
         switch key {
         case .activityStatus: "circle.fill"
         case .readReceipts: "checkmark.message"
-        case .findableInSearch: "magnifyingglass"
+        case .findableInSearch: AppSymbol.search.rawValue
         case .findableByPhone: "phone"
         case .findableByEmail: "envelope"
         case .reachableByLink: "qrcode"
@@ -182,7 +182,7 @@ package final class ActivityDiscoveryViewController: UIViewController {
             switch item {
             case .toggle(let key):
                 content.text = Self.title(key)
-                content.image = UIImage(systemName: Self.symbol(key))
+                content.image = UIImage.symbol(named: Self.symbol(key))
                 content.imageProperties.tintColor = key == .activityStatus ? .systemGreen : .label
                 let toggle = UISwitch()
                 if case .loaded(let settings) = phase { toggle.isOn = saves.value(for: key) ?? settings[key] }

@@ -127,7 +127,7 @@ public final class EmotePickerView: UIInputView {
         addSubview(collectionView)
 
         let symbol = UIImage.SymbolConfiguration(pointSize: 17, weight: .medium)
-        searchButton.setImage(UIImage(systemName: "magnifyingglass", withConfiguration: symbol), for: .normal)
+        searchButton.setImage(AppSymbol.search.image(symbol), for: .normal)
         searchButton.accessibilityLabel = "Search emotes"
         searchButton.tintColor = .secondaryLabel
         deleteButton.tintColor = .secondaryLabel

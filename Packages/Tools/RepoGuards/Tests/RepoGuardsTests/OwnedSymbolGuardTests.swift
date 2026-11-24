@@ -19,6 +19,7 @@ struct OwnedSymbolGuardTests {
         "\"heart\"", "\"heart.fill\"", "\"bookmark\"", "\"bookmark.fill\"", "\"star\"", "\"star.fill\"",
         // The owner's gear, magnifier and bell (#2433, #2456, #2457).
         "\"gearshape\"", "\"gearshape.fill\"", "\"gear\"",
+        "\"magnifyingglass\"",
         "\"diamond\"", "\"diamond.fill\"", "\"ellipsis.message\"", "\"ellipsis.message.fill\"",
         "\"arrow.trianglehead.2.clockwise.rotate.90\"",
     ]

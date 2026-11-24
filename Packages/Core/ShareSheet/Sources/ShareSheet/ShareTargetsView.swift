@@ -107,10 +107,7 @@ final class ShareTargetsView: UIView {
         // verified here exactly as it was on the action chips. The neutral
         // fill also sits correctly beside the opaque avatars it leads.
         var configuration = UIButton.Configuration.filled()
-        configuration.image = UIImage(
-            systemName: "magnifyingglass",
-            withConfiguration: UIImage.SymbolConfiguration(pointSize: 21, weight: .regular)
-        )
+        configuration.image = AppSymbol.search.image(AppSymbol.fixed(21))
         configuration.contentInsets = .zero
         configuration.cornerStyle = .capsule
         // Opaque for the reason the rest of this sheet documents: semantic

@@ -36,6 +36,8 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         // Every switch's on track in the primary: a `UISwitch` ignores the
         // window's tint below (#2435).
         SwitchStyle.tintAppWide()
+        // Every search field's magnifier is the owner's (#2456).
+        SearchFieldStyle.magnifierAppWide()
 
         #if DEBUG
         // Shake for the debug dashboard (#2131, #2132; the mock network's
