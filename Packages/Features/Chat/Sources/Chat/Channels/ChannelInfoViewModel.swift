@@ -227,7 +227,7 @@ final class ChannelInfoViewModel {
         }
         let owner = state.owner
         return ConversationInfoHeader(
-            title: state.name, titleSymbol: ConversationInfoHeader.channelSymbol,
+            title: state.name, titleSymbol: .megaphoneFill,
             subtitle: subtitle(visibility: state.visibility, ownerHandle: owner?.handle),
             subtitleOwner: owner.flatMap { $0.isViewer || $0.handle == nil ? nil : $0.id },
             bio: state.description.isEmpty ? nil : state.description,

@@ -42,12 +42,8 @@ final class ConversationRowView: UIView {
     private let unreadPill = UnreadCountPill()
     /// A channel (#2215): a small megaphone right after its name — on every
     /// channel since #2230, where it marked only the ones the viewer runs.
-    private let channelBadge = UIImageView(image: UIImage(systemName: ConversationRowView.channelBadgeSymbol))
+    private let channelBadge = UIImageView(image: AppSymbol.megaphoneFill.image())
 
-    /// The mark of a channel: a megaphone — one voice, to everyone who
-    /// follows it. Every channel wears it in Chats (#2230): mixed with the
-    /// DMs and the groups, it is what says a row is read, not answered.
-    static let channelBadgeSymbol = "megaphone.fill"
 
     /// Told when the face's "+" is tapped — never the row's own tap.
     var onFollowTapped: (() -> Void)? {

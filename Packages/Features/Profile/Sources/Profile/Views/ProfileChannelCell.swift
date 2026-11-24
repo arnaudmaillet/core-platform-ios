@@ -146,7 +146,7 @@ final class ProfileChannelCell: UICollectionViewCell {
         photo.translatesAutoresizingMaskIntoConstraints = false
         photo.isUserInteractionEnabled = false
 
-        glyph.image = UIImage(systemName: ChannelEmbedCopy.channelSymbol)
+        glyph.image = AppSymbol.megaphoneFill.image()
         glyph.preferredSymbolConfiguration = UIImage.SymbolConfiguration(textStyle: .caption1, scale: .small)
         glyph.tintColor = Palette.tint
         lock.image = UIImage(systemName: ProfileChannelsCopy.lockSymbol)

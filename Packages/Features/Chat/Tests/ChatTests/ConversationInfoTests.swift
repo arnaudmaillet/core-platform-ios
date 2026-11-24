@@ -149,7 +149,7 @@ struct ConversationInfoTests {
     @Test func aChannelsHeaderForItsOwner() async {
         let header = await channel("ch-studio-requests").header
         #expect(header.title == "Studio drops")
-        #expect(header.titleSymbol == "megaphone.fill")
+        #expect(header.titleSymbol == .megaphoneFill)
         #expect(header.subtitle.hasPrefix("Channel on request"))
         #expect(header.subtitleOwner == nil, "the owner's own name opens nothing")
         #expect(header.counters[.subscribers] == 64)

@@ -108,8 +108,9 @@ public enum ChannelEmbedCopy {
         }
     }
 
-    /// A channel's glyph: the megaphone every channel row in Chats wears (#2230).
-    public static let channelSymbol = "megaphone.fill"
+    /// A channel's glyph, by name for `unavailableSymbol`: the owner's
+    /// megaphone, named once in `AppSymbol.megaphoneFill` (#2415).
+    private static var channelSymbol: String { AppSymbol.megaphoneFill.rawValue }
 
     /// What VoiceOver reads for the card: "Channel Harbour notes, 10
     /// subscribers" — the action is its own button.

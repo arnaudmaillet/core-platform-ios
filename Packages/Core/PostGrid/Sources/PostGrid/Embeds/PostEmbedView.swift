@@ -225,7 +225,7 @@ public final class PostEmbedView: UIView {
     }
 
     private func showUnavailable(_ availability: ChannelEmbed.Availability, size: PostEmbeds.Size) {
-        unavailableIcon.image = UIImage(systemName: ChannelEmbedCopy.unavailableSymbol(availability))
+        unavailableIcon.image = UIImage.symbol(named: ChannelEmbedCopy.unavailableSymbol(availability))
         unavailableIcon.preferredSymbolConfiguration = UIImage.SymbolConfiguration(
             pointSize: size == .mark ? 11 : 15, weight: .semibold
         )
@@ -453,7 +453,7 @@ public final class PostEmbedView: UIView {
         photo.translatesAutoresizingMaskIntoConstraints = false
         photo.isUserInteractionEnabled = false
         photoHolder.addSubview(photo)
-        badge.image = UIImage(systemName: ChannelEmbedCopy.channelSymbol)
+        badge.image = AppSymbol.megaphoneFill.image()
         badge.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: 7, weight: .bold)
         badge.tintColor = Palette.onPrimary
         badge.backgroundColor = Palette.prominentFill
@@ -477,7 +477,7 @@ public final class PostEmbedView: UIView {
             badge.bottomAnchor.constraint(equalTo: photoHolder.bottomAnchor, constant: 3),
         ])
 
-        glyph.image = UIImage(systemName: ChannelEmbedCopy.channelSymbol)
+        glyph.image = AppSymbol.megaphoneFill.image()
         glyph.preferredSymbolConfiguration = UIImage.SymbolConfiguration(textStyle: .caption1, scale: .small)
         glyph.tintColor = Palette.tint
         glyph.setContentHuggingPriority(.required, for: .horizontal)

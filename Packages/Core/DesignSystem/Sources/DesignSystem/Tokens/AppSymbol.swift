@@ -82,6 +82,15 @@ public enum AppSymbol: String, CaseIterable, Sendable {
     /// video in a conversation).
     case playCircle = "core.play.circle.fill"
 
+    // A channel's mark and the guest's sign-in, the owner's own glyphs,
+    // traced from their drawings (`dev/symbols/megaphone`, `dev/symbols/login`).
+    /// A channel: the owner's megaphone, filled — the one channel glyph,
+    /// named here only (#2415).
+    case megaphoneFill = "core.megaphone.fill"
+    /// The megaphone's outline, derived from the fill (the "+" menu's New
+    /// Channel, the empty Channels tab).
+    case megaphone = "core.megaphone"
+
     /// The glyph as a template image, sized by `configuration` (a text style
     /// for a glyph beside text, a point size for fixed chrome — see
     /// `textStyle(_:)` and `fixed(_:)`).
@@ -108,6 +117,7 @@ public enum AppSymbol: String, CaseIterable, Sendable {
         case .chats, .chatsFill, .chatsBadge, .chatsBadgeFill: "Messages"
         case .play, .playCircle: "Play"
         case .pause: "Pause"
+        case .megaphone, .megaphoneFill: "Channel"
         }
     }
 

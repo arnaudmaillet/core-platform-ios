@@ -18,6 +18,8 @@ struct OwnedSymbolGuardTests {
     static let names = [
         "\"heart\"", "\"heart.fill\"", "\"bookmark\"", "\"bookmark.fill\"", "\"star\"", "\"star.fill\"",
         "\"diamond\"", "\"diamond.fill\"", "\"ellipsis.message\"", "\"ellipsis.message.fill\"",
+        // The owner's megaphone, a channel's mark (#2415).
+        "\"megaphone\"", "\"megaphone.fill\"",
         "\"arrow.trianglehead.2.clockwise.rotate.90\"",
     ]
 

@@ -140,7 +140,7 @@ extension ProfileTab {
             ("clock.arrow.circlepath", "No History Yet", "Posts you watch will appear here.")
         case .channels:
             // Never drawn: the tab leaves with its last channel (#2232).
-            ("megaphone", "No Channels", "Channels will appear here.")
+            (AppSymbol.megaphone.rawValue, "No Channels", "Channels will appear here.")
         }
     }
 }

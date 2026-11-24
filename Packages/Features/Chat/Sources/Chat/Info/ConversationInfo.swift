@@ -118,7 +118,7 @@ enum ConversationInfoAction: Equatable, Sendable {
 struct ConversationInfoHeader: Equatable, Sendable {
     var title: String
     /// A channel's megaphone after its name (#2230).
-    var titleSymbol: String?
+    var titleSymbol: AppSymbol?
     var subtitle: String
     /// The subtitle names the owner ("by @owner"): a tap opens them.
     var subtitleOwner: ProfileID?
@@ -144,9 +144,6 @@ struct ConversationInfoHeader: Equatable, Sendable {
         captions.map { list in counters[list].map { CountFormatter.compactString(for: Int64(max(0, $0))) } }
     }
 
-    /// A channel's mark after its name: the megaphone its row wears
-    /// (`ConversationRowView.channelBadgeSymbol`, #2230).
-    static let channelSymbol = "megaphone.fill"
 
     /// The link's words: its host and path, no scheme.
     static func linkText(_ url: URL?) -> String? {

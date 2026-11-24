@@ -1,4 +1,5 @@
 import CoreNavigation
+import DesignSystem
 import UIKit
 
 /// The bar's detached trailing item: a "+" that opens a menu of ways to make a
@@ -175,7 +176,7 @@ final class CreateTabItem {
     /// otherwise, so this is the "otherwise".
     private static func menu(_ destinations: [Destination], open: @escaping @MainActor (Destination) -> Void) -> UIMenu {
         let actions = destinations.map { destination in
-            UIAction(title: destination.title, image: UIImage(systemName: destination.symbolName)) { _ in
+            UIAction(title: destination.title, image: UIImage.symbol(named: destination.symbolName)) { _ in
                 open(destination)
             }
         }
@@ -198,7 +199,7 @@ extension CreateTabItem.Destination {
         case .camera: "camera"
         case .upload: "photo.on.rectangle"
         case .text: "textformat"
-        case .channel: "megaphone"
+        case .channel: AppSymbol.megaphone.rawValue
         }
     }
 }
