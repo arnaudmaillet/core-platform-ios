@@ -1161,15 +1161,13 @@ final class SnapChromeView: UIView {
 
     // MARK: - Boost feedback
 
-    /// The like pill's receipts for a spend (#2521).
-    private(set) lazy var boostReceipts = SnapBoostReceipts(host: self)
+    /// The like pill's receipts for a spend, DesignSystem's (#2529).
+    private(set) lazy var boostReceipts = StakeReceipt(anchor: boostButton, host: self, style: .regular, ground: .media)
 
     /// See `SnapChromeActionColumn` — the flight replica's too.
     func setBoostTotal(_ total: Int, animated: Bool = false) { actionColumn.setBoostTotal(total, animated: animated) }
     func setPostLikeCount(_ count: Int64?) { actionColumn.setPostLikeCount(count) }
 }
-
-extension SnapChromeView: SnapBoostReceiptsHost {}
 
 extension SnapChromeView: SnapChromeCommentSurfacesHost {}
 

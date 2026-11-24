@@ -163,9 +163,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
 
     /// Boost feedback pass-throughs — the chrome owns the anchor and its
     /// theatre; the VC owns the wallet verdict that picks which one plays.
-    func playBoostConfirmation(amount: Int) { chrome.boostReceipts.playBoostConfirmation(amount: amount) }
-    func playBoostDenied() { chrome.boostReceipts.playBoostDenied() }
-    func playBoostRefund(amount: Int) { chrome.boostReceipts.playBoostRefund(amount: amount) }
+    func playBoostConfirmation(amount: Int) { chrome.boostReceipts.spend(amount) }
+    func playBoostDenied() { chrome.boostReceipts.refuse() }
+    func playBoostRefund(amount: Int) { chrome.boostReceipts.refund(amount) }
     /// The viewer's cumulative spend on this post — the anchor's number
     /// face. Set at configure (from the wallet's ledger) and again after
     /// each confirmed spend; chrome reset returns it to 0 on reuse.

@@ -68,6 +68,7 @@ Look for a helper before you write one. A second copy of these fails `SharedHelp
 |---|---|
 | A count in short form ("1.2k") | `CountFormatter` (DesignSystem) |
 | A blur whose strength varies (0…1) | `ProgressBlurView` (DesignSystem) |
+| A control shaking its head | `StakeReceipt` for a stake's refusal, `AppControl.fail()` for a failed action (DesignSystem) |
 | Notification observer tokens | `NotificationTokens` (CoreModels) |
 | Waiting in a test for main-actor work to settle | `settle(looks:isolation:until:)` (TestSupport) |
 | Rewriting a media host | `HostRewrite` (CoreModels) |

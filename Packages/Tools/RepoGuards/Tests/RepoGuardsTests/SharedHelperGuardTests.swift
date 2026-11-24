@@ -11,12 +11,27 @@ import Testing
 /// - A count spelled short ("1.2K") is DesignSystem's `CountFormatter`,
 ///   which truncates. The comment rows and the subtitles rounded ("2.0k" for
 ///   1,999) until #2390, and Maps had its own until #2397.
+/// - A head-shake (a keyframe on `transform.translation.x`) is DesignSystem's:
+///   `StakeReceipt` for a stake control's refusal, `AppControl.fail()` for a
+///   button's failed action. The feed rail, the comments bar and the list
+///   card each shook their own way until #2529.
 struct SharedHelperGuardTests {
     /// Where the strength blur is made.
     static let progressBlur = "Packages/Core/DesignSystem/Sources/DesignSystem/Components/ProgressBlurView.swift"
 
     /// Where a count is spelled short.
     static let countFormatter = "Packages/Core/DesignSystem/Sources/DesignSystem/Formatting/CountFormatter.swift"
+
+    /// Where a control shakes its head.
+    static let headShakes: Set<String> = [
+        "Packages/Core/DesignSystem/Sources/DesignSystem/Components/StakeReceipt.swift",
+        "Packages/Core/DesignSystem/Sources/DesignSystem/Components/AppControl.swift",
+    ]
+
+    /// Whether `text`, comments left out, animates a horizontal shake.
+    static func shakesItsHead(_ text: String) -> Bool {
+        EmptyActionGuardTests.strippingLineComments(text).contains("\"transform.translation.x\"")
+    }
 
     /// Whether `text` abbreviates a count by hand: a one-decimal format
     /// followed by k, K or M.
@@ -63,6 +78,22 @@ struct SharedHelperGuardTests {
             if Self.spellsACountShort(text) { copies.append(file) }
         }
         #expect(copies.isEmpty, "a count abbreviated outside CountFormatter: \(copies)")
+    }
+
+    @Test func aHeadShakeIsDesignSystems() throws {
+        let root = RepoRoot.url
+        var copies: [String] = []
+        for file in try Self.sources() where !Self.headShakes.contains(file) {
+            let text = try String(contentsOf: root.appendingPathComponent(file), encoding: .utf8)
+            if Self.shakesItsHead(text) { copies.append(file) }
+        }
+        #expect(copies.isEmpty, "a head-shake outside StakeReceipt and AppControl: \(copies)")
+    }
+
+    @Test func theShakePatternSeesACopyAndNotAComment() {
+        #expect(Self.shakesItsHead(#"let shake = CAKeyframeAnimation(keyPath: "transform.translation.x")"#))
+        #expect(!Self.shakesItsHead(#"// CAKeyframeAnimation(keyPath: "transform.translation.x")"#))
+        #expect(!Self.shakesItsHead(#"let fade = CABasicAnimation(keyPath: "opacity")"#))
     }
 
     @Test func theCountPatternSeesACopy() {
