@@ -60,6 +60,13 @@ final class SnapChromeActionColumn {
     /// never from the stream (see there for why the band's hidden state is
     /// the wrong authority for it).
     let boostButton = SnapRailBoostButton()
+    /// The like pill's receipts, DesignSystem's `StakeReceipt` (#2529). They
+    /// float in the column's layer, ABOVE the wheel's (#2553): floated in the
+    /// chrome, which lies under the whole column, the "+N" rose behind the
+    /// reaction emojis.
+    private(set) lazy var boostReceipts = StakeReceipt(
+        anchor: boostButton, host: columnLayer, style: .regular, ground: .media
+    )
     /// The post's like count on the like button's corner (#668) — or, in the
     /// like pill (#669), under its heart.
     /// The post's like count — `configure`'s, then the live one

@@ -2716,10 +2716,10 @@ public final class CommentsInputBar: UIView {
         )
     }
 
-    /// The boost bubble's receipts, DesignSystem's `StakeReceipt` (#2529):
-    /// the "+N" rising, the "−N" sinking, the refusal's shake. The bar does
-    /// not clip, so the number may pass its top edge by design.
-    private lazy var boostReceipts = StakeReceipt(anchor: boostButton, host: self, style: .regular, ground: .media)
+    /// The boost bubble's receipts (#2529), on the page's ground (#2553): the
+    /// bubble shows only where the bar hosts its column, on a plain page; over
+    /// media the page's column plays its own. The bar does not clip.
+    private lazy var boostReceipts = StakeReceipt(anchor: boostButton, host: self, style: .regular, ground: .page)
     public func playBoostConfirmation(amount: Int) { boostReceipts.spend(amount) }
     public func playBoostRefund(amount: Int) { boostReceipts.refund(amount) }
     public func playBoostDenied() { boostReceipts.refuse() }
