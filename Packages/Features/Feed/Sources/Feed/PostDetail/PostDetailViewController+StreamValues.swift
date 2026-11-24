@@ -67,17 +67,9 @@ extension PostDetailViewController {
     static let nearEndRowCount = 5
 
     /// The empty stream's words: an invitation to write while this is a
-    /// DRAFT, an invitation to comment once it is a post.
+    /// DRAFT. A post with no comments shows no page at all (#2477): an empty
+    /// list above the composer.
     typealias EmptyPageCopy = CommentsEmptyPageCopy
-
-    static let commentsEmptyPageCopy = EmptyPageCopy(
-        // The comments glyph, app-wide — a DM thread's empty page keeps the
-        // two bubbles (Chat's `ConversationThreadViewController`): a
-        // conversation is not a post's comments.
-        symbol: PostActionSymbol.comments,
-        title: SnapCommentEmptyStateView.promptText,
-        subtitle: "Be the first to comment."
-    )
 
     static let draftEmptyPageCopy = EmptyPageCopy(
         symbol: "square.and.pencil",

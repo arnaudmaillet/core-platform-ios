@@ -735,8 +735,8 @@ final class TextPostComposerViewController: UIViewController {
     // MARK: - Published
 
     /// The first message went out: the page is the post's now. The panel did
-    /// its own half (caption row, "No comments yet", a composer that
-    /// comments); these are the bars.
+    /// its own half (caption row, an empty list, a composer that comments);
+    /// these are the bars.
     private func becomePublished(_ entry: FeedEntry) {
         if let editingDraftID { drafts.delete(editingDraftID) }
         editingDraftID = nil
