@@ -38,8 +38,11 @@ from fighting over `develop` and over CI.
     its package's tests (`build-for-testing`) and push.
   - CI compiles with Xcode 26, which can reject Swift that a local Xcode 27
     accepts.
-  - An **app build** and simulator captures wait until the self-hosted
-    runner is idle **and** no workflow run is in progress. The background
+  - While test lanes run on the self-hosted Mac (`MACOS_RUNNER` unset), an
+    **app build** and simulator captures wait until the self-hosted
+    runner is idle **and** no workflow run is in progress. With
+    `MACOS_RUNNER=github` they only wait for the runner to finish a job
+    started before the switch. The background
     QoS (`taskpolicy -b xcodebuild …`) limits CPU and disk, not memory: a
     Debug app build beside a Mac job turned #2449's Upload lane red (a video
     poster that failed to decode, 2026-11-14).
@@ -100,8 +103,9 @@ from fighting over `develop` and over CI.
     file and never fails: the count per rule goes to the job summary, and the
     report to the `swiftlint-report` artifact.
   - **The test lanes, by repository variable:**
-    - `MACOS_RUNNER=github` (set since 2026-11-18, the owner: one session
-      works on the repository during audit #2366): **every lane runs on
+    - `MACOS_RUNNER=github` (set again on 2026-11-24 by the owner: from
+      2026-11-18 to 2026-11-24 `HOSTED_LANES_ON_MAC=1` sent every lane to the
+      Mac, and local builds waited hours for it): **every lane runs on
       GitHub's `macos-latest`, Xcode 26**, four at a time for a pull request
       and three for `develop`. `compile tests (Xcode 26)` is skipped, since the
       lanes are Xcode 26 themselves. The self-hosted Mac stays free for local
