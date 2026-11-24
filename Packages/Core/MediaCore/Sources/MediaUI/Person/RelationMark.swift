@@ -291,8 +291,8 @@ public final class RelationBadgeView: UIButton {
 
     /// The disc's ink for a badge (#1197, the owner 2026-10-15): the "+"
     /// black; a FOLLOWED check and a pending request grey, their mark pink;
-    /// FRIENDS black (`2C2C2E` in the dark), their mark mint (#2440); clear
-    /// for none.
+    /// FRIENDS dark grey (`48484A`, `3A3A3C` in the dark, #2476), their mark
+    /// mint (#2440); clear for none.
     public static func discInk(for badge: PersonPill.Badge) -> UIColor {
         switch badge {
         case .none, .loading: .clear

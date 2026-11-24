@@ -4,9 +4,10 @@ import UIKit
 @testable import MediaCore
 @testable import MediaUI
 
-/// Friends' badge is a black disc with a mint glyph (#2440, the owner
-/// 2026-11-14): a very dark grey disc in the dark, the same with Increased
-/// Contrast. Following keeps its grey disc and pink check.
+/// Friends' badge is a dark grey disc with a mint glyph (#2440; dark grey,
+/// not black, since #2476, the owner 2026-11-17): `48484A` in the light,
+/// `3A3A3C` in the dark, and `3A3A3C` in the light with Increased Contrast.
+/// Following keeps its grey disc and pink check.
 @MainActor
 struct FriendsBadgeInkTests {
     private static func hex(_ color: UIColor, _ style: UIUserInterfaceStyle, contrast: UIAccessibilityContrast = .normal) -> String {
@@ -20,11 +21,11 @@ struct FriendsBadgeInkTests {
     }
 
     @Test(arguments: [UIAccessibilityContrast.normal, .high])
-    func friendsIsABlackDiscWithAMintGlyph(_ contrast: UIAccessibilityContrast) {
+    func friendsIsADarkGreyDiscWithAMintGlyph(_ contrast: UIAccessibilityContrast) {
         let disc = RelationBadgeView.discInk(for: .friends)
         let glyph = RelationBadgeView.glyphInk(for: .friends)
-        #expect(Self.hex(disc, .light, contrast: contrast) == "000000")
-        #expect(Self.hex(disc, .dark, contrast: contrast) == "2C2C2E", "a black disc loses its outline on the black page")
+        #expect(Self.hex(disc, .light, contrast: contrast) == (contrast == .high ? "3A3A3C" : "48484A"), "dark grey, not black")
+        #expect(Self.hex(disc, .dark, contrast: contrast) == "3A3A3C", "a step lighter than the black page, so the disc keeps its outline")
         #expect(Self.hex(glyph, .light, contrast: contrast) == "16FFCB")
         #expect(Self.hex(glyph, .dark, contrast: contrast) == "16FFCB")
     }

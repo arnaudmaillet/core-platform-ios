@@ -31,8 +31,8 @@ struct SnapAuthorBadgeInkTests {
 
     /// The owner's inks (#1197): the "+" a black disc with a white mark; a
     /// FOLLOWED check and a PENDING clock a grey disc with a pink mark; FRIENDS
-    /// a black disc with a mint mark (#2440), its disc a very dark grey in the
-    /// dark. Each ink is read under the appearance it is drawn in.
+    /// a dark grey disc with a mint mark (#2440, #2476), its disc resolving per
+    /// appearance. Each ink is read under the appearance it is drawn in.
     @Test(arguments: [Badge.follow, .following, .friends, .pending],
           [UIUserInterfaceStyle.light, .dark])
     func eachBadgeWearsItsInks(_ badge: Badge, _ style: UIUserInterfaceStyle) throws {
@@ -62,8 +62,8 @@ struct SnapAuthorBadgeInkTests {
     }
 
     /// The same badge, pixel for pixel, in light and dark mode — all but
-    /// Friends, whose disc turns a very dark grey in the dark so it keeps its
-    /// outline on the black page (#2440).
+    /// Friends, whose dark grey disc is a step lighter in the dark so it keeps
+    /// its outline on the black page (#2440, #2476).
     @Test(arguments: [Badge.follow, .following, .pending])
     func theBadgeIsTheSameInEitherAppearance(_ badge: Badge) throws {
         let pill = SnapAuthorIdentityView()
