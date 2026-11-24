@@ -165,9 +165,17 @@ struct SnapStakeSessionTests {
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
         window.rootViewController = page
         window.isHidden = false
+        // Taken down within the test (TEST_TRAPS): a window released visible
+        // in the turn that dirtied it is laid out after it is freed, and
+        // crashes the host somewhere else (#2556's first CI run).
         defer {
+            panel.willMove(toParent: nil)
+            panel.view.removeFromSuperview()
+            panel.removeFromParent()
             window.rootViewController = nil
+            window.subviews.forEach { $0.removeFromSuperview() }
             window.isHidden = true
+            window.layoutIfNeeded()
         }
         page.addChild(panel)
         page.view.addSubview(panel.view)
