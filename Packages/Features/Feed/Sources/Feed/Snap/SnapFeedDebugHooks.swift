@@ -28,8 +28,8 @@ protocol SnapFeedDebugHooksHost: UIViewController {
     func updateActiveItem()
     func presentSoundSheet()
     func presentWalletSheet()
-    func performBoost(on id: PostID, spend: WalletStakeSpend, feedbackCell: SnapFeedCell?)
-    func performBoostUndo(on id: PostID, feedbackCell: SnapFeedCell?)
+    func performBoost(on id: PostID, spend: WalletStakeSpend, from source: UIResponder?)
+    func performBoostUndo(on id: PostID, from source: UIResponder?)
     func debugDrivePageSwipe(steps: Int, distance: CGFloat)
     func debugFlingPages(_ remaining: Int, back: Int)
     func dumpBarHierarchy()
@@ -224,7 +224,7 @@ final class SnapFeedDebugHooks {
                 let cell = self.host.collectionView.visibleCells
                     .compactMap { $0 as? SnapFeedCell }.first
                 let spend: WalletStakeSpend = LaunchArgument.walletDemoShot.isPassed(in: arguments) ? .shot : .likes(amount)
-                self.host.performBoost(on: self.host.orderedIDs[index], spend: spend, feedbackCell: cell)
+                self.host.performBoost(on: self.host.orderedIDs[index], spend: spend, from: cell)
             }
         }
         // `-wallet-demo-undo`: takes back the active post's session boosts
@@ -238,7 +238,7 @@ final class SnapFeedDebugHooks {
                 guard self.host.orderedIDs.indices.contains(index) else { return }
                 let cell = self.host.collectionView.visibleCells
                     .compactMap { $0 as? SnapFeedCell }.first
-                self.host.performBoostUndo(on: self.host.orderedIDs[index], feedbackCell: cell)
+                self.host.performBoostUndo(on: self.host.orderedIDs[index], from: cell)
             }
         }
         // `-save-elsewhere [seconds]` (#1067): toggles the active post's save

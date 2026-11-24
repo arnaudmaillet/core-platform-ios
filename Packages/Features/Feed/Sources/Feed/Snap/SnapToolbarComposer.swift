@@ -5,6 +5,7 @@ import DesignSystem
 import FeedInterface
 import LaunchArguments
 import MediaCore
+import PostGrid
 import PostSurfaces
 import ThreadKit
 import UIKit
@@ -24,7 +25,7 @@ protocol SnapToolbarComposerHost: UIViewController {
     var unavailablePostIDs: Set<PostID> { get }
     var bookmarks: PostBookmarkStore { get }
     var viewModel: FeedViewModel { get }
-    var boost: SnapBoostController { get }
+    var stakes: StakeSession? { get }
     var imagePipeline: ImagePipeline { get }
     /// The pill the toolbar's leading item wears.
     var authorIdentityView: SnapAuthorIdentityView { get }
@@ -32,7 +33,7 @@ protocol SnapToolbarComposerHost: UIViewController {
     var canAnimateBarItems: Bool { get }
     func soundFace(for model: FeedItemDisplayModel) -> SnapSoundFace?
     func presentSoundSheet()
-    func performBoost(on id: PostID, spend: WalletStakeSpend, feedbackCell: SnapFeedCell?)
+    func performBoost(on id: PostID, spend: WalletStakeSpend, from source: UIResponder?)
     func snapCell(for id: PostID) -> SnapFeedCell?
     func applyAuthorWidthBudget(bar: CGFloat?, sortOnBar: Bool?)
 }
@@ -372,7 +373,7 @@ final class SnapToolbarComposer {
         let face = model.flatMap { model -> FooterLikeFace? in
             guard model.mediaURL == nil, !host.unavailablePostIDs.contains(model.id) else { return nil }
             return FooterLikeFace(
-                id: model.id, count: host.viewModel.visibleLikeCount(for: model), spent: host.boost.boostTotal(on: model.id) ?? 0
+                id: model.id, count: host.viewModel.visibleLikeCount(for: model), spent: host.stakes?.total(on: model.id) ?? 0
             )
         }
         guard face != footerLikeFace else { return }
@@ -412,6 +413,6 @@ final class SnapToolbarComposer {
     /// text page.
     func likeFromFooter() {
         guard let id = footerLikeFace?.id else { return }
-        host.performBoost(on: id, spend: .likes(WalletStore.Policy.defaultStakeAmount), feedbackCell: host.snapCell(for: id))
+        host.performBoost(on: id, spend: .likes(WalletStore.Policy.defaultStakeAmount), from: host.snapCell(for: id))
     }
 }

@@ -92,9 +92,10 @@ final class SnapFeedViewController: UIViewController {
     /// the SAME shell-owned sheet the map's badge opens, injected so the
     /// two entries can never diverge. Nil keeps the badge display-only.
     let makeWalletSheet: (@MainActor () -> UIViewController)?
-    /// The boost flow on the current post — the wallet's verdicts, the
-    /// session undo and the anchors' context (`SnapBoostController`).
-    let boost: SnapBoostController
+    /// The stakes every like on this screen spends through (#2532): the
+    /// pages' pills, the text page's footer like and the comments panels it
+    /// embeds. Nil without a wallet: the likes stay visible but inert.
+    let stakes: StakeSession?
 
     /// id → display model; lookups only, never measurement.
     /// The colour this screen wears while it has NO PAGES.
@@ -328,10 +329,6 @@ final class SnapFeedViewController: UIViewController {
     /// The side list's session and the swipe chain (`SnapSideListSession`).
     /// Built on first use; building it does nothing else.
     private(set) lazy var sideListSession = SnapSideListSession(host: self, videoPlayback: videoPlayback)
-    /// The boost on screen: the gate, the theatre, the stake toast and the
-    /// boost anchors (`SnapBoostDrive`). Built on first use; building it does
-    /// nothing else.
-    private(set) lazy var boostDrive = SnapBoostDrive(host: self, wallet: wallet)
     /// The share sheet and its chips: Repost, Not interested, Report
     /// (`SnapPostActions`). Built on first use; building it does nothing
     /// else.
@@ -418,7 +415,7 @@ final class SnapFeedViewController: UIViewController {
         self.makeCommentsPanelContent = makeCommentsPanelContent
         self.makeRestingCommentsPanelContent = makeRestingCommentsPanelContent
         self.wallet = wallet
-        self.boost = SnapBoostController(wallet: wallet)
+        self.stakes = wallet.map { StakeSession(wallet: $0) }
         self.makeWalletSheet = makeWalletSheet
         self.showsBalance = showsBalance
         self.reporting = reporting
@@ -452,6 +449,11 @@ final class SnapFeedViewController: UIViewController {
         }
         followSubscription = followEvents?.subscribeOnMain { [weak self] change in
             self?.followStore.graphDidChange(change)
+        }
+        // The footer like wears the stake too; the pages' pills are bound.
+        self.stakes?.onChange = { [weak self] in
+            guard let self, isViewLoaded else { return }
+            toolbarComposer.refreshFooterLike(for: activeModel, animated: true)
         }
     }
 
@@ -1085,10 +1087,9 @@ final class SnapFeedViewController: UIViewController {
         for cell in collectionView.visibleCells {
             (cell as? SnapCellLifecycle)?.releaseRetainedNeighbourClips()
         }
-        // Leaving the screen finalizes the session's boosts, same as paging
-        // away (`SnapBoostController.finalize`).
-        boost.finalize()
-        boostDrive.closeStakeToastIfSettled()
+        // Leaving the screen: a burst with no toast is sent now; one whose
+        // toast is up stays undoable until it ends (#1375).
+        stakes?.end()
     }
 
     // MARK: - Setup
@@ -1303,26 +1304,16 @@ final class SnapFeedViewController: UIViewController {
                     cell.mediaTaps.onPostTrackTap = nil
                     cell.mediaTaps.onPostTrackHold = nil
                 }
-                // The boost spend: wallet verdict here (the cell holds no
-                // balance), theatre back on the cell that asked.
+                // The like spends through the screen's stakes, which play
+                // the receipts back on the cell that asked; bound, the cell
+                // wears the post's stake (a recycled cell gets it back).
                 cell.onRequestBoost = { [weak self, weak cell] id, spend in
-                    self?.performBoost(on: id, spend: spend, feedbackCell: cell)
+                    self?.performBoost(on: id, spend: spend, from: cell)
                 }
                 cell.onRequestBoostUndo = { [weak self, weak cell] id in
-                    self?.performBoostUndo(on: id, feedbackCell: cell)
+                    self?.performBoostUndo(on: id, from: cell)
                 }
-                // The anchor's number face and wallet context: what this
-                // viewer has already put on this post (the ledger), what
-                // the balance can still afford, and whether any of it is
-                // still session-undoable — a recycled cell for a boosted
-                // post gets its receipt back.
-                if let total = self.boost.boostTotal(on: id),
-                   let context = self.boost.anchorContext(for: id) {
-                    cell.setBoostTotal(total)
-                    cell.setBoostContext(
-                        balance: context.balance, undoable: context.undoable, stakeShots: context.stakeShots
-                    )
-                }
+                self.stakes?.bind(cell, to: id)
                 cell.onRequestCommentsPageDrive = { [weak self] phase, translation, velocity in
                     self?.pagerDrive.drivePageSwipe(phase, translation: translation, velocity: velocity)
                 }
@@ -1675,14 +1666,18 @@ final class SnapFeedViewController: UIViewController {
 
     // MARK: - Boost
 
-    /// One boost spend (`SnapBoostDrive`).
-    func performBoost(on id: PostID, spend: WalletStakeSpend, feedbackCell: SnapFeedCell?) {
-        boostDrive.performBoost(on: id, spend: spend, feedbackCell: feedbackCell)
+    /// One stake on `id`, from `source` (the page's cell, the footer): none
+    /// on a post the viewer may no longer see (#1409), a tap that finished a
+    /// member gate after it turned unavailable.
+    func performBoost(on id: PostID, spend: WalletStakeSpend, from source: UIResponder?) {
+        stakes?.stake(spend, on: id, from: source ?? self, lands: { [weak self] in
+            self.map { !$0.unavailablePostIDs.contains(id) } ?? false
+        })
     }
 
-    /// Takes back the whole session spend on `id` (`SnapBoostDrive`).
-    func performBoostUndo(on id: PostID, feedbackCell: SnapFeedCell?) {
-        boostDrive.performBoostUndo(on: id, feedbackCell: feedbackCell)
+    /// Takes back the live burst on `id`: the menu's Undo.
+    func performBoostUndo(on id: PostID, from source: UIResponder?) {
+        stakes?.undo(on: id, from: source)
     }
 
     // MARK: - Unavailable posts (#1409)
@@ -1723,7 +1718,7 @@ final class SnapFeedViewController: UIViewController {
             viewModel.postBecameUnavailable(id, onShow: givesWay ? nil : activePostID)
         }
         guard unavailablePostIDs.insert(id).inserted else { return }
-        boostDrive.takeBackSessionStake(on: id, feedbackCell: snapCell(for: id), withFeedback: false)
+        stakes?.takeBack(id)
         // On screen now; a page already dequeued but not yet shown is told
         // at `willDisplay`, every later one at configure.
         snapCell(for: id)?.setPostUnavailable(true)
@@ -1744,10 +1739,11 @@ final class SnapFeedViewController: UIViewController {
     /// A tap on the footer's like, through the screen's own path.
     func debugTapFooterLike() { toolbarComposer.likeFromFooter() }
 
-    /// A like staked straight through the wallet, as a tap's spend lands —
-    /// without the toast, whose one undo slot is shared by the whole process.
+    /// A like staked through the screen's stakes as a tap's spend lands —
+    /// without the toast (from no screen), whose one undo slot is shared by
+    /// the whole process.
     func debugStake(_ spend: WalletStakeSpend, on id: PostID) {
-        _ = boost.stake(spend, on: id)
+        stakes?.stake(spend, on: id, from: UIView())
     }
 
     /// A tap on the page's like, through the screen's own path.
@@ -1790,10 +1786,6 @@ final class SnapFeedViewController: UIViewController {
         present(makeWalletSheet(), animated: true)
     }
 
-    /// Pushes the wallet's current answer — affordability and the
-    /// session-undoable tally — into every visible cell's boost anchor, so
-    /// a spend (or a claim on another screen) enables/disables the control
-    /// and updates the menu it will build on its next long-press.
     /// What the sound bubble and the composer's rail slot draw for `model`
     /// (#671) — see `SnapSoundState.face`.
     func soundFace(for model: FeedItemDisplayModel) -> SnapSoundFace? {
@@ -2101,13 +2093,8 @@ final class SnapFeedViewController: UIViewController {
             // Paging within the feed: the page stays alive and a swipe away, so
             // it keeps its player and simply stops advancing.
             lifecycleCell(at: resign)?.didResignActive(releasingPlayback: false)
-            // Paging away FINALIZES the session's boosts: the undo window
-            // is the post's time on screen, and it just ended — and commits
-            // its taps (#676).
-            if orderedIDs.indices.contains(resign) {
-                boost.pageResigned(orderedIDs[resign])
-                boostDrive.closeStakeToastIfSettled()
-            }
+            // Paging away leaves the stakes alone: a burst stays undoable
+            // while its toast is up, and its toast's end sends it (#2532).
             // A text page's resting engagement is not retired here: it keeps
             // its interface until its last pixel has left (`didEndDisplaying`).
         }
@@ -2977,10 +2964,6 @@ extension SnapFeedViewController: SnapNavigationBarComposerHost {}
 // MARK: - The side list session's host (#2514)
 
 extension SnapFeedViewController: SnapSideListSessionHost {}
-
-// MARK: - The boost's host (#2514)
-
-extension SnapFeedViewController: SnapBoostDriveHost {}
 
 // MARK: - The post actions' host (#2514)
 

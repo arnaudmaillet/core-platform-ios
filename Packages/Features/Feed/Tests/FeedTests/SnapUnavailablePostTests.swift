@@ -274,9 +274,10 @@ struct SnapUnavailablePostTests {
     }
 
     /// AC3, before the toast: a like still inside its undo window when the
-    /// post turns unavailable goes back to the wallet. Staked straight
-    /// through the wallet — the toast's one undo slot is shared by the whole
-    /// process, and another suite's toast could send the burst.
+    /// post turns unavailable goes back to the wallet: the screen's stakes
+    /// take it back (`StakeSession.takeBack`, #2532). Staked without a toast
+    /// — the toast's one undo slot is shared by the whole process, and
+    /// another suite's toast could send the burst.
     @Test func aLikeTappedJustBeforeTheChangeGoesBack() async throws {
         let wallet = makeWallet()
         let panels = Panels(posts: Posts(gone: [PostID("a")]))
