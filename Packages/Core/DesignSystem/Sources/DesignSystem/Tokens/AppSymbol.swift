@@ -44,8 +44,6 @@ public enum AppSymbol: String, CaseIterable, Sendable {
     case save = "core.star"
     /// Saved: the star, filled (drawn gold, `Palette.saveGold`).
     case saved = "core.star.fill"
-    /// Share.
-    case share = "core.share"
     /// Gems, outline: the owner's crown (#2071).
     case crown = "core.crown"
     /// Gems, filled — the glyph beside an amount (`GemSymbol.glyph`).
@@ -68,6 +66,13 @@ public enum AppSymbol: String, CaseIterable, Sendable {
     case bellSlash = "core.bell.slash"
     case bellSlashFill = "core.bell.slash.fill"
     case bellBadge = "core.bell.badge"
+
+    // What a viewer does to content, the owner's own glyphs (#2416, #2458,
+    // #2459), traced from their drawings the same way.
+    /// Share and forward, everywhere: the owner's send glyph (#2416), read
+    /// through `PostActionSymbol.share`.
+    case send = "core.send"
+    case sendFill = "core.send.fill"
 
     // The tab bar's own glyphs (#1191): each an outline, a fill (the
     // selected tab), and both with a badge layer (unread) — palette layer 0
@@ -130,12 +135,12 @@ public enum AppSymbol: String, CaseIterable, Sendable {
         case .repost: "Repost"
         case .save: "Save"
         case .saved: "Saved"
-        case .share: "Share"
         case .crown, .crownFilled: GemSymbol.name
         case .settings, .settingsFill: "Settings"
         case .search: "Search"
         case .bell, .bellFill, .bellBadge: "Notifications"
         case .bellSlash, .bellSlashFill: "Notifications muted"
+        case .send, .sendFill: "Share"
         case .map, .mapFill, .mapBadge, .mapBadgeFill: "Explore"
         case .squarePlay, .squarePlayFill, .squarePlayBadge, .squarePlayBadgeFill: "For You"
         case .chats, .chatsFill, .chatsBadge, .chatsBadgeFill: "Messages"

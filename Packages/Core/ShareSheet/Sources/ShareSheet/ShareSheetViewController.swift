@@ -523,7 +523,7 @@ public final class ShareSheetViewController: UIViewController {
     private func makeActionsTray() -> UIView {
         let actions = UIStackView(arrangedSubviews: [
             ShareActionChip(
-                title: "Share", symbol: "square.and.arrow.up", prominent: true
+                title: "Share", symbol: PostActionSymbol.share, prominent: true
             ) { [weak self] in self?.handOffToSystemShare() },
             ShareActionChip(title: "Copy Link", symbol: "link", prominent: false) { [weak self] in
                 self?.copyLink()

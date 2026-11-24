@@ -124,7 +124,7 @@ enum MapSubFilterMenuAction: String, CaseIterable {
         case .sendMessage: "message"
         case .toggleMute: MuteMenu.symbol(muted: !isMuted).rawValue
         case .viewDetails: "info.circle"
-        case .share: "square.and.arrow.up"
+        case .share: PostActionSymbol.share
         case .unpin: "pin.slash"
         }
     }

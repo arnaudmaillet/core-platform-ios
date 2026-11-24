@@ -360,7 +360,7 @@ public final class AppButtonCatalogViewController: UIViewController {
         let qr = track(AppIconButton(style: .bubble(.quiet), content: .symbol("qrcode")))
         let more = track(AppIconButton(style: .bubble(.quiet), content: .symbol("ellipsis")))
         more.menu = UIMenu(children: [
-            UIAction(title: "Share Profile", image: UIImage(systemName: "square.and.arrow.up")) { _ in print("[catalog] Share Profile") },
+            UIAction(title: "Share Profile", image: UIImage.symbol(named: PostActionSymbol.share)) { _ in print("[catalog] Share Profile") },
             UIAction(title: "Report", image: UIImage(systemName: "flag"), attributes: .destructive) { _ in print("[catalog] Report") },
         ])
         more.showsMenuAsPrimaryAction = true

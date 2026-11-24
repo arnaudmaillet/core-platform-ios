@@ -789,7 +789,7 @@ final class TextPostComposerViewController: UIViewController {
         bookmarkItem.isEnabled = true
         refreshBookmarkGlyph()
         moreItem.menu = UIMenu(children: [
-            UIAction(title: "Share", image: AppSymbol.share.image()) { [weak self] _ in
+            UIAction(title: "Share", image: UIImage.symbol(named: PostActionSymbol.share)) { [weak self] _ in
                 self?.sharePost()
             },
         ])

@@ -2993,8 +2993,9 @@ public final class CommentsInputBar: UIView {
         }
     }
 
-    /// The share face's glyph: the toolbar's Share (`SnapFooterToolbar`).
-    public static let shareRailSymbol = "arrowshape.turn.up.right"
+    /// The share face's glyph: the toolbar's Share (`SnapFooterToolbar`) —
+    /// the one share glyph, the owner's send (#2416).
+    public static let shareRailSymbol = PostActionSymbol.share
 
     /// What `debugRailSymbol` reads while the slot wears the sound's cover.
     static let soundRailSymbol = "sound.cover"

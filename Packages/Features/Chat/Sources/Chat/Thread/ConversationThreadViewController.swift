@@ -2089,7 +2089,7 @@ final class ConversationThreadViewController: UIViewController {
         let select = UIAction(title: "Select Text", image: UIImage(systemName: "text.magnifyingglass")) {
             [weak self] _ in self?.selectText(of: id)
         }
-        let forward = UIAction(title: "Forward", image: UIImage(systemName: "arrowshape.turn.up.right")) {
+        let forward = UIAction(title: "Forward", image: UIImage.symbol(named: PostActionSymbol.share)) {
             [weak self] _ in self?.driver.forward(id)
         }
         let delete = UIAction(title: "Delete", image: UIImage(systemName: "trash"), attributes: .destructive) {
