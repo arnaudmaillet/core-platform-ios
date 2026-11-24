@@ -123,7 +123,7 @@ public enum PostCardMenuAction {
         case .copyLink: "link"
         case .selectText: "selection.pin.in.out"
         case .edit: "pencil"
-        case .delete: "trash"
+        case .delete: AppSymbol.trash.rawValue
         case .removeFromHistory: "clock.badge.xmark"
         case .viewProfile: "person.crop.circle"
         case .follow: "person.badge.plus"

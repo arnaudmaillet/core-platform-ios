@@ -550,7 +550,7 @@ extension ConversationListViewController: UITableViewDelegate {
         let isMuted = viewModel.isMuted(id)
         let pin = UIAction(
             title: isPinned ? "Unpin" : "Pin",
-            image: UIImage(systemName: isPinned ? "pin.slash" : "pin")
+            image: (isPinned ? AppSymbol.bookmarkSlash : .bookmark).image()
         ) { [weak self] _ in self?.pin(id) }
         let mute = UIAction(
             title: isMuted ? "Unmute" : "Mute",
@@ -569,7 +569,7 @@ extension ConversationListViewController: UITableViewDelegate {
         } else {
             delete = UIAction(
                 title: "Delete",
-                image: UIImage(systemName: "trash"),
+                image: AppSymbol.trash.image(),
                 attributes: .destructive
             ) { [weak self] _ in self?.viewModel.delete([id]) }
         }

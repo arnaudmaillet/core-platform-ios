@@ -80,6 +80,20 @@ public enum AppSymbol: String, CaseIterable, Sendable {
     case cameraFill = "core.camera.fill"
     case gallery = "core.gallery"
     case galleryFill = "core.gallery.fill"
+    /// The bin (#2459): delete, clear, discard. Its fill is derived (the
+    /// lid and tub solid, the slots cut out, the handle an open arch).
+    case trash = "core.trash"
+    case trashFill = "core.trash.fill"
+    /// The microphone (#2459): a capsule with three slots on a cradle, no
+    /// stand. The outline is derived from the drawn fill.
+    case mic = "core.mic"
+    case micFill = "core.mic.fill"
+    /// A conversation's pin (#2459): the owner's bookmark. ⚠️ CONVERSATIONS
+    /// ONLY — the map's pins (favourite places and profiles) stay `pin`.
+    case bookmark = "core.bookmark"
+    case bookmarkFill = "core.bookmark.fill"
+    /// Unpin: the bookmark crossed by the bell's slash (`core.bell.slash`).
+    case bookmarkSlash = "core.bookmark.slash"
 
     // The tab bar's own glyphs (#1191): each an outline, a fill (the
     // selected tab), and both with a badge layer (unread) — palette layer 0
@@ -150,6 +164,10 @@ public enum AppSymbol: String, CaseIterable, Sendable {
         case .send, .sendFill: "Share"
         case .camera, .cameraFill: "Camera"
         case .gallery, .galleryFill: "Photo Library"
+        case .trash, .trashFill: "Delete"
+        case .mic, .micFill: "Microphone"
+        case .bookmark, .bookmarkFill: "Pin"
+        case .bookmarkSlash: "Unpin"
         case .map, .mapFill, .mapBadge, .mapBadgeFill: "Explore"
         case .squarePlay, .squarePlayFill, .squarePlayBadge, .squarePlayBadgeFill: "For You"
         case .chats, .chatsFill, .chatsBadge, .chatsBadgeFill: "Messages"

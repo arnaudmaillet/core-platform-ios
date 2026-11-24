@@ -102,7 +102,7 @@ public enum ChannelEmbedCopy {
     public static func unavailableSymbol(_ availability: ChannelEmbed.Availability) -> String {
         switch availability {
         case .available: channelSymbol
-        case .deleted: "trash"
+        case .deleted: AppSymbol.trash.rawValue
         case .private: "lock.fill"
         case .blocked: "nosign"
         }

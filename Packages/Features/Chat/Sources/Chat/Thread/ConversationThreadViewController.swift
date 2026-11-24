@@ -89,7 +89,7 @@ final class ConversationThreadViewController: UIViewController {
     /// re-applied to its item when it fires).
     private lazy var pinItem: UIBarButtonItem = {
         let item = UIBarButtonItem(
-            title: nil, image: UIImage(systemName: "pin"),
+            title: nil, image: AppSymbol.bookmark.image(),
             primaryAction: UIAction { [weak self] _ in self?.togglePin() }
         )
         item.identifier = "conversation.pin"
@@ -103,7 +103,7 @@ final class ConversationThreadViewController: UIViewController {
     }
 
     private func applyPinLook() {
-        pinItem.image = UIImage(systemName: isPinned == true ? "pin.fill" : "pin")
+        pinItem.image = (isPinned == true ? AppSymbol.bookmarkFill : .bookmark).image()
         pinItem.isEnabled = isPinned != nil
         pinItem.accessibilityLabel = isPinned == true ? "Unpin conversation" : "Pin conversation"
     }
@@ -2092,7 +2092,7 @@ final class ConversationThreadViewController: UIViewController {
         let forward = UIAction(title: "Forward", image: UIImage.symbol(named: PostActionSymbol.share)) {
             [weak self] _ in self?.driver.forward(id)
         }
-        let delete = UIAction(title: "Delete", image: UIImage(systemName: "trash"), attributes: .destructive) {
+        let delete = UIAction(title: "Delete", image: AppSymbol.trash.image(), attributes: .destructive) {
             [weak self] _ in self?.confirmDelete(id)
         }
         // A channel's reader reads (#2215): no Reply, and nothing of theirs
@@ -3011,7 +3011,7 @@ extension ConversationThreadViewController {
         composer.onSend = { [weak self] take in self?.driver.send(voice: take) }
         composer.onHint = { [weak self] hint in
             guard let self else { return }
-            Feedback.info(hint, symbol: "mic", from: self)
+            Feedback.info(hint, symbol: AppSymbol.mic.rawValue, from: self)
         }
         // Once refused, a hold offers Settings (#2102).
         composer.offersMicrophoneSettings(from: self, message: "Allow microphone access to record voice messages.")

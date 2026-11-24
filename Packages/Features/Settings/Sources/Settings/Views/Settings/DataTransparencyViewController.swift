@@ -130,7 +130,7 @@ package final class DataTransparencyViewController: UIViewController {
         }
         return [
             Permission(title: "Camera", symbolName: AppSymbol.camera.rawValue, purpose: purpose("NSCameraUsageDescription"), state: capture(.video)),
-            Permission(title: "Microphone", symbolName: "mic", purpose: purpose("NSMicrophoneUsageDescription"), state: capture(.audio)),
+            Permission(title: "Microphone", symbolName: AppSymbol.mic.rawValue, purpose: purpose("NSMicrophoneUsageDescription"), state: capture(.audio)),
             Permission(title: "Photos", symbolName: AppSymbol.gallery.rawValue, purpose: purpose("NSPhotoLibraryUsageDescription"), state: photos(.readWrite)),
             Permission(title: "Save to Photos", symbolName: "square.and.arrow.down", purpose: purpose("NSPhotoLibraryAddUsageDescription"), state: photos(.addOnly)),
             Permission(title: "Contacts", symbolName: "person.crop.circle", purpose: purpose("NSContactsUsageDescription"), state: contacts())

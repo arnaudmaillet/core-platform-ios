@@ -37,7 +37,7 @@ final class ConversationRowView: UIView {
     private let previewLabel = EmoteLabel()
     private let timeLabel = UILabel()
     private let mutedIcon = UIImageView(image: AppSymbol.bellSlashFill.image())
-    private let pinnedIcon = UIImageView(image: UIImage(systemName: "pin.fill"))
+    private let pinnedIcon = UIImageView(image: AppSymbol.bookmarkFill.image())
     /// The unread count, under the time at the row's trailing edge (#2049).
     private let unreadPill = UnreadCountPill()
     /// A channel (#2215): a small megaphone right after its name — on every

@@ -1,5 +1,6 @@
 import CoreModels
 import CoreNetworking
+import DesignSystem
 import PostGrid
 import ProfileData
 
@@ -143,7 +144,7 @@ final class ProfileGalleryFeed {
         renderGallery()
         let action = UndoableAction(
             message: "Post deleted",
-            symbol: "trash.fill",
+            symbol: AppSymbol.trashFill.rawValue,
             commit: { [weak self] in
                 Task { @MainActor [weak self] in
                     do {

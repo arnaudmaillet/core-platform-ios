@@ -52,7 +52,7 @@ final class PostDetailVoiceComments {
         }
         composer.onHint = { [weak self] hint in
             guard let self else { return }
-            Feedback.info(hint, symbol: "mic", from: host)
+            Feedback.info(hint, symbol: AppSymbol.mic.rawValue, from: host)
         }
         // Once refused, a hold offers Settings, the conversation's (#2102).
         composer.offersMicrophoneSettings(from: host, message: "Allow microphone access to record voice comments.")

@@ -754,13 +754,13 @@ struct ConversationThreadViewControllerTests {
         let bar = try #require(Self.firstView(CommentsInputBar.self, in: screen.view))
         let pin = screen.debugPinItem
         #expect(pin.accessibilityLabel == "Pin conversation")
-        #expect(pin.image == UIImage(systemName: "pin"))
+        #expect(pin.image == AppSymbol.bookmark.image())
 
         // Through the footer item's own action.
         pin.primaryAction?.performWithSender(nil, target: nil)
         #expect(driver.pinned == true)
         #expect(pin.accessibilityLabel == "Unpin conversation")
-        #expect(pin.image == UIImage(systemName: "pin.fill"))
+        #expect(pin.image == AppSymbol.bookmarkFill.image())
         #expect(screen.toolbarItems?.first { $0.identifier == "conversation.pin" } === pin, "the pin left the footer")
 
         bar.draftText = "On my way"

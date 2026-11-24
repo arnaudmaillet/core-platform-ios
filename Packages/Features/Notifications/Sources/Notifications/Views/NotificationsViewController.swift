@@ -93,13 +93,13 @@ final class NotificationsViewController: UIViewController {
         self.imagePipeline = imagePipeline
         self.muteModel = muteModel
         self.openPost = openPost
-        clearItem = offersClearAll ? UIBarButtonItem(image: UIImage(systemName: "trash")) : nil
+        clearItem = offersClearAll ? UIBarButtonItem(image: AppSymbol.trash.image()) : nil
         super.init(nibName: nil, bundle: nil)
         if let clearItem {
             clearItem.accessibilityLabel = "Clear All"
             clearItem.identifier = "notifications.clear-all"
             clearItem.isEnabled = false
-            clearItem.primaryAction = UIAction(image: UIImage(systemName: "trash")) { [weak self] _ in
+            clearItem.primaryAction = UIAction(image: AppSymbol.trash.image()) { [weak self] _ in
                 self?.clearTapped()
             }
         }
@@ -185,7 +185,7 @@ final class NotificationsViewController: UIViewController {
         let viewModel = viewModel
         Feedback.undoable(
             "Notifications cleared",
-            symbol: "trash.fill",
+            symbol: AppSymbol.trashFill.rawValue,
             from: self,
             id: "notifications.clear",
             // However the toast went, the trash follows the list.

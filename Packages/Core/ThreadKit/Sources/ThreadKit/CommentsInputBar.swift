@@ -400,9 +400,7 @@ public final class CommentsInputBar: UIView {
             face.image = nil
             // Each symbol carries its own size, so a Replace never resizes
             // the outgoing one first (a view-wide configuration would).
-            let glyph = UIImage(
-                systemName: voiceHoldTrash ? "trash.fill" : "mic.fill", withConfiguration: Self.holdGlyphConfiguration
-            )!
+            let glyph = (voiceHoldTrash ? AppSymbol.trashFill : .micFill).image(Self.holdGlyphConfiguration)!
             if holdGlyph.isHidden {
                 holdGlyph.image = glyph
                 holdGlyph.isHidden = false
@@ -1196,7 +1194,7 @@ public final class CommentsInputBar: UIView {
     /// or paused (#2102; the owner, 2026-11-06, Telegram's bin on the left).
     private let voiceDeleteButton: UIButton = {
         var configuration = UIButton.Configuration.plain()
-        configuration.image = UIImage(systemName: "trash")
+        configuration.image = AppSymbol.trash.image()
         configuration.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(pointSize: 17, weight: .semibold)
         configuration.baseForegroundColor = .label
         let button = UIButton(configuration: configuration)
@@ -2901,7 +2899,8 @@ public final class CommentsInputBar: UIView {
             symbol = PostActionSymbol.repost
             railButton.accessibilityLabel = "Repost"
         case .pin(let isPinned):
-            symbol = isPinned ? "pin.fill" : "pin"
+            // The owner's bookmark: a conversation's pin (#2459); the map's pins stay `pin`.
+            symbol = (isPinned ? AppSymbol.bookmarkFill : .bookmark).rawValue
             railButton.accessibilityLabel = isPinned ? "Unpin conversation" : "Pin conversation"
         case .returnTo(let down):
             symbol = down ? "chevron.down" : "chevron.up"

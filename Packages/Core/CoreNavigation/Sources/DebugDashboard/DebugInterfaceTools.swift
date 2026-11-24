@@ -114,7 +114,7 @@ final class DebugReportViewController: UIViewController {
             UIAction(title: "Copy Issue Draft", image: UIImage(systemName: "doc.on.doc")) { [weak self] _ in
                 self?.copyDraft()
             },
-            UIAction(title: "Clear Drawing", image: UIImage(systemName: "trash"), attributes: .destructive) { [weak self] _ in
+            UIAction(title: "Clear Drawing", image: AppSymbol.trash.image(), attributes: .destructive) { [weak self] _ in
                 self?.canvas.drawing = PKDrawing()
             },
         ])

@@ -178,7 +178,7 @@ final class TextPostComposerViewController: UIViewController {
         }
         composer.onHint = { [weak self] hint in
             guard let self else { return }
-            Feedback.info(hint, symbol: "mic", from: self)
+            Feedback.info(hint, symbol: AppSymbol.mic.rawValue, from: self)
         }
         // Once refused, a hold offers Settings, the thread's (#2102).
         composer.offersMicrophoneSettings(from: self, message: "Allow microphone access to record a voice post.")

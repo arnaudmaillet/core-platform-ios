@@ -44,6 +44,7 @@ struct AppSymbolTests {
             (.bell, .bellFill), (.bellSlash, .bellSlashFill),
             (.send, .sendFill),
             (.camera, .cameraFill), (.gallery, .galleryFill),
+            (.trash, .trashFill), (.mic, .micFill), (.bookmark, .bookmarkFill),
         ] {
             let a = inked(try #require(outline.image(AppSymbol.fixed(20))))
             let b = inked(try #require(filled.image(AppSymbol.fixed(20))))
@@ -106,6 +107,7 @@ struct AppSymbolTests {
         [.bell, .bellFill, .bellSlash, .bellSlashFill, .bellBadge],
         [.send, .sendFill],
         [.camera, .cameraFill], [.gallery, .galleryFill],
+        [.trash, .trashFill], [.mic, .micFill], [.bookmark, .bookmarkFill],
     ])
     func aFamilySharesOneBox(_ family: [AppSymbol]) throws {
         let configuration = AppSymbol.fixed(17)
@@ -187,6 +189,8 @@ struct AppSymbolSizeTests {
         (.send, "arrowshape.turn.up.forward"), (.sendFill, "arrowshape.turn.up.forward"),
         (.camera, "camera"), (.cameraFill, "camera.fill"),
         (.gallery, "photo.on.rectangle"), (.galleryFill, "photo.on.rectangle"),
+        (.trash, "trash"), (.trashFill, "trash.fill"), (.mic, "mic"), (.micFill, "mic.fill"),
+        (.bookmark, "pin"), (.bookmarkFill, "pin.fill"), (.bookmarkSlash, "pin.slash"),
     ])
     func aGlyphIsAsTallAsTheSystemsOwn(_ pair: (AppSymbol, String)) throws {
         let configuration = AppSymbol.fixed(12, weight: .semibold)

@@ -911,7 +911,7 @@ public final class PostHistorySquareView: UIView {
             mark.layer.shadowOffset = .zero
             addSubview(mark)
         }
-        micMark.image = UIImage(systemName: "mic.fill")
+        micMark.image = AppSymbol.micFill.image()
         micMark.tintColor = VoiceView.ink
         micMark.contentMode = .center
         micMark.isHidden = true
