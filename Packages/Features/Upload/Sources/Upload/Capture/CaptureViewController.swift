@@ -593,7 +593,7 @@ final class CaptureViewController: UIViewController {
         // A neutral face until the newest picture can be shown — see
         // `loadLibraryShortcut`.
         libraryButton.setImage(
-            UIImage(systemName: "photo.on.rectangle", withConfiguration: UIImage.SymbolConfiguration(pointSize: 17, weight: .semibold)),
+            AppSymbol.gallery.image(AppSymbol.fixed(17, weight: .semibold)),
             for: .normal
         )
         libraryButton.tintColor = .white

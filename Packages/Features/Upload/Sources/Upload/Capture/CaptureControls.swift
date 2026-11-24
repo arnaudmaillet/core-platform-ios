@@ -234,7 +234,7 @@ final class CaptureAccessNoticeView: UIView {
     init(_ kind: Kind) {
         self.kind = kind
         super.init(frame: .zero)
-        let icon = UIImageView(image: UIImage(systemName: kind == .denied ? "camera.fill" : "video.slash.fill"))
+        let icon = UIImageView(image: kind == .denied ? AppSymbol.cameraFill.image() : UIImage(systemName: "video.slash.fill"))
         icon.tintColor = .secondaryLabel
         icon.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: 36, weight: .regular)
         title.text = kind == .denied ? "Camera access is off" : "No camera available"

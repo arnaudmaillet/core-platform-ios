@@ -123,7 +123,7 @@ extension ProfileTab {
         case .format(.activity):
             ("rectangle.stack", "No Posts Yet", "Posts and reposts will appear here.")
         case .format(.media):
-            ("photo.on.rectangle", "No Photos or Videos", "Photos and videos will appear here.")
+            (AppSymbol.gallery.rawValue, "No Photos or Videos", "Photos and videos will appear here.")
         case .format(.short):
             // No page shows it since #631. Worded for what it filtered —
             // text posts — not for the video clips it once claimed.

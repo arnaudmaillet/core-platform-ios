@@ -73,6 +73,13 @@ public enum AppSymbol: String, CaseIterable, Sendable {
     /// through `PostActionSymbol.share`.
     case send = "core.send"
     case sendFill = "core.send.fill"
+    /// The camera and the gallery (#2458): a body with a centred hump, a
+    /// lens and a flash; two stacked photos. The gallery's fill has no site
+    /// yet (a selected or prominent state).
+    case camera = "core.camera"
+    case cameraFill = "core.camera.fill"
+    case gallery = "core.gallery"
+    case galleryFill = "core.gallery.fill"
 
     // The tab bar's own glyphs (#1191): each an outline, a fill (the
     // selected tab), and both with a badge layer (unread) — palette layer 0
@@ -141,6 +148,8 @@ public enum AppSymbol: String, CaseIterable, Sendable {
         case .bell, .bellFill, .bellBadge: "Notifications"
         case .bellSlash, .bellSlashFill: "Notifications muted"
         case .send, .sendFill: "Share"
+        case .camera, .cameraFill: "Camera"
+        case .gallery, .galleryFill: "Photo Library"
         case .map, .mapFill, .mapBadge, .mapBadgeFill: "Explore"
         case .squarePlay, .squarePlayFill, .squarePlayBadge, .squarePlayBadgeFill: "For You"
         case .chats, .chatsFill, .chatsBadge, .chatsBadgeFill: "Messages"

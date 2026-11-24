@@ -198,8 +198,8 @@ extension CreateTabItem.Destination {
 
     var symbolName: String {
         switch self {
-        case .camera: "camera"
-        case .upload: "photo.on.rectangle"
+        case .camera: AppSymbol.camera.rawValue
+        case .upload: AppSymbol.gallery.rawValue
         case .text: "textformat"
         case .channel: AppSymbol.megaphone.rawValue
         }

@@ -25,7 +25,7 @@ final class MediaDraftsViewController: UIViewController {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
         emptyState.configure(
-            symbolName: "photo.on.rectangle.angled",
+            symbolName: AppSymbol.gallery.rawValue,
             title: "No drafts",
             subtitle: "Posts you save as drafts will appear here."
         )

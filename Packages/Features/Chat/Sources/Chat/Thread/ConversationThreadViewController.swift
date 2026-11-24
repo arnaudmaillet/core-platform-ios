@@ -1099,11 +1099,11 @@ final class ConversationThreadViewController: UIViewController {
         // A channel's reader sends nothing (#2215).
         guard mode == .full, driver.sendsMedia, group?.canPost != false else { return [] }
         return [
-            ComposerAttachmentSource(id: Self.cameraID, symbol: "camera", accessibilityLabel: "Camera") { [weak self] in
+            ComposerAttachmentSource(id: Self.cameraID, symbol: AppSymbol.camera.rawValue, accessibilityLabel: "Camera") { [weak self] in
                 self?.pickMedia(.camera)
             },
             ComposerAttachmentSource(
-                id: Self.libraryID, symbol: "photo.on.rectangle", accessibilityLabel: "Photo Library"
+                id: Self.libraryID, symbol: AppSymbol.gallery.rawValue, accessibilityLabel: "Photo Library"
             ) { [weak self] in
                 self?.pickMedia(.library)
             },

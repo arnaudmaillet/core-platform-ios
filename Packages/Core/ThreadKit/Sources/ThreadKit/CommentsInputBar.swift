@@ -630,7 +630,7 @@ public final class CommentsInputBar: UIView {
 
     private func makeAttachmentButton(for source: ComposerAttachmentSource) -> UIButton {
         var face = UIButton.Configuration.plain()
-        face.image = UIImage(systemName: source.symbol)
+        face.image = UIImage.symbol(named: source.symbol)
         face.preferredSymbolConfigurationForImage = Self.attachmentConfiguration
         face.baseForegroundColor = Self.restingTint
         let button = UIButton(configuration: face)

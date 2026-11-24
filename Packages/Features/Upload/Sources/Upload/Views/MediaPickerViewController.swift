@@ -630,7 +630,7 @@ private extension MediaPickerViewController {
         let albums = await library.albums()
         guard !albums.isEmpty else {
             showEmptyState(
-                symbolName: "photo.on.rectangle.angled",
+                symbolName: AppSymbol.gallery.rawValue,
                 title: "Nothing to post yet",
                 subtitle: "Photos and videos you take will show up here."
             )

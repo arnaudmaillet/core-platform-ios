@@ -23,6 +23,8 @@ struct OwnedSymbolGuardTests {
         "\"bell\"", "\"bell.fill\"", "\"bell.slash\"", "\"bell.slash.fill\"", "\"bell.badge\"",
         // The owner's send glyph, every share and forward (#2416).
         "\"arrowshape.turn.up.forward\"", "\"arrowshape.turn.up.right\"", "\"square.and.arrow.up\"",
+        // The owner's camera and gallery (#2458).
+        "\"camera\"", "\"camera.fill\"", "\"photo.on.rectangle\"", "\"photo.on.rectangle.angled\"", "\"photo.badge.plus\"",
         "\"diamond\"", "\"diamond.fill\"", "\"ellipsis.message\"", "\"ellipsis.message.fill\"",
         // The owner's megaphone, a channel's mark (#2415).
         "\"megaphone\"", "\"megaphone.fill\"",

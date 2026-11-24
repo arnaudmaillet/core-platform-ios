@@ -144,7 +144,7 @@ final class MediaAccessNoticeView: UIView {
     /// because only Settings can widen the permission itself.
     private func rebuildMenu() {
         menu = UIMenu(children: [
-            UIAction(title: "Select More Photos…", image: UIImage(systemName: "photo.badge.plus")) {
+            UIAction(title: "Select More Photos…", image: AppSymbol.gallery.image()) {
                 [weak self] _ in self?.onSelectMore?()
             },
             UIAction(title: "Allow Access to All Photos", image: AppSymbol.settings.image()) {
