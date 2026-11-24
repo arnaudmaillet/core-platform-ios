@@ -7,6 +7,7 @@ import CoreStorage
 import FeedInterface
 import Foundation
 import MediaCore
+import PostGrid
 import Testing
 import UIKit
 @testable import Feed
@@ -217,7 +218,7 @@ struct UnavailablePostActionsTests {
         let viewModel = PostDetailViewModel(postID: PostID("post-1"), repository: Provider(.failure(.notFound)))
         let screen = PostDetailViewController(
             viewModel: viewModel, imagePipeline: ImagePipeline(fetcher: Unreachable()),
-            wallet: wallet
+            stakes: .own(StakeSession(wallet: wallet))
         )
         screen.view.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
         screen.loadViewIfNeeded()

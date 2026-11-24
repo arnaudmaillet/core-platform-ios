@@ -126,7 +126,7 @@ struct TextPostAssembly {
             threadChrome: true,
             imagePipeline: imagePipeline,
             makeProfileSwitcher: makeProfileSwitcher,
-            wallet: wallet,
+            stakes: wallet.map { .own(StakeSession(wallet: $0)) },
             viewerEvents: unavailablePosts.viewerEvents
         )
         let composer = TextPostComposerViewController(
