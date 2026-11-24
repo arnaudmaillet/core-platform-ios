@@ -1,0 +1,1 @@
+Captures for #2532 (stake session), before and after.
