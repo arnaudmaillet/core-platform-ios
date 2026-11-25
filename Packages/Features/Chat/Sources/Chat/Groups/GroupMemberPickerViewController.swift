@@ -14,13 +14,15 @@ import UIKit
 /// (`onNext`): the name step, or the invitations.
 final class GroupMemberPickerViewController: UIViewController {
     private let viewModel: GroupMemberPickerViewModel
-    private let imagePipeline: ImagePipeline?
-    private let avatars: (any PeerAvatarProviding)?
+    /// The rows' faces, the inbox search's own lookup.
+    private let faces: PersonRowFaces
     private let nextTitle: String
 
     /// The picked people, in order, on "Next".
     var onNext: (([PersonDisplayModel]) -> Void)?
-    /// The sheet's Cancel.
+    /// The sheet's Cancel: set, the picker leads its own sheet and wears a
+    /// Cancel; nil, it is pushed in a sheet (the "New message" sheet's New
+    /// group, #2411) and goes back with the chevron. Set before it loads.
     var onCancel: (() -> Void)?
 
     private let searchField = UISearchTextField()
@@ -33,7 +35,6 @@ final class GroupMemberPickerViewController: UIViewController {
     private lazy var nextItem = UIBarButtonItem(
         title: nextTitle, style: .prominent, target: self, action: #selector(nextTapped)
     )
-    private var avatarLookups: [ObjectIdentifier: (id: ProfileID, task: Task<Void, Never>)] = [:]
 
     init(
         viewModel: GroupMemberPickerViewModel,
@@ -44,8 +45,7 @@ final class GroupMemberPickerViewController: UIViewController {
     ) {
         self.viewModel = viewModel
         self.nextTitle = nextTitle
-        self.imagePipeline = imagePipeline
-        self.avatars = avatars
+        faces = PersonRowFaces(avatars: avatars, imagePipeline: imagePipeline)
         super.init(nibName: nil, bundle: nil)
         self.title = title
     }
@@ -56,9 +56,11 @@ final class GroupMemberPickerViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
-        navigationItem.leftBarButtonItem = UIBarButtonItem(
-            systemItem: .cancel, primaryAction: UIAction { [weak self] _ in self?.onCancel?() }
-        )
+        if onCancel != nil {
+            navigationItem.leftBarButtonItem = UIBarButtonItem(
+                systemItem: .cancel, primaryAction: UIAction { [weak self] _ in self?.onCancel?() }
+            )
+        }
         navigationItem.rightBarButtonItem = nextItem
         configureHeader()
         configureList()
@@ -137,7 +139,7 @@ final class GroupMemberPickerViewController: UIViewController {
             // The check on a picked person: shown or not, the row keeps its width.
             cell.accessories.append(.checkmark(displayed: .always, options: .init(isHidden: !self.viewModel.isSelected(id))))
             cell.accessibilityTraits = self.viewModel.isSelected(id) ? [.button, .selected] : .button
-            self.lookUpAvatar(of: id, into: cell)
+            self.faces.lookUp(id, into: cell)
         }
         let headerRegistration = UICollectionView.SupplementaryRegistration<SectionHeaderCapsuleView>(
             elementKind: UICollectionView.elementKindSectionHeader
@@ -220,26 +222,6 @@ final class GroupMemberPickerViewController: UIViewController {
     @objc private func nextTapped() {
         guard viewModel.state.canContinue else { return }
         onNext?(viewModel.selectedPeople)
-    }
-
-    /// The row's face: the skeleton while profile.v1 is asked, then the
-    /// picture — the search results' own lookup.
-    private func lookUpAvatar(of id: ProfileID, into cell: PersonListCell) {
-        let key = ObjectIdentifier(cell)
-        if avatarLookups[key]?.id == id { return }
-        avatarLookups[key]?.task.cancel()
-        guard let avatars, let imagePipeline else {
-            avatarLookups[key] = nil
-            cell.avatar.setPicture(nil, pipeline: nil)
-            return
-        }
-        cell.avatar.awaitPicture()
-        let task = Task { [weak self, weak cell] in
-            let urls = await avatars.avatarURLs(for: [id])
-            guard !Task.isCancelled, let self, let cell, self.avatarLookups[key]?.id == id else { return }
-            cell.avatar.setPicture(urls[id], pipeline: imagePipeline)
-        }
-        avatarLookups[key] = (id, task)
     }
 
     #if DEBUG

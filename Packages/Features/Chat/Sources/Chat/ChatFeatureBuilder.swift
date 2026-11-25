@@ -36,6 +36,9 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         public var connections: any SuggestionsProviding & PeerAvatarProviding
         /// The compose picker's and the inbox search's people directory.
         public var people: any PeopleDirectoryProviding
+        /// The viewer's friends, the "New message" sheet's first section
+        /// (#2411). Nil: the sheet has no Friends.
+        public var friends: (any FriendsProviding)?
         public var imagePipeline: ImagePipeline
         public var router: any Router
         /// The SAME history the global search screen writes to.
@@ -73,6 +76,7 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
             voicePlayed: VoicePlayedStore,
             connections: any SuggestionsProviding & PeerAvatarProviding,
             people: any PeopleDirectoryProviding,
+            friends: (any FriendsProviding)?,
             imagePipeline: ImagePipeline,
             router: any Router,
             recentSearches: RecentSearchStore,
@@ -91,6 +95,7 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
             self.voicePlayed = voicePlayed
             self.connections = connections
             self.people = people
+            self.friends = friends
             self.imagePipeline = imagePipeline
             self.router = router
             self.recentSearches = recentSearches
@@ -106,14 +111,16 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         }
     }
 
-    private let repository: any ChatProviding
+    let repository: any ChatProviding
     /// Suggestions, and the avatar source: it already caches the profiles
     /// the rows need, and the two surfaces are one tab apart.
-    private let connections: any SuggestionsProviding & PeerAvatarProviding
+    let connections: any SuggestionsProviding & PeerAvatarProviding
     /// The compose picker's search backing.
-    private let people: any PeopleDirectoryProviding
-    private let imagePipeline: ImagePipeline
-    private let router: any Router
+    let people: any PeopleDirectoryProviding
+    /// The "New message" sheet's Friends (#2411).
+    let friends: (any FriendsProviding)?
+    let imagePipeline: ImagePipeline
+    let router: any Router
     /// The SAME history the global search screen writes to.
     private let recentSearches: RecentSearchStore
     /// Shared list→thread warm-start context (the builder is a long-lived
@@ -123,7 +130,7 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
     /// pushed later — built by an entirely separate call — can report back
     /// into the same one. Without that, reading a thread has no way to reach
     /// the list it should disappear from.
-    private let catalog: InboxCatalog
+    let catalog: InboxCatalog
     /// The conversation's peer pill (#752): its relation glyph, "+" follows
     /// through `socialGraph`. `entities` is the app's one copy of where the
     /// viewer stands with each person (#2049).
@@ -136,17 +143,17 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
     private let deviceCache: ChatLocalCache?
     /// The peers' relations, for the rows' mark and its "+" (#2049): the
     /// inbox's and its search's, over the app's `EntityStore`.
-    private let relations: InboxRelations
+    let relations: InboxRelations
     /// Groups (#2214, `-group-chats`): creating one, its thread's senders,
     /// its info screen. Nil — the flag off — and Messages is DMs only, as it
     /// was.
-    private let groups: (any GroupChatServicing)?
+    let groups: (any GroupChatServicing)?
     /// Channels (#2215, `-channels`): their rows in Chats (#2230), creating
-    /// one from the "+" menu and the inbox search, its thread's reader bar,
-    /// its info screen, the join requests in Requests, and a profile's
-    /// Channels tab (#2232). Nil — the flag off — and Messages has none of
-    /// it, as it was.
-    private let channels: (any ChatConversationServicing)?
+    /// one from the "+" menu and the "New message" sheet (#2411), its
+    /// thread's reader bar, its info screen, the join requests in Requests,
+    /// and a profile's Channels tab (#2232). Nil — the flag off — and
+    /// Messages has none of it, as it was.
+    let channels: (any ChatConversationServicing)?
     /// "Share as a Post" on a channel's creation and info screens (#2216):
     /// with the channels (`-channels`), which draw showcases.
     private let sharesShowcases: Bool
@@ -182,6 +189,7 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         self.repository = repository
         connections = dependencies.connections
         people = dependencies.people
+        friends = dependencies.friends
         imagePipeline = dependencies.imagePipeline
         router = dependencies.router
         recentSearches = dependencies.recentSearches
@@ -334,21 +342,12 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
             initialCategory: initialCategory
         )
         inbox.onTotalNewCountChange = onUnreadCountChange
-        // "New group" in the empty search (#2214): the member picker, over
-        // the inbox.
-        if groups != nil {
-            searchViewModel.onNewGroup = { [weak inbox, self] in
-                guard let inbox else { return }
-                presentGroupCreation(from: inbox)
-            }
-        }
-        // "New channel" beside it (#2230): the creation sheet, over the
-        // inbox; Create pushes the channel's thread there.
-        if channels != nil {
-            searchViewModel.onNewChannel = { [weak inbox, self] in
-                guard let inbox, let sheet = makeChannelCreationSheet(landing: .onTheStack) else { return }
-                inbox.present(sheet, animated: true)
-            }
+        // The compose item (#2411): the "New message" sheet, over the inbox —
+        // writing to someone, New group and New channel; the search under
+        // the bar only finds.
+        inbox.onCompose = { [weak inbox, self] in
+            guard let inbox else { return }
+            presentNewMessage(from: inbox)
         }
         return inbox
     }
@@ -362,8 +361,8 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         /// `.conversation`). The back chevron returns to Chats: a native
         /// push closes with a native pop.
         case inMessages
-        /// From the inbox search: the thread pushed on the stack the inbox
-        /// is on, as a new group's is.
+        /// From the "New message" sheet (#2411): the thread pushed on the
+        /// stack the inbox is on, as a new group's is.
         case onTheStack
     }
 
@@ -379,11 +378,20 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
     /// opened by "You created the channel". A channel the viewer creates is
     /// not muted (#2230): they are the one posting.
     func makeChannelCreationSheet(landing: ChannelLanding) -> UINavigationController? {
+        let sheet = UINavigationController()
+        guard let screen = makeChannelCreation(landing: landing, in: sheet) else { return nil }
+        screen.onCancel = { [weak sheet] in _ = sheet?.closePresentation() }
+        sheet.setViewControllers([screen], animated: false)
+        return sheet
+    }
+
+    /// The new channel's screen, in `sheet`: its root (the "+" menu, with a
+    /// Cancel) or pushed in the "New message" sheet (#2411, the chevron back
+    /// to it). Create closes `sheet`, then lands.
+    func makeChannelCreation(landing: ChannelLanding, in sheet: UINavigationController) -> ChannelCreationViewController? {
         guard let channels else { return nil }
         let creation = ChannelCreationViewModel(service: channels, sharesShowcases: sharesShowcases)
         let screen = ChannelCreationViewController(viewModel: creation)
-        let sheet = UINavigationController(rootViewController: screen)
-        screen.onCancel = { [weak sheet] in _ = sheet?.closePresentation() }
         // Closes the sheet, then routes: a route fired under a sheet on its
         // way out would land behind it.
         let leave: @MainActor ([AppRoute]) -> Void = { [weak sheet, router] routes in
@@ -407,7 +415,7 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         screen.onShareAsPost = { id, embed in
             leave(Self.landingRoutes(for: id, landing: landing) + [.composeShowcase(embed)])
         }
-        return sheet
+        return screen
     }
 
     /// The routes Create takes to the new channel (#2230). Pure, for tests.
@@ -468,13 +476,14 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
 
     // MARK: - Groups (#2214)
 
-    /// The new group's sheet: pick the people, then name it, then Create —
-    /// which lands in its thread, opened by "You created the group".
-    private func presentGroupCreation(from presenter: UIViewController) {
+    /// A new group, pushed in the "New message" sheet (#2411): pick the
+    /// people, then name it, then Create — which closes the sheet and lands
+    /// in its thread, opened by "You created the group". Pushed rather than
+    /// a second sheet over the first: one sheet, its chevron back to the
+    /// people.
+    func pushGroupCreation(in sheet: UINavigationController) {
         guard let groups else { return }
         let picker = makeMemberPicker(purpose: .create, excluded: [], title: "New Group", nextTitle: "Next")
-        let sheet = UINavigationController(rootViewController: picker)
-        picker.onCancel = { [weak sheet] in _ = sheet?.closePresentation() }
         picker.onNext = { [weak sheet, catalog, groupNotes, router, imagePipeline] people in
             let creation = GroupCreationViewModel(members: people, service: groups)
             creation.onCreated = { [weak sheet] id in
@@ -491,7 +500,7 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
                 GroupNameViewController(viewModel: creation, imagePipeline: imagePipeline, profiles: groups), animated: true
             )
         }
-        presenter.present(sheet, animated: true)
+        sheet.pushViewController(picker, animated: true)
     }
 
     /// The member picker (#2214): the viewer's recent correspondents, the
@@ -586,7 +595,7 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         makeConversationViewController(target: .existing(conversationID))
     }
 
-    private func makeConversationViewController(target: ConversationTarget, prefill: String = "") -> UIViewController {
+    func makeConversationViewController(target: ConversationTarget, prefill: String = "") -> UIViewController {
         let viewModel = ConversationViewModel(
             target: target,
             repository: repository,

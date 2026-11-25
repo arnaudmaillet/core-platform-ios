@@ -1,4 +1,5 @@
 import ChatInterface
+import CoreModels
 import CoreNavigation
 import DesignSystem
 import LaunchArguments
@@ -39,6 +40,12 @@ import UIKit
 /// balance trails it (#2336, the owner 2026-11-12): the likes balance shows
 /// where likes are spent or earned, and the inbox has no heart, no spend and
 /// no claim.
+///
+/// **The compose item trails (#2411, the owner 2026-11-13):**
+/// `[bell][Chats | Requests | Suggestions] ——— [✎]`, a stock item in the
+/// brand primary, the page's primary action. It opens the "New message"
+/// sheet (`onCompose`); writing has its own button, and the search under the
+/// bar only finds.
 final class MessagesInboxViewController: UIViewController, MessagesInboxCategorySelecting,
     HeaderAccessoryHosting {
     /// The inbox's surfaces, in paging order.
@@ -56,6 +63,36 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     /// The selector item's identifier, the same on every launch (#2337). One
     /// item for the screen's life, as For You's.
     static let selectorItemID = "messages.inbox.selector"
+    /// The compose item's identifier (#2411).
+    static let composeItemID = "messages.inbox.compose"
+
+    /// The compose item's tap (#2411): the "New message" sheet, after the
+    /// member gate. Nil — a composition without the sheet — and the bar has
+    /// no compose item. Set before the view loads.
+    var onCompose: (() -> Void)?
+
+    /// `[✎]` (#2411): a stock image item, prominent, tinted with the brand
+    /// primary — the bar draws its glass, its white glyph and its press (the
+    /// bar contract, R1). One instance for the screen's life (R3).
+    private(set) lazy var composeItem: UIBarButtonItem = {
+        let item = BarItems.icon(
+            id: Self.composeItemID, image: UIImage(systemName: "square.and.pencil"),
+            label: Self.composeLabel
+        ) { [weak self] in self?.composeTapped() }
+        item.style = .prominent
+        item.tintColor = Palette.prominentGlassTint
+        return item
+    }()
+
+    /// What VoiceOver says for the compose item.
+    static let composeLabel = "New message"
+
+    /// The tap: through the member gate, the sign-in prompt a guest gets on
+    /// starting a conversation (`GatedAction.message`). A guest has no inbox
+    /// today (#626); the gate holds if one ever does.
+    private func composeTapped() {
+        MemberGates.perform(.message(handle: nil), from: self) { [weak self] in self?.onCompose?() }
+    }
 
     /// Built in `viewDidLoad`, once the surfaces are children — reading a
     /// child's `view` before containment would load it outside its parent.
@@ -312,6 +349,10 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
             }
         }
         runSearchDebugSequence(arguments)
+        // `-new-message-open`: the compose item's sheet, by its tap's path.
+        if LaunchArgument.newMessageOpen.isPassed(in: arguments) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.composeTapped() }
+        }
 
         // `-tabbar-shape-watch` samples the capsule's shape twice a second and
         // prints it. The shape's two halves fail SEPARATELY — clipping switched
@@ -443,9 +484,8 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     /// The shell's items: the notifications bell at the head of the leading
     /// group, the selector right after it. The trailing slot is the
     /// protocol's, and the shell hands nothing into it since #2336 (no
-    /// balance in Messages); it reserves no room while empty, and an item
-    /// that did come would be charged to the selector's room
-    /// (`selectorBudget`).
+    /// balance in Messages); an item that did come would trail the compose
+    /// item and be charged to the selector's room (`selectorBudget`).
     private var leadingAccessoryItem: UIBarButtonItem?
     private var trailingAccessoryItem: UIBarButtonItem?
 
@@ -464,26 +504,32 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         applyRestingBar()
     }
 
-    /// `[ bell ][ Chats 43 | Requests 6 | Suggestions ]———————`
+    /// `[ bell ][ Chats 43 | Requests 6 | Sugg… ]———————[ ✎ ]`
     /// `[ search people and chats                       ]`
     ///
     /// What the shell hands in: the bell leading, nothing trailing (#2336: no
     /// balance in Messages). The selector follows the bell in a platter of
-    /// its own (#2337), as For You's Feed | Shots does; the search is not
-    /// among the items: it is stacked under the bar (`searchController`), at
-    /// rest and open alike. No section is named after the bell any more
-    /// (#2328).
+    /// its own (#2337), as For You's Feed | Shots does; the compose item
+    /// trails (#2411). The search is not among the items: it is stacked
+    /// under the bar (`searchController`), at rest and open alike. No section
+    /// is named after the bell any more (#2328).
     ///
     /// ⚠️ NEVER `searchBarPlacementBarButtonItem` IN THE NAVIGATION BAR: iOS 26
     /// throws ("only supported in UIToolbar") — iOS 27 accepts it, which is
     /// how it shipped in #1689's first push and crashed CI's iOS 26 hosts.
     private func applyRestingBar() {
-        setOwnTrailingBarItems([trailingAccessoryItem].compactMap { $0 }, animated: false)
+        setOwnTrailingBarItems(trailingItems, animated: false)
         // A back chevron (none on the tab root) would keep its place before
         // the group.
         navigationItem.leftItemsSupplementBackButton = true
-        selector.fit(selectorBudget)
+        selector.fit(selectorBudget, titleBudget: selectorTitleBudget)
         applyLeadingGroup()
+    }
+
+    /// The trailing group, the first item at the bar's edge: the compose
+    /// item (#2411), then whatever the shell hands in (nothing since #2336).
+    private var trailingItems: [UIBarButtonItem] {
+        (onCompose == nil ? [] : [composeItem]) + [trailingAccessoryItem].compactMap { $0 }
     }
 
     /// `[bell][selector]`, or the selector alone without a bell.
@@ -500,7 +546,7 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     /// bar to lay out again. The item stays the same: no group is rewritten
     /// (`BarSelectorItem`'s note on why it is never re-minted).
     private func refitSelector() {
-        guard isViewLoaded, selector.fit(selectorBudget) else { return }
+        guard isViewLoaded, selector.fit(selectorBudget, titleBudget: selectorTitleBudget) else { return }
         navigationController?.navigationBar.setNeedsLayout()
         traceSelector("fit")
         // A wider strip (a count arriving) on a bar on show can tip it over.
@@ -523,11 +569,27 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         else { return }
         navigation.navigationBar.layoutIfNeeded()
         traceSelector("check \(attempt)")
-        guard !selector.isHosted, selector.narrowAfterOverflow(selectorBudget) else { return }
+        // The compose item swept alone (#2411): the strip is hosted, the
+        // trailing group is a `•••`.
+        let trailingSwept = Self.showsOverflow(in: navigation.navigationBar)
+        guard !selector.isHosted || trailingSwept, selector.narrowAfterOverflow(selectorBudget) else { return }
         applyLeadingGroup()
+        if trailingSwept {
+            // A swept group is measured again only when it is handed back.
+            setOwnTrailingBarItems([], animated: false)
+            setOwnTrailingBarItems(trailingItems, animated: false)
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
             self?.recoverSelectorFromOverflow(attempt: attempt + 1)
         }
+    }
+
+    /// Whether `bar` shows UIKit's overflow control — the `•••` a group it
+    /// cannot fit goes into, "More" to VoiceOver (as the selector's tests
+    /// look for it).
+    private static func showsOverflow(in bar: UIView) -> Bool {
+        if bar.window != nil, !bar.isHidden, bar.accessibilityLabel == "More" { return true }
+        return bar.subviews.contains { showsOverflow(in: $0) }
     }
 
     /// `-inbox-selector-trace`: the numbers behind the selector's width —
@@ -549,11 +611,25 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         #endif
     }
 
-    /// The room the bar leaves the selector: the bell before it, whatever
-    /// trails (nothing today, #2336). Nothing can come into the trailing
+    /// The room the bar leaves the selector: the bell before it, the
+    /// compose item after it (#2411). Nothing else comes into the trailing
     /// corner on this screen (no editing, no batch action, no Cancel of its
     /// own — the search's Cancel is in the stacked field, under the bar).
+    ///
+    /// ⚠️ **THE COMPOSE ITEM TAKES ITS PLATTER FIRST, AND NO TITLE SHRINKS
+    /// FOR IT** (#2411, #2361's rule): the selector's container takes what
+    /// is left and scrolls past it, the selected tab kept whole in view by
+    /// the strip (`PagedTabBar`'s reveal). The titles' size is decided
+    /// without it (`selectorTitleBudget`).
     private var selectorBudget: BarSelectorBudget {
+        var budget = selectorTitleBudget
+        budget.trailingWidths = trailingItems.map(BarSelectorBudget.width(of:))
+        return budget
+    }
+
+    /// The room without the compose item: what decides the titles' size, so
+    /// the compose item narrows the container and never shrinks a title.
+    private var selectorTitleBudget: BarSelectorBudget {
         let navigationBarWidth = navigationController?.navigationBar.bounds.width ?? 0
         let barWidth = navigationBarWidth > 1 ? navigationBarWidth : (view.window?.bounds.width ?? view.bounds.width)
         return BarSelectorBudget(
@@ -572,6 +648,8 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     var debugActiveIndex: Int { pagerView?.activeIndex ?? initialIndex }
     /// The pages, in order (#2215). Tests.
     var debugCategories: [MessagesCategory] { surfaces.map(\.category) }
+    /// The compose item's tap, as the bar fires it (#2411). Tests.
+    func debugTapCompose() { composeTapped() }
     #endif
 
     /// Opens search, focused — what `-inbox-search-query` drives.
@@ -648,8 +726,21 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     /// selector is re-fitted (15pt or 13pt, its ceiling) and the bar told to
     /// lay out again when the stated width moved (`BarSelectorItem`).
     private func setBadge(_ count: Int, at index: Int) {
-        categoryBar.setBadge(count, at: index)
+        categoryBar.setBadge(Self.debugForcedBadge(at: index) ?? count, at: index)
         refitSelector()
+    }
+
+    /// `-inbox-badges 0,43,150` (DEBUG, #2411): the counts the segments
+    /// wear, in order, whatever the pages publish — the width captures (0,
+    /// 43 and "99+" on each phone).
+    private static func debugForcedBadge(at index: Int) -> Int? {
+        #if DEBUG
+        let counts = LaunchArgument.inboxBadges.value(in: ProcessInfo.processInfo.arguments)?
+            .split(separator: ",").compactMap { Int($0) } ?? []
+        return counts.indices.contains(index) ? counts[index] : nil
+        #else
+        return nil
+        #endif
     }
 
 }
