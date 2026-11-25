@@ -22,6 +22,11 @@ final class ExploreTabCoordinator: TabCoordinator {
 
     private let container: AppContainer
     private let notificationsButtonItem: UIBarButtonItem
+    /// The "+" (a member's) or Sign in (a guest's), just inboard of search
+    /// (#2489). Built by the shell, which opens what it offers.
+    private let createItem: CreateBarItem
+    /// The trailing group, handed to the bar only when its list changes (R3).
+    private let trailingItems = BarItemStore()
 
     /// A compass: exploring, not route-finding.
     ///
@@ -42,13 +47,10 @@ final class ExploreTabCoordinator: TabCoordinator {
         return tab
     }()
 
-    /// Search, at the very edge of the trailing group.
+    /// Search, at the very edge of the trailing group, the "+" beside it.
     ///
-    /// It lives here rather than in the bar because the bar's detached trailing
-    /// item is the "+" menu now (`CreateTabItem`). Constructed by the
-    /// coordinator so the tap is owned by navigation and the Maps package stays
-    /// navigation-agnostic — exactly as the header "+" that stood opposite it
-    /// used to be.
+    /// Constructed by the coordinator so the tap is owned by navigation and
+    /// the Maps package stays navigation-agnostic.
     private lazy var searchButtonItem: UIBarButtonItem = BarItems.icon(
         id: BarItems.SharedID.search, image: AppSymbol.search.image(), label: "Search"
     ) { [weak self] in
@@ -72,9 +74,10 @@ final class ExploreTabCoordinator: TabCoordinator {
         installBarItems()
     }
 
-    init(container: AppContainer, notificationsButtonItem: UIBarButtonItem) {
+    init(container: AppContainer, notificationsButtonItem: UIBarButtonItem, createItem: CreateBarItem) {
         self.container = container
         self.notificationsButtonItem = notificationsButtonItem
+        self.createItem = createItem
     }
 
     func start() {
@@ -88,10 +91,9 @@ final class ExploreTabCoordinator: TabCoordinator {
         //
         // The avatar that used to sit to its right is gone: Profile is a root
         // tab now, and two entry points to one destination is one too many.
-        // ⚠️ THE BELL MOVED TO THE LEADING EDGE and the "+" is gone — the
-        // compose screen it opened has been removed from the product. The
-        // balance that stood inboard of the search went too (#2336): the
-        // header now reads `[bell] … [search]`.
+        // ⚠️ THE BELL MOVED TO THE LEADING EDGE. The balance that stood
+        // inboard of the search went (#2336), and the tab bar's "+" came in
+        // its place (#2489): the header reads `[bell] … [+][search]`.
         // ⚠️ NO TITLE IN THE BAR. "Maps" (the tab's name then; "Explore" now)
         // was written here for a while (the controller is navigation-agnostic,
         // so the coordinator was the one place to write it); it went with For
@@ -111,10 +113,11 @@ final class ExploreTabCoordinator: TabCoordinator {
         // Profile tab's badge presents the sheet at launch (#2455).
     }
 
-    /// The header for the viewer now: a member's `[bell] … [search]`, a
-    /// guest's `… [search]` alone (#1146, the owner 2026-10-14: no bell for a
-    /// guest). No balance for either (#2336). Run at start and on every
-    /// sign-up and sign-out, so the items come and go without a relaunch.
+    /// The header for the viewer now: a member's `[bell] … [+][search]`, a
+    /// guest's `… [Sign in][search]` (#1146, the owner 2026-10-14: no bell
+    /// for a guest; #2489: the "+" and Sign in). No balance for either
+    /// (#2336). Run at start and on every sign-up and sign-out, so the items
+    /// come and go without a relaunch.
     private func installBarItems() {
         applyBarItems()
     }
@@ -134,10 +137,17 @@ final class ExploreTabCoordinator: TabCoordinator {
 
     private func applyBarItems() {
         guard let map = mapViewController else { return }
-        // The trailing group through the toasts' door (#1420, #1679): under a
-        // bar toast these are the items that come back.
-        guard container.memberGate.isMember else {
-            // `[Allow location] … [search]` while the guest's location is not
+        let isMember = container.memberGate.isMember
+        // ⚠️ `[0]` IS THE SCREEN EDGE: search holds the corner, the "+" (or
+        // a guest's Sign in) just inboard (#2489) — the same item, re-dressed
+        // in place on a sign-in or a sign-out, so the list does not change
+        // and the bar is not handed it again. No balance on the map (#2336).
+        // No Shop door (#1494, the owner 2026-10-21): the Rewards sheet's
+        // Shop tile and the stake menu open it.
+        createItem.showSignIn(!isMember)
+        trailingItems.apply(trailing: createItem.trailingGroup(search: searchButtonItem), to: map, animated: false)
+        guard isMember else {
+            // `[Allow location] … [Sign in][search]` while the guest's location is not
             // allowed (#1907); the leading slot is empty otherwise.
             let offering = map as? any GuestLocationOffering
             let items = offering?.offersGuestLocation == true ? [allowLocationItem(for: offering)] : []
@@ -147,14 +157,8 @@ final class ExploreTabCoordinator: TabCoordinator {
                 // which this call, computed before, would then overwrite.
                 map.navigationItem.setLeftBarButtonItems(items, animated: map.viewIfLoaded?.window != nil)
             }
-            map.setOwnTrailingBarItems([searchButtonItem], animated: false)
             return
         }
         map.navigationItem.leftBarButtonItem = notificationsButtonItem
-        // ⚠️ `[0]` IS THE SCREEN EDGE: search takes the corner the bell used
-        // to hold, alone — no balance on the map (#2336). No Shop door (#1494,
-        // the owner 2026-10-21): the Rewards sheet's Shop tile and the stake
-        // menu open it.
-        map.setOwnTrailingBarItems([searchButtonItem], animated: false)
     }
 }

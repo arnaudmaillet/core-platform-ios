@@ -20,11 +20,11 @@ import UploadInterface
 /// (`viewerDidChange(isMember:)`) and leaves every other stack where it is. Each tab owns its own navigation stack; this
 /// coordinator only assembles them and holds them alive.
 ///
-/// Tabs are set via the modern `UITabBarController.tabs` API. The trailing item
-/// is the "+" (`CreateTabItem`), a `UISearchTab`, which the system detaches to
-/// the trailing edge, producing the grouped bar
-/// `| Explore  Messages  Profile |  + |` natively (For You left it, #2453). It opens a menu and
-/// is never selected.
+/// Tabs are set via the modern `UITabBarController.tabs` API: three places
+/// (#2489, the owner 2026-11-18), `| Explore  Messages |  Profile |` with
+/// Profile apart on iOS 27, or in one bubble with `-tabbar-grouped` (and on
+/// iOS 26 either way) — see `ShellTabs`. For You left the bar with #2453, and
+/// the "+" with #2489: it is Explore's top bar item now (`CreateBarItem`).
 ///
 /// Profile is a root tab, carrying the viewer's own avatar as its icon
 /// (`ProfileTabCoordinator`) — it is the canonical entry point, so it is the one
@@ -32,7 +32,7 @@ import UploadInterface
 /// the avatar button that used to sit in the map's nav bar (the Explore tab,
 /// then called Maps); the map header now carries the notifications bell, the
 /// wallet and search. Its "+" left with #152 — making a post starts from the
-/// bar's "+" (`CreateTabItem`).
+/// "+" beside Explore's search (`CreateBarItem`).
 ///
 /// **Every bar button is a tab.** For You (slot 1 from 2026-10, Feed and
 /// Shots) left the bar on 2026-11-15 (#2453): the app is the map's first.
@@ -114,10 +114,11 @@ final class MainTabCoordinator: NSObject, Coordinator {
         return button
     }()
 
-    /// The Profile tab's hold, hung on the BAR as the "+"'s is
-    /// (`CreateHoldShortcut`): the iOS 26 bar takes a touch on its items for
-    /// its own selection, so a recognizer on an overlay never began. It looks
-    /// only at touches on the Profile tab (`shouldReceive`).
+    /// The Profile tab's hold, hung on the BAR: the iOS 26 bar takes a touch
+    /// on its items for its own selection, so a recognizer on an overlay
+    /// never began. It looks only at touches on the Profile tab
+    /// (`shouldReceive`), wherever that tab stands — apart or grouped
+    /// (#2489): `UITab.frame(in:)` follows it.
     ///
     /// **Hold, slide, release** as a system menu: the hold opens the switcher
     /// (`beginTracking`), the finger lights the rows it crosses, and lifting
@@ -163,29 +164,21 @@ final class MainTabCoordinator: NSObject, Coordinator {
             switcherTracking = nil
         }
     }
-    /// The bar's detached "+": a menu of ways to make a post, never a tab
-    /// anyone stands on. See `CreateTabItem`.
-    ///
-    /// Internal (not private) only for the +QA hooks.
-    private(set) lazy var createItem = CreateTabItem(
+    /// The "+" beside Explore's search, a menu of ways to make a post; a
+    /// guest's Sign in in its place (#2489). See `CreateBarItem`.
+    private lazy var createItem = CreateBarItem(
         // "New Channel" with the channels on (#2230).
-        destinations: CreateTabItem.destinations(offersChannel: DebugFlags.isOn("-channels"))
-    ) { [weak self] destination in
-        self?.openCreate(destination)
-    }
+        destinations: CreateDestination.offered(channels: DebugFlags.isOn("-channels")),
+        open: { [weak self] destination in self?.openCreate(destination) },
+        signIn: { [weak self] in self?.onSignIn() }
+    )
 
-    /// Hold the "+" to go straight to the camera — the menu's Camera row
-    /// without the menu. See `CreateHoldShortcut`.
-    ///
-    /// Internal (not private) only for the +QA hooks.
-    private(set) lazy var createHold = CreateHoldShortcut(
-        tab: createItem.tab, tabBarController: tabBarController
-    ) { [weak self] in
-        self?.createItem.open(.camera)
-    }
+    /// Where Profile stands: apart (iOS 27) or grouped (`-tabbar-grouped`).
+    /// Read once, at launch.
+    private let tabLayout = ShellTabs.layout()
 
     /// Tabs paired with their `AppTab`, in bar order — the lookup `selectTab`
-    /// resolves against. Every bar button but the "+" is in here.
+    /// resolves against. Every bar button is in here.
     private var orderedTabs: [(AppTab, any TabCoordinator)] = []
     /// One per tab stack: keeps the native edge-swipe pop working under the
     /// feed's custom transition delegates (see `NativePopGestureEnabler`).
@@ -292,14 +285,13 @@ final class MainTabCoordinator: NSObject, Coordinator {
             container: container, notificationsBell: notificationsBell, onSignIn: onSignIn
         )
         self.messagesTab = messagesTab
-        // Bar order: the three places, then the "+". The "+" is not a place, so
-        // it is not in `orderedTabs` and nothing can route to it. UIKit
-        // separates it from the other three because it is a `UISearchTab` — see
-        // `CreateTabItem` for why the type, not `.pinned`, is what detaches it.
+        // Bar order: the three places (`ShellTabs`). Profile stands apart
+        // through `prominentTabIdentifier` below, not through its type.
         orderedTabs = [
             (.explore, ExploreTabCoordinator(
                 container: container,
-                notificationsButtonItem: notificationsBell.makeItem()
+                notificationsButtonItem: notificationsBell.makeItem(),
+                createItem: createItem
             )),
             (.messages, messagesTab),
             (.profile, profileTab)
@@ -344,35 +336,16 @@ final class MainTabCoordinator: NSObject, Coordinator {
             self?.notificationsBell.repaint()
             self?.refreshTabGlyphs()
         }
-        createHold.install()
         tabBarController.tabBar.addGestureRecognizer(profileHold)
-        // ⚠️ **iOS 27 STOPPED DETACHING A SEARCH TAB BY ITS TYPE ALONE.** It now
-        // gives the separate bubble — its "prominent" treatment — to the tab
-        // named by `prominentTabIdentifier`, and when that is nil only to a
-        // `UISearchTab` whose `automaticallyActivatesSearch` is on, which the
-        // "+" is not (it opens a menu). Unnamed, the "+" was drawn inside the
-        // other four's bubble. Named, it stands apart again — measured on an
-        // iPhone 18 Pro under iOS 27; iOS 26 separates it by type, as before.
-        //
-        // ⚠️ **AN iOS 27 SDK API, AND CI STILL BUILDS WITH XCODE 26.** Its SDK
-        // does not declare `prominentTabIdentifier`, so `#available` alone does
-        // not compile there. Built with an iOS 27 SDK (Swift 6.4), the call is
-        // typed; built without one, the same public setter is reached by name,
-        // and still runs on an iOS 27 device.
-        #if compiler(>=6.4)
-        if #available(iOS 27, *) {
-            tabBarController.prominentTabIdentifier = createItem.tab.identifier
-        }
-        #else
-        let setter = NSSelectorFromString("setProminentTabIdentifier:")
-        if tabBarController.responds(to: setter) {
-            _ = tabBarController.perform(setter, with: createItem.tab.identifier)
-        }
-        #endif
-        // The bar's menus: Profile's long-press switcher and the "+". `UITab` carries no menu of its own — `UITab`, `UITabBar`,
-        // `UITabBarItem` and the controller delegate were all checked against
-        // the iOS 26 SDK and expose nothing — so each menu rides an invisible
-        // button kept aligned over its item.
+        // ⚠️ **iOS 27 DRAWS APART THE TAB `prominentTabIdentifier` NAMES**:
+        // Profile by default, none under `-tabbar-grouped` (#2489). With no
+        // `UISearchTab` left in the bar, nothing else stands apart, so iOS 26
+        // groups all three either way. See `ShellTabs`.
+        ShellTabs.applyProminence(tabLayout, to: tabBarController)
+        // Profile's long-press switcher. `UITab` carries no menu of its own —
+        // `UITab`, `UITabBar`, `UITabBarItem` and the controller delegate were
+        // all checked against the iOS 26 SDK and expose nothing — so it rides
+        // an invisible button kept aligned over the tab.
         tabBarController.onLayout = { [weak self] in
             self?.alignMenuOverlays()
             // The CONTROLLER lays out before the bar has placed its own buttons,
@@ -507,9 +480,9 @@ extension MainTabCoordinator: UITabBarControllerDelegate {
         alignMenuOverlays()
     }
 
-    /// The bar for this viewer (#626) — a member's: Explore, Messages,
-    /// Profile and the "+"; a guest's: Explore, Settings and a "Sign in"
-    /// bubble. Nothing in it is a dead end.
+    /// The bar for this viewer (#626, #2489) — a member's: Explore, Messages
+    /// and Profile; a guest's: Explore and Settings, with Sign in in
+    /// Explore's top bar (`CreateBarItem`). Nothing in it is a dead end.
     ///
     /// ⚠️ MESSAGES LEAVES THE BAR, it is not greyed out. A disabled tab stood
     /// in a guest's bar doing nothing on tap (and iOS 27 would not even redraw
@@ -517,9 +490,9 @@ extension MainTabCoordinator: UITabBarControllerDelegate {
     /// (`AppRoute.gatedAction`) and lands in the inbox after.
     ///
     /// ⚠️ THE SAME TAB OBJECTS, re-composed with `setTabs` — never rebuilt. The
-    /// Profile tab is re-dressed as Settings by its coordinator, and the "+"
-    /// is the SAME `UISearchTab` re-dressed as "Sign in": the prominent
-    /// identifier, the hold shortcut and the menu anchor are keyed on it.
+    /// Profile tab is re-dressed as Settings by its coordinator: the
+    /// prominent identifier, the hold and the switcher's anchor are keyed on
+    /// it.
     ///
     /// A viewer standing on a tab that leaves (a member on Messages who logs
     /// out) lands on Explore — set before the bar changes, so the bar never
@@ -531,15 +504,13 @@ extension MainTabCoordinator: UITabBarControllerDelegate {
     }
 
     private func applyBar(animated: Bool) {
-        createItem.showSignIn(!isMember)
-        createHold.isEnabled = isMember
         // A guest's tab is Settings, with no switcher behind a long press: the
         // overlay that carries Profile's menu goes, so the tab is the bar's own
         // button — one element for VoiceOver, not a duplicate laid over it.
         profileMenuOverlay.isHidden = !isMember
-        let wanted = orderedTabs
-            .filter { isMember || $0.0 != .messages }
-            .map(\.1.tab) + [createItem.tab]
+        let wanted = ShellTabs.tabs(isMember: isMember).compactMap { place in
+            orderedTabs.first(where: { $0.0 == place })?.1.tab
+        }
         if let selected = tabBarController.selectedTab, !wanted.contains(where: { $0 === selected }),
            let explore = orderedTabs.first(where: { $0.0 == .explore })?.1.tab {
             tabBarController.selectedTab = explore
@@ -613,36 +584,16 @@ extension MainTabCoordinator: UITabBarControllerDelegate {
         container.router.route(to: .profileHandle(handle))
     }
 
-    /// The "+" is never a place — see `CreateTabItem`. A tap on it lands HERE,
-    /// on the real bubble, which is what keeps the bubble's glass press
-    /// response; the selection is refused and the menu opens instead.
-    /// VoiceOver and a hardware keyboard arrive by the same road.
+    /// Every tab is a place (#2489: the "+" left the bar), so every
+    /// selection is taken. A re-tap on the tab already showing brings its
+    /// root back to the top (#1309); UIKit still pops a pushed stack on its
+    /// own.
     func tabBarController(_ tabBarController: UITabBarController, shouldSelectTab tab: UITab) -> Bool {
-        guard tab === createItem.tab else {
-            // A re-tap on the tab already showing brings its root back to the
-            // top (#1309); UIKit still pops a pushed stack on its own.
-            TabReselect.target(
-                tappedSelectedTab: tab === tabBarController.selectedTab,
-                stack: tabBarController.selectedViewController as? UINavigationController
-            )?.scrollToTopForTabReselect()
-            return true
-        }
-        // A guest's bubble is "Sign in" (#626): one tap, the login sheet — no
-        // menu of things they cannot do yet.
-        if createItem.isSignIn {
-            onSignIn()
-            return false
-        }
-        // A hold on the "+" that went on to show the camera disc is not a tap,
-        // whatever the bar makes of the lift — see `CreateHoldShortcut`.
-        if createHold.consumeSelection() { return false }
-        // Place the anchor now rather than trust the last layout pass, and
-        // never open the menu from an anchor outside a window: that raises.
-        alignMenuOverlays()
-        if !createItem.presentMenu(), tabBarController.presentedViewController == nil {
-            tabBarController.present(createItem.makeFallbackSheet(), animated: true)
-        }
-        return false
+        TabReselect.target(
+            tappedSelectedTab: tab === tabBarController.selectedTab,
+            stack: tabBarController.selectedViewController as? UINavigationController
+        )?.scrollToTopForTabReselect()
+        return true
     }
 
     /// The bar is managed by hand around full-bleed snap surfaces (the pushed
@@ -682,14 +633,12 @@ extension MainTabCoordinator: UITabBarControllerDelegate {
 // MARK: - Bar menus
 
 extension MainTabCoordinator {
-    /// Keeps every menu overlay exactly over its bar item: Profile's switcher
-    /// and the "+".
+    /// Keeps the menu overlay exactly over its bar item: Profile's switcher.
     ///
     /// Runs on every layout pass, so it is cheap and idempotent: it re-adds
     /// nothing already added and writes the frame only when it moved.
     fileprivate func alignMenuOverlays() {
         align(profileMenuOverlay, over: profileTab?.tab)
-        align(createItem.overlay, over: createItem.tab)
     }
 
     /// Puts an overlay exactly over the bar's button for `tab`.
@@ -703,8 +652,9 @@ extension MainTabCoordinator {
     /// button carries that label ONLY while the accessibility runtime is loaded:
     /// on a simulator an accessibility inspector has touched, yes; on an iPhone
     /// with VoiceOver off, no. Every overlay then went unplaced — measured on an
-    /// iPhone SE simulator, not one `_UITabButton` labelled — and the "+" crashed
-    /// opening its menu from an anchor outside any window.
+    /// iPhone SE simulator, not one `_UITabButton` labelled — and the tab bar's
+    /// "+" of the time crashed opening its menu from an anchor outside any
+    /// window.
     private func align(_ overlay: UIButton, over tab: UITab?) {
         guard let tab else { return }
         let bar = tabBarController.tabBar
@@ -720,10 +670,6 @@ extension MainTabCoordinator {
         bar.bringSubviewToFront(overlay)
     }
 
-    /// Opens one of the "+" menu's destinations.
-    ///
-    /// PRESENTED over the shell, not pushed onto the current tab: making a
-    /// post belongs to no tab, and is finished or abandoned as a whole.
     /// "Use this sound" on a post: the camera, with the sound already chosen.
     fileprivate func openCamera(with sound: PostSound) {
         guard tabBarController.presentedViewController == nil,
@@ -734,17 +680,22 @@ extension MainTabCoordinator {
         )
     }
 
+    /// Opens one of the "+" menu's destinations.
+    ///
+    /// PRESENTED over the shell, not pushed onto the current tab: making a
+    /// post belongs to no tab, and is finished or abandoned as a whole.
+    ///
     /// Internal (not private) only for the +QA hooks.
-    func openCreate(_ destination: CreateTabItem.Destination) {
+    func openCreate(_ destination: CreateDestination) {
         // Posting needs an account: a guest signs up first, then lands on the
-        // screen they chose. Every "+" entry (menu, long press, debug hook)
-        // comes through here.
+        // screen they chose. Every "+" entry (the menu, the debug hook) comes
+        // through here.
         MemberGates.perform(.create, from: tabBarController) { [weak self] in
             self?.presentCreate(destination)
         }
     }
 
-    private func presentCreate(_ destination: CreateTabItem.Destination) {
+    private func presentCreate(_ destination: CreateDestination) {
         // A second presentation would be refused. The bar cannot be tapped
         // under one, so this only ever turns away the debug hook.
         guard tabBarController.presentedViewController == nil else { return }

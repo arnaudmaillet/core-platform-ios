@@ -28,7 +28,8 @@ extension AppContainer {
     // picks the media, it is covered by tests, and `-mock-compose-demo` still
     // drives it end to end. Whatever the new screens are, they talk to this.
     //
-    // The "+" is back, in the TAB BAR, as a menu (`CreateTabItem`). Its Text
+    // The "+" is back, beside Explore's search, as a menu (`CreateBarItem`,
+    // #2489; the tab bar's from #152 until then). Its Text
     // Post entry is Feed's text page, born empty, publishing through this
     // pipeline; Upload Media still opens an empty screen on purpose — see
     // `UploadFeatureBuilder`.

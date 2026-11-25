@@ -46,17 +46,19 @@ final class GuestModeUITests: XCTestCase {
         app.navigationBars["Log in or sign up"]
     }
 
-    /// The guest bar holds only what a guest can use (#626): Explore,
-    /// Settings and a "Sign in" bubble — no Messages. Settings is the tab's
-    /// root, with the bar still under it. Signing in turns the bar back into
-    /// the member's, without a tap.
+    /// The guest bar holds only what a guest can use (#626): Explore and
+    /// Settings — no Messages — with Sign in in Explore's top bar (#2489).
+    /// Settings is the tab's root, with the bar still under it. Signing in
+    /// turns the bar back into the member's, and Sign in into the "+",
+    /// without a tap.
     func testTheGuestBarHoldsOnlyWhatAGuestCanUseUntilTheySignIn() {
         let app = launch(["-guest-sign-in-after", "45"])
         let bar = app.tabBars.firstMatch
         XCTAssertTrue(bar.waitForExistence(timeout: 25), "no tab bar")
         let settings = bar.buttons["Settings"]
         XCTAssertTrue(settings.waitForExistence(timeout: Self.step), "the guest bar has no Settings")
-        XCTAssertTrue(bar.buttons["Sign in"].exists, "the guest bar has no Sign in bubble")
+        XCTAssertTrue(app.navigationBars.buttons["Sign in"].exists, "Explore's top bar has no Sign in")
+        XCTAssertFalse(bar.buttons["Sign in"].exists, "Sign in is still in the tab bar")
         XCTAssertFalse(bar.buttons["Messages"].exists, "Messages is in the guest bar")
 
         settings.tap()
@@ -66,9 +68,12 @@ final class GuestModeUITests: XCTestCase {
 
         XCTAssertTrue(bar.buttons["Messages"].waitForExistence(timeout: 90), "signing in did not bring Messages back")
         XCTAssertTrue(bar.buttons["Profile"].exists, "the member bar has no Profile")
-        XCTAssertTrue(bar.buttons["Create"].exists,
-                      "the member bar has no \"+\": \(bar.buttons.allElementsBoundByIndex.map { $0.label })")
+        XCTAssertFalse(bar.buttons["Create"].exists, "the \"+\" is still in the tab bar")
         XCTAssertFalse(bar.buttons["Settings"].exists, "the guest's Settings tab outlived the sign-in")
+        bar.buttons["Explore"].firstMatch.tap()
+        let create = app.navigationBars.buttons["Create"]
+        XCTAssertTrue(create.waitForExistence(timeout: Self.step),
+                      "Explore's top bar has no \"+\": \(app.navigationBars.buttons.allElementsBoundByIndex.map { $0.label })")
     }
 
     /// No bell, no balance and no Shop in a guest's bars (#1146, the owner
@@ -112,11 +117,11 @@ final class GuestModeUITests: XCTestCase {
         // Explore's leading item in the same turn, both animated: one snapshot
         // in between lacked the bell, the next had it again, still fading out,
         // and the absence check below read it (hero-uitests run 44723558388,
-        // PR #2510). The guest's markers in the tab bar first — the "Sign in"
-        // bubble in, Profile out — then a fresh wait for the bell to go, and
-        // a short window it has to stay gone through.
-        XCTAssertTrue(bar.buttons["Sign in"].waitForExistence(timeout: 90),
-                      "signing out did not bring the guest's Sign in bubble")
+        // PR #2510). The guest's markers first — Sign in in Explore's top bar
+        // (#2489), Profile out of the tab bar — then a fresh wait for the bell
+        // to go, and a short window it has to stay gone through.
+        XCTAssertTrue(app.navigationBars.buttons["Sign in"].waitForExistence(timeout: 90),
+                      "signing out did not bring the guest's Sign in")
         XCTAssertTrue(bar.buttons["Profile"].waitForNonExistence(timeout: Self.step),
                       "signing out left Profile in the bar")
         XCTAssertTrue(bell.waitForNonExistence(timeout: Self.step), "signing out left Explore's bell")
@@ -161,11 +166,12 @@ final class GuestModeUITests: XCTestCase {
         XCTAssertFalse(bars.buttons["Shop"].exists, "\(screen) shows a guest the Shop", file: file, line: line)
     }
 
-    /// One tap on the guest's bubble opens the login sheet — no create menu.
+    /// One tap on the guest's Sign in, in Explore's top bar (#2489), opens
+    /// the login sheet — no create menu.
     func testTheSignInBubbleOpensTheSheetInOneTap() {
         let app = launch([])
-        let signIn = app.tabBars.buttons["Sign in"]
-        XCTAssertTrue(signIn.waitForExistence(timeout: 25), "the guest bar has no Sign in bubble")
+        let signIn = app.navigationBars.buttons["Sign in"]
+        XCTAssertTrue(signIn.waitForExistence(timeout: 25), "Explore's top bar has no Sign in")
         signIn.tap()
         let email = app.descendants(matching: .any)
             .matching(NSPredicate(format: "label CONTAINS[c] 'with email'")).firstMatch
