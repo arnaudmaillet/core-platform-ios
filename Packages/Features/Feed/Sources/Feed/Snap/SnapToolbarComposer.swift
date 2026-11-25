@@ -31,6 +31,9 @@ protocol SnapToolbarComposerHost: UIViewController {
     var authorIdentityView: SnapAuthorIdentityView { get }
     /// On screen, and no transition or flight owns the bar's items.
     var canAnimateBarItems: Bool { get }
+    /// `-snap-layout-v2` (#2407): a media page's footer is the author and
+    /// repost, save and the sound being the column's (#2408).
+    var layoutV2: Bool { get }
     func soundFace(for model: FeedItemDisplayModel) -> SnapSoundFace?
     func presentSoundSheet()
     func presentShareSheet(for id: PostID)
@@ -191,12 +194,13 @@ final class SnapToolbarComposer {
             defaultToolbarItems = []
         }
         #endif
-        host.toolbarItems = defaultToolbarItems
+        host.toolbarItems = footerToolbarItems()
     }
 
     /// Optimistic local toggle (no backend seam yet — see the set's comment);
-    /// the glyph flips immediately, scoped to the acted-on post.
-    private func toggleBookmark(for id: PostID) {
+    /// the glyph flips immediately, scoped to the acted-on post — the bar's
+    /// star, and v2's column star (#2408).
+    func toggleBookmark(for id: PostID) {
         guard !host.unavailablePostIDs.contains(id) else { return }
         MemberGates.perform(.save, from: host) { [weak self] in
             guard let self else { return }
@@ -217,6 +221,7 @@ final class SnapToolbarComposer {
         // different offers, and a reader who cannot see the fill has only this.
         bookmarkItem.accessibilityLabel = saved ? "Saved" : "Save"
         bookmarkItem.image = SnapFooterToolbar.saveImage(saved: saved)
+        host.snapCell(for: id)?.chrome.actionColumn.setSaved(saved)
     }
 
     /// The save glyph (#1128): the star, outline at rest; filled in the
@@ -405,7 +410,12 @@ final class SnapToolbarComposer {
     func footerToolbarItems() -> [UIBarButtonItem] {
         var items = defaultToolbarItems
         guard let like = footerLikeItem,
-              let flexible = items.firstIndex(where: { $0 === footerFlexibleSpace }) else { return items }
+              let flexible = items.firstIndex(where: { $0 === footerFlexibleSpace }) else {
+            // ⚠️ v2's media page (#2408): `[author] ——— [⇄]`. Save and the
+            // sound moved to the column; the repost stays, in its own bubble.
+            guard host.layoutV2 else { return items }
+            return items.filter { $0 !== bookmarkItem && $0 !== shareSeparator && $0 !== footerSoundItem }
+        }
         items.removeAll { $0 === repostToolbarItem || $0 === footerSoundItem || $0 === shareSeparator }
         items.insert(contentsOf: footerMergesLike ? [like] : [like, footerLikeSeparator], at: flexible + 1)
         if let save = items.firstIndex(where: { $0 === bookmarkItem }) { items.insert(shareItem, at: save + 1) }

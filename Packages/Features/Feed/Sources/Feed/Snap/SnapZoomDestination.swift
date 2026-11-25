@@ -48,6 +48,8 @@ protocol SnapZoomDestinationHost: UIViewController {
     #endif
     func soundFace(for model: FeedItemDisplayModel) -> SnapSoundFace?
     func slotSharesPost(_ model: FeedItemDisplayModel) -> Bool
+    /// `-snap-layout-v2`'s column (#2408), on the replica as on the page.
+    func applyColumnLayout(to chrome: SnapChromeView, for model: FeedItemDisplayModel)
     func applyPendingComments(animated: Bool)
     func applyGrounds()
     func installAuthorPillAfterLanding()
@@ -616,6 +618,9 @@ final class SnapZoomDestination {
         let index = host.lifecycle.activeIndex ?? 0
         guard host.orderedIDs.indices.contains(index),
               let model = host.modelsByID[host.orderedIDs[index]] else { return }
+        // The page's column, so the replica flies the bubbles it lands on —
+        // and no wheel under v2 (#2408).
+        host.applyColumnLayout(to: chrome, for: model)
         chrome.configure(with: model)
         chrome.setPostLikeCount(host.viewModel.visibleLikeCount(for: model))
         chrome.setImagePipeline(host.imagePipeline)

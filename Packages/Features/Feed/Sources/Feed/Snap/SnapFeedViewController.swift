@@ -58,22 +58,21 @@ final class SnapFeedViewController: UIViewController {
     private(set) var backItem: UIBarButtonItem?
     /// The viewer's saved pile.
     ///
-    /// It used to be a `Set` on this screen, which meant a save survived
-    /// exactly as long as the feed did and was visible to nothing else. The BFF
-    /// still exposes no save API — but the profile now has a Saved tab, and two
-    /// surfaces reading one list is precisely what a store is for. See
+    /// Two surfaces read one list (the profile's Saved tab): see
     /// `PostBookmarkStore` for what a client-owned list can and cannot claim.
     /// The app's one pile outside tests (#2376).
     let bookmarks: PostBookmarkStore
+    /// `-snap-layout-v2` (#2407): a media page's column is like, save, share
+    /// and sound, its toolbar the author, Follow and repost. Set before the
+    /// view loads (tests); off, the screen is unchanged.
+    var layoutV2 = DebugFlags.isOn("-snap-layout-v2")
     /// The sounds the viewer saved, for the sound sheet (#2376).
     private let savedSounds: SavedSoundStore
     /// Keeps the save glyph on the saved fact of the post it draws (#1067):
-    /// a save or unsave made on another surface — a card, a grid behind a
-    /// sheet, the post's "..." elsewhere — writes the EntityStore's fact
-    /// (`PostBookmarkStore`), and the glyph draws it at once: the cards'
-    /// mechanism (`PostCardStaking`). One observation for the screen's life,
-    /// filtered to `bookmarkGlyphPostID`: it ends with the screen, and a page
-    /// paged away from is never the one it re-draws.
+    /// a save made on another surface writes the EntityStore's fact
+    /// (`PostBookmarkStore`), and the glyph draws it at once (`PostCardStaking`'s
+    /// mechanism). One observation for the screen's life, filtered to
+    /// `bookmarkGlyphPostID`.
     private var savedObservation: EntityObservation?
 
     /// The viewer's point balance, spent by the rail's boost anchor.
@@ -1329,8 +1328,9 @@ final class SnapFeedViewController: UIViewController {
                     guard let id = cell?.representedPostID else { return }
                     self?.commentsPanel(for: id)?.scrollToStart(animated: true)
                 }
-                // A text page's like, in the footer when there is one (#1924).
+                // A text page's like in the footer (#1924); v2's column (#2408).
                 cell.setLikeInFooter(self.toolbarComposer.footerCarriesTextLike)
+                self.applyColumnLayout(to: cell.chrome, for: model)
                 // The sound bubble's Share (#1999).
                 cell.onRequestShare = { [weak self] in self?.presentShareSheet(for: id) }
             }

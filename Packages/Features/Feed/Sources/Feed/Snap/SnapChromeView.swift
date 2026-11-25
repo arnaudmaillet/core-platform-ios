@@ -161,7 +161,7 @@ final class SnapChromeView: UIView {
     var interactionRoots: [UIView] {
         // The wheel's capsule (#1872): the wheel lets its touches through to it.
         [shortcutRail, shortcutRail.capsule.glass, boostButton, commentEmptyState, subtitleView, commentTicker,
-         soundBubble, captionLabel]
+         soundBubble, captionLabel] + actionColumn.v2InteractionRoots
     }
 
     @objc private func captionTapped() {

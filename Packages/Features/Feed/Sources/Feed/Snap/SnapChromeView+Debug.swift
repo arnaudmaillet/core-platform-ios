@@ -43,6 +43,13 @@ extension SnapChromeView {
     /// The glass column's items, shape by shape, as the column stands them
     /// now (#1872).
     var debugColumnItems: [[String]] { actionColumn.columnSlots().map { $0.map(\.id) } }
+    /// Each column item's frame in this chrome's space, by id (#2408).
+    var debugColumnFrames: [String: CGRect] {
+        Dictionary(actionColumn.columnSlots().joined().map { ($0.id, actionColumn.columnLayer.convert($0.frame, to: self)) },
+                   uniquingKeysWith: { first, _ in first })
+    }
+    /// Whether the emote wheel is installed in the column's layer (#2408).
+    var debugWheelInstalled: Bool { shortcutRail.superview != nil && shortcutRail.capsule.isInstalled }
     var debugGlassColumn: SnapGlassColumn { glassColumn }
     /// `view`'s frame in this chrome's space — a column item stands in its
     /// bubble's glass, not in the chrome (#1872).

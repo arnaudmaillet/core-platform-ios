@@ -76,6 +76,14 @@ final class SnapChromeActionColumn {
     /// the caption and the page strip — see `SnapActionColumn`. Media chrome,
     /// like the pill (`applySoundVisibility`).
     let soundBubble = SnapSoundBubbleButton()
+    /// Under `-snap-layout-v2` (#2408): Share in a bubble of its own, the
+    /// slot's face (#1999) on its own station — the sound keeps the bottom.
+    let shareBubble = SnapSoundBubbleButton()
+    /// Under `-snap-layout-v2` (#2408): the toolbar's ☆, in the column.
+    let saveBubble = SnapColumnSaveButton()
+    /// The save star was tapped (#2408): the screen toggles the post's saved
+    /// state and draws it back (`setSaved`).
+    var onSaveRequested: (() -> Void)?
     /// (#1924, the owner): a TEXT page's like stands in the screen's footer —
     /// its heart and count beside save and repost — so the column floats no
     /// pill over the composer, and a short comment list rests on it. A media
@@ -127,7 +135,15 @@ final class SnapChromeActionColumn {
         // their one glass, standing them on their stations.
         boostButton.drawsGlass = false
         soundBubble.drawsGlass = false
-        for (id, button) in [(ColumnItem.like, boostButton as UIView), (ColumnItem.sound, soundBubble)] {
+        shareBubble.drawsGlass = false
+        shareBubble.setSharesPost(true)
+        shareBubble.isHidden = true
+        saveBubble.isHidden = true
+        let items: [(String, UIView)] = [
+            (ColumnItem.like, boostButton), (ColumnItem.sound, soundBubble),
+            (ColumnItem.share, shareBubble), (ColumnItem.save, saveBubble),
+        ]
+        for (id, button) in items {
             button.translatesAutoresizingMaskIntoConstraints = true
             glassColumn.register(button, for: id)
         }
@@ -140,25 +156,17 @@ final class SnapChromeActionColumn {
         // The wheel over the glass (#1872), its capsule in it.
         railLayer.frame = columnLayer.bounds
         railLayer.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        railLayer.addSubview(host.shortcutRail)
         columnLayer.addSubview(railLayer)
         let capsule = host.shortcutRail.capsule
         capsule.likeHeight = SnapActionColumn.likePillHeight
         capsule.onLikeCover = { [weak self] cover in self?.glassColumn.setCover(ColumnItem.like, amount: cover) }
         capsule.onReturnShown = { [weak self] shown in self?.boostButton.setShowsReturn(shown) }
         boostButton.onReturn = { [weak capsule] in capsule?.returnToRest() }
-        capsule.host = { [weak self] glass in self?.glassColumn.insertAccessory(glass) }
+        installWheel(true)
         mountColumn(in: host)
-        soundBubble.onTap = { [weak self] in
-            guard let self else { return }
-            if soundBubble.showsReturn {
-                onSoundReturnRequested?()
-            } else if soundBubble.sharesPost {
-                onShareRequested?()
-            } else {
-                onSoundSheetRequested?()
-            }
-        }
+        soundBubble.onTap = { [weak self] in self.map { $0.bubbleTapped($0.soundBubble) } }
+        shareBubble.onTap = { [weak self] in self.map { $0.bubbleTapped($0.shareBubble) } }
+        saveBubble.onTap = { [weak self] in self?.onSaveRequested?() }
         // No hold of its own since #1931 (no in-app mute): only the way back
         // has one, arming the sheet (#1929).
         let hold = HoldToArmPresenter(view: soundBubble) { [weak self] in
@@ -175,10 +183,21 @@ final class SnapChromeActionColumn {
         soundHold = hold
     }
 
-    /// The column item (the sound cover, the like) under `point`, if one
-    /// takes touches there.
+    /// A tap on a bubble wearing the sound's face, Share or the way back.
+    private func bubbleTapped(_ bubble: SnapSoundBubbleButton) {
+        if bubble.showsReturn {
+            onSoundReturnRequested?()
+        } else if bubble.sharesPost {
+            onShareRequested?()
+        } else {
+            onSoundSheetRequested?()
+        }
+    }
+
+    /// The column item (the sound cover, the like, v2's share and save)
+    /// under `point`, if one takes touches there.
     func columnItemHit(at point: CGPoint, with event: UIEvent?) -> UIView? {
-        for item in [soundBubble, boostButton] as [UIView] {
+        for item in [soundBubble, shareBubble, saveBubble, boostButton] as [UIView] {
             guard !item.isHidden, item.alpha > 0.01, item.isUserInteractionEnabled, item.window != nil else { continue }
             let local = host.convert(point, to: item)
             guard item.point(inside: local, with: event), let hit = item.hitTest(local, with: event) else { continue }
@@ -190,9 +209,12 @@ final class SnapChromeActionColumn {
     /// Scrolled away from the comments' start (#1929): the sound bubble
     /// offers the way back to the top, and its sheet moves to a hold — kept
     /// for VoiceOver as a custom action.
+    /// Under `-snap-layout-v2` the way back is Share's bubble's (#2408): it
+    /// follows the slot's face, as it did on the sound's bubble (#1999).
     func setSoundShowsReturn(_ shows: Bool, down: Bool = false, animated: Bool = true) {
-        guard shows != soundBubble.showsReturn || down != soundBubble.returnPointsDown else { return }
-        soundBubble.setShowsReturn(shows, down: down, animated: animated)
+        let bubble = isLayoutV2 ? shareBubble : soundBubble
+        guard shows != bubble.showsReturn || down != bubble.returnPointsDown else { return }
+        bubble.setShowsReturn(shows, down: down, animated: animated)
         applySoundHold()
     }
 
@@ -223,6 +245,13 @@ final class SnapChromeActionColumn {
         } else {
             soundBubble.accessibilityCustomActions = nil
         }
+        // v2's Share keeps its VoiceOver road with the chevron up (#2408).
+        shareBubble.accessibilityCustomActions = shareBubble.showsReturn ? [
+            UIAccessibilityCustomAction(name: "Share") { [weak self] _ in
+                self?.onShareRequested?()
+                return true
+            },
+        ] : nil
     }
 
     /// The bubble as the post's Share (#1999) on a pushed page: a text
@@ -230,8 +259,19 @@ final class SnapChromeActionColumn {
     /// ends on Share where the sound was (the sound moves to the footer).
     /// `holdArmsShare`: the way back's hold arms Share — a media page's.
     func setSlotSharesPost(_ shares: Bool, holdArmsShare: Bool = false) {
+        slotSharesPost = shares
         self.holdArmsShare = shares && holdArmsShare
-        soundBubble.setSharesPost(shares)
+        applySlot()
+    }
+
+    /// What the page asked of the slot (`setSlotSharesPost`).
+    private var slotSharesPost = false
+
+    /// The slot's face as the layout stands: the sound's bubble wears Share
+    /// on the classic layout (#1999); under `-snap-layout-v2` Share has a
+    /// bubble of its own and the sound keeps its face (#2408).
+    private func applySlot() {
+        soundBubble.setSharesPost(slotSharesPost && !isLayoutV2)
         applySoundHold()
         applySoundVisibility()
     }
@@ -241,6 +281,8 @@ final class SnapChromeActionColumn {
     /// Share (#1999), on the same frame.
     func applySoundVisibility() {
         soundBubble.isHidden = soundFace == nil && !soundBubble.sharesPost
+        shareBubble.isHidden = !isLayoutV2
+        saveBubble.isHidden = !isLayoutV2
         // The glass column stands what shows (#1872).
         host.setNeedsLayout()
     }
@@ -257,6 +299,84 @@ final class SnapChromeActionColumn {
     /// Turns the sound bubble's cover while the post plays.
     func setSoundSpinning(_ spinning: Bool) {
         soundBubble.setSpinning(spinning)
+    }
+
+    // MARK: - Layout v2 (#2408)
+
+    /// The screen runs `-snap-layout-v2` (`setLayoutV2`).
+    private var layoutV2Requested = false
+    /// The column as it stands: v2's four bubbles on a media page under the
+    /// flag; the classic like, sound and wheel otherwise — a text page always.
+    private(set) var isLayoutV2 = false
+    /// v2's share and save, for the chrome's tap arbitration: none off v2, so
+    /// the classic column declares exactly what it did (#2408).
+    var v2InteractionRoots: [UIView] { isLayoutV2 ? [shareBubble, saveBubble] : [] }
+    /// v2's like, save and share folded into the sound while the comments
+    /// sheet is up (#2408).
+    private(set) var isFoldedIntoSound = false
+    /// v2's stations, stacked on the sound's: built the first time v2 shows.
+    private lazy var v2Stations = SnapColumnV2Stations(in: host, sound: host.soundStation, pill: host.boostStation)
+
+    /// Turns `-snap-layout-v2` on or off for this chrome, the screen's flag
+    /// (a spare chrome is built before it knows): `configure` applies it to
+    /// the page — a media page's column only.
+    func setLayoutV2(_ on: Bool) {
+        guard on != layoutV2Requested else { return }
+        layoutV2Requested = on
+        applyLayout()
+    }
+
+    /// Stands the column for the flag and the page: the wheel in or out, the
+    /// slot's face, v2's bubbles shown or hidden.
+    private func applyLayout() {
+        let v2 = layoutV2Requested && host.hasMedia
+        guard v2 != isLayoutV2 else { return }
+        isLayoutV2 = v2
+        // ⚠️ NOT INSTALLED, NOT HIDDEN (#2408): no wheel means no scroll
+        // lock, no capsule glass in the column and no slot in the flight's
+        // replica — a hidden wheel would keep all three.
+        installWheel(!v2)
+        // The way back moves with the slot's face.
+        soundBubble.setShowsReturn(false, animated: false)
+        shareBubble.setShowsReturn(false, animated: false)
+        isFoldedIntoSound = false
+        applySlot()
+        glassColumn.refresh(animated: false)
+    }
+
+    /// The emote wheel in the column's layer, its capsule in the column's
+    /// glass — or out of both.
+    private func installWheel(_ installs: Bool) {
+        let rail = host.shortcutRail
+        guard installs != (rail.superview === railLayer) else { return }
+        if installs {
+            railLayer.addSubview(rail)
+            rail.capsule.host = { [weak self] glass in self?.glassColumn.insertAccessory(glass) }
+        } else {
+            // The capsule takes its glass out of the column.
+            rail.capsule.host = nil
+            rail.removeFromSuperview()
+            // The heart's "return" mode scrolled the wheel back: never shown.
+            boostButton.setShowsReturn(false)
+            glassColumn.setCover(nil, amount: 0)
+        }
+    }
+
+    /// The post's saved state on v2's star.
+    func setSaved(_ saved: Bool) {
+        saveBubble.setSaved(saved)
+    }
+
+    /// v2 (#2408): the like, save and share fold into the sound as the
+    /// comments sheet leaves the resting page, and come back out of it once
+    /// the page is at rest again — the glass column's own morph (#1872), on
+    /// its springs, while the column fades and glides on the sheet's share.
+    /// Reduce Motion: in place.
+    private func applyFold() {
+        let folds = isLayoutV2 && sheetColumnShare > 0
+        guard folds != isFoldedIntoSound else { return }
+        isFoldedIntoSound = folds
+        glassColumn.refresh(animated: !MotionPreference.reducesMotion)
     }
 
     // MARK: - The column's glide with the comments (#2326)
@@ -309,6 +429,7 @@ final class SnapChromeActionColumn {
         guard clamped != sheetColumnShare else { return }
         sheetColumnShare = clamped
         applyColumnGlide()
+        applyFold()
     }
 
     /// Mounts the column ABOVE this chrome in `host` (the cell's content
@@ -331,10 +452,13 @@ final class SnapChromeActionColumn {
         NSLayoutConstraint.activate(constraints)
     }
 
-    /// The glass column's items (#1872).
+    /// The glass column's items (#1872); share and save under
+    /// `-snap-layout-v2` (#2408).
     enum ColumnItem {
         static let like = "like"
         static let sound = "sound"
+        static let share = "share"
+        static let save = "save"
     }
 
     /// Where the column's items stand: on their stations, each a bubble of
@@ -347,6 +471,18 @@ final class SnapChromeActionColumn {
             return SnapGlassColumn.Slot(id: id, frame: station.convert(station.bounds, to: columnLayer))
         }
         let sound = slot(ColumnItem.sound, soundBubble, host.soundStation)
+        if isLayoutV2 {
+            // Bottom to top ◉ ↗ ☆ ♥ (#2408); all of it in the sound while the
+            // comments are up.
+            guard !isFoldedIntoSound else { return [sound].compactMap { $0.map { [$0] } } }
+            let stations = v2Stations
+            return [
+                slot(ColumnItem.like, boostButton, stations.like),
+                slot(ColumnItem.save, saveBubble, stations.save),
+                slot(ColumnItem.share, shareBubble, stations.share),
+                sound,
+            ].compactMap { $0.map { [$0] } }
+        }
         return [
             slot(ColumnItem.like, boostButton, host.boostStation),
             sound,
@@ -377,7 +513,7 @@ final class SnapChromeActionColumn {
         // ⚠️ AND ON EACH ITEM (#1872): a glass's content takes the ink the
         // glass picks over what is behind it, and the column's ink is the
         // page's choice — white over media, whatever the picture.
-        for item in [boostButton as UIView, soundBubble] {
+        for item in [boostButton as UIView, soundBubble, shareBubble, saveBubble] {
             item.overrideUserInterfaceStyle = style
         }
     }
@@ -410,6 +546,8 @@ final class SnapChromeActionColumn {
         // the post's live one (`setPostLikeCount`).
         postLikeCount = model.likeCount
         applyLikeBadge(animated: false)
+        // A media page wears v2's column, a text page never (#2408).
+        applyLayout()
         applySoundVisibility()
     }
 
@@ -424,6 +562,12 @@ final class SnapChromeActionColumn {
         soundBubble.setFace(nil, pipeline: nil)
         soundBubble.setSharesPost(false)
         soundBubble.isHidden = true
+        shareBubble.setShowsReturn(false, animated: false)
+        shareBubble.isHidden = true
+        saveBubble.setSaved(false)
+        saveBubble.isHidden = true
+        slotSharesPost = false
+        isFoldedIntoSound = false
         // Back to the unwired default (every amount, nothing undoable) — the
         // next configure pushes the real context.
         boostButton.setWalletContext(balance: .max, undoableAmount: 0)
