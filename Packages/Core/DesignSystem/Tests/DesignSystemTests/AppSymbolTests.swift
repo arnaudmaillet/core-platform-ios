@@ -42,6 +42,9 @@ struct AppSymbolTests {
             (AppSymbol.like, AppSymbol.liked), (.save, .saved), (.comment, .commentFilled), (.crown, .crownFilled),
             (.settings, .settingsFill),
             (.bell, .bellFill), (.bellSlash, .bellSlashFill),
+            (.send, .sendFill),
+            (.camera, .cameraFill), (.gallery, .galleryFill),
+            (.trash, .trashFill), (.mic, .micFill), (.bookmark, .bookmarkFill),
         ] {
             let a = inked(try #require(outline.image(AppSymbol.fixed(20))))
             let b = inked(try #require(filled.image(AppSymbol.fixed(20))))
@@ -102,6 +105,9 @@ struct AppSymbolTests {
     @Test(arguments: [
         [AppSymbol.settings, .settingsFill],
         [.bell, .bellFill, .bellSlash, .bellSlashFill, .bellBadge],
+        [.send, .sendFill],
+        [.camera, .cameraFill], [.gallery, .galleryFill],
+        [.trash, .trashFill], [.mic, .micFill], [.bookmark, .bookmarkFill],
     ])
     func aFamilySharesOneBox(_ family: [AppSymbol]) throws {
         let configuration = AppSymbol.fixed(17)
@@ -172,7 +178,6 @@ struct AppSymbolSizeTests {
     @Test(arguments: [
         (AppSymbol.liked, "heart.fill"), (.save, "star"), (.comment, "ellipsis.message"),
         (.repost, "arrow.trianglehead.2.clockwise.rotate.90"), (.crownFilled, "crown.fill"),
-        (.share, "square.and.arrow.up"),
         (.play, "play.fill"), (.pause, "pause.fill"), (.playCircle, "play.circle.fill"),
         (.megaphoneFill, "megaphone.fill"), (.megaphone, "megaphone"),
         (.login, "person.crop.circle.badge.plus"),
@@ -181,6 +186,11 @@ struct AppSymbolSizeTests {
         (.search, "magnifyingglass"),
         (.bell, "bell"), (.bellFill, "bell.fill"), (.bellSlash, "bell.slash"), (.bellSlashFill, "bell.slash.fill"),
         (.bellBadge, "bell.badge"),
+        (.send, "arrowshape.turn.up.forward"), (.sendFill, "arrowshape.turn.up.forward"),
+        (.camera, "camera"), (.cameraFill, "camera.fill"),
+        (.gallery, "photo.on.rectangle"), (.galleryFill, "photo.on.rectangle"),
+        (.trash, "trash"), (.trashFill, "trash.fill"), (.mic, "mic"), (.micFill, "mic.fill"),
+        (.bookmark, "pin"), (.bookmarkFill, "pin.fill"), (.bookmarkSlash, "pin.slash"),
     ])
     func aGlyphIsAsTallAsTheSystemsOwn(_ pair: (AppSymbol, String)) throws {
         let configuration = AppSymbol.fixed(12, weight: .semibold)

@@ -44,8 +44,6 @@ public enum AppSymbol: String, CaseIterable, Sendable {
     case save = "core.star"
     /// Saved: the star, filled (drawn gold, `Palette.saveGold`).
     case saved = "core.star.fill"
-    /// Share.
-    case share = "core.share"
     /// Gems, outline: the owner's crown (#2071).
     case crown = "core.crown"
     /// Gems, filled — the glyph beside an amount (`GemSymbol.glyph`).
@@ -68,6 +66,34 @@ public enum AppSymbol: String, CaseIterable, Sendable {
     case bellSlash = "core.bell.slash"
     case bellSlashFill = "core.bell.slash.fill"
     case bellBadge = "core.bell.badge"
+
+    // What a viewer does to content, the owner's own glyphs (#2416, #2458,
+    // #2459), traced from their drawings the same way.
+    /// Share and forward, everywhere: the owner's send glyph (#2416), read
+    /// through `PostActionSymbol.share`.
+    case send = "core.send"
+    case sendFill = "core.send.fill"
+    /// The camera and the gallery (#2458): a body with a centred hump, a
+    /// lens and a flash; two stacked photos. The gallery's fill has no site
+    /// yet (a selected or prominent state).
+    case camera = "core.camera"
+    case cameraFill = "core.camera.fill"
+    case gallery = "core.gallery"
+    case galleryFill = "core.gallery.fill"
+    /// The bin (#2459): delete, clear, discard. Its fill is derived (the
+    /// lid and tub solid, the slots cut out, the handle an open arch).
+    case trash = "core.trash"
+    case trashFill = "core.trash.fill"
+    /// The microphone (#2459): a capsule with three slots on a cradle, no
+    /// stand. The outline is derived from the drawn fill.
+    case mic = "core.mic"
+    case micFill = "core.mic.fill"
+    /// A conversation's pin (#2459): the owner's bookmark. ⚠️ CONVERSATIONS
+    /// ONLY — the map's pins (favourite places and profiles) stay `pin`.
+    case bookmark = "core.bookmark"
+    case bookmarkFill = "core.bookmark.fill"
+    /// Unpin: the bookmark crossed by the bell's slash (`core.bell.slash`).
+    case bookmarkSlash = "core.bookmark.slash"
 
     // The tab bar's own glyphs (#1191): each an outline, a fill (the
     // selected tab), and both with a badge layer (unread) — palette layer 0
@@ -130,12 +156,18 @@ public enum AppSymbol: String, CaseIterable, Sendable {
         case .repost: "Repost"
         case .save: "Save"
         case .saved: "Saved"
-        case .share: "Share"
         case .crown, .crownFilled: GemSymbol.name
         case .settings, .settingsFill: "Settings"
         case .search: "Search"
         case .bell, .bellFill, .bellBadge: "Notifications"
         case .bellSlash, .bellSlashFill: "Notifications muted"
+        case .send, .sendFill: "Share"
+        case .camera, .cameraFill: "Camera"
+        case .gallery, .galleryFill: "Photo Library"
+        case .trash, .trashFill: "Delete"
+        case .mic, .micFill: "Microphone"
+        case .bookmark, .bookmarkFill: "Pin"
+        case .bookmarkSlash: "Unpin"
         case .map, .mapFill, .mapBadge, .mapBadgeFill: "Explore"
         case .squarePlay, .squarePlayFill, .squarePlayBadge, .squarePlayBadgeFill: "For You"
         case .chats, .chatsFill, .chatsBadge, .chatsBadgeFill: "Messages"

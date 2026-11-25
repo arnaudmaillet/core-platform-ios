@@ -36,11 +36,11 @@ final class MediaSoundtrackToolsView: UIView {
     /// What the empty tools say.
     static let emptyHint = "Pick a song from Files, or use the sound of another video."
 
-    /// The SF Symbols this view draws.
+    /// The symbols this view draws: SF Symbols, and the owner's bin (#2459).
     enum Symbol {
         static let files = "folder"
         static let video = "film"
-        static let remove = "trash"
+        static let remove = AppSymbol.trash.rawValue
         static let song = "music.note"
         static let film = "speaker.wave.2"
     }
@@ -66,9 +66,9 @@ final class MediaSoundtrackToolsView: UIView {
     }
     private lazy var remove: UIButton = {
         var configuration = UIButton.Configuration.plain()
-        configuration.image = UIImage(
-            systemName: Symbol.remove,
-            withConfiguration: UIImage.SymbolConfiguration(pointSize: Metrics.symbol, weight: .semibold)
+        configuration.image = UIImage.symbol(
+            named: Symbol.remove,
+            configuration: UIImage.SymbolConfiguration(pointSize: Metrics.symbol, weight: .semibold)
         )
         configuration.baseForegroundColor = .label
         configuration.contentInsets = .zero

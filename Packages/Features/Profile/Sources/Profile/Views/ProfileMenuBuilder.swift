@@ -1,3 +1,4 @@
+import DesignSystem
 import MapsInterface
 import PostGrid
 import ProfileData
@@ -66,7 +67,7 @@ enum ProfileMenuBuilder {
         // rather than offering an action that would no-op.
         if state.canShare {
             groups.append(UIMenu(options: .displayInline, children: [
-                UIAction(title: "Share", image: UIImage(systemName: "square.and.arrow.up")) { _ in
+                UIAction(title: "Share", image: UIImage.symbol(named: PostActionSymbol.share)) { _ in
                     handlers.share()
                 },
                 UIAction(title: "Copy Link", image: UIImage(systemName: "link")) { _ in

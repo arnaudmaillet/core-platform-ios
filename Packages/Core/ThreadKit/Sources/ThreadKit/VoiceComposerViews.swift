@@ -228,7 +228,7 @@ final class VoiceRecordingStrip: UIView {
         // only, before the row's layout: the scale and fade and the
         // cross-fade are view animations, which no `performWithoutAnimation`
         // may hold.
-        let takeFace = locked ? AppSymbol.pause.rawValue : "mic.fill"
+        let takeFace = locked ? AppSymbol.pause.rawValue : AppSymbol.micFill.rawValue
         if takeFace != shownTakeFace {
             shownTakeFace = takeFace
             let take = UIImage.symbol(named: takeFace)

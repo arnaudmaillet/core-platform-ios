@@ -36,7 +36,7 @@ public final class VoiceMarkView: UIView {
         super.init(frame: frame)
         isUserInteractionEnabled = false
         isAccessibilityElement = false
-        mic.image = UIImage(systemName: "mic.fill")
+        mic.image = AppSymbol.micFill.image()
         mic.preferredSymbolConfiguration = UIImage.SymbolConfiguration(textStyle: .caption2, scale: .small)
         mic.setContentHuggingPriority(.required, for: .horizontal)
         waveform.scrubs = false

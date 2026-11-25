@@ -9,7 +9,7 @@ import UIKit
 struct BarItemsTests {
     @Test func anIconIsAStockImageItemWithItsIdentity() {
         var tapped = 0
-        let item = BarItems.icon(id: "test.share", image: UIImage(systemName: "square.and.arrow.up"), label: "Share") {
+        let item = BarItems.icon(id: "test.share", image: UIImage.symbol(named: PostActionSymbol.share), label: "Share") {
             tapped += 1
         }
         #expect(item.identifier == "test.share")

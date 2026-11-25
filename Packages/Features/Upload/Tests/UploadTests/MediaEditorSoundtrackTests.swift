@@ -450,7 +450,7 @@ struct MediaEditorSoundtrackTests {
 
     @Test func everySymbolExists() {
         for symbol in MediaSoundtrackToolsView.symbols {
-            #expect(UIImage(systemName: symbol) != nil, "\(symbol) is not a symbol")
+            #expect(UIImage.symbol(named: symbol) != nil, "\(symbol) is not a symbol")
         }
     }
 }

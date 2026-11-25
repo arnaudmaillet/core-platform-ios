@@ -396,7 +396,7 @@ struct ConversationRowAttachmentsTests {
         #expect(bell == pin + 1 && more == bell + 2, "\(items.map { $0.identifier ?? "·" })")
         let gap = items[bell + 1]
         #expect(gap.identifier == nil && gap.customView == nil && gap.primaryAction == nil)
-        #expect(items[pin].image == UIImage(systemName: "pin"))
+        #expect(items[pin].image == AppSymbol.bookmark.image())
         #expect(items[bell].image == AppSymbol.bell.image())
         #expect(items[pin].accessibilityLabel == "Pin conversation")
         #expect(items[bell].accessibilityLabel == "Notifications")
@@ -435,7 +435,7 @@ struct ConversationRowAttachmentsTests {
 
         pin.primaryAction?.performWithSender(nil, target: nil)
         #expect(driver.pinToggles == 1)
-        #expect(pin.image == UIImage(systemName: "pin.fill"))
+        #expect(pin.image == AppSymbol.bookmarkFill.image())
         #expect(pin.accessibilityLabel == "Unpin conversation")
 
         bell.primaryAction?.performWithSender(nil, target: nil)

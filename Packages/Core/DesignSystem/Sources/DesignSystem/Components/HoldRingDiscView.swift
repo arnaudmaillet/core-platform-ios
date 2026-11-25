@@ -138,7 +138,7 @@ public final class HoldRingDiscView: UIView {
         }
         ring.strokeEnd = 0
 
-        glyph.image = UIImage(systemName: symbolName)
+        glyph.image = UIImage.symbol(named: symbolName)
         glyph.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: 22, weight: .semibold)
         glyph.layer.masksToBounds = true
         glyph.contentMode = .center
@@ -192,7 +192,7 @@ public final class HoldRingDiscView: UIView {
     /// The glyph becomes `symbolName` — a disc that says the new state
     /// before it retreats (#1929: the pin turned `pin.fill`).
     public func setSymbol(_ symbolName: String) {
-        glyph.image = UIImage(systemName: symbolName)
+        glyph.image = UIImage.symbol(named: symbolName)
         glyph.contentMode = .center
         showsPicture = false
         setNeedsLayout()

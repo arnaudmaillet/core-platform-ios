@@ -1518,7 +1518,7 @@ private final class PinTextFaceView: UIView {
     private var showsChannelMark = false
     var wearsVoiceMark: Bool { !micBadge.isHidden && !showsChannelMark }
     var wearsChannelMark: Bool { !micBadge.isHidden && showsChannelMark }
-    private static let micImage = UIImage(systemName: "mic.fill")?.withConfiguration(
+    private static let micImage = AppSymbol.micFill.image()?.withConfiguration(
         UIImage.SymbolConfiguration(pointSize: 9, weight: .bold)
     )
     private static let channelImage = AppSymbol.megaphoneFill.image()?.withConfiguration(

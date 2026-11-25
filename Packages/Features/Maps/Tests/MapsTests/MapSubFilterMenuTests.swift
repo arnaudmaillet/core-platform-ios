@@ -160,7 +160,7 @@ struct MapSubFilterMenuTests {
             .sendMessage: "message",
             .toggleMute: AppSymbol.bellSlash.rawValue,
             .viewDetails: "info.circle",
-            .share: "square.and.arrow.up",
+            .share: PostActionSymbol.share,
             .unpin: "pin.slash"
         ]
         for (action, symbol) in expected {

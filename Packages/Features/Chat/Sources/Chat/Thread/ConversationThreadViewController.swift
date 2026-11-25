@@ -89,7 +89,7 @@ final class ConversationThreadViewController: UIViewController {
     /// re-applied to its item when it fires).
     private lazy var pinItem: UIBarButtonItem = {
         let item = UIBarButtonItem(
-            title: nil, image: UIImage(systemName: "pin"),
+            title: nil, image: AppSymbol.bookmark.image(),
             primaryAction: UIAction { [weak self] _ in self?.togglePin() }
         )
         item.identifier = "conversation.pin"
@@ -103,7 +103,7 @@ final class ConversationThreadViewController: UIViewController {
     }
 
     private func applyPinLook() {
-        pinItem.image = UIImage(systemName: isPinned == true ? "pin.fill" : "pin")
+        pinItem.image = (isPinned == true ? AppSymbol.bookmarkFill : .bookmark).image()
         pinItem.isEnabled = isPinned != nil
         pinItem.accessibilityLabel = isPinned == true ? "Unpin conversation" : "Pin conversation"
     }
@@ -1099,11 +1099,11 @@ final class ConversationThreadViewController: UIViewController {
         // A channel's reader sends nothing (#2215).
         guard mode == .full, driver.sendsMedia, group?.canPost != false else { return [] }
         return [
-            ComposerAttachmentSource(id: Self.cameraID, symbol: "camera", accessibilityLabel: "Camera") { [weak self] in
+            ComposerAttachmentSource(id: Self.cameraID, symbol: AppSymbol.camera.rawValue, accessibilityLabel: "Camera") { [weak self] in
                 self?.pickMedia(.camera)
             },
             ComposerAttachmentSource(
-                id: Self.libraryID, symbol: "photo.on.rectangle", accessibilityLabel: "Photo Library"
+                id: Self.libraryID, symbol: AppSymbol.gallery.rawValue, accessibilityLabel: "Photo Library"
             ) { [weak self] in
                 self?.pickMedia(.library)
             },
@@ -2089,10 +2089,10 @@ final class ConversationThreadViewController: UIViewController {
         let select = UIAction(title: "Select Text", image: UIImage(systemName: "text.magnifyingglass")) {
             [weak self] _ in self?.selectText(of: id)
         }
-        let forward = UIAction(title: "Forward", image: UIImage(systemName: "arrowshape.turn.up.right")) {
+        let forward = UIAction(title: "Forward", image: UIImage.symbol(named: PostActionSymbol.share)) {
             [weak self] _ in self?.driver.forward(id)
         }
-        let delete = UIAction(title: "Delete", image: UIImage(systemName: "trash"), attributes: .destructive) {
+        let delete = UIAction(title: "Delete", image: AppSymbol.trash.image(), attributes: .destructive) {
             [weak self] _ in self?.confirmDelete(id)
         }
         // A channel's reader reads (#2215): no Reply, and nothing of theirs
@@ -3011,7 +3011,7 @@ extension ConversationThreadViewController {
         composer.onSend = { [weak self] take in self?.driver.send(voice: take) }
         composer.onHint = { [weak self] hint in
             guard let self else { return }
-            Feedback.info(hint, symbol: "mic", from: self)
+            Feedback.info(hint, symbol: AppSymbol.mic.rawValue, from: self)
         }
         // Once refused, a hold offers Settings (#2102).
         composer.offersMicrophoneSettings(from: self, message: "Allow microphone access to record voice messages.")

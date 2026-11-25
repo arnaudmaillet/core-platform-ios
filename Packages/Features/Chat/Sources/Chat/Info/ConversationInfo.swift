@@ -108,8 +108,8 @@ enum ConversationInfoAction: Equatable, Sendable {
         }
     }
 
-    /// The bubble's glyph.
-    static let shareSymbol = "square.and.arrow.up"
+    /// The bubble's glyph: the one share glyph (#2416).
+    static let shareSymbol = PostActionSymbol.share
 }
 
 /// What a group's or a channel's header shows (#2237), for the viewer it

@@ -655,7 +655,7 @@ public final class CommentRowView: UIView {
     /// whichever moderation actions are wired.
     public func menuElements() -> [UIMenuElement] {
         let review: [UIMenuElement] = onReview.map { [Self.reviewActions($0)] } ?? []
-        let share = UIAction(title: "Share Comment", image: UIImage(systemName: "square.and.arrow.up")) {
+        let share = UIAction(title: "Share Comment", image: UIImage.symbol(named: PostActionSymbol.share)) {
             [weak self] _ in self?.onShare?()
         }
         let moderation: [UIMenuElement] = Self.moderationMenu(onBlock: onBlock, onReport: onReport).map { [$0] } ?? []

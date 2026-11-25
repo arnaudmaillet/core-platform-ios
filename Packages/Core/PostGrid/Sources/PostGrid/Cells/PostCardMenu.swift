@@ -118,12 +118,12 @@ public enum PostCardMenuAction {
         case .repost: PostActionSymbol.repost
         case .comment: PostActionSymbol.comments
         case .like(let isOn, _): isOn ? LikesSymbol.glyph : LikesSymbol.outlineGlyph
-        case .share: "square.and.arrow.up"
+        case .share: PostActionSymbol.share
         case .copyText: "doc.on.doc"
         case .copyLink: "link"
         case .selectText: "selection.pin.in.out"
         case .edit: "pencil"
-        case .delete: "trash"
+        case .delete: AppSymbol.trash.rawValue
         case .removeFromHistory: "clock.badge.xmark"
         case .viewProfile: "person.crop.circle"
         case .follow: "person.badge.plus"

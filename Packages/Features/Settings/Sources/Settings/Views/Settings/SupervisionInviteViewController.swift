@@ -112,7 +112,7 @@ package final class SupervisionInviteViewController: UIViewController {
 
         var share = UIButton.Configuration.filled()
         share.title = "Share Code"
-        share.image = UIImage(systemName: "square.and.arrow.up")
+        share.image = UIImage.symbol(named: PostActionSymbol.share)
         share.imagePadding = Spacing.sm
         share.cornerStyle = .capsule
         share.buttonSize = .large

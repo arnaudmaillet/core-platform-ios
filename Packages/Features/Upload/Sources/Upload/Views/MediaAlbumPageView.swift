@@ -241,7 +241,7 @@ final class MediaAlbumPageView: UIView {
         emptyState.isHidden = !items.isEmpty
         if items.isEmpty {
             emptyState.configure(
-                symbolName: "photo.on.rectangle.angled",
+                symbolName: AppSymbol.gallery.rawValue,
                 title: "This album is empty"
             )
         }

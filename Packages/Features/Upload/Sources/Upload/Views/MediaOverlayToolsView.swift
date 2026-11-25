@@ -124,7 +124,7 @@ final class MediaOverlayToolsView: UIView {
                 UIAction(title: "Bring to front", image: UIImage(systemName: "square.3.layers.3d.top.filled")) {
                     [weak self] _ in self?.onAction?(.bringToFront(id: id))
                 },
-                UIAction(title: "Delete", image: UIImage(systemName: "trash"), attributes: .destructive) {
+                UIAction(title: "Delete", image: AppSymbol.trash.image(), attributes: .destructive) {
                     [weak self] _ in self?.onAction?(.delete(id: id))
                 }
             ])

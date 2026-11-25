@@ -975,7 +975,7 @@ package final class BackupCodesViewController: UIViewController {
                 content.textProperties.color = .tintColor
             case .share:
                 content.text = "Share or Save…"
-                content.image = UIImage(systemName: "square.and.arrow.up")
+                content.image = UIImage.symbol(named: PostActionSymbol.share)
                 content.textProperties.color = .tintColor
             }
             cell.contentConfiguration = content

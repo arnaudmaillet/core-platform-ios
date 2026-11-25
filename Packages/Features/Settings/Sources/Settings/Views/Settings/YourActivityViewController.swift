@@ -190,7 +190,7 @@ package final class YourActivityViewController: UIViewController {
         case .recentlyDeleted:
             var content = UIListContentConfiguration.cell()
             content.text = "Recently Deleted"
-            content.image = UIImage(systemName: "trash")
+            content.image = AppSymbol.trash.image()
             content.imageProperties.tintColor = .label
             cell.contentConfiguration = content
             cell.accessories = [.disclosureIndicator()]

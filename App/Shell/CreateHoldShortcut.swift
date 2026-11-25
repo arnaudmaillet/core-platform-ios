@@ -107,7 +107,7 @@ final class CreateHoldShortcut: NSObject {
     /// Hangs the hold on the bar. Idempotent.
     func install() {
         guard presenter == nil, let bar = tabBarController?.tabBar else { return }
-        let presenter = HoldToArmPresenter(view: bar) { .symbol("camera.fill") }
+        let presenter = HoldToArmPresenter(view: bar) { .symbol(AppSymbol.cameraFill.rawValue) }
         presenter.host = { [weak self] in self?.tabBarController?.view }
         presenter.discFrame = { [weak self] host in self?.discFrame(in: host) }
         presenter.onPressBegan = { [weak self] in

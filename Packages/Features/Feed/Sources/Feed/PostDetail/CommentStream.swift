@@ -1295,7 +1295,7 @@ final class CommentStream: NSObject {
                 selectText()
             })
         }
-        children.append(UIAction(title: "Share Comment", image: AppSymbol.share.image()) { _ in share() })
+        children.append(UIAction(title: "Share Comment", image: UIImage.symbol(named: PostActionSymbol.share)) { _ in share() })
         // ⚠️ NO MODERATION ROWS UNTIL THEY DO SOMETHING (#801). Block and
         // Report used to sit here as `{ _ in }` no-ops: for a safety action
         // the user believes something was filed. There is no comment report

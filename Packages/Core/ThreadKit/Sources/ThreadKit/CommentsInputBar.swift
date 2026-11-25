@@ -400,9 +400,7 @@ public final class CommentsInputBar: UIView {
             face.image = nil
             // Each symbol carries its own size, so a Replace never resizes
             // the outgoing one first (a view-wide configuration would).
-            let glyph = UIImage(
-                systemName: voiceHoldTrash ? "trash.fill" : "mic.fill", withConfiguration: Self.holdGlyphConfiguration
-            )!
+            let glyph = (voiceHoldTrash ? AppSymbol.trashFill : .micFill).image(Self.holdGlyphConfiguration)!
             if holdGlyph.isHidden {
                 holdGlyph.image = glyph
                 holdGlyph.isHidden = false
@@ -630,7 +628,7 @@ public final class CommentsInputBar: UIView {
 
     private func makeAttachmentButton(for source: ComposerAttachmentSource) -> UIButton {
         var face = UIButton.Configuration.plain()
-        face.image = UIImage(systemName: source.symbol)
+        face.image = UIImage.symbol(named: source.symbol)
         face.preferredSymbolConfigurationForImage = Self.attachmentConfiguration
         face.baseForegroundColor = Self.restingTint
         let button = UIButton(configuration: face)
@@ -1196,7 +1194,7 @@ public final class CommentsInputBar: UIView {
     /// or paused (#2102; the owner, 2026-11-06, Telegram's bin on the left).
     private let voiceDeleteButton: UIButton = {
         var configuration = UIButton.Configuration.plain()
-        configuration.image = UIImage(systemName: "trash")
+        configuration.image = AppSymbol.trash.image()
         configuration.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(pointSize: 17, weight: .semibold)
         configuration.baseForegroundColor = .label
         let button = UIButton(configuration: configuration)
@@ -2892,7 +2890,8 @@ public final class CommentsInputBar: UIView {
             symbol = PostActionSymbol.repost
             railButton.accessibilityLabel = "Repost"
         case .pin(let isPinned):
-            symbol = isPinned ? "pin.fill" : "pin"
+            // The owner's bookmark: a conversation's pin (#2459); the map's pins stay `pin`.
+            symbol = (isPinned ? AppSymbol.bookmarkFill : .bookmark).rawValue
             railButton.accessibilityLabel = isPinned ? "Unpin conversation" : "Pin conversation"
         case .returnTo(let down):
             symbol = down ? "chevron.down" : "chevron.up"
@@ -2984,8 +2983,9 @@ public final class CommentsInputBar: UIView {
         }
     }
 
-    /// The share face's glyph: the toolbar's Share (`SnapFooterToolbar`).
-    public static let shareRailSymbol = "arrowshape.turn.up.right"
+    /// The share face's glyph: the toolbar's Share (`SnapFooterToolbar`) —
+    /// the one share glyph, the owner's send (#2416).
+    public static let shareRailSymbol = PostActionSymbol.share
 
     /// What `debugRailSymbol` reads while the slot wears the sound's cover.
     static let soundRailSymbol = "sound.cover"

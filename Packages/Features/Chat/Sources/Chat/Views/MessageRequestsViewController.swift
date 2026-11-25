@@ -495,7 +495,7 @@ extension MessageRequestsViewController: UITableViewDelegate {
         ) { [weak self] _ in self?.viewModel.accept(id) }
         let decline = UIAction(
             title: "Delete",
-            image: UIImage(systemName: "trash"),
+            image: AppSymbol.trash.image(),
             attributes: .destructive
         ) { [weak self] _ in self?.viewModel.decline(id) }
         return UIMenu(children: [accept, decline])

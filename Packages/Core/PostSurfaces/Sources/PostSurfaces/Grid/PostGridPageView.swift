@@ -3370,7 +3370,7 @@ final public class PostGridPageView: UIView {
             apply(posts, skeleton: false)
         case .empty(let empty):
             showStatus(
-                symbolName: style == .grid ? "photo.on.rectangle.angled" : "tray",
+                symbolName: style == .grid ? AppSymbol.gallery.rawValue : "tray",
                 title: empty.title,
                 subtitle: empty.subtitle
             )
