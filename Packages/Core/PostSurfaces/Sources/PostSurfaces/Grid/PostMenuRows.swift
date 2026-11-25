@@ -34,6 +34,11 @@ public struct PostMenuRows {
     public var offersShare: Bool = true
     /// Whether channel showcases are drawn (`-channels`); tests set it.
     public var showsEmbeds: Bool = PostEmbeds.areDrawn
+    /// Where Copy Text writes. Tests record it instead: ⚠️ a test that reads
+    /// or writes `UIPasteboard.general` blocks the main thread on a CI
+    /// simulator (80 s locally, past the 600 s limit on a hosted runner,
+    /// taking every main-actor test of its process down with it).
+    var copyToPasteboard: @MainActor (String) -> Void = { UIPasteboard.general.string = $0 }
 
     public func rows(for post: GalleryPost, anchor: UIView) -> [PostCardMenuAction] {
         var rows: [PostCardMenuAction] = []
@@ -65,8 +70,9 @@ public struct PostMenuRows {
         }
         let caption = post.caption.trimmingCharacters(in: .whitespacesAndNewlines)
         if !caption.isEmpty {
+            let copyToPasteboard = copyToPasteboard
             rows.append(.copyText { [weak anchor] in
-                UIPasteboard.general.string = caption
+                copyToPasteboard(caption)
                 if let screen = anchor.flatMap(Self.screen(of:)) {
                     Feedback.success("Text copied", symbol: "doc.on.doc", from: screen)
                 }

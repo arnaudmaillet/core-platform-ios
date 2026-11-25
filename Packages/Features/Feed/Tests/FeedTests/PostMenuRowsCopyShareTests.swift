@@ -44,15 +44,23 @@ struct PostMenuRowsCopyShareTests {
         #expect(!titles(sections).contains("Share"))
     }
 
+    /// ⚠️ Never `UIPasteboard.general` here: on a CI simulator it blocked
+    /// the main thread, and the whole Feed shard with it (#2568's two reds).
     @Test func copyTextCopiesThePostsWords() throws {
-        let rows = PostMenuRows(comment: {}, offersShare: false).rows(for: post, anchor: UIView())
+        let copied = Copied()
+        var menuRows = PostMenuRows(comment: {}, offersShare: false)
+        menuRows.copyToPasteboard = { copied.strings.append($0) }
+        let rows = menuRows.rows(for: post, anchor: UIView())
         let sections = PostCardMenu.sections(for: rows, author: nil)
         let action = try #require((sections.first as? UIMenu)?.children.first as? UIAction)
         #expect(action.title == "Copy Text")
-        let pasteboard = UIPasteboard.general
-        let previous = pasteboard.string
-        defer { pasteboard.string = previous ?? "" }
         action.performWithSender(nil, target: nil)
-        #expect(pasteboard.string == post.caption)
+        #expect(copied.strings == [post.caption])
     }
+}
+
+/// What Copy Text wrote, in order.
+@MainActor
+private final class Copied {
+    var strings: [String] = []
 }
