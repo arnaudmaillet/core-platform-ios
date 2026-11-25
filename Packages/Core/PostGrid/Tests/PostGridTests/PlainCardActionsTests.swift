@@ -136,7 +136,7 @@ struct PlainCardActionsTests {
         let names = [
             PostGridListRowCell.ActionSymbol.comments, PostGridListRowCell.ActionSymbol.like,
             PostGridListRowCell.ActionSymbol.repost, PostGridListRowCell.ActionSymbol.save,
-            PostGridListRowCell.ActionSymbol.saved,
+            PostGridListRowCell.ActionSymbol.saved, PostGridListRowCell.ActionSymbol.share,
             // The app-wide set the card's two new glyphs come from — the
             // notifications' comment disc draws the filled one.
             PostActionSymbol.comments, PostActionSymbol.commentsFilled, PostActionSymbol.repost
@@ -177,6 +177,10 @@ struct PlainCardActionsTests {
             let ink = save.convert(save.bounds.inset(by: insets), to: cell.contentView)
             #expect(abs(ink.minX - PostGridListRowCell.actionLineInset) < 1, "\(kind): save ink at \(ink.minX)")
 
+            // The like's slot holds the widest count (#2441): drawn, "999K"
+            // ends on the column; a shorter count ends before it.
+            cell.updateCounts(from: Self.post(kind: kind, reactions: 999_000))
+            cell.layoutIfNeeded()
             let count = try #require(line[3].titleLabel)
             let text = count.convert(count.bounds, to: cell.contentView)
             #expect(abs(cell.contentView.bounds.maxX - text.maxX - PostGridListRowCell.actionLineInset) < 1)
@@ -267,7 +271,7 @@ struct PlainCardActionsTests {
         let view = RevealDismissCardView(
             post: Self.post(), width: width,
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
-            actions: .init(repost: true, bookmark: true, saved: false),
+            actions: .init(repost: true, bookmark: true, share: false, saved: false),
             height: wired.bounds.height
         )
         view.frame = wired.bounds
@@ -311,7 +315,7 @@ struct PlainCardActionsTests {
         let view = RevealDismissCardView(
             post: Self.post(), width: 370,
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
-            actions: .init(repost: true, bookmark: true, saved: false, stake: 10)
+            actions: .init(repost: true, bookmark: true, share: false, saved: false, stake: 10)
         )
         let card = try #require(view.subviews.first as? PostGridListRowCell)
         #expect(try heart(card).likesHeart == nil, "a heart laid over the flying card's: it doubled the like (#1186)")
@@ -322,7 +326,7 @@ struct PlainCardActionsTests {
         let countless = RevealDismissCardView(
             post: Self.post(reactions: nil), width: 370,
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
-            actions: .init(repost: false, bookmark: false, saved: false, stake: 0)
+            actions: .init(repost: false, bookmark: false, share: false, saved: false, stake: 0)
         )
         let bare = try #require(countless.subviews.first as? PostGridListRowCell)
         // The line's last VISIBLE action is the heart, not the comments.

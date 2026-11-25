@@ -22,16 +22,17 @@ struct PostCardMenuTests {
         ]
     }
 
-    /// Someone else's post: the palette, the post's rows, then "@handle ▸"
-    /// holding the author's rows.
+    /// Someone else's post: Copy Text and Copy Link at the top (#2441), the
+    /// palette, the post's rows, then "@handle ▸" holding the author's rows.
     @Test func someoneElsesPostReadsInTheOwnersOrder() throws {
         let sections = PostCardMenu.sections(for: others(), author: PostCardMenuAuthor(handle: "ada"))
-        #expect(sections.count == 3)
-        let palette = try #require(sections[0] as? UIMenu)
+        #expect(sections.count == 4)
+        #expect(titles([sections[0]]) == ["Copy Text", "Copy Link"])
+        let palette = try #require(sections[1] as? UIMenu)
         #expect(palette.options.contains(.displayAsPalette))
         #expect(palette.children.map(\.title) == ["Saved", "Repost", "Comment", "Like"])
-        #expect(titles([sections[1]]) == ["Share", "Copy Text", "Copy Link"])
-        let author = try #require((sections[2] as? UIMenu)?.children.first as? UIMenu)
+        #expect(titles([sections[2]]) == ["Share"])
+        let author = try #require((sections[3] as? UIMenu)?.children.first as? UIMenu)
         #expect(author.title == "@ada")
         #expect(author.children.map(\.title) == ["View Profile", "Follow", "Hide This Post", "Report"])
     }
@@ -40,11 +41,11 @@ struct PostCardMenuTests {
     /// its state; Like opens the amounts (the owner's choices).
     @Test func statesAndDisabledRows() throws {
         let sections = PostCardMenu.sections(for: others(), author: nil)
-        let palette = try #require(sections[0] as? UIMenu)
+        let palette = try #require(sections[1] as? UIMenu)
         let repost = try #require(palette.children[1] as? UIAction)
         #expect(repost.attributes.contains(.disabled))
         #expect(palette.children[3] is UIMenu, "Like does not open the amounts")
-        let copyLink = try #require((sections[1] as? UIMenu)?.children.last as? UIAction)
+        let copyLink = try #require((sections[0] as? UIMenu)?.children.last as? UIAction)
         #expect(copyLink.attributes.contains(.disabled))
     }
 

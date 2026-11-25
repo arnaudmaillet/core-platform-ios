@@ -407,6 +407,13 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
             syncClosingLine()
         }
     }
+    /// The closing row's share control, the left group's last (#2441). Nil hides it.
+    public var onShareTapped: (() -> Void)? {
+        didSet {
+            shareAction.isHidden = onShareTapped == nil
+            syncClosingLine()
+        }
+    }
     /// The like chip's STAKE — a tap spends the default amount through this,
     /// a menu pick spends its amount. Nil leaves the chip a counter.
     ///
@@ -536,10 +543,11 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// profile's own cards still say when. On a card with an identity the
     /// date is on the handle's line instead.
     private let closingAgeLabel = UILabel()
-    /// The closing row's two SECONDARY actions, each its own plain control,
-    /// leading the line: `[save][repost][pages] ······ [comments][likes]`. One
-    /// control per verb, so a hidden one closes its own slot.
+    /// The closing row's actions with no count, each its own plain control,
+    /// leading the line: `[save][repost][share][pages] ······ [comments][likes]`
+    /// (#2441). One control per verb, so a hidden one closes its own slot.
     let repostAction = PostCardAction.make(symbol: ActionSymbol.repost, label: "Repost")
+    let shareAction = PostCardAction.make(symbol: ActionSymbol.share, label: "Share")
     /// Saved, the star is the full-screen post's gold — the reference, the
     /// owner's call (#1182, #1188): one gold in both appearances.
     let bookmarkAction = PostCardAction.make(symbol: ActionSymbol.save, label: "Save", selectedTint: SaveStar.tint)
@@ -716,30 +724,18 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
 
         let spacer = lineSpacer
         spacer.setContentHuggingPriority(UILayoutPriority(1), for: .horizontal)
-        // ⚠️ ONE CLOSING ROW, ON EVERY CARD, and it is where every control is.
+        // ⚠️ ONE CLOSING ROW, ON EVERY CARD, and it is where every control is:
         //
-        //     [save][repost][2h][pages] ·······  [comments][likes]
+        //     [save][repost][share][2h][pages] ·······  [comments][likes]
         //
-        // What the viewer DOES leads the line and what the post HAS closes
-        // it. The counters used to sit on a media card's photograph and under
-        // a text card's caption, and the repost and save controls sat in the
-        // header beside the name — two clusters of controls per card, and a
-        // different one depending on whether the post carried a picture. Now
-        // the header says who and when, the picture is a picture, and this
-        // row is the one place a finger goes. It closes the card whatever the
-        // card holds: under the caption of a text post, under the preview of
-        // a media post.
-        //
-        // The date joins the leading group only on a card whose band is bare
-        // (a profile's own), and the page indicator only on a collection. Of
-        // everything on the line the INDICATOR is what gives way first when
-        // the width runs out — a shorter run of dots still says "there is
-        // more" — and a count never truncates: a clipped count is a wrong
-        // count.
-        //
-        // Card actions, not media pills: PLAIN, ink on the card's own fill
-        // (no capsule since 2026-09-30 — see `PostCardPillView`). Comments
-        // and likes are the primary pair, repost and save the secondary one.
+        // Two groups (#2441, `PostGridListRowCell+ClosingLineGroups`): the
+        // actions with no count lead, close together; the counted ones close
+        // the line in fixed slots. The header says who and when, the picture
+        // is a picture, and this row is the one place a finger goes, under the
+        // caption or the preview. The date leads only on a bare band's card,
+        // the indicator only on a collection, and the INDICATOR gives way
+        // first when the width runs out: a count never truncates. Card
+        // actions, not media pills: PLAIN, ink on the card's own fill.
         likesAction.addAction(UIAction { [weak self] _ in
             guard let self, let onStake else { return }
             onStake(stakeTapAmount)
@@ -750,9 +746,11 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         commentsAction.isHidden = true
         repostAction.addAction(UIAction { [weak self] _ in self?.onRepostTapped?() }, for: .primaryActionTriggered)
         bookmarkAction.addAction(UIAction { [weak self] _ in self?.onBookmarkTapped?() }, for: .primaryActionTriggered)
+        shareAction.addAction(UIAction { [weak self] _ in self?.onShareTapped?() }, for: .primaryActionTriggered)
         bookmarkAction.isToggle = true
         repostAction.isHidden = true
         bookmarkAction.isHidden = true
+        shareAction.isHidden = true
         closingAgeLabel.font = .appFont(forTextStyle: .footnote)
         closingAgeLabel.adjustsFontForContentSizeCategory = true
         closingAgeLabel.textColor = .secondaryLabel
@@ -772,11 +770,12 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         pageIndicator.isHidden = true
         let metaRow = UIStackView(
             arrangedSubviews: [
-                bookmarkAction, repostAction, closingAgeLabel, pageIndicator,
+                bookmarkAction, repostAction, shareAction, closingAgeLabel, pageIndicator,
                 spacer, commentsAction, likesAction
             ]
         )
         self.metaRow = metaRow
+        buildClosingLineGroups()
         metaRow.axis = .horizontal
         metaRow.alignment = .center
         // The chips' own gap: capsules side by side belong together more
@@ -1112,6 +1111,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         // recycled row would otherwise save someone else's post.
         onRepostTapped = nil
         onBookmarkTapped = nil
+        onShareTapped = nil
         isBookmarked = false
         // The stake captures its post too, and the viewer's stake on the
         // previous post must not tint the next one's heart.

@@ -99,7 +99,7 @@ struct FixedCaptionCardTests {
         let cell = Self.card(caption: Self.long)
         let standIn = RevealDismissCardView(
             post: Self.post(caption: Self.long), width: Self.width, imagePipeline: Self.pipeline,
-            actions: .init(repost: true, bookmark: true, saved: false, stake: 0),
+            actions: .init(repost: true, bookmark: true, share: false, saved: false, stake: 0),
             height: cell.bounds.height, captionLines: 2
         )
         standIn.frame = cell.bounds

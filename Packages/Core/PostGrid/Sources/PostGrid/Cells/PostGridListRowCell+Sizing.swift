@@ -164,7 +164,7 @@ extension PostGridListRowCell {
             showsVoice: showsVoice, showsEmbed: false
         )
         card.showAuthorMenuControlAsScenery()
-        card.showRowActionsAsScenery(repost: true, bookmark: true, saved: false)
+        card.showRowActionsAsScenery(repost: true, bookmark: true, share: true, saved: false)
         card.showStakeAsScenery(viewerStake: 0)
         let attributes = UICollectionViewLayoutAttributes(forCellWith: IndexPath(item: 0, section: 0))
         attributes.frame = CGRect(x: 0, y: 0, width: width, height: 200)

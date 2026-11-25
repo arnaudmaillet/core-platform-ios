@@ -523,13 +523,19 @@ public enum PostCardAction {
     /// bookmark, not 34) and centres the glyph in it, so the air is half of
     /// what the glyph leaves of the button's width — read off the drawn
     /// image, as the closing line's glyph controls always were.
+    ///
+    /// A count's slot (#2441) draws its glyph on its leading edge whatever its
+    /// count, so its ink starts at the content inset and its widest count ends
+    /// at the trailing one: the slot, not its current count, hangs.
     static func inkLeading(_ button: AppIconButton) -> CGFloat {
-        glyphAir(button) ?? button.configuration?.contentInsets.leading ?? 0
+        let inset = button.configuration?.contentInsets.leading ?? 0
+        return button.contentHorizontalAlignment == .leading ? inset : glyphAir(button) ?? inset
     }
 
     /// The same, from the trailing edge.
     static func inkTrailing(_ button: AppIconButton) -> CGFloat {
-        glyphAir(button) ?? button.configuration?.contentInsets.trailing ?? 0
+        let inset = button.configuration?.contentInsets.trailing ?? 0
+        return button.contentHorizontalAlignment == .leading ? inset : glyphAir(button) ?? inset
     }
 
     /// The air either side of a glyph-only button's glyph; nil for one with
@@ -539,6 +545,23 @@ public enum PostCardAction {
               let configuration = button.configuration, let image = configuration.image else { return nil }
         let drawn = configuration.preferredSymbolConfigurationForImage
             .flatMap { image.applyingSymbolConfiguration($0) } ?? image
-        return max((button.fittingSize(for: button.content).width - drawn.size.width) / 2, 0)
+        // A glyph in a box of fixed width (the left group's, #2441) is centred
+        // in that box, not in the width it would fit. Found by its identifier:
+        // UIKit's own content-size constraints are width equalities too.
+        let box = button.constraints.first { $0.identifier == fixedBoxID }?.constant
+            ?? button.fittingSize(for: button.content).width
+        return max((box - drawn.size.width) / 2, 0)
+    }
+
+    /// Names a glyph button's fixed box (`fixBox`).
+    static let fixedBoxID = "PostCardAction.fixedBox"
+
+    /// Gives a glyph-only button a box of `width`, its glyph centred in it:
+    /// wider than the glyph, so it no longer hugs it.
+    static func fixBox(_ button: AppIconButton, width: CGFloat) {
+        button.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let box = button.widthAnchor.constraint(equalToConstant: width)
+        box.identifier = fixedBoxID
+        box.isActive = true
     }
 }
