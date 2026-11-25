@@ -747,8 +747,8 @@ final class SnapRailBoostButton: StakeMenuButton {
     private var likeCount: Int64?
     /// The wallet context the host pushes (`setWalletContext`): what the
     /// balance can still afford, and how much of this post's spend is
-    /// session-undoable. `Int.max` at rest so an unwired host keeps the
-    /// historical always-enabled affordance.
+    /// session-undoable — the menu's contents. `Int.max` at rest, so an
+    /// unwired host's menu offers every amount.
     private var availableBalance = Int.max
     private var undoableAmount = 0
     /// Shots left in the viewer's ×100 cartridge pack — the menu's loaded face.
@@ -781,24 +781,19 @@ final class SnapRailBoostButton: StakeMenuButton {
         )
     }
 
-    /// The affordability + undo state, pushed by the host on configure and
-    /// on every wallet change. Disables the control only when it has
-    /// NOTHING to offer — tap unaffordable (or the post full) AND nothing
-    /// to undo — because a disabled `UIButton` delivers no long-press
-    /// either, and the menu is the undo's only door.
+    /// The menu's state, pushed by the host on configure and on every
+    /// wallet change.
+    ///
+    /// ⚠️ IT NEVER DISABLES THE PILL (#2554): an empty wallet or a full
+    /// post leaves it live, as a card's like chip is. A tap the wallet
+    /// refuses shakes it (the session's refusal receipt), and the long press
+    /// still raises the menu, whose empty pack's row is the way to the Shop.
+    /// A disabled `UIButton` delivers no long press, so disabling it hid the
+    /// Shop exactly when the viewer needed it.
     func setWalletContext(balance: Int, undoableAmount: Int, stakeShots: Int = 0) {
         availableBalance = balance
         self.undoableAmount = undoableAmount
         self.stakeShots = stakeShots
-        refreshEnabled()
-    }
-
-    private func refreshEnabled() {
-        let remaining = max(0, WalletStore.Policy.perTargetBoostCap - spentTotal)
-        // A tap near the cap costs only the remainder (the store clamps),
-        // so affordability is judged against that, not the flat tap price.
-        let tapCost = min(WalletStore.Policy.defaultStakeAmount, remaining)
-        isEnabled = undoableAmount > 0 || (remaining > 0 && availableBalance >= tapCost)
     }
 
     /// The menu — `StakeMenu`'s, the SAME one every card's like chip raises,
@@ -847,9 +842,6 @@ final class SnapRailBoostButton: StakeMenuButton {
         guard total != spentTotal else { return }
         spentTotal = total
         applyFace()
-        // The spend moves the cap's remainder, and the remainder moves the
-        // enable state (a full post refuses even the tap).
-        refreshEnabled()
     }
 
     /// Whether the pill wears its own glass — off in the page's action

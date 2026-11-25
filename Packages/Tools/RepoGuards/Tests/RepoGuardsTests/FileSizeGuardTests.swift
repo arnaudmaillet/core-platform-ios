@@ -49,7 +49,7 @@ struct FileSizeGuardTests {
         "Packages/Core/PostSurfaces/Sources/PostSurfaces/Grid/Shelf/PostShelf/PostShelfSection.swift": 1416,
         "Packages/Core/ShareSheet/Sources/ShareSheet/ShareSheetViewController.swift": 1030,
         "Packages/Core/ThreadKit/Sources/ThreadKit/CommentRowView.swift": 1770,
-        "Packages/Core/ThreadKit/Sources/ThreadKit/CommentsInputBar.swift": 3142,
+        "Packages/Core/ThreadKit/Sources/ThreadKit/CommentsInputBar.swift": 3133,
         "Packages/Core/VoiceKit/Sources/VoiceKitUI/VoiceView.swift": 2271,
         "Packages/Features/Chat/Sources/Chat/Data/ChatRepository.swift": 1044,
         "Packages/Features/Chat/Sources/Chat/Thread/ConversationThreadViewController.swift": 3021,

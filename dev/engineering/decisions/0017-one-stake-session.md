@@ -16,4 +16,4 @@ Staking likes with an undo toast was written three times: the post detail's comp
 - A fix to the rule reaches the post detail, the Snap page and every card at once.
 - `SharedHelperGuardTests` fails on `.undoBoost(`, `.commitStakes(`, `StakeMenu.undoToast(` or `StakeMenu.Burst(` anywhere outside `StakeSession.swift` (CoreStorage's definitions aside).
 - A change to the session reaches PostGrid's closure of lanes (13 at the time).
-- The empty-wallet affordance stays each control's own (the rail and the bar disable, the card chip shakes); the session only pushes the state.
+- The empty-wallet affordance stays each control's own (the rail and the bar disable, the card chip shakes); the session only pushes the state. *Amended 2026-11-24 (#2554), which the decision left open: every control now behaves as the card chip did. On an empty wallet or a full post it stays live, a refused tap plays `StakeReceipt`'s shake, and the long press keeps the menu with its Shop row.*
