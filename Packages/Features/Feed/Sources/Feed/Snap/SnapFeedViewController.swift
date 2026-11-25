@@ -1322,7 +1322,7 @@ final class SnapFeedViewController: UIViewController {
                 // The sound bubble (#671): its face, and its tap. No hold since
                 // #1931: the sound follows the device.
                 cell.setSoundFace(self.soundFace(for: model))
-                cell.setSlotSharesPost(true, holdArmsShare: self.slotHoldArmsShare(model))
+                cell.setSlotSharesPost(self.slotSharesPost(model), holdArmsShare: self.slotSharesPost(model))
                 cell.onRequestSoundSheet = { [weak self] in self?.presentSoundSheet() }
                 // Its way back, while the comments are scrolled away (#1929).
                 cell.onRequestSoundReturn = { [weak self, weak cell] in
@@ -1804,17 +1804,17 @@ final class SnapFeedViewController: UIViewController {
                   let model = modelsByID[orderedIDs[indexPath.item]],
                   let cell = collectionView.cellForItem(at: indexPath) as? SnapFeedCell else { continue }
             cell.setSoundFace(soundFace(for: model))
-            cell.setSlotSharesPost(true, holdArmsShare: slotHoldArmsShare(model))
+            cell.setSlotSharesPost(slotSharesPost(model), holdArmsShare: slotSharesPost(model))
         }
         if let model = activeModel { toolbarComposer.refreshFooterSound(for: model) }
         applyRailSlot(to: commentsContentVC)
         applyRailSlot(to: previewRestingVC)
     }
 
-    /// Whether the way back's hold over Share arms it (#1999): a media
-    /// page's — "a hold arms its own action" (#1929). A text page's arms
-    /// nothing, as before.
-    func slotHoldArmsShare(_ model: FeedItemDisplayModel) -> Bool {
+    /// Whether the page's slot is Share (#1999) and its way back's hold arms
+    /// it (#1929): a media page's. A text page's Share is the footer's
+    /// `[☆ ↗]` (#2488): its composer keeps no slot.
+    func slotSharesPost(_ model: FeedItemDisplayModel) -> Bool {
         !SnapSoundState.isText(model)
     }
 
@@ -1836,13 +1836,13 @@ final class SnapFeedViewController: UIViewController {
         detail.setActionColumnHostedByPage(
             hostedByPage, foldsIntoSlot: model.mediaURL != nil || toolbarComposer.footerCarriesTextLike
         )
-        // ⚠️ THE SLOT'S ONE DECISION (#1999), for every page:
-        //   - a page, text or media: Share, the toolbar's old action;
-        //     a media page's sound moves to the footer's trailing item;
-        //   - scrolled away, any: the way back (#1929), the panel's call.
-        let face = soundFace(for: model)
-        detail.setRailShare({ [weak self] in self?.presentShareSheet(for: id) }, holdArms: slotHoldArmsShare(model))
-        detail.setRailSoundFace(face)
+        // ⚠️ THE SLOT'S ONE DECISION (#1999, #2488): a media page: Share (its
+        // sound in the footer); a text page: NO slot — Share is the footer's
+        // [☆ ↗], the field widens, the way back floats above the own bubble.
+        let shares = slotSharesPost(model)
+        detail.setRailShare(shares ? { [weak self] in self?.presentShareSheet(for: id) } : nil, holdArms: shares)
+        detail.setRailSoundFace(soundFace(for: model), keepsSlot: shares)
+        detail.setWayBackAboveOwnBubble(!shares)
         // The composer on the page's breath (#1716, #1722).
         detail.setComposerLift(SnapActionColumn.bottomBreath)
         // A remote cover loads in the rail's own slot (#1772).
@@ -1851,11 +1851,11 @@ final class SnapFeedViewController: UIViewController {
         detail.setRailSoundActions(tap: { [weak self] in self?.presentSoundSheet() }, hold: nil)
         // Scrolled away from the text, the page's sound bubble offers the way
         // back (#1929) — the composer's own slot does, on the loading page.
-        detail.onScrollAwayChange = hostedByPage ? { [weak self, weak detail] shows in
+        detail.onScrollAwayChange = hostedByPage && shares ? { [weak self, weak detail] shows in
             self?.setSoundShowsReturn(shows, down: detail?.scrollAwayReturnsDown ?? false, for: id)
         } : nil
         if hostedByPage {
-            setSoundShowsReturn(detail.showsScrollAwayReturn, down: detail.scrollAwayReturnsDown, for: id)
+            setSoundShowsReturn(shares && detail.showsScrollAwayReturn, down: detail.scrollAwayReturnsDown, for: id)
         }
     }
 

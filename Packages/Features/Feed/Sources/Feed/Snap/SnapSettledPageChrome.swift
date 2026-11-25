@@ -21,7 +21,7 @@ protocol SnapSettledPageChromeHost: AnyObject {
     var commentsContentVC: UIViewController? { get }
     func applyChromeTheme(hasMedia: Bool)
     func soundFace(for model: FeedItemDisplayModel) -> SnapSoundFace?
-    func slotHoldArmsShare(_ model: FeedItemDisplayModel) -> Bool
+    func slotSharesPost(_ model: FeedItemDisplayModel) -> Bool
     func applyRailSlot(to panel: UIViewController?, hostedByPage: Bool)
 }
 
@@ -96,7 +96,7 @@ final class SnapSettledPageChrome {
         host.toolbarComposer.applyToolbarPostActions(for: model.id)
         // The page's sound bubble and the panel's rail slot (#671).
         host.activeSnapCell?.setSoundFace(host.soundFace(for: model))
-        host.activeSnapCell?.setSlotSharesPost(true, holdArmsShare: host.slotHoldArmsShare(model))
+        host.activeSnapCell?.setSlotSharesPost(host.slotSharesPost(model), holdArmsShare: host.slotSharesPost(model))
         // The footer's sound follows the page in place (#1999).
         host.toolbarComposer.refreshFooterSound(for: model)
         host.applyRailSlot(to: host.commentsContentVC, hostedByPage: true)

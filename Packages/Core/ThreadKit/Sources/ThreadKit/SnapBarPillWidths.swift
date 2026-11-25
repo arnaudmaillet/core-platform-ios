@@ -38,10 +38,13 @@ public struct SnapBarPillWidths: Equatable {
     /// footer's stock items leave (`toolbarReserve(icon:)`), capped, so the
     /// run never folds into `•••`.
     public var toolbarAuthor: CGFloat
-    /// The same on a text post's footer (#1924): `[author] [♥ n] [☆]`, the
-    /// like in repost's place and Share in the comment field's slot (#1999,
-    /// `textToolbarReserve`).
+    /// The same on a text post's footer (#1924, #2488): `[author] [♥ n] [☆ ↗]`
+    /// (`textToolbarReserve`), or `[author] [♥ n ☆ ↗]` once merged.
     public var toolbarAuthorBesideLike: CGFloat
+    /// Whether a text post's footer runs the like, the star and Share in ONE
+    /// platter (#2488, step 3): only when even the pill's face alone does not
+    /// fit beside the like's own bubble. Never `•••` on a text page.
+    public var textFooterMergesLike = false
 
     // MARK: - Navigation bar (measured, iOS 26/27)
 
@@ -97,19 +100,24 @@ public struct SnapBarPillWidths: Equatable {
         28 + 10 + 13 + CGFloat(max(0, lone)) * (icon + 10 + 13) + 48 + 28 + slack
     }
 
-    /// A text post's footer (#1924): the margins and the pill's glass as
-    /// above, the like's `like`-wide bubble, ☆ alone in its own (its glyph
-    /// and the bar's 10), the 13pt gaps between, and the slack. Repost lives
-    /// in the share sheet there: with it, the run folded ⇄ and ↪ into `•••`
-    /// on an iPhone SE (the owner, 2026-10-30).
+    /// A text post's footer (#1924, #2488): the margins and the pill's glass
+    /// as above, the like's `like`-wide bubble, the 13pt gap, `[☆ ↗]` in one
+    /// platter (two glyphs and 31 of its own, as `[☆ ⇄]` measured), and the
+    /// slack. Repost lives in the share sheet there.
     ///
-    /// ⚠️ NO ↪ ANY MORE (#1999): Share moved to the comment field's slot.
-    /// Its 48 + 13 stayed in this sum for a while, and the pill's budget fell
-    /// under `PersonPill`'s face-only threshold on every phone — the owner
-    /// saw a face alone and a hole before the heart. The pill takes the
-    /// room back: its name shows, truncated.
+    /// ⚠️ NEVER `•••` (the owner, 2026-11-18): the run gives way in steps,
+    /// each only if the one before is not enough — the name shortens (the
+    /// pill's budget), the pill folds to its face (`PersonPill`'s face-only
+    /// threshold), and last the like joins `[☆ ↗]` (`mergedTextToolbarReserve`).
     static func textToolbarReserve(icon: CGFloat, like: CGFloat) -> CGFloat {
-        28 + 10 + 13 + like + 13 + (icon + 10) + 28 + slack
+        28 + 10 + 13 + like + 13 + (2 * icon + 31) + 28 + slack
+    }
+
+    /// The same footer with the like, the star and Share in one platter
+    /// (#2488, step 3): the like's bubble loses its own glass (10) and the gap
+    /// before the star's platter.
+    static func mergedTextToolbarReserve(icon: CGFloat, like: CGFloat) -> CGFloat {
+        textToolbarReserve(icon: icon, like: like) - 13 - 10
     }
 
     /// A stock glyph item's width at `traits`' text size.
@@ -140,13 +148,20 @@ public struct SnapBarPillWidths: Equatable {
         func clamp(_ width: CGFloat, cap: CGFloat) -> CGFloat {
             max(minimum, min(cap, width)).rounded(.down)
         }
+        // Step 3 from the measured widths, never the device: the like merges
+        // only when the face alone does not fit beside its own bubble.
+        let apart = toolbarLike.map { toolbarWidth - textToolbarReserve(icon: toolbarIcon, like: $0) }
+        let merges = apart.map { $0 < minimum } ?? false
+        let besideLike = toolbarLike.map { like in
+            let reserve = merges
+                ? mergedTextToolbarReserve(icon: toolbarIcon, like: like)
+                : textToolbarReserve(icon: toolbarIcon, like: like)
+            return toolbarWidth - reserve
+        } ?? toolbarWidth - toolbarReserve(icon: toolbarIcon)
         return SnapBarPillWidths(
             toolbarAuthor: clamp(toolbarWidth - toolbarReserve(icon: toolbarIcon), cap: toolbarAuthorCap),
-            toolbarAuthorBesideLike: clamp(
-                toolbarWidth - (toolbarLike.map { textToolbarReserve(icon: toolbarIcon, like: $0) }
-                    ?? toolbarReserve(icon: toolbarIcon)),
-                cap: toolbarAuthorCap
-            )
+            toolbarAuthorBesideLike: clamp(besideLike, cap: toolbarAuthorCap),
+            textFooterMergesLike: merges
         )
     }
 }

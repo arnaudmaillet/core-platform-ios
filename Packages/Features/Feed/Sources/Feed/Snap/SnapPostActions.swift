@@ -39,6 +39,11 @@ final class SnapPostActions {
     /// Files a post's Report. Nil withholds the row entirely.
     private let reporting: (any ContentReporting)?
 
+    #if DEBUG
+    /// The posts whose sheet was raised, in order. Tests.
+    private(set) var debugSharedPostIDs: [PostID] = []
+    #endif
+
     init(host: any SnapPostActionsHost, reporting: (any ContentReporting)?) {
         self.host = host
         self.reporting = reporting
@@ -52,6 +57,9 @@ final class SnapPostActions {
     func presentShareSheet(for id: PostID) {
         guard host.presentedViewController == nil, let model = host.modelsByID[id],
               let link = AppRoute.postLink(id) else { return }
+        #if DEBUG
+        debugSharedPostIDs.append(id)
+        #endif
         let card = ShareCard(
             displayName: model.authorName,
             handle: SnapAuthorIdentityView.pillMetaLine(fromMeta: model.metaText),

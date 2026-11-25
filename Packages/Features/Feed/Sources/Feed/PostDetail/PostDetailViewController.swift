@@ -924,18 +924,18 @@ final class PostDetailViewController: UIViewController {
 
     // MARK: The way back (#1929)
 
-    /// The way back came or went — for a host whose page draws the sound
-    /// bubble above this composer (the snap feed's column).
+    /// The way back came or went — for a page whose column draws it (#1929).
     var onScrollAwayChange: ((Bool) -> Void)?
     /// Whether the way back shows now.
     var showsScrollAwayReturn: Bool { stream.showsScrollAwayReturn }
     /// Whether it points down: Recent's start is its newest (#2007).
     var scrollAwayReturnsDown: Bool { stream.returnsDown }
-    /// The composer's rail slot: its face, the way back, Share and the
-    /// sound's gestures (`PostDetailRailSlot`), the only writer of
-    /// `composeBar.railFace`. Built on first use; building it does nothing
-    /// else.
+    /// The composer's rail slot (`PostDetailRailSlot`), the only writer of
+    /// `composeBar.railFace`; a slotless text page's way back floats above the
+    /// own bubble instead (#2488). Built on first use, doing nothing else.
     private(set) lazy var rail = PostDetailRailSlot(host: self)
+    private(set) lazy var wayBackBubble = PostDetailWayBackBubble(host: self)
+    func setWayBackAboveOwnBubble(_ above: Bool) { wayBackBubble.isEnabled = above }
     /// The composer's slot as the way back stands (`PostDetailRailSlot`).
     func applyRailWayBack() { rail.applyRailWayBack() }
     func setRailShare(_ action: (() -> Void)?, holdArms: Bool = false) { rail.setRailShare(action, holdArms: holdArms) }

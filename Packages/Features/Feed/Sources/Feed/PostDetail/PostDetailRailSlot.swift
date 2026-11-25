@@ -10,6 +10,8 @@ protocol PostDetailRailSlotHost: AnyObject {
     var composeBar: CommentsInputBar { get }
     var viewModel: PostDetailViewModel { get }
     var stream: CommentStream { get }
+    /// A text page's way back, above the own bubble (#2488).
+    var wayBackBubble: PostDetailWayBackBubble { get }
     func scrollToStart(animated: Bool)
 }
 
@@ -49,8 +51,10 @@ final class PostDetailRailSlot {
     /// back hides it (#692).
     private var railSpinning = false
 
-    /// The composer's slot as the way back stands.
+    /// The composer's slot as the way back stands — and the bubble above the
+    /// own bubble, where a slotless text page shows it (#2488).
     func applyRailWayBack() {
+        host.wayBackBubble.refresh()
         if !host.viewModel.isDraft { host.composeBar.railFace = publishedRailFace }
         let returns = host.composeBar.railFace == .returnTo(down: host.stream.returnsDown)
         if !returns { host.composeBar.setRailSpinning(railSpinning) }
@@ -168,4 +172,4 @@ final class PostDetailRailSlot {
     }
 }
 
-extension PostDetailViewController: PostDetailRailSlotHost {}
+extension PostDetailViewController: PostDetailRailSlotHost, PostDetailWayBackBubbleHost {}

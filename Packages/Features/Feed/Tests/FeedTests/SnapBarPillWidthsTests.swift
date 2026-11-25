@@ -99,37 +99,45 @@ struct SnapBarPillWidthsTests {
         }
     }
 
-    /// A text post's footer (#1924, #1999): `[author] [♥ n] [☆]` fits at the
-    /// default size and at XXXL's glyphs, the pill at its face when the
-    /// room is short — never folding into `•••`.
+    /// A text post's footer (#1924, #2488): `[author] [♥ n] [☆ ↗]` fits at the
+    /// default size and at XXXL's glyphs — or `[author] [♥ n ☆ ↗]` once the
+    /// like merges — the pill at its face when the room is short, never
+    /// folding into `•••`.
     @Test(arguments: phoneWidths)
     func theTextFooterFitsWithItsLike(_ width: CGFloat) {
         // Measured on the iPhone SE (`-open-post post-0002`): the like's
-        // bubble 99pt at "382" and 102 at XXXL, ☆'s 48 at both — "999K" is
-        // about 22 wider.
-        let measured: [(icon: CGFloat, like: CGFloat)] = [(38, 121), (49, 125)]
-        for (icon, like) in measured {
-            let pill = SnapBarPillWidths.resolve(
-                toolbarWidth: width,
-                toolbarIcon: icon, toolbarLike: like
-            ).toolbarAuthorBesideLike
-            let run = 27.5 + (pill + 10) + 12.5 + like + 12.5 + 48 + 27.5
+        // bubble 99pt at "382" and 102 at XXXL — "999K" is about 22 wider —
+        // and a two-glyph platter 107 at the default size, 2 × 49 + 31 at XXXL.
+        let measured: [(icon: CGFloat, like: CGFloat, platter: CGFloat)] = [(38, 121, 107), (49, 125, 129)]
+        for (icon, like, platter) in measured {
+            let widths = SnapBarPillWidths.resolve(toolbarWidth: width, toolbarIcon: icon, toolbarLike: like)
+            let pill = widths.toolbarAuthorBesideLike
+            let trailing = widths.textFooterMergesLike ? (like - 10 + platter) : (like + 12.5 + platter)
+            let run = 27.5 + (pill + 10) + 12.5 + trailing + 27.5
             #expect(run <= width, "\(width)pt, \(icon)pt glyphs: the text footer is \(run) — it folds into •••")
         }
     }
 
-    /// ⚠️ THE PILL TAKES THE ROOM SHARE LEFT (#1999, the owner 2026-11-01):
-    /// at the default size its budget clears the face-only threshold on
-    /// every phone, so the name shows, truncated — no face alone with a hole
-    /// before the heart. (`PersonPill.faceOnlyThreshold`: the face, its
-    /// badge's overhang, the gaps and a few letters — about 100 pt.)
-    @Test(arguments: phoneWidths)
-    func theTextFootersPillShowsItsName(_ width: CGFloat) {
-        let pill = SnapBarPillWidths.resolve(
-            toolbarWidth: width,
-            toolbarIcon: SnapBarPillWidths.defaultToolbarIcon, toolbarLike: 121
-        ).toolbarAuthorBesideLike
-        #expect(pill >= 100, "\(width)pt: the text footer's pill is \(pill) — its face alone")
+    /// ⚠️ THE STEPS, FROM THE MEASURED WIDTHS (#2488, the owner 2026-11-18):
+    /// the name shortens while the room allows it, the pill folds to its face
+    /// under `PersonPill`'s face-only threshold (about 100 pt), and only when
+    /// even the face does not fit does the like join `[☆ ↗]`.
+    @Test func theTextFooterGivesWayInSteps() {
+        // Wide: the name shows.
+        let wide = SnapBarPillWidths.resolve(toolbarWidth: 440, toolbarIcon: 38, toolbarLike: 121)
+        #expect(wide.toolbarAuthorBesideLike >= 100 && !wide.textFooterMergesLike)
+        // An SE at the default size: the face alone, the like apart.
+        let se = SnapBarPillWidths.resolve(toolbarWidth: 375, toolbarIcon: 38, toolbarLike: 121)
+        #expect(se.toolbarAuthorBesideLike < 100, "\(se.toolbarAuthorBesideLike)")
+        #expect(se.toolbarAuthorBesideLike >= SnapBarPillWidths.minimum)
+        #expect(!se.textFooterMergesLike, "the like merged while the face still fit")
+        // An SE at XXXL: even the face does not fit beside the like's own
+        // bubble, so the like joins the star's platter and the face fits.
+        let large = SnapBarPillWidths.resolve(toolbarWidth: 375, toolbarIcon: 49, toolbarLike: 125)
+        #expect(large.textFooterMergesLike)
+        #expect(large.toolbarAuthorBesideLike >= SnapBarPillWidths.minimum)
+        // A footer with no like (a media page's) never merges.
+        #expect(!SnapBarPillWidths.resolve(toolbarWidth: 320, toolbarIcon: 49).textFooterMergesLike)
     }
 
     /// Nothing pathological asks for a negative width.

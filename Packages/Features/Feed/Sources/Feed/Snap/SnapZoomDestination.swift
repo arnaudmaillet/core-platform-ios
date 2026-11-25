@@ -47,7 +47,7 @@ protocol SnapZoomDestinationHost: UIViewController {
     var authorIdentityView: SnapAuthorIdentityView { get }
     #endif
     func soundFace(for model: FeedItemDisplayModel) -> SnapSoundFace?
-    func slotHoldArmsShare(_ model: FeedItemDisplayModel) -> Bool
+    func slotSharesPost(_ model: FeedItemDisplayModel) -> Bool
     func applyPendingComments(animated: Bool)
     func applyGrounds()
     func installAuthorPillAfterLanding()
@@ -646,7 +646,7 @@ final class SnapZoomDestination {
         // appearing at the landing (#683).
         chrome.setSoundFace(host.soundFace(for: model))
         // …or the post's Share, a pushed text page's (#1999).
-        chrome.setSlotSharesPost(true, holdArmsShare: host.slotHoldArmsShare(model))
+        chrome.setSlotSharesPost(host.slotSharesPost(model), holdArmsShare: host.slotSharesPost(model))
         // The replica's boost anchor wears the same face as the live one —
         // a boosted post must not flash back to the glyph mid-flight.
         chrome.setBoostTotal(host.stakes?.total(on: model.id) ?? 0)
