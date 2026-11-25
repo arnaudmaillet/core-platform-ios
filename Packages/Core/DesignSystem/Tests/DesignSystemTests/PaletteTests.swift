@@ -314,4 +314,17 @@ struct PaletteTests {
             #expect(Self.hex(Palette.prominentGlassTint, traits) == 0xFF1358)
         }
     }
+
+    /// The Friends badge's disc is a dark grey, not black (#2476): `48484A`
+    /// in the light, `3A3A3C` in the dark, one step darker in the light with
+    /// Increased Contrast; the mint glyph keeps well past 3:1 on each.
+    @Test func theFriendsDiscIsADarkGrey() {
+        #expect(Self.hex(Palette.friendsBadgeDisc, Self.traits(.light)) == 0x48484A)
+        #expect(Self.hex(Palette.friendsBadgeDisc, Self.traits(.dark)) == 0x3A3A3C)
+        #expect(Self.hex(Palette.friendsBadgeDisc, Self.traits(.light, high: true)) == 0x3A3A3C)
+        #expect(Self.hex(Palette.friendsBadgeDisc, Self.traits(.dark, high: true)) == 0x3A3A3C)
+        for traits in [Self.traits(.light), Self.traits(.dark), Self.traits(.light, high: true)] {
+            #expect(Self.contrast(Palette.friendsBadgeGlyph, on: Palette.friendsBadgeDisc, traits) >= 7)
+        }
+    }
 }

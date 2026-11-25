@@ -114,7 +114,7 @@ final class CommentStream: NSObject {
     private var seededEmbed: PostEmbed? { host.seededEmbed }
     /// Whether the post is a channel's showcase (#2216): it takes no
     /// comments, so the stream is its caption row alone — no bones, no
-    /// "no comments yet", no threads. The hydrated post decides once it has
+    /// failed row, no threads. The hydrated post decides once it has
     /// landed; the opener's seed until then.
     /// The hydrated post's card, behind the switch like the seed's: off, a
     /// showcase is the text post it is, comments and all.
@@ -379,7 +379,7 @@ final class CommentStream: NSObject {
     private var stagedReveals: [UIView] = []
     private(set) var commentsLoaded = false
     /// The first page of comments failed with nothing to show (#798): the
-    /// empty row says so, with a Try Again, instead of "No comments yet".
+    /// empty row says so, with a Try Again, instead of an empty list.
     private var commentsFailed = false
     /// What the failed row says: the view model's words, "You're offline"
     /// when that is why (#794).
@@ -1116,9 +1116,8 @@ final class CommentStream: NSObject {
                 row.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -Spacing.lg),
             ])
         }
-        // The empty stream gets the app's shared empty PAGE: the comments ARE
-        // the page, so its emptiness is the page's emptiness, and that is
-        // exactly what `EmptyStateView` is for.
+        // The empty page's row (a failed or slow first page, a draft: #2477)
+        // is the app's shared empty PAGE, `EmptyStateView`.
         // The height is decided HERE, once, from geometry that is already
         // final on frame 0 — `CommentsEmptyPageCell` then returns it
         // unchanged for the life of the configuration. Nothing recomputes
@@ -1127,7 +1126,7 @@ final class CommentStream: NSObject {
         let emptyPageCell = UICollectionView.CellRegistration<CommentsEmptyPageCell, StreamItem> {
             [weak self] cell, _, _ in
             let fit = self?.currentEmptyPageFit() ?? EmptyPageFit(
-                copy: PostDetailViewController.commentsEmptyPageCopy,
+                copy: PostDetailViewController.draftEmptyPageCopy,
                 height: SnapCommentsLayout.emptyPageFallbackHeight,
                 blockOffset: 0
             )
@@ -1350,8 +1349,9 @@ final class CommentStream: NSObject {
             items.append(contentsOf: (0..<count).map(StreamItem.skeletonPlaceholder))
             return items
         }
+        // No "No comments yet" (#2477): an empty post is an empty list; a failure or a draft keeps the row.
         guard !latestComments.isEmpty else {
-            items.append(.emptyState)
+            if commentsFailed || viewModel.isDraft { items.append(.emptyState) }
             return items
         }
         let ordered = kind == .recent ? Self.conversationOrder(latestComments) : latestComments
@@ -1749,7 +1749,7 @@ final class CommentStream: NSObject {
     private var emptyPageCopy: EmptyPageCopy {
         if commentsFailed { return PostDetailViewController.commentsFailedPageCopy(commentsFailureText) }
         if !commentsLoaded, commentsGate.isTakingLonger { return PostDetailViewController.commentsTakingLongerPageCopy }
-        return viewModel.isDraft ? PostDetailViewController.draftEmptyPageCopy : PostDetailViewController.commentsEmptyPageCopy
+        return PostDetailViewController.draftEmptyPageCopy
     }
 
     /// What the empty page was last configured with.

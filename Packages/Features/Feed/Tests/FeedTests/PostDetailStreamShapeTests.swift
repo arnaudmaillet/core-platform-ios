@@ -270,9 +270,8 @@ struct PostDetailStreamShapeTests {
         #expect(abs(stream.contentInset.top - 120) < 0.5)
     }
 
-    /// No comments: the empty page is its block alone, so the caption and the
-    /// invitation rest together above the composer rather than a page
-    /// filling the room.
+    /// No comments: no empty page at all (#2477), so the caption rests alone
+    /// above the composer, the room above it worn as slack.
     @Test func withNoCommentsTheCaptionRestsAboveTheComposer() async throws {
         let controller = PostDetailViewController(
             viewModel: PostDetailViewModel(
@@ -286,8 +285,8 @@ struct PostDetailStreamShapeTests {
         window.isHidden = false
         defer { window.isHidden = true }
         controller.seedCaption("A text post", timestamp: "2h", authorName: "Ava Moreau")
-        // Recent's empty page (the conversation's anchor): every panel opens
-        // on Popular now (#2287).
+        // Recent (the conversation's anchor): every panel opens on Popular
+        // now (#2287).
         controller.showStream(.recent, animated: false)
         let stream = controller.recent.collectionView
         engage(controller, stream, anchored: true)
@@ -295,7 +294,7 @@ struct PostDetailStreamShapeTests {
             try await Task.sleep(for: .milliseconds(10))
             stream.layoutIfNeeded()
         }
-        #expect(controller.bottomAnchorSlack > 100, "the empty page still fills the room")
+        #expect(controller.bottomAnchorSlack > 100, "the caption alone rests on the composer")
         let edges = Self.contentBottomAndRoomBottom(stream)
         #expect(abs(edges.content - edges.room) < 1)
     }

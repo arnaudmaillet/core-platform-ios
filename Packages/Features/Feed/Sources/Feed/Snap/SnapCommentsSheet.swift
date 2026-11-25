@@ -1963,9 +1963,9 @@ final class SnapCommentsSheetViewController: UIViewController, UINavigationBarDe
     /// expanded detent is offered — never the sheet's height, which is its
     /// shape's (#2195).
     ///
-    /// ⚠️ AN EMPTY PAGE, BY ITS OWN BLOCK (measured, 2026-11-04): the "No
-    /// comments yet" page stretches over the room it is given, so its rows
-    /// only ever measure the sheet. Its block's own height — the caption
+    /// ⚠️ AN EMPTY PAGE, BY ITS OWN BLOCK (measured, 2026-11-04): the failed
+    /// or slow page's row (#2477) stretches over the room it is given, so its
+    /// rows only ever measure the sheet. Its block's own height — the caption
     /// over it included — says whether it outgrows the sheet, as the text
     /// post's composer sizes its sheet. (Until #2195 it also sized the
     /// collapsed sheet, which opened ~140 pt too tall without it.)

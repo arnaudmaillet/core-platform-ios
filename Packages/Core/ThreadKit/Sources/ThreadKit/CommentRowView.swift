@@ -1602,8 +1602,8 @@ public final class CommentSkeletonRowView: UIView {
 }
 
 /// The empty stream's words, the row `CommentsEmptyPageCell` draws: an
-/// invitation to comment on a post, to write a draft, to say hi in a
-/// conversation, or the failed stream's reason with Try Again. Moved from
+/// invitation to write a draft or to say hi in a conversation, or a failed
+/// or slow stream's reason with Try Again (an empty post has none, #2477). Moved from
 /// the post page (#2380) so the conversation, now Chat's, words its own.
 public struct CommentsEmptyPageCopy: Equatable {
     public let symbol: String
