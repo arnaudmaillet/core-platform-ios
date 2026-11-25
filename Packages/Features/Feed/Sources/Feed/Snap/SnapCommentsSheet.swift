@@ -1748,7 +1748,7 @@ final class SnapCommentsSheetViewController: UIViewController, UINavigationBarDe
         // come on its "Earlier comments" row — as on the text page. No pull
         // to another post here: the sheet is not a page of the feed.
         detail.cutStreamsToRoom()
-        // The sheet rises over the keyboard itself: Recent does not ride it.
+        // The sheet rises over the keys itself; a reply rides its detached bar (#2487).
         detail.streamsRideKeyboard = false
         // The count the feed knows: no comment bones for a post with none (#1773).
         detail.seedCommentCount(commentCount)
@@ -1866,7 +1866,6 @@ final class SnapCommentsSheetViewController: UIViewController, UINavigationBarDe
     /// paths leave them be.
     var editsDetached: Bool { detachedComposer?.isEditingDetached == true }
 
-
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         detachedComposer?.tearDown()
@@ -1905,6 +1904,7 @@ final class SnapCommentsSheetViewController: UIViewController, UINavigationBarDe
             let composer = SnapCommentsDetachedComposer(source: detail.composeBar, sheetView: view)
             composer.onEditingChanged = { [weak self] editing in self?.onDetachedEditingChanged?(editing) }
             composer.detaches = { [weak self] in self?.detachesKeyboard?() ?? true }
+            composer.onRise = { [weak detail] in detail?.followDetachedComposer(rise: $0) }
             detachedComposer = composer
         }
         // The app's soft edges, top and bottom; the bar follows the tab shown.

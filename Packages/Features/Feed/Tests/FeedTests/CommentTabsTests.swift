@@ -391,9 +391,10 @@ struct CommentTabsTests {
     }
 
     /// A reply rides the keyboard on Popular as Recent does: the inset grows
-    /// by the rise, the rows rise with it, and the keyboard gone, Popular is
-    /// back at its top.
-    @Test func aReplyOnPopularRidesTheKeyboard() async {
+    /// by the rise, the rows rise with it — never past the answered comment's
+    /// top at the room's top (#2487, decided 2026-11-25) — and the keyboard
+    /// gone, Popular is back at its top.
+    @Test func aReplyOnPopularRidesTheKeyboard() async throws {
         let (controller, window) = panel(PagedComments(count: 30, pageSize: 30))
         defer {
             controller.composeBar.debugTextView.resignFirstResponder()
@@ -404,12 +405,16 @@ struct CommentTabsTests {
         let popular = controller.popular.collectionView
         let inset = popular.contentInset.bottom
         let offset = popular.contentOffset.y
-        // Comment 29 leads Popular: already in view, it moves with the rise only.
+        // Comment 29 leads Popular: high up, it rises until its top meets
+        // the room's, and stays in view.
         reply(controller, to: 29)
+        let top = try #require(Self.frame(of: "c29", in: controller.popular)).minY - popular.adjustedContentInset.top
 
         controller.popular.syncKeyboardRise(300)
         #expect(abs(popular.contentInset.bottom - (inset + 300)) < 0.5)
-        #expect(abs(popular.contentOffset.y - (offset + 300)) < 0.5, "Popular's rows did not rise with the keyboard")
+        let risen = min(offset + 300, top)
+        #expect(risen > offset + 0.5, "Popular's rows did not rise with the keyboard")
+        #expect(abs(popular.contentOffset.y - risen) < 0.5, "the answered comment left the view")
 
         controller.popular.syncKeyboardRise(0)
         #expect(abs(popular.contentInset.bottom - inset) < 0.5)
@@ -509,6 +514,139 @@ struct CommentTabsTests {
         #expect(!rise.isRiding && rise.rowID == nil)
         let after = rise.follows(rise: 0, replying: false)
         #expect(!after)
+    }
+
+    /// A reply armed waits for its keys: a layout pass before they come (the
+    /// sheet expanding for the reply, #2153) keeps it; a reply let go before
+    /// them is forgotten.
+    @Test func anArmedReplyWaitsForItsKeys() {
+        var rise = ReplyKeyboardRise()
+        rise.rowID = "c1"
+        let beforeTheKeys = rise.follows(rise: 0, replying: true)
+        #expect(!beforeTheKeys && rise.rowID == "c1", "a layout pass before the keys dropped the reply")
+        let keys = rise.follows(rise: 300, replying: true)
+        #expect(keys)
+        _ = rise.follows(rise: 0, replying: true)
+        #expect(rise.rowID == nil, "the reply outlived its keyboard")
+        rise.rowID = "c2"
+        _ = rise.follows(rise: 0, replying: false)
+        #expect(rise.rowID == nil, "a reply let go before its keys was kept")
+    }
+
+    // MARK: - A reply rides the comments sheet's detached composer (#2487)
+
+    /// The panel as the comments sheet sets it: its composer does not ride
+    /// the keys, a detached one edits over them (`prepare`).
+    private func sheetPanel() async -> (PostDetailViewController, UIWindow) {
+        let (controller, window) = panel(PagedComments(count: 30, pageSize: 30))
+        controller.streamsRideKeyboard = false
+        controller.setEngagedInsets(top: 100, bottomInset: 34)
+        #expect(await settle { Self.loaded(controller.popular) && Self.loaded(controller.recent) })
+        return (controller, window)
+    }
+
+    /// A plain tap in the field moves nothing under the detached composer,
+    /// on either tab (the owner, 2026-11-04, kept 2026-11-25).
+    @Test func underTheDetachedComposerAPlainTapMovesNeitherTab() async {
+        let (controller, window) = await sheetPanel()
+        defer { window.isHidden = true }
+        let lists = controller.streams.map(\.collectionView)
+        let before = lists.map { ($0.contentInset.bottom, $0.contentOffset.y) }
+
+        controller.followDetachedComposer(rise: 300)
+        controller.view.setNeedsLayout()
+        controller.view.layoutIfNeeded()
+        for (list, was) in zip(lists, before) {
+            #expect(list.contentInset.bottom == was.0 && list.contentOffset.y == was.1, "a plain tap moved a tab")
+        }
+        controller.followDetachedComposer(rise: 0)
+    }
+
+    /// A reply on Recent rides the detached composer: its end rises over the
+    /// field, the panel's own layout passes keep the rise, Popular stays,
+    /// and the keys gone, Recent is back at its end.
+    @Test func aReplyOnRecentRidesTheDetachedComposer() async {
+        let (controller, window) = await sheetPanel()
+        defer {
+            controller.composeBar.debugTextView.resignFirstResponder()
+            window.isHidden = true
+        }
+        controller.showStream(.recent, animated: false)
+        let recent = controller.recent.collectionView
+        let popular = controller.popular.collectionView
+        let inset = recent.contentInset.bottom
+        let popularBefore = (popular.contentInset.bottom, popular.contentOffset.y)
+        controller.composeBar.debugTextView.raisesNoKeyboard()
+        controller.recent.enterReplyState(for: CommentDisplayModel(entry: comment(0)))
+
+        controller.followDetachedComposer(rise: 300)
+        controller.view.setNeedsLayout()
+        controller.view.layoutIfNeeded()
+        #expect(abs(recent.contentInset.bottom - (inset + 300)) < 0.5, "Recent did not ride the reply's keys")
+        #expect(abs(recent.contentOffset.y - Self.tailOffset(recent)) < 1, "Recent's end went under the keys")
+        #expect(popular.contentInset.bottom == popularBefore.0 && popular.contentOffset.y == popularBefore.1)
+
+        controller.followDetachedComposer(rise: 0)
+        #expect(abs(recent.contentInset.bottom - inset) < 0.5)
+        #expect(abs(recent.contentOffset.y - Self.tailOffset(recent)) < 1)
+    }
+
+    /// A reply to a comment high up: the rows rise with the keys until its
+    /// top meets the room's, never further — it stays in view — and the
+    /// keys gone, a reader's Recent is back where it stood.
+    @Test func aReplyHighUpKeepsTheCommentInView() async throws {
+        let (controller, window) = await sheetPanel()
+        defer {
+            controller.composeBar.debugTextView.resignFirstResponder()
+            window.isHidden = true
+        }
+        controller.showStream(.recent, animated: false)
+        let recent = controller.recent.collectionView
+        controller.debugScroll(to: Self.tailOffset(recent) - 300, userScroll: true)
+        let before = recent.contentOffset.y
+        recent.layoutIfNeeded()
+        // The first comment a little under the room's top: high up.
+        let highUp = recent.indexPathsForVisibleItems.sorted().compactMap { path -> String? in
+            guard case .comment(let id) = controller.recent.streamDataSource.itemIdentifier(for: path),
+                  let frame = recent.layoutAttributesForItem(at: path)?.frame,
+                  frame.minY > before + recent.adjustedContentInset.top + 40 else { return nil }
+            return id
+        }
+        let id = try #require(highUp.first)
+        let frame = try #require(Self.frame(of: id, in: controller.recent))
+        controller.composeBar.debugTextView.raisesNoKeyboard()
+        controller.recent.enterReplyState(for: CommentDisplayModel(entry: comment(Int(id.dropFirst()) ?? 0)))
+
+        controller.followDetachedComposer(rise: 300)
+        let roomTop = recent.contentOffset.y + recent.adjustedContentInset.top
+        #expect(recent.contentOffset.y > before + 0.5, "the rows did not rise")
+        #expect(frame.minY >= roomTop - 0.5, "the answered comment went under the bar")
+        #expect(recent.contentOffset.y < before + 300, "the rise was not capped")
+
+        controller.followDetachedComposer(rise: 0)
+        #expect(abs(recent.contentOffset.y - before) < 0.5, "Recent did not go back where it stood")
+    }
+
+    /// A reply on Popular rides the detached composer, armed through a
+    /// layout pass before the keys: the comment answered ends over the
+    /// field, and the keys gone, Popular is back at its top.
+    @Test func aReplyOnPopularRidesTheDetachedComposerToItsRow() async throws {
+        let (controller, window) = await sheetPanel()
+        defer {
+            controller.composeBar.debugTextView.resignFirstResponder()
+            window.isHidden = true
+        }
+        let stream = controller.popular
+        let id = try #require(Self.firstRowUnderTheComposer(stream))
+        reply(controller, to: try #require(Int(id.dropFirst())))
+        controller.followDetachedComposer(rise: 0)
+
+        controller.followDetachedComposer(rise: 300)
+        let row = try #require(Self.frame(of: id, in: stream))
+        #expect(row.maxY <= Self.visibleBottom(stream.collectionView) + 0.5, "the answered comment is under the keys")
+
+        controller.followDetachedComposer(rise: 0)
+        #expect(abs(stream.collectionView.contentOffset.y - Self.topOffset(stream.collectionView)) < 0.5)
     }
 
     // MARK: - The tabs' ends (#2008)

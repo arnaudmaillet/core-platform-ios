@@ -232,12 +232,12 @@ final class PostDetailViewController: UIViewController {
         return engaged.top + rows + engaged.bottom
     }
 
-    /// Whether Recent rides the keyboard, as a conversation does (#2007).
-    /// Not in the comments sheet (#2087): UIKit raises the sheet itself over
-    /// the keyboard, and Recent riding it too was pinned to its tail then
-    /// clamped back, inside the keyboard's animation — the rows slid under
-    /// the bar and back (measured, 2026-11-03).
+    /// Whether Recent rides the composer's keyboard, as a conversation does
+    /// (#2007). Not in the comments sheet (#2087), which UIKit raises over the
+    /// keys (measured, 2026-11-03): there a reply alone rides, by the rise of
+    /// the detached composer (`followDetachedComposer`, #2487).
     var streamsRideKeyboard = true
+    var detachedComposerRise: CGFloat = 0
 
     // MARK: - The stream, as the panel's
 
@@ -377,7 +377,7 @@ final class PostDetailViewController: UIViewController {
         refitEmptyPageOnHeightChange()
         syncDayUnderHeader()
         // Rows realised as the engaged stream grows into its room (#1799).
-        let rise = streamsRideKeyboard ? engagedLayout.composerRise : 0
+        let rise = streamsRideKeyboard ? engagedLayout.composerRise : detachedComposerRise
         streams.forEach {
             // Popular's cut once its room is known, or changed (#2298).
             $0.refitCut()
