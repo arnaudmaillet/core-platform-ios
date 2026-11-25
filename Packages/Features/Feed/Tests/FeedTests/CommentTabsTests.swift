@@ -321,8 +321,9 @@ struct CommentTabsTests {
 
     /// ⚠️ RECENT RIDES THE KEYBOARD, as a conversation does (the owner,
     /// 2026-11-01): its newest row stays just above the risen field. Popular
-    /// stays where it is; and the two hold their own insets, so either tab is
-    /// right with the keyboard up.
+    /// stays where it is for a plain tap in the field — no reply armed (the
+    /// owner, 2026-11-18, #2487); and the two hold their own insets, so either
+    /// tab is right with the keyboard up.
     @Test func recentRidesTheKeyboardAndPopularStays() async {
         let (controller, window) = panel(PagedComments(count: 30, pageSize: 30))
         defer { window.isHidden = true }
@@ -359,6 +360,155 @@ struct CommentTabsTests {
 
         controller.recent.syncKeyboardRise(250)
         #expect(abs(recent.contentOffset.y - (before + 250)) < 0.5)
+    }
+
+    // MARK: - A reply on Popular rides the keyboard (#2487)
+
+    /// The visible bottom of `list`'s rows: the composer's top, in content.
+    private static func visibleBottom(_ list: UIScrollView) -> CGFloat {
+        list.contentOffset.y + list.bounds.height - list.adjustedContentInset.bottom
+    }
+
+    /// The frame of Popular's row for comment `id`, in its content.
+    private static func frame(of id: String, in stream: CommentStream) -> CGRect? {
+        stream.collectionView.layoutIfNeeded()
+        return stream.streamDataSource.indexPath(for: .comment(id))
+            .flatMap { stream.collectionView.layoutAttributesForItem(at: $0)?.frame }
+    }
+
+    /// Popular's first comment whose row ends below the composer's top at
+    /// rest: the one a keyboard would hide.
+    private static func firstRowUnderTheComposer(_ stream: CommentStream) -> String? {
+        let bottom = visibleBottom(stream.collectionView)
+        return (0..<30).reversed().map { "c\($0)" }.first { (frame(of: $0, in: stream)?.maxY ?? 0) > bottom }
+    }
+
+    /// A Reply on Popular's comment `id`, as its row arms it: the field
+    /// focused, with no system keyboard (`raisesNoKeyboard`).
+    private func reply(_ controller: PostDetailViewController, to index: Int) {
+        controller.composeBar.debugTextView.raisesNoKeyboard()
+        controller.popular.enterReplyState(for: CommentDisplayModel(entry: comment(index)))
+    }
+
+    /// A reply rides the keyboard on Popular as Recent does: the inset grows
+    /// by the rise, the rows rise with it, and the keyboard gone, Popular is
+    /// back at its top.
+    @Test func aReplyOnPopularRidesTheKeyboard() async {
+        let (controller, window) = panel(PagedComments(count: 30, pageSize: 30))
+        defer {
+            controller.composeBar.debugTextView.resignFirstResponder()
+            window.isHidden = true
+        }
+        controller.setEngagedInsets(top: 100, bottomInset: 34)
+        #expect(await settle { Self.loaded(controller.popular) && Self.loaded(controller.recent) })
+        let popular = controller.popular.collectionView
+        let inset = popular.contentInset.bottom
+        let offset = popular.contentOffset.y
+        // Comment 29 leads Popular: already in view, it moves with the rise only.
+        reply(controller, to: 29)
+
+        controller.popular.syncKeyboardRise(300)
+        #expect(abs(popular.contentInset.bottom - (inset + 300)) < 0.5)
+        #expect(abs(popular.contentOffset.y - (offset + 300)) < 0.5, "Popular's rows did not rise with the keyboard")
+
+        controller.popular.syncKeyboardRise(0)
+        #expect(abs(popular.contentInset.bottom - inset) < 0.5)
+        #expect(abs(popular.contentOffset.y - Self.topOffset(popular)) < 0.5, "Popular is not back at its top")
+    }
+
+    /// The comment being answered ends just above the field: a row the
+    /// keyboard would cover scrolls in, past the rise, as far as it needs.
+    @Test func theAnsweredCommentEndsAboveTheField() async throws {
+        let (controller, window) = panel(PagedComments(count: 30, pageSize: 30))
+        defer {
+            controller.composeBar.debugTextView.resignFirstResponder()
+            window.isHidden = true
+        }
+        controller.setEngagedInsets(top: 100, bottomInset: 34)
+        #expect(await settle { Self.loaded(controller.popular) && Self.loaded(controller.recent) })
+        let stream = controller.popular
+        let id = try #require(Self.firstRowUnderTheComposer(stream))
+        let offset = stream.collectionView.contentOffset.y
+        reply(controller, to: try #require(Int(id.dropFirst())))
+
+        stream.syncKeyboardRise(300)
+        let row = try #require(Self.frame(of: id, in: stream))
+        #expect(row.maxY <= Self.visibleBottom(stream.collectionView) + 0.5, "the answered comment is under the keys")
+        #expect(stream.collectionView.contentOffset.y > offset + 300, "the row needed more than the rise")
+        stream.syncKeyboardRise(0)
+    }
+
+    /// A reply cancelled with the keyboard up (the chip's ✕): Popular stays
+    /// risen until the keyboard goes, then rests at its top.
+    @Test func aCancelledReplyStaysRisenUntilTheKeyboardGoes() async {
+        let (controller, window) = panel(PagedComments(count: 30, pageSize: 30))
+        defer {
+            controller.composeBar.debugTextView.resignFirstResponder()
+            window.isHidden = true
+        }
+        controller.setEngagedInsets(top: 100, bottomInset: 34)
+        #expect(await settle { Self.loaded(controller.popular) && Self.loaded(controller.recent) })
+        let popular = controller.popular.collectionView
+        let inset = popular.contentInset.bottom
+        reply(controller, to: 29)
+        controller.popular.syncKeyboardRise(300)
+        let risen = popular.contentOffset.y
+
+        controller.clearReplyState()
+        controller.popular.syncKeyboardRise(310)
+        #expect(abs(popular.contentInset.bottom - (inset + 310)) < 0.5, "the cancelled reply's inset jumped back")
+        #expect(popular.contentOffset.y >= risen, "the rows jumped back while typing")
+
+        controller.popular.syncKeyboardRise(0)
+        #expect(abs(popular.contentOffset.y - Self.topOffset(popular)) < 0.5)
+        // The next plain tap in the field moves nothing.
+        controller.popular.syncKeyboardRise(300)
+        #expect(abs(popular.contentInset.bottom - inset) < 0.5, "a plain tap moved Popular")
+    }
+
+    /// Popular's cut (#2298) is decided on the resting room: a reply's
+    /// keyboard changes its inset, never the threads it shows.
+    @Test func popularsCutStaysWithTheKeyboardUp() async {
+        let (controller, window) = panel(PagedComments(count: 30, pageSize: 30))
+        defer {
+            controller.composeBar.debugTextView.resignFirstResponder()
+            window.isHidden = true
+        }
+        controller.cutStreamsToRoom()
+        controller.setEngagedInsets(top: 100, bottomInset: 34)
+        #expect(await settle { Self.loaded(controller.popular) && controller.popular.debugItems.last == .seeAll })
+        let items = controller.popular.debugItems
+        let room = controller.popular.debugCutRoom
+        reply(controller, to: 29)
+
+        controller.popular.syncKeyboardRise(300)
+        controller.popular.refitCut()
+        #expect(controller.popular.debugItems == items, "the keyboard cut Popular again")
+        #expect(controller.popular.debugCutRoom == room)
+        controller.popular.syncKeyboardRise(0)
+    }
+
+    /// The rule alone: a plain tap never rides; a reply rides from its rise
+    /// until the keyboard is down, cancelled or not; the way down is followed
+    /// once, to rest.
+    @Test func theReplyRiseRule() {
+        var rise = ReplyKeyboardRise()
+        let plainTap = rise.follows(rise: 300, replying: false)
+        let otherTab = rise.follows(rise: 300, replying: true)
+        let down = rise.follows(rise: 0, replying: false)
+        #expect(!plainTap, "a plain tap rode")
+        #expect(!otherTab, "a reply armed on the other tab rode")
+        #expect(!down)
+        rise.rowID = "c1"
+        let reply = rise.follows(rise: 300, replying: true)
+        let cancelled = rise.follows(rise: 280, replying: false)
+        let wayBack = rise.follows(rise: 0, replying: false)
+        #expect(reply)
+        #expect(cancelled, "a cancelled reply let go with the keyboard up")
+        #expect(wayBack, "the way back to rest was not followed")
+        #expect(!rise.isRiding && rise.rowID == nil)
+        let after = rise.follows(rise: 0, replying: false)
+        #expect(!after)
     }
 
     // MARK: - The tabs' ends (#2008)
