@@ -3,6 +3,7 @@ import CoreModels
 import CoreNavigation
 import LaunchArguments
 import MediaCore
+import MediaUI
 import UIKit
 
 /// The inbox's "All" surface: every active direct message, with unread ones
@@ -109,6 +110,8 @@ final class ConversationListViewController: UIViewController {
         self.avatars = relations?.recording(avatars) ?? avatars
         self.relations = relations
         super.init(nibName: nil, bundle: nil)
+        // One face at a time, unread rows first (`AvatarMotionPolicy`).
+        traitOverrides.avatarMotionScreen = .messages
         // The chrome is the container's, and the container reads it before
         // this view exists: the inbox no longer loads every surface's view up
         // front (charter P3), so the badge is published from here, off the

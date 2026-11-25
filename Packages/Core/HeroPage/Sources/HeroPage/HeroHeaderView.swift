@@ -1038,10 +1038,10 @@ open class HeroHeaderView: UIView {
         }
         bannerView = HeroBannerView(imagePipeline: imagePipeline)
         super.init(frame: .zero)
-        // Large and alone on its screen: an animated avatar plays once on the
-        // page's first display, scroll or not (#1358), a beat after it is
-        // shown (#1424).
-        avatar?.animationTrigger = .firstAppearance(AnimatedAvatarScope())
+        // Large and alone on its screen: its animated avatar follows the
+        // table's header rule (`AvatarMotionPolicy`), a play on the page's
+        // first display, scroll or not, a beat after it is shown.
+        traitOverrides.avatarMotionScreen = .profileHeader
         configureSubviews()
         installFootHairline()
         // The picture decides the shape, whenever it lands.

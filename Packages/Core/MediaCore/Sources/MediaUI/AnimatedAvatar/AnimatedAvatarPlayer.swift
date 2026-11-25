@@ -3,31 +3,21 @@ import LaunchArguments
 import MediaCore
 import UIKit
 
-/// The screens where an avatar plays on its first display rather than in the
-/// rounds (`AnimatedAvatarPlayer.Trigger.firstAppearance`): one per screen, so
-/// an avatar plays once there however often its cell is reused.
-@MainActor
-public final class AnimatedAvatarScope {
-    fileprivate var played: Set<URL> = []
-    public init() {}
-}
-
 /// An animated avatar over its picture (#1358, #1424): the sheet's LAST frame
 /// at rest, and the sheet played ONCE, from frame 0 back to that last frame
-/// (a seamless loop, so neither end is a cut). When it plays (the owner,
-/// 2026-10-19):
-/// - most avatars (lists, cards, rows) are picked at random, a few at a
-///   time, staggered, while their screen rests (`AnimatedAvatarRounds`).
-///   Nothing plays because it appeared or scrolled;
-/// - on the two screens where an avatar is large and alone (the profile page,
-///   For You's Friends faces), on its FIRST DISPLAY there, after a short
-///   beat (`.firstAppearance`);
-/// - the post screen's author pill, when its person CHANGES (`.change`);
-/// - on the viewer's tap (`replay()`, the profile page's avatar).
+/// (a seamless loop, so neither end is a cut). When it plays is its SCREEN'S
+/// RULE (#2454): the screen it is drawn in declares itself once
+/// (`traitOverrides.avatarMotionScreen`), and the table
+/// (`AvatarMotionPolicy`) says what that screen's avatars do — nothing, the
+/// random rounds, a sequence one at a time, a first display, a change, an
+/// arrival. A screen that declares nothing gets the rounds. The viewer's tap
+/// replays it (`replay()`, the profile page's avatar).
 ///
-/// Never under `minimumDiameter` (tile thumbnails, danmaku bubbles), never
+/// Never under `minimumDiameter` (tile thumbnails, danmaku bubbles; a
+/// group's first face: `groupFaceMinimumDiameter`), never
 /// under Reduce Motion, Low Power Mode or idle calm (a tap ignores the last two),
-/// and never more than `maxConcurrent` at once.
+/// and never more than `maxConcurrent` at once: these limits stay above every
+/// rule.
 ///
 /// ⚠️ ONE LAYER, AT REST AND PLAYING. The sheet's layer always shows a frame
 /// of the sheet: its model value is the last frame, and a play is a single,
@@ -41,29 +31,17 @@ public final class AnimatedAvatarScope {
 /// it; `setAvatar(_:)` names the avatar on every configure.
 @MainActor
 public final class AnimatedAvatarPlayer: UIView {
-    public enum Trigger {
-        /// Picked at random by the rounds while its screen rests.
-        case rounds
-        /// Plays on its first display within the scope's screen, then, like
-        /// `.rounds`, whenever the rounds pick it (the owner, 2026-10-20: a
-        /// face that played once and never again read as broken).
-        case firstAppearance(AnimatedAvatarScope)
-        /// Plays when the avatar it shows CHANGES while on screen — a fixed
-        /// piece of chrome whose person moves with a scroll: the post
-        /// screen's author pill, on paging to the next post. Its first
-        /// avatar rests.
-        case change
-        /// Plays once when it first shows on screen, its sheet landed — a
-        /// FRESH view standing for a change: the post screen's author pill,
-        /// a new pill per author (#1791), whose host keeps `.change` on the
-        /// first one so that one rests. Never in the rounds.
-        case arrival
-    }
-
     /// The smallest avatar that plays: a post card's author (40 pt), a
     /// Messages row (52 pt), the post screen's author pill (36 pt) do; a
     /// tile's author (16 pt) and a danmaku bubble (20 pt) do not.
     public static let minimumDiameter: CGFloat = 32
+    /// The smallest GROUP'S FIRST FACE that plays (#2454, the coordinator on
+    /// the owner's 2026-11-23 instruction): the table says a group plays its
+    /// first face, and in a 56 pt row that face is 34 pt with two faces, 31
+    /// with three, 27 with four — under `minimumDiameter`, most groups would
+    /// never play. Every other limit still wins over it: Reduce Motion, Low
+    /// Power Mode, idle calm, `maxConcurrent`.
+    public static let groupFaceMinimumDiameter: CGFloat = 24
     /// Playing at once, app-wide — measured headroom (#1358's bench).
     public static let maxConcurrent = 4
 
@@ -76,9 +54,29 @@ public final class AnimatedAvatarPlayer: UIView {
         static let app = Concurrency()
     }
 
-    public var trigger: Trigger = .rounds {
+    /// Where it ranks in a sequence ordered by it (`.unreadFirst`): its host
+    /// raises an unread row.
+    public var motionPriority: AvatarMotionPriority = .normal
+
+    /// A FRESH view standing for a change of person — the post screen's
+    /// author pill, a new pill per author (#1791): under `.change`, it plays
+    /// once on screen like the change it stands for, where a pill's first
+    /// avatar rests.
+    public var standsForChange = false
+
+    /// Never plays, whatever its screen's rule: a group's faces past its
+    /// first, a group's photo (#2454). Its still shows.
+    var holdsStill = false {
         didSet { updateMembership() }
     }
+
+    /// A group's first face, the one that plays (`GroupAvatarView`): its
+    /// floor is `groupFaceMinimumDiameter`.
+    var isGroupFirstFace = false
+
+    /// The smallest it plays at.
+    var playableDiameter: CGFloat { isGroupFirstFace ? Self.groupFaceMinimumDiameter : Self.minimumDiameter }
+
     /// Where sheets come from: the pipeline's the avatar is drawn through
     /// (`AvatarView.setPicture`), or a test's own. Nil: nothing animates.
     var registry: AnimatedAvatars?
@@ -96,7 +94,8 @@ public final class AnimatedAvatarPlayer: UIView {
     }
     /// Who counts the plays — the app's, or a test's own.
     var concurrency = Concurrency.app
-    /// Who picks the plays — the app's, or a test's own.
+    /// Who conducts the plays, and holds the table — the app's, or a test's
+    /// own.
     var rounds = AnimatedAvatarRounds.app {
         willSet { rounds.leave(self) }
         didSet { updateMembership() }
@@ -121,8 +120,11 @@ public final class AnimatedAvatarPlayer: UIView {
     private(set) var url: URL?
     private var sheet: AnimatedIconSheet?
     private var stillImage: UIImage?
-    /// A play asked for before the sheet came.
+    /// A play owed since the avatar was set, until its display: an arrival's,
+    /// or a change's when `owesChange`. Whether it is due is read from the
+    /// rule at the display, not when the avatar is set.
     private var owesPlay = false
+    private var owesChange = false
     private var wasVisible = false
     private var observations: [NSKeyValueObservation] = []
     private var playToken = 0
@@ -140,10 +142,37 @@ public final class AnimatedAvatarPlayer: UIView {
         sheetView.layer.contentsGravity = .resizeAspectFill
         sheetView.isUserInteractionEnabled = false
         addSubview(sheetView)
+        // A screen declared above it after it was laid in: its rule now.
+        registerForTraitChanges([AvatarMotionTrait.self]) { (player: AnimatedAvatarPlayer, _: UITraitCollection) in
+            player.updateMembership(duringTraitChange: true)
+        }
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    // MARK: Its screen
+
+    /// The screen it is drawn in, with that screen's memory of first
+    /// displays; nil when no screen above it declared one.
+    var place: AvatarMotionPlace? {
+        // ⚠️ A DECLARATION ABOVE IT REACHES ITS TRAITS ON THE NEXT LAYOUT:
+        // read now, a header configured before it is laid out would still
+        // have no screen.
+        updateTraitsIfNeeded()
+        return traitCollection.avatarMotionPlace
+    }
+
+    /// `place`, as told by a trait change: its traits are current there.
+    private func motionPlace(duringTraitChange: Bool) -> AvatarMotionPlace? {
+        duringTraitChange ? traitCollection.avatarMotionPlace : place
+    }
+
+    /// Its screen's name, nil for none.
+    var screen: AvatarMotionScreen? { place?.screen }
+
+    /// The rule it follows now: its screen's, from the table.
+    var rule: AvatarMotionRule { holdsStill ? .off : rounds.rule(for: screen) }
 
     /// The avatar shown — nil for none. A still avatar hides the player; an
     /// animated one rests on its sheet's last frame.
@@ -160,8 +189,11 @@ public final class AnimatedAvatarPlayer: UIView {
         isHidden = true
         updateMembership()
         guard let url else { return }
-        if case .change = trigger, replacesOne, window != nil { owesPlay = true }
-        if case .arrival = trigger { owesPlay = true }
+        // ⚠️ THE RULE IS READ WHEN THE PLAY IS DUE, NOT HERE: off a window, a
+        // screen declared above it may not have reached its traits yet (a
+        // pill set before it joins the bar read no screen on iOS 26, #2454).
+        owesPlay = true
+        owesChange = standsForChange || (replacesOne && window != nil)
         guard let registry else { return }
         let rung = resolvedRung
         registry.sheet(for: url, rung: rung) { [weak self] sheet in
@@ -183,15 +215,19 @@ public final class AnimatedAvatarPlayer: UIView {
         isHidden = false
         updateMembership()
         if let stillImage { onStill?(stillImage) }
-        if owesPlay {
-            if isVisible {
-                owesPlay = false
+        let current = rule
+        if owesPlay, isVisible {
+            // Its display: the owed play plays now, or not at all.
+            owesPlay = false
+            if owedPlayIsDue(under: current) {
                 requestPlay()
-            } else if case .change = trigger {
-                owesPlay = false
+                return
             }
-            // `.arrival` keeps owing: its display is still to come.
-        } else if case .firstAppearance = trigger, isVisible {
+        } else if owesPlay, case .change = current, !standsForChange {
+            owesPlay = false
+        }
+        // An arrival keeps owing: its display is still to come.
+        if case .firstAppearance = current, isVisible {
             // ⚠️ The avatar often arrives AFTER its screen is up — a profile
             // loads after its header is on show — so the first display was
             // seen with nothing to play. It is the first display that counts.
@@ -216,9 +252,9 @@ public final class AnimatedAvatarPlayer: UIView {
         // An arrival whose sheet landed before it joined the window.
         if owesPlay, visible, sheet != nil {
             owesPlay = false
-            requestPlay()
+            if owedPlayIsDue(under: rule) { requestPlay() }
         }
-        guard case .firstAppearance = trigger else { return }
+        guard case .firstAppearance = rule else { return }
         // Every scroll view it rides in — a face in a row that scrolls
         // sideways: its first display can come with a scroll.
         var ancestor = superview
@@ -233,6 +269,15 @@ public final class AnimatedAvatarPlayer: UIView {
         if visible { firstAppearance() }
     }
 
+    /// Whether the play owed since the avatar was set is one `rule` plays.
+    private func owedPlayIsDue(under rule: AvatarMotionRule) -> Bool {
+        switch rule {
+        case .arrival: true
+        case .change: owesChange
+        default: false
+        }
+    }
+
     private func scrolled() {
         let visible = isVisible
         defer { wasVisible = visible }
@@ -240,12 +285,14 @@ public final class AnimatedAvatarPlayer: UIView {
         firstAppearance()
     }
 
-    /// A member of the rounds while it can be picked at all: animated, in a
-    /// window, and theirs to play — `.rounds` and `.firstAppearance` alike;
-    /// `.change` plays only on a change. Off screen, no timer runs for it.
-    private func updateMembership() {
-        if joinsRounds, window != nil, sheet != nil {
-            rounds.join(self)
+    /// A member of its screen's conductor while it can be picked at all:
+    /// animated, in a window, and its rule a conducted one (the rounds, a
+    /// sequence, after a first display). Off screen, no timer runs for it.
+    private func updateMembership(duringTraitChange: Bool = false) {
+        guard window != nil, sheet != nil, !holdsStill else { return rounds.leave(self) }
+        let screen = motionPlace(duringTraitChange: duringTraitChange)?.screen
+        if rounds.rule(for: screen).conducted != nil {
+            rounds.join(self, on: screen)
         } else {
             rounds.leave(self)
         }
@@ -254,16 +301,17 @@ public final class AnimatedAvatarPlayer: UIView {
     /// A beat after it is shown, not the instant it lands (the owner,
     /// 2026-10-19). It counts as played once it PLAYS: shown for less than
     /// the beat, it plays on its next display. Its sheet not here yet,
-    /// `adopt` asks again when it lands.
+    /// `adopt` asks again when it lands. Once per screen: a screen pushed
+    /// again is a new one (`AvatarMotionPlace`).
     private func firstAppearance() {
-        guard case .firstAppearance(let scope) = trigger, let url, !scope.played.contains(url),
+        guard case .firstAppearance = rule, let place, let url, !place.firstShown.contains(url),
               sheet != nil, firstDisplayWork == nil else { return }
         let work = DispatchWorkItem { [weak self] in
             MainActor.assumeIsolated {
                 guard let self else { return }
                 self.firstDisplayWork = nil
-                guard self.url == url, self.isVisible, !scope.played.contains(url) else { return }
-                scope.played.insert(url)
+                guard self.url == url, self.isVisible, !place.firstShown.contains(url) else { return }
+                place.firstShown.insert(url)
                 self.requestPlay()
             }
         }
@@ -271,25 +319,16 @@ public final class AnimatedAvatarPlayer: UIView {
         DispatchQueue.main.asyncAfter(deadline: .now() + rounds.tuning.draw(rounds.tuning.firstDisplayDelay), execute: work)
     }
 
-    /// Whether the rounds may pick it: everything but `.change` and
-    /// `.arrival`.
-    private var joinsRounds: Bool {
-        switch trigger {
-        case .change, .arrival: false
-        case .rounds, .firstAppearance: true
-        }
-    }
-
     private func cancelFirstDisplay() {
         firstDisplayWork?.cancel()
         firstDisplayWork = nil
     }
 
-    /// Whether the rounds may pick it now: animated, idle, big enough, on
+    /// Whether its conductor may play it now: animated, idle, big enough, on
     /// screen, its screen resting (no scroll under it, nothing presented over
     /// it, the scene in front).
     var isRoundCandidate: Bool {
-        guard sheet != nil, !isPlaying, min(bounds.width, bounds.height) >= Self.minimumDiameter else { return false }
+        guard sheet != nil, !isPlaying, min(bounds.width, bounds.height) >= playableDiameter else { return false }
         return isVisible && !isScrolling && !isCovered && isSceneActive
     }
 
@@ -344,9 +383,12 @@ public final class AnimatedAvatarPlayer: UIView {
         requestPlay(viewerAsked: true)
     }
 
-    /// Picked by the rounds.
-    func playFromRound() {
-        requestPlay()
+    /// Played by its conductor (a round, a sequence): how long the play
+    /// lasts, nil when a limit refused it.
+    @discardableResult
+    func playFromConductor() -> TimeInterval? {
+        guard requestPlay(), let sheet else { return nil }
+        return Self.playDuration(of: sheet)
     }
 
     /// How many times one play runs the sheet's loop, back to back (the owner,
@@ -360,11 +402,12 @@ public final class AnimatedAvatarPlayer: UIView {
         sheet.loopDuration * CFTimeInterval(loopsPerPlay)
     }
 
-    private func requestPlay(viewerAsked: Bool = false) {
+    @discardableResult
+    private func requestPlay(viewerAsked: Bool = false) -> Bool {
         guard let sheet, let last = sheet.frameRects.last else { return refuse("no sheet") }
         guard !isPlaying else { return refuse("already playing") }
-        guard min(bounds.width, bounds.height) >= Self.minimumDiameter else {
-            return refuse("under \(Self.minimumDiameter) pt: \(bounds.size)")
+        guard min(bounds.width, bounds.height) >= playableDiameter else {
+            return refuse("under \(playableDiameter) pt: \(bounds.size)")
         }
         if viewerAsked {
             guard !MotionPreference.reducesMotion else { return refuse("reduce motion") }
@@ -398,7 +441,10 @@ public final class AnimatedAvatarPlayer: UIView {
         #if DEBUG
         playStartedAt = CACurrentMediaTime()
         if Self.logsPlays {
-            print(String(format: "[avatar] play frames=%d loop=%.2fs loops=%d", count, sheet.loopDuration, Self.loopsPerPlay))
+            let why = "screen=\(screen?.rawValue ?? "unlisted") rule=\(viewerAsked ? "tap" : rule.description)"
+            print("[avatar] play \(why) " + String(
+                format: "frames=%d loop=%.2fs loops=%d", count, sheet.loopDuration, Self.loopsPerPlay
+            ))
         }
         #endif
         // The slot comes back with the animation's end — and, should its
@@ -406,6 +452,7 @@ public final class AnimatedAvatarPlayer: UIView {
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.playDuration(of: sheet) + 0.25) { [weak self] in
             self?.playEnded(token)
         }
+        return true
     }
 
     fileprivate func playEnded(_ token: Int) {
@@ -425,8 +472,12 @@ public final class AnimatedAvatarPlayer: UIView {
     /// The last play's animation, for a test to read its shape.
     private(set) var lastPlayAnimation: CAKeyframeAnimation?
 
-    private func refuse(_ reason: String) {
+    private func refuse(_ reason: String) -> Bool {
         lastRefusal = reason
+        #if DEBUG
+        if Self.logsPlays { print("[avatar] refused screen=\(screen?.rawValue ?? "unlisted") rule=\(rule): \(reason)") }
+        #endif
+        return false
     }
 
     /// Back to the still — the last frame, the layer's model value.
@@ -452,7 +503,8 @@ public final class AnimatedAvatarPlayer: UIView {
     public var still: UIImage? { sheet == nil ? nil : stillImage }
 
     #if DEBUG
-    /// `-avatar-play-log`: each play's frames and loops, and when it ended.
+    /// `-avatar-play-log`: each play's screen, rule, frames and loops, when
+    /// it ended, and each refusal's reason.
     private static let logsPlays = LaunchArgument.avatarPlayLog.isPassed()
     private var playStartedAt: CFTimeInterval?
 

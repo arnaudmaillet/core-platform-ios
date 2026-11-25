@@ -107,6 +107,7 @@ Look here before writing any of these. Add a row when you create a shared piece.
 | Concept | Component | Where | Guard |
 |---|---|---|---|
 | A person's face | `AvatarView` | MediaCore / `MediaUI` | `HandMadeAvatarGuardTests` |
+| When an animated avatar plays, screen by screen | one table, `AvatarMotionPolicy`; a screen declares itself once with `traitOverrides.avatarMotionScreen`, never per avatar (#2454) | MediaCore / `MediaUI` | |
 | A person in a list | `PersonRowContent`, `PersonListCell` | DesignSystem | |
 | Opening a person (card or profile) | `PersonOpening` | MediaCore / `MediaUI` | `PersonOpeningGuardTests` |
 | A remote picture | `MediaSlot`, `CoverSlot`, `ImageContentView` | MediaCore / `MediaUI` | `BareImageLoadGuardTests`, `DirectPipelineReadGuardTests` |

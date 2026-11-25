@@ -216,7 +216,7 @@ final class ConversationThreadViewController: UIViewController {
     /// looking — at the top — whatever the scroll. Turns only while a page
     /// is out; an idle spinner redraws the screen every frame (#580).
     private let olderSpinner = AppLoaderView(size: .medium)
-    private let peerPill = SnapAuthorIdentityView()
+    private let peerPill = SnapAuthorIdentityView(motionScreen: .threadHeader)
     /// The conversation's mute (#719): `bell`, or `bell.slash` once muted —
     /// on the footer between the pin and ⋯ since #2305 (the top bar's
     /// trailing corner before). Hidden while there is nothing to mute (a
@@ -395,9 +395,9 @@ final class ConversationThreadViewController: UIViewController {
         self.socialGraph = socialGraph
         self.followRelations = followRelations
         super.init(nibName: nil, bundle: nil)
-        // In the initializer: a navigation controller reads it when the push
-        // begins, and `viewDidLoad` can run inside that same push.
+        // In the initializer: a navigation controller reads it when the push begins, and `viewDidLoad` can run inside it.
         hidesBottomBarWhenPushed = true
+        traitOverrides.avatarMotionScreen = .thread
     }
 
     @available(*, unavailable)

@@ -2,6 +2,7 @@ import CoreModels
 import CoreNavigation
 import DesignSystem
 import MediaCore
+import MediaUI
 import ProfileData
 import UIKit
 
@@ -57,6 +58,7 @@ final class ProfileRelationshipListViewController: UIViewController {
         self.viewModel = viewModel
         self.imagePipeline = imagePipeline
         super.init(nibName: nil, bundle: nil)
+        traitOverrides.avatarMotionScreen = .personLists
     }
 
     @available(*, unavailable)

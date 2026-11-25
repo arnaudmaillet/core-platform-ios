@@ -3,6 +3,7 @@ import CoreNavigation
 import CoreStorage
 import EntityStore
 import MediaCore
+import MediaUI
 import PostGrid
 import PostSurfaces
 import ProfileInterface
@@ -86,7 +87,7 @@ struct PostCommentsAssembly {
         stakes: PostDetailStakes?,
         viewerEvents: ViewerEvents
     ) -> PostDetailViewController {
-        PostDetailViewController(
+        let panel = PostDetailViewController(
             viewModel: viewModel,
             imagePipeline: imagePipeline,
             profileSwitcher: makeProfileSwitcher(),
@@ -98,5 +99,8 @@ struct PostCommentsAssembly {
             // Every snap page's comments group by day under Recent (#757).
             groupsByDay: true
         )
+        // A reading screen: nothing plays in it (`AvatarMotionPolicy`).
+        panel.traitOverrides.avatarMotionScreen = .comments
+        return panel
     }
 }

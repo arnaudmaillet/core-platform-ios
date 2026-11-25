@@ -8,6 +8,7 @@ import LocalStore
 import MapsInterface
 import MediaCore
 import MediaPlayback
+import MediaUI
 import PlaceInterface
 import UIKit
 import WalletInterface
@@ -374,6 +375,8 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
         )
         // The dock's and the rows' people open on their last list (#1776).
         map.peopleCache = peopleCache
+        // Nothing plays on the map (`AvatarMotionPolicy`).
+        map.traitOverrides.avatarMotionScreen = .map
         return map
     }
 }

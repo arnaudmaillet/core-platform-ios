@@ -4,6 +4,7 @@ import CoreStorage
 import DesignSystem
 import MediaCore
 import MediaPlayback
+import MediaUI
 import PostGrid
 import UIKit
 
@@ -168,6 +169,8 @@ final public class PushedPostListViewController: UIViewController {
         self.header = header
         self.openPost = openPost
         super.init(nibName: nil, bundle: nil)
+        // Posts in a list: their authors' motion is the table's.
+        traitOverrides.avatarMotionScreen = .posts
         // The like chips stake from the same wallet For You's list does — one
         // surface, one undo window (`PostCardStaking`).
         page.staking = staking

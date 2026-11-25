@@ -130,15 +130,21 @@ final public class SnapAuthorIdentityView: UIView {
     /// from "same page, better data".
     private var renderedModel: FeedItemDisplayModel?
 
-    /// - Parameter arrives: a pill standing for a new author (#1791) — its
-    ///   animated avatar plays once on screen. Otherwise the pill's FIRST
-    ///   avatar rests, and one that replaces it plays.
-    public init(arrives: Bool = false) {
+    /// - Parameters:
+    ///   - arrives: a pill standing for a new author (#1791) — under the
+    ///     table's `.change`, its animated avatar plays once on screen.
+    ///     Otherwise the pill's FIRST avatar rests, and one that replaces it
+    ///     plays.
+    ///   - motionScreen: the screen its avatar's rule is read for
+    ///     (`AvatarMotionPolicy`): the media pages' author pill, or a host's
+    ///     own (a conversation's header).
+    public init(arrives: Bool = false, motionScreen: AvatarMotionScreen = .authorPill) {
         super.init(frame: .zero)
         // The post screen's author: an animated avatar plays once when
         // paging brings the next author in — a fresh pill per author (#1791)
         // — and the first one opened rests (#1358).
-        pill.avatar.animationTrigger = arrives ? .arrival : .change
+        traitOverrides.avatarMotionScreen = motionScreen
+        pill.avatar.standsForChange = arrives
         // The bar is transparent over arbitrary media; shadows keep the
         // identity legible without a background (`setOverMedia`).
         pill.setOverMedia(true)
