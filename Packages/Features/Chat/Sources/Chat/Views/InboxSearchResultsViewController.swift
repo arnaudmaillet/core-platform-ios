@@ -190,7 +190,7 @@ final class InboxSearchResultsViewController: UIViewController {
         let newChannelRegistration = UICollectionView.CellRegistration<PersonListCell, Row> { cell, _, _ in
             cell.configure(with: PersonRowContent(
                 displayName: "New channel", handle: ChannelCopy.newChannelMessage, monogram: "",
-                subject: .symbol(ConversationRowView.channelBadgeSymbol)
+                subject: .symbol(AppSymbol.megaphoneFill.rawValue)
             ))
         }
 

@@ -1521,7 +1521,7 @@ private final class PinTextFaceView: UIView {
     private static let micImage = UIImage(systemName: "mic.fill")?.withConfiguration(
         UIImage.SymbolConfiguration(pointSize: 9, weight: .bold)
     )
-    private static let channelImage = UIImage(systemName: ChannelEmbedCopy.channelSymbol)?.withConfiguration(
+    private static let channelImage = AppSymbol.megaphoneFill.image()?.withConfiguration(
         UIImage.SymbolConfiguration(pointSize: 8, weight: .bold)
     )
 

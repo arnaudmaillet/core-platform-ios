@@ -56,12 +56,12 @@ public struct HeroHeaderContent: Equatable, Sendable {
     /// the banner's slot shows its skeleton rather than the bannerless
     /// layout (#1752).
     public var bannerPending: Bool
-    /// A small SF Symbol after the title, in the subtitle's ink — a
-    /// channel's megaphone (#2230, #2237). Nil: none.
-    public var titleSymbol: String?
+    /// One of the app's glyphs after the title, in the subtitle's ink — a
+    /// channel's megaphone (#2230, #2237, #2415). Nil: none.
+    public var titleSymbol: AppSymbol?
 
     public init(
-        title: String, subtitle: String, isVerified: Bool = false, titleSymbol: String? = nil, bio: String? = nil,
+        title: String, subtitle: String, isVerified: Bool = false, titleSymbol: AppSymbol? = nil, bio: String? = nil,
         websiteText: String? = nil, websiteURL: URL? = nil, counterValues: [String?],
         avatarURL: URL? = nil, avatarMonogram: String = "", avatarFrameID: String? = nil,
         bannerImageURL: URL? = nil, bannerVideoURL: URL? = nil, bannerPending: Bool = false
@@ -1544,12 +1544,12 @@ open class HeroHeaderView: UIView {
     public func debugTapSubtitle() { onSubtitleTapped?() }
 
     /// The symbol after the title, or nil (#2237).
-    public var debugTitleSymbol: String? { titleMark.isHidden ? nil : titleSymbolName }
-    private var titleSymbolName: String?
+    public var debugTitleSymbol: AppSymbol? { titleMark.isHidden ? nil : titleSymbolName }
+    private var titleSymbolName: AppSymbol?
 
-    private func applyTitleMark(_ symbol: String?) {
+    private func applyTitleMark(_ symbol: AppSymbol?) {
         titleSymbolName = symbol
-        titleMark.image = symbol.flatMap { UIImage(systemName: $0) }
+        titleMark.image = symbol.flatMap { $0.image() }
         titleMark.isHidden = titleMark.image == nil
     }
 

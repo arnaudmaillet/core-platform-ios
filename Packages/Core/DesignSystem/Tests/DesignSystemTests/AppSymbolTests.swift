@@ -100,6 +100,18 @@ struct AppSymbolTests {
         #expect(AppSymbol.pause.image()?.accessibilityLabel == "Pause")
     }
 
+    /// The owner's megaphone (#2415): the outline, derived from the fill,
+    /// stands in the fill's box, so a site swapping one for the other never
+    /// moves; and the fill paints more.
+    @Test func theMegaphonesShareOneBox() throws {
+        let configuration = AppSymbol.fixed(17)
+        let fill = try #require(AppSymbol.megaphoneFill.image(configuration))
+        let outline = try #require(AppSymbol.megaphone.image(configuration))
+        #expect(abs(fill.size.width - outline.size.width) <= 0.34 && abs(fill.size.height - outline.size.height) <= 0.34,
+                "\(fill.size) vs \(outline.size)")
+        #expect(inked(fill) > inked(outline))
+    }
+
     /// VoiceOver reads the star as Save, not as a favourite.
     @Test func theStarReadsAsSave() {
         #expect(AppSymbol.save.accessibilityLabel == "Save")
@@ -117,6 +129,8 @@ struct AppSymbolSizeTests {
         (.repost, "arrow.trianglehead.2.clockwise.rotate.90"), (.crownFilled, "crown.fill"),
         (.share, "square.and.arrow.up"),
         (.play, "play.fill"), (.pause, "pause.fill"), (.playCircle, "play.circle.fill"),
+        (.megaphoneFill, "megaphone.fill"), (.megaphone, "megaphone"),
+        (.login, "person.crop.circle.badge.plus"),
         (.map, "map"), (.mapFill, "map.fill"),
     ])
     func aGlyphIsAsTallAsTheSystemsOwn(_ pair: (AppSymbol, String)) throws {

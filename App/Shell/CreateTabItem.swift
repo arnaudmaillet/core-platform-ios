@@ -1,4 +1,5 @@
 import CoreNavigation
+import DesignSystem
 import UIKit
 
 /// The bar's detached trailing item: a "+" that opens a menu of ways to make a
@@ -83,10 +84,10 @@ final class CreateTabItem {
     /// Whether the bubble is a guest's "Sign in" rather than the "+" (#626).
     private(set) var isSignIn = false
 
-    /// The symbol a guest's bubble wears: "join / your account" — it carries
-    /// on from the person glyph the guest Profile tab wore, and matches the
-    /// sheet's "Log in or sign up".
-    static let signInSymbol = "person.crop.circle.badge.plus"
+    /// The symbol a guest's bubble wears: the owner's login door, an arrow
+    /// coming into a bracket (#2434), matching the sheet's "Log in or sign
+    /// up". One face: the bubble is never selected (its selection is vetoed).
+    static let signInSymbol = AppSymbol.login
 
     init(destinations: [Destination] = CreateTabItem.destinations(offersChannel: false), open: @escaping @MainActor (Destination) -> Void) {
         self.opener = open
@@ -125,7 +126,9 @@ final class CreateTabItem {
         // `GuestModeUITests`. The #547 family: a bar item does not refresh
         // everything one change touches.
         tab.accessibilityLabel = tab.title
-        tab.image = UIImage(systemName: signIn ? Self.signInSymbol : "plus")
+        // ⚠️ Through `AppSymbol`: `UIImage(systemName:)` never finds the
+        // app's own symbol, and the bubble would go blank.
+        tab.image = signIn ? Self.signInSymbol.image() : UIImage(systemName: "plus")
     }
 
     /// Opens the menu, anchored to the bubble. Returns `false`, and opens
@@ -175,7 +178,7 @@ final class CreateTabItem {
     /// otherwise, so this is the "otherwise".
     private static func menu(_ destinations: [Destination], open: @escaping @MainActor (Destination) -> Void) -> UIMenu {
         let actions = destinations.map { destination in
-            UIAction(title: destination.title, image: UIImage(systemName: destination.symbolName)) { _ in
+            UIAction(title: destination.title, image: UIImage.symbol(named: destination.symbolName)) { _ in
                 open(destination)
             }
         }
@@ -198,7 +201,7 @@ extension CreateTabItem.Destination {
         case .camera: "camera"
         case .upload: "photo.on.rectangle"
         case .text: "textformat"
-        case .channel: "megaphone"
+        case .channel: AppSymbol.megaphone.rawValue
         }
     }
 }

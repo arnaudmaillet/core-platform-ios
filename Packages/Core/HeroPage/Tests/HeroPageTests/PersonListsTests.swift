@@ -143,10 +143,10 @@ struct PersonListsTests {
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()), counters: ["Subscribers", "Admins", "Requests"]
         )
         header.configure(with: HeroHeaderContent(
-            title: "Daily light", subtitle: "Public channel · by @ava", titleSymbol: "megaphone.fill",
+            title: "Daily light", subtitle: "Public channel · by @ava", titleSymbol: .megaphoneFill,
             counterValues: ["12.4K", "2", nil]
         ))
-        #expect(header.debugTitleSymbol == "megaphone.fill")
+        #expect(header.debugTitleSymbol == .megaphoneFill)
         var tapped = false
         header.onSubtitleTapped = { tapped = true }
         header.debugTapSubtitle()
