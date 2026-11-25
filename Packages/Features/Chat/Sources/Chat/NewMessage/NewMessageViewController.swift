@@ -14,8 +14,9 @@ import UIKit
 /// same anatomy with a glyph for a face, as the inbox search drew them. The
 /// headers are the inbox search's glass capsules, pinned over the rows.
 ///
-/// Loading draws skeleton rows where the loaded rows stop (the kit's
-/// `PersonSkeletonCell`), never over them.
+/// Loading draws skeleton rows where the loaded rows stop, on the kit's
+/// timing (`SkeletonGate`, #1770: nothing for 0.15 s, held 0.3 s once up,
+/// gone after 10 s), with the kit's `PersonSkeletonCell`, never over them.
 final class NewMessageViewController: UIViewController {
     private enum ListSection: Hashable {
         case content(NewMessageViewModel.SectionKind)
@@ -206,8 +207,45 @@ final class NewMessageViewController: UIViewController {
 
     // MARK: - Render
 
+    // MARK: - The bones' timing (#1770)
+
+    /// The loading kit's clock; a test steps it.
+    var skeletonClock: LoadingClock = .system
+    private lazy var skeletonGate: SkeletonGate = {
+        let gate = SkeletonGate(clock: skeletonClock)
+        gate.onSkeletonChange = { [weak self] _ in self?.renderNow() }
+        // Past 10 s the bones go, as Search's Suggested does: the rows on
+        // show and the field still work.
+        gate.onTakingLonger = { [weak self] in
+            self?.bonesGaveUp = true
+            self?.skeletonGate.finish { [weak self] in self?.renderNow() }
+        }
+        return gate
+    }()
+    /// The wait ran past 10 s: no bones again until a load answers.
+    private var bonesGaveUp = false
+    /// The view model's last state, drawn when the gate says.
+    private var latestState = NewMessageViewModel.State()
+
+    /// A state from the view model: while a source is out the gate runs and
+    /// the rows draw now, the bones when it says; once everything answered,
+    /// the list lands once the bones had their minimum.
     private func render(_ state: NewMessageViewModel.State) {
+        latestState = state
         guard isViewLoaded else { return }
+        if state.isLoading {
+            if !bonesGaveUp { skeletonGate.begin() }
+            renderNow()
+        } else {
+            bonesGaveUp = false
+            skeletonGate.finish { [weak self] in self?.renderNow() }
+        }
+    }
+
+    /// The latest state, with the bones only while the gate shows them.
+    private func renderNow() {
+        guard isViewLoaded else { return }
+        let state = latestState
         var snapshot = NSDiffableDataSourceSnapshot<ListSection, ListItem>()
         titles = [:]
         for section in state.sections {
@@ -215,7 +253,7 @@ final class NewMessageViewController: UIViewController {
             snapshot.appendItems(section.rows.map(ListItem.row), toSection: .content(section.kind))
             titles[section.kind] = section.title
         }
-        if state.isLoading {
+        if state.isLoading, skeletonGate.showsSkeleton, !bonesGaveUp {
             snapshot.appendSections([.loading])
             snapshot.appendItems((0..<skeletonRowCount(after: state)).map(ListItem.skeleton), toSection: .loading)
         }

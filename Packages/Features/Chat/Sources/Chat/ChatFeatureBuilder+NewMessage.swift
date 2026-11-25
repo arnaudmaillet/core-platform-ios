@@ -19,10 +19,9 @@ extension ChatFeatureBuilder {
         )
         let sheet = UINavigationController(rootViewController: screen)
         sheet.modalPresentationStyle = .pageSheet
-        if let presentation = sheet.sheetPresentationController {
-            presentation.detents = [.large()]
-            presentation.selectedDetentIdentifier = .large
-        }
+        // One detent, large: the sheet never changes height while it is up,
+        // so it covers the screen from the moment it presents.
+        sheet.sheetPresentationController?.detents = [.large()]
         screen.onClose = { [weak sheet] in _ = sheet?.closePresentation() }
         model.onPick = { [weak sheet, weak inbox, self] target in
             openPicked(target, closing: sheet, under: inbox)
