@@ -141,6 +141,9 @@ extension AppContainer {
             // repository.
             connections: socialConnectionsRepository,
             people: peopleDirectoryRepository,
+            // The "New message" sheet's Friends (#2411): the profile's own
+            // Friends list for the viewer, the app's one mutual-follow read.
+            friends: ViewerFriends(relationships: profileRelationshipsRepository, viewer: profileRepository),
             imagePipeline: imagePipeline,
             router: routeResolver,
             // One history for the whole app: a query typed in the inbox is recent on
@@ -165,5 +168,24 @@ extension AppContainer {
             followRelations: profileRepository,
             entities: entityStore
         ))
+    }
+}
+
+/// The viewer's friends for Chat's "New message" sheet (#2411): one page of
+/// the profile's Friends list (`ProfileRelationshipsRepository`, mutual
+/// follows) for the viewer, spelled as Chat's people. Chat never intersects
+/// the follow lists itself.
+private struct ViewerFriends: FriendsProviding {
+    let relationships: ProfileRelationshipsRepository
+    let viewer: any ProfileViewerResolving
+
+    func friends(limit: Int) async throws -> [DirectoryPerson] {
+        guard let viewerID = await viewer.viewerProfileID() else { return [] }
+        let page = try await relationships.relationships(
+            for: viewerID, direction: .friends, pageToken: "", limit: Int32(limit)
+        )
+        return page.relations.filter { !$0.isViewer }.map {
+            DirectoryPerson(id: $0.id, handle: $0.handle, displayName: $0.displayName, isVerified: $0.isVerified)
+        }
     }
 }

@@ -52,6 +52,9 @@ public final class BarSelectorItem {
     private let separator = BarItems.separator()
     /// The width the strip last stated; nil before the first fit.
     private var statedWidth: CGFloat?
+    /// The title budget the host last fitted with, kept for the narrowing a
+    /// sweep asks for.
+    private var lastTitleBudget: BarSelectorBudget?
 
     public init(strip: PagedTabBar, id: String) {
         strip.hosting = .platter
@@ -71,10 +74,17 @@ public final class BarSelectorItem {
     /// Fits the strip to the room `budget` leaves: the title size and the
     /// ceiling. Returns true when the width the strip states moved, so the
     /// host lays its bar out again — the item stays the same.
+    ///
+    /// `titleBudget`, when given, decides the title size instead of `budget`
+    /// (#2411): an item that comes into the bar without taking the titles'
+    /// size — the inbox's compose item — narrows the strip, which scrolls,
+    /// and no title shrinks for it.
     @discardableResult
-    public func fit(_ budget: BarSelectorBudget) -> Bool {
+    public func fit(_ budget: BarSelectorBudget, titleBudget: BarSelectorBudget? = nil) -> Bool {
         let ceiling = ceiling(for: budget)
-        strip.titleSize = strip.preferredWidth(at: .regular) <= ceiling + 0.5 ? .regular : .compact
+        lastTitleBudget = titleBudget
+        let titleRoom = titleBudget.map(self.ceiling(for:)) ?? ceiling
+        strip.titleSize = strip.preferredWidth(at: .regular) <= titleRoom + 0.5 ? .regular : .compact
         strip.widthCeiling = ceiling
         let width = strip.intrinsicContentSize.width
         if let statedWidth, abs(statedWidth - width) <= 0.5 { return false }
@@ -103,7 +113,7 @@ public final class BarSelectorItem {
     public func narrowAfterOverflow(_ budget: BarSelectorBudget) -> Bool {
         guard ceiling(for: budget) > strip.intrinsicContentSize.height + 0.5 else { return false }
         trim += Self.trimStep
-        fit(budget)
+        fit(budget, titleBudget: lastTitleBudget)
         item = BarItems.container(id: id, view: strip)
         return true
     }
@@ -170,13 +180,26 @@ public struct BarSelectorBudget: Equatable, Sendable {
         max(bubble, (room - ring * 2).rounded(.down))
     }
 
-    /// What an item takes in the bar: a custom view its width, a glyph a
+    /// What an item takes in the bar: a custom view its width, a glyph its
+    /// bubble — the glyph and `imageInset` each side, never less than a
     /// platter. A titled item is charged a platter too — the inbox's
     /// trailing corner holds none today (#2337 lists what could come).
+    ///
+    /// ⚠️ **A GLYPH SIZED BY A TEXT STYLE GROWS WITH THE TEXT SIZE** (#2411):
+    /// the shell's bell (`textStyle: .body`, `.large`) is a bubble about
+    /// 89pt wide at the largest accessibility size on an iPhone 18 Pro, not
+    /// 48. Charged a platter, it left the selector room the bar did not
+    /// have, and the compose item went into a `•••`.
     @MainActor
     public static func width(of item: UIBarButtonItem) -> CGFloat {
-        guard let custom = item.customView else { return platter }
+        guard let custom = item.customView else {
+            guard let image = item.image else { return platter }
+            return max(platter, ceil(image.size.width) + imageInset * 2)
+        }
         let intrinsic = custom.intrinsicContentSize.width
         return intrinsic > 0 ? intrinsic : max(platter, custom.bounds.width)
     }
+
+    /// The room a bubble keeps each side of its glyph.
+    public static let imageInset: CGFloat = 12
 }

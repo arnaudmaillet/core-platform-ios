@@ -53,10 +53,10 @@ final class InboxSearchResultsViewController: UIViewController {
 
     private let imagePipeline: ImagePipeline?
     private let avatars: (any PeerAvatarProviding)?
-    /// Each person row's face lookup, by cell: the directory carries no
-    /// picture, so it is read from profile.v1 like the inbox rows' (#1750 —
-    /// these rows drew initials only, never a face).
-    private var avatarLookups: [ObjectIdentifier: (id: ProfileID, task: Task<Void, Never>)] = [:]
+    /// Each person row's face: the directory carries no picture, so it is
+    /// read from profile.v1 like the inbox rows' (#1750 — these rows drew
+    /// initials only, never a face).
+    private let faces: PersonRowFaces
 
     /// The peers' relations, for the conversation rows' mark (#2049) — the
     /// inbox's own cache, so a follow made in one shows in the other.
@@ -71,7 +71,9 @@ final class InboxSearchResultsViewController: UIViewController {
         self.viewModel = viewModel
         self.imagePipeline = imagePipeline
         // The faces the rows read are kept for the thread they open (#2049).
-        self.avatars = relations?.recording(avatars) ?? avatars
+        let recorded = relations?.recording(avatars) ?? avatars
+        self.avatars = recorded
+        faces = PersonRowFaces(avatars: recorded, imagePipeline: imagePipeline)
         self.relations = relations
         super.init(nibName: nil, bundle: nil)
     }
@@ -144,7 +146,7 @@ final class InboxSearchResultsViewController: UIViewController {
         > { [weak self] cell, _, id in
             guard let self, let model = self.viewModel.peopleModels[id] else { return }
             cell.configure(with: model.rowContent)
-            self.lookUpAvatar(of: id, into: cell)
+            self.faces.lookUp(id, into: cell)
         }
 
         // A plain list pins its headers, so rows pass DIRECTLY under this one.
@@ -178,34 +180,10 @@ final class InboxSearchResultsViewController: UIViewController {
             cell.accessories = []
         }
 
-        // "New group" (#2214): the people rows' anatomy, a symbol for a face.
-        let newGroupRegistration = UICollectionView.CellRegistration<PersonListCell, Row> { cell, _, _ in
-            cell.configure(with: PersonRowContent(
-                displayName: "New group", handle: "Talk with several people at once", monogram: "",
-                subject: .symbol("person.2.fill")
-            ))
-        }
-
-        // "New channel" (#2230): the same anatomy, the channel's megaphone.
-        let newChannelRegistration = UICollectionView.CellRegistration<PersonListCell, Row> { cell, _, _ in
-            cell.configure(with: PersonRowContent(
-                displayName: "New channel", handle: ChannelCopy.newChannelMessage, monogram: "",
-                subject: .symbol(AppSymbol.megaphoneFill.rawValue)
-            ))
-        }
-
         dataSource = UICollectionViewDiffableDataSource<Section, Row>(
             collectionView: collectionView
         ) { collectionView, indexPath, row in
             switch row {
-            case .newGroup:
-                return collectionView.dequeueConfiguredReusableCell(
-                    using: newGroupRegistration, for: indexPath, item: row
-                )
-            case .newChannel:
-                return collectionView.dequeueConfiguredReusableCell(
-                    using: newChannelRegistration, for: indexPath, item: row
-                )
             case .conversation(let id):
                 return collectionView.dequeueConfiguredReusableCell(
                     using: conversationRegistration, for: indexPath, item: id
@@ -438,29 +416,5 @@ private extension Array {
     /// configure can land after a section has gone away.
     subscript(safe index: Int) -> Element? {
         indices.contains(index) ? self[index] : nil
-    }
-}
-
-extension InboxSearchResultsViewController {
-    /// The row's face: the skeleton while profile.v1 is asked, then the
-    /// picture, or the initials when there is none. The same person again
-    /// (a reconfigure) keeps what is under way; a recycled cell drops the
-    /// late answer for the person it showed before.
-    fileprivate func lookUpAvatar(of id: ProfileID, into cell: PersonListCell) {
-        let key = ObjectIdentifier(cell)
-        if avatarLookups[key]?.id == id { return }
-        avatarLookups[key]?.task.cancel()
-        guard let avatars, let imagePipeline else {
-            avatarLookups[key] = nil
-            cell.avatar.setPicture(nil, pipeline: nil)
-            return
-        }
-        cell.avatar.awaitPicture()
-        let task = Task { [weak self, weak cell] in
-            let urls = await avatars.avatarURLs(for: [id])
-            guard !Task.isCancelled, let self, let cell, avatarLookups[key]?.id == id else { return }
-            cell.avatar.setPicture(urls[id], pipeline: imagePipeline)
-        }
-        avatarLookups[key] = (id, task)
     }
 }

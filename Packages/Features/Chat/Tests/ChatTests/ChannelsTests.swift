@@ -130,7 +130,7 @@ struct ChannelsTests {
         let repository = make()
         let catalog = await loadedCatalog(repository)
         let search = InboxSearchViewModel(
-            catalog: catalog, viewer: repository, debounce: .zero, showsNewGroup: false, showsNewChannel: false
+            catalog: catalog, viewer: repository, debounce: .zero
         )
         var phase: InboxSearchViewModel.Phase?
         search.onPhaseChange = { phase = $0 }
@@ -728,36 +728,36 @@ struct ChannelsTests {
         // all: `ChatConversationServicing` fails to compile (#2375).
     }
 
-    /// The empty search's create rows, for each pair of flags (#2230): one
-    /// "Create" section, no section with neither.
-    @Test func theSearchOffersItsCreateRowsForEachPairOfFlags() async {
-        typealias Search = InboxSearchViewModel
-        #expect(Search.createRows(showsNewGroup: true, showsNewChannel: true) == [.newGroup, .newChannel])
-        #expect(Search.createRows(showsNewGroup: true, showsNewChannel: false) == [.newGroup])
-        #expect(Search.createRows(showsNewGroup: false, showsNewChannel: true) == [.newChannel])
-        #expect(Search.createRows(showsNewGroup: false, showsNewChannel: false).isEmpty)
+    /// The "New message" sheet's action rows, for each pair of flags
+    /// (#2230, moved from the inbox search by #2411): "New channel" behind
+    /// `-channels`, none with neither flag, and a pick reaches its handler.
+    @Test func theSheetOffersItsActionRowsForEachPairOfFlags() async {
+        typealias Sheet = NewMessageViewModel
+        #expect(Sheet.actionRows(showsNewGroup: true, showsNewChannel: true) == [.newGroup, .newChannel])
+        #expect(Sheet.actionRows(showsNewGroup: true, showsNewChannel: false) == [.newGroup])
+        #expect(Sheet.actionRows(showsNewGroup: false, showsNewChannel: true) == [.newChannel])
+        #expect(Sheet.actionRows(showsNewGroup: false, showsNewChannel: false).isEmpty)
 
         let repository = make()
         let catalog = await loadedCatalog(repository)
-        for (groups, channels) in [(true, true), (true, false), (false, true), (false, false)] {
-            let search = Search(catalog: catalog, viewer: repository, showsNewGroup: groups, showsNewChannel: channels)
-            var phase: Search.Phase?
-            search.onPhaseChange = { phase = $0 }
-            search.queryChanged("")
-            guard case .content(let sections) = phase else { Issue.record("\(String(describing: phase))"); continue }
-            let create = sections.first { $0.kind == .create }
-            if groups || channels {
-                #expect(sections.first?.kind == .create, "the create rows lead the empty field")
-                #expect(create?.title == "Create")
-                #expect(create?.rows == Search.createRows(showsNewGroup: groups, showsNewChannel: channels))
-            } else {
-                #expect(create == nil, "no section with neither flag")
-            }
-        }
         var picked = false
-        let search = Search(catalog: catalog, viewer: repository, showsNewGroup: false, showsNewChannel: true)
-        search.onNewChannel = { picked = true }
-        search.didSelect(.newChannel)
+        let sheet = NewMessageViewModel(
+            catalog: catalog, viewer: repository, friends: nil, suggestions: NoSuggestions(),
+            directory: NoDirectory(), showsNewGroup: false, showsNewChannel: true
+        )
+        sheet.onNewChannel = { picked = true }
+        #expect(sheet.state.sections.first?.rows == [.newChannel])
+        sheet.didSelect(.newChannel)
         #expect(picked)
     }
+}
+
+private actor NoSuggestions: SuggestionsProviding {
+    func suggestions(limit: Int) async throws -> [SuggestedAccount] { [] }
+    func follow(_ profileID: ProfileID) async throws -> FollowOutcome { .following }
+    func unfollow(_ profileID: ProfileID) async throws {}
+}
+
+private actor NoDirectory: PeopleDirectoryProviding {
+    func searchPeople(matching query: String, limit: Int32) async throws -> [DirectoryPerson] { [] }
 }

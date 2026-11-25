@@ -17,7 +17,9 @@ import UIKit
 final class ChannelCreationViewController: UIViewController {
     private let viewModel: ChannelCreationViewModel
 
-    /// Cancel: the host dismisses the sheet.
+    /// Cancel: the host dismisses the sheet. Nil — pushed in the "New
+    /// message" sheet (#2411) — and the chevron goes back instead. Set
+    /// before it loads.
     var onCancel: (() -> Void)?
     /// The created step's "Open Channel" (#2216): the host lands in it.
     var onOpen: ((ConversationID) -> Void)?
@@ -56,9 +58,11 @@ final class ChannelCreationViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
-        navigationItem.leftBarButtonItem = UIBarButtonItem(
-            systemItem: .cancel, primaryAction: UIAction { [weak self] _ in self?.onCancel?() }
-        )
+        if onCancel != nil {
+            navigationItem.leftBarButtonItem = UIBarButtonItem(
+                systemItem: .cancel, primaryAction: UIAction { [weak self] _ in self?.onCancel?() }
+            )
+        }
         introLabel.text = ChannelCopy.whatItIs
         introLabel.font = .appFont(forTextStyle: .subheadline)
         introLabel.textColor = .secondaryLabel
@@ -277,6 +281,7 @@ extension ChannelCreationViewController {
 // MARK: - How it is left (#1144)
 
 extension ChannelCreationViewController: StackScreen {
-    /// A sheet's root: its Cancel, or the sheet's swipe down.
-    var leaving: ScreenLeaving { .controlsOnly }
+    /// A sheet's root: its Cancel, or the sheet's swipe down. Pushed in the
+    /// "New message" sheet (#2411, no Cancel): the chevron back to it.
+    var leaving: ScreenLeaving { onCancel == nil ? .nativeBack : .controlsOnly }
 }

@@ -28,6 +28,11 @@ import LaunchArguments
 /// section is the one place raw truth is consulted — via
 /// `directConversationID(with:)`, so tapping someone whose thread is hidden
 /// still opens that real thread instead of starting a blank draft.
+///
+/// **It only finds (#2411).** Starting a conversation — with someone new, a
+/// group or a channel — is the compose item's "New message" sheet
+/// (`NewMessageViewModel`); the create rows the empty field led with moved
+/// there.
 @MainActor
 final class InboxSearchViewModel {
     nonisolated enum SectionKind: Hashable, Sendable {
@@ -36,10 +41,6 @@ final class InboxSearchViewModel {
         case people
         /// The device-local search history — queries, not threads.
         case recents
-        /// "New group" (#2214, `-group-chats`) and "New channel" (#2230,
-        /// `-channels`): starting a conversation with several people, or a
-        /// channel, from the screen that starts one with someone.
-        case create
     }
 
     /// A result row, as the diffable data source's identifier. The two cases
@@ -52,10 +53,6 @@ final class InboxSearchViewModel {
         /// A query the viewer has run before, from the device-local history the
         /// global search screen writes to.
         case recentQuery(String)
-        /// "New group" (#2214).
-        case newGroup
-        /// "New channel" (#2230).
-        case newChannel
     }
 
     nonisolated struct Section: Equatable, Sendable, Identifiable {
@@ -85,16 +82,6 @@ final class InboxSearchViewModel {
     /// seam the compose picker uses, so no result opens slower than another and
     /// this view model never navigates.
     var onOpenConversation: ((ConversationTarget) -> Void)?
-    /// "New group" was picked (#2214): the group's member picker.
-    var onNewGroup: (() -> Void)?
-    /// Whether the empty field offers "New group" (#2214, `-group-chats`).
-    let showsNewGroup: Bool
-    /// "New channel" was picked (#2230): the channel's creation sheet.
-    var onNewChannel: (() -> Void)?
-    /// Whether the empty field offers "New channel" (#2230, `-channels`):
-    /// in Telegram and Instagram, a channel is made from where messages are
-    /// written.
-    let showsNewChannel: Bool
 
     private enum SearchState: Equatable {
         case idle
@@ -160,12 +147,8 @@ final class InboxSearchViewModel {
         recents: RecentSearchStore? = nil,
         debounce: Duration = .milliseconds(300),
         pageSize: Int32 = 25,
-        now: @escaping @Sendable () -> Date = { Date() },
-        showsNewGroup: Bool = DebugFlags.isOn("-group-chats"),
-        showsNewChannel: Bool = DebugFlags.isOn("-channels")
+        now: @escaping @Sendable () -> Date = { Date() }
     ) {
-        self.showsNewGroup = showsNewGroup
-        self.showsNewChannel = showsNewChannel
         self.catalog = catalog
         self.viewer = viewer
         self.people = people
@@ -336,18 +319,10 @@ final class InboxSearchViewModel {
             onOpenConversation?(.existing(id))
         case .person(let id):
             guard let person = peopleModels[id] else { return }
-            if let existing = person.existingConversationID ?? catalog.directConversationID(with: id) {
-                onOpenConversation?(.existing(existing))
-            } else {
-                onOpenConversation?(.draft(peer: id, displayName: person.displayName, handle: person.handle))
-            }
+            onOpenConversation?(person.conversationTarget(in: catalog))
         case .recentQuery(let text):
             // A history row is not a destination — it is the query again.
             replayRecentQuery(text)
-        case .newGroup:
-            onNewGroup?()
-        case .newChannel:
-            onNewChannel?()
         }
     }
 
@@ -484,14 +459,8 @@ final class InboxSearchViewModel {
         matchedPeerIDs = []
         let stamp = now()
         var sections: [Section] = []
-        // "New group" and "New channel" lead the empty field (#2214, #2230):
-        // the field is where a conversation is started, with one person,
-        // several, or everyone who follows — one section, each row behind
-        // its flag, no section with neither.
-        let createRows = Self.createRows(showsNewGroup: showsNewGroup, showsNewChannel: showsNewChannel)
-        if !createRows.isEmpty {
-            sections.append(Section(kind: .create, title: "Create", rows: createRows))
-        }
+        // No create rows (#2411): writing to someone new, a group or a
+        // channel starts from the compose item's sheet; this field finds.
         // ⚠️ Recent QUERIES first, from the shared device-local store. These are
         // things the viewer typed, which is what "recent searches" means
         // everywhere else in the app; the threads below are a suggestion, not a
@@ -531,15 +500,6 @@ final class InboxSearchViewModel {
             return Section(kind: kind, title: title, rows: conversations.map { .conversation($0.id) })
         })
         return sections
-    }
-
-    /// The empty field's create rows for a pair of flags (#2230). Pure, for
-    /// tests.
-    nonisolated static func createRows(showsNewGroup: Bool, showsNewChannel: Bool) -> [Row] {
-        var rows: [Row] = []
-        if showsNewGroup { rows.append(.newGroup) }
-        if showsNewChannel { rows.append(.newChannel) }
-        return rows
     }
 
     /// Records what the viewer actually searched for, so it is offered next time

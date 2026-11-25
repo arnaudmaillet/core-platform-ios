@@ -106,3 +106,19 @@ extension PersonDisplayModel {
         )
     }
 }
+
+extension PersonDisplayModel {
+    /// Where a tap on this person leads (#2411), synchronously: the thread
+    /// already known, else the one the inbox has loaded with them — read
+    /// from the catalog's RAW load, so a thread filed under Requests, or
+    /// hidden this session, is still found — else a draft, pushed on the
+    /// identity and created underneath (`ConversationTarget.draft`). The
+    /// inbox's search and the "New message" sheet resolve a person here.
+    @MainActor
+    func conversationTarget(in catalog: InboxCatalog) -> ConversationTarget {
+        if let existing = existingConversationID ?? catalog.directConversationID(with: id) {
+            return .existing(existing)
+        }
+        return .draft(peer: id, displayName: displayName, handle: handle)
+    }
+}

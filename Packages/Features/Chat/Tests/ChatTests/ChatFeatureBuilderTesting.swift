@@ -26,6 +26,7 @@ extension ChatFeatureBuilder.Dependencies {
             voicePlayed: VoicePlayedStore(scope: StorageScope()),
             connections: InertConnections(),
             people: InertPeopleDirectory(),
+            friends: nil,
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             router: InertRouter(),
             recentSearches: RecentSearchStore(defaults: UserDefaults(suiteName: "chat-builder-\(UUID().uuidString)")!),

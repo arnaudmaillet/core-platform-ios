@@ -354,28 +354,52 @@ struct GroupChatsTests {
             #expect(model.previewSender == nil && model.invitation == nil && model.groupPhotoURL == nil)
             #expect(model.previewLine == model.preview)
         }
-        let search = InboxSearchViewModel(catalog: InboxCatalog(repository: make(groups: false)), viewer: make(groups: false),
-                                          showsNewGroup: false, showsNewChannel: false)
+        let off = NewMessageViewModel.actionRows(showsNewGroup: false, showsNewChannel: false)
+        #expect(!off.contains(.newGroup), "a New group row with the flag off")
+    }
+
+    /// "New group" leads the "New message" sheet with the flag on (#2214,
+    /// moved from the inbox search by #2411), and a pick reaches the picker.
+    @Test func withTheFlagOnTheSheetOffersANewGroup() {
+        let repository = make()
+        let sheet = NewMessageViewModel(
+            catalog: InboxCatalog(repository: repository), viewer: repository, friends: nil,
+            suggestions: GroupSheetSuggestions(), directory: GroupSheetDirectory(),
+            showsNewGroup: true, showsNewChannel: false
+        )
+        var opened = false
+        sheet.onNewGroup = { opened = true }
+        #expect(sheet.state.sections.first?.kind == .actions)
+        #expect(sheet.state.sections.first?.rows == [.newGroup])
+        sheet.didSelect(.newGroup)
+        #expect(opened)
+    }
+
+    /// The inbox's search only finds (#2411): its empty field offers the
+    /// recent searches and conversations, no create row.
+    @Test func theInboxSearchNoLongerOffersTheCreateRows() async {
+        let repository = make()
+        let catalog = InboxCatalog(repository: repository)
+        catalog.reload()
+        _ = await settle { catalog.snapshot.phase == .loaded }
+        let search = InboxSearchViewModel(catalog: catalog, viewer: repository)
         var phases: [InboxSearchViewModel.Phase] = []
         search.onPhaseChange = { phases.append($0) }
         search.queryChanged("")
-        #expect(!phases.contains { phase in
-            if case .content(let sections) = phase { sections.contains { $0.kind == .create } } else { false }
-        })
+        let kinds = phases.flatMap { phase -> [InboxSearchViewModel.SectionKind] in
+            guard case .content(let sections) = phase else { return [] }
+            return sections.map(\.kind)
+        }
+        #expect(Set(kinds).isSubset(of: [.recents, .messages, .requests]), "\(kinds)")
     }
+}
 
-    @Test func withTheFlagOnTheEmptySearchOffersANewGroup() {
-        let repository = make()
-        let search = InboxSearchViewModel(
-            catalog: InboxCatalog(repository: repository), viewer: repository, showsNewGroup: true, showsNewChannel: false
-        )
-        var sections: [InboxSearchViewModel.Section] = []
-        search.onPhaseChange = { if case .content(let shown) = $0 { sections = shown } }
-        var opened = false
-        search.onNewGroup = { opened = true }
-        search.queryChanged("")
-        #expect(sections.first?.rows == [.newGroup])
-        search.didSelect(.newGroup)
-        #expect(opened)
-    }
+private actor GroupSheetSuggestions: SuggestionsProviding {
+    func suggestions(limit: Int) async throws -> [SuggestedAccount] { [] }
+    func follow(_ profileID: ProfileID) async throws -> FollowOutcome { .following }
+    func unfollow(_ profileID: ProfileID) async throws {}
+}
+
+private actor GroupSheetDirectory: PeopleDirectoryProviding {
+    func searchPeople(matching query: String, limit: Int32) async throws -> [DirectoryPerson] { [] }
 }
