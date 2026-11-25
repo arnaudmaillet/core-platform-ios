@@ -23,7 +23,7 @@ import UIKit
 public final class AuthorFollowButton: AppButton {
     /// How long "✓ Following" stays before the button folds (#2409's
     /// confirmation, the same here).
-    public static let confirmationDuration: TimeInterval = 1
+    public static let confirmationDuration = AuthorFollowOffer.confirmationDuration
 
     /// The offer drawn now.
     public private(set) var offer: AuthorFollowOffer = .none
@@ -73,7 +73,7 @@ public final class AuthorFollowButton: AppButton {
         }
         // Followed from the button's own invitation, on screen: say so, then
         // fold (#2419, as #2409's).
-        if offer == .following, seen, !isHidden, old == .follow || old == .followBack {
+        if offer.confirmsFollow(from: old), seen, !isHidden {
             isConfirming = true
             setContent(AppButton.Content(title: "Following", symbol: "checkmark"), selected: true, animated: true)
             fold = loadClock.schedule(Self.confirmationDuration) { [weak self] in
@@ -151,11 +151,7 @@ public final class AuthorFollowButton: AppButton {
 
     /// The words for an offer that draws a button.
     static func title(for offer: AuthorFollowOffer) -> String {
-        switch offer {
-        case .followBack: "Follow back"
-        case .requested: "Requested"
-        case .follow, .following, .none: "Follow"
-        }
+        offer.buttonTitle ?? "Follow"
     }
 
     #if DEBUG

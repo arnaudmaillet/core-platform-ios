@@ -367,7 +367,7 @@ final class SnapFeedViewController: UIViewController {
     /// The page's sound: which sound a post is set to, what it draws, what is
     /// heard, and the sound sheet's inputs (`SnapSoundState`), over
     /// `FeedFeatureBuilder.soundProvider`.
-    private let soundState: SnapSoundState
+    let soundState: SnapSoundState
     /// See `FeedFeatureBuilder.useSound`.
     private let useSound: (@MainActor (PostSound) -> Void)?
     /// Opens a new feed with the hero — the sound sheet's grid uses it.

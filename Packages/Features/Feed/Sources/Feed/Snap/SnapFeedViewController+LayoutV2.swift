@@ -14,4 +14,13 @@ extension SnapFeedViewController {
         let id = model.id
         chrome.actionColumn.onSaveRequested = { [weak self] in self?.toolbarComposer.toggleBookmark(for: id) }
     }
+
+    /// v2's Follow beside the pill (#2409), the author bar's.
+    var toolbarFollow: SnapToolbarFollow { authorBar.follow }
+
+    /// The followed pill's second line (#2409): the sound's own line, as the
+    /// attribution said it (`SnapSoundState.line`), behind a note.
+    func pillSoundLine(for model: FeedItemDisplayModel) -> String? {
+        SnapSoundState.line(for: soundState.sound(for: model), of: model).map { "♪ " + $0 }
+    }
 }

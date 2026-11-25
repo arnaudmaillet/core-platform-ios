@@ -37,7 +37,7 @@ let package = Package(
     ],
     targets: [
         .target(name: "MediaCore", dependencies: ["LaunchArguments", "CacheKit", "CoreModels"]),
-        .target(name: "MediaUI", dependencies: ["MediaCore", "DesignSystem", "LaunchArguments", "CacheKit"]),
+        .target(name: "MediaUI", dependencies: ["MediaCore", "CoreModels", "DesignSystem", "LaunchArguments", "CacheKit"]),
         .target(name: "MediaCoreFixtures", dependencies: ["MediaCore", "LaunchArguments", "CacheKit"]),
         .testTarget(name: "MediaCoreTests", dependencies: ["MediaCore", "MediaCoreFixtures", "CacheKit"]),
         .testTarget(

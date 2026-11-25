@@ -61,6 +61,48 @@ final public class SnapAuthorIdentityView: UIView {
         BarItemRemeasure.run(self, duration: nil)
     }
 
+    /// Whether the pill stands at its budget, past its ceiling (#2409: the
+    /// full-screen page's followed author, stretched to the repost): the
+    /// budget is the room the toolbar leaves it (`setWidthBudget`).
+    public var stretches: Bool {
+        get { pill.stretches }
+        set {
+            guard newValue != pill.stretches else { return }
+            pill.setStretches(newValue)
+            if superview != nil { BarItemRemeasure.run(self, duration: nil) }
+        }
+    }
+
+    /// The line under the name when it is not the handle (#2409: the post's
+    /// sound, scrolling); nil while the handle shows. Set with the author.
+    public private(set) var secondLine: String?
+
+    /// A tap on the second line while it is not the handle: the sound sheet
+    /// (#2409). The rest of the pill keeps the person's tap.
+    public var onSecondLineTapped: (() -> Void)?
+
+    /// Where the touch the gestures are reading began.
+    private var lastTouchPoint: CGPoint?
+
+    override public func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        let hit = super.hitTest(point, with: event)
+        if hit != nil { lastTouchPoint = point }
+        return hit
+    }
+
+    /// Whether the second line is sliding now. Tests.
+    public var isScrollingSecondLine: Bool { pill.isScrollingSecondLine }
+
+    #if DEBUG
+    /// A tap at `point`, in the pill's space. Tests.
+    public func debugTap(at point: CGPoint) {
+        lastTouchPoint = point
+        opening.debugTap()
+    }
+    /// The second line's frame in the pill's space. Tests.
+    public var debugSecondLineFrame: CGRect { pill.secondLineFrame(in: self) }
+    #endif
+
     /// The widest the pill is drawn: the budget, under the pill's own cap.
     var widthCap: CGFloat { pill.widthCap }
 
@@ -87,7 +129,12 @@ final public class SnapAuthorIdentityView: UIView {
         opening.hasPerson = { [weak self] in self?.authorID != nil || self?.onGroupTapped != nil }
         opening.openCard = { [weak self] in
             guard let self else { return }
-            if let authorID {
+            // The sound line opens the sound (#2409); the rest of the pill,
+            // the card.
+            if let onSecondLineTapped, secondLine != nil, let touch = lastTouchPoint,
+               pill.secondLineFrame(in: self).insetBy(dx: 0, dy: -4).contains(touch) {
+                onSecondLineTapped()
+            } else if let authorID {
                 onAuthorTapped?(authorID)
             } else {
                 onGroupTapped?()
@@ -178,18 +225,27 @@ final public class SnapAuthorIdentityView: UIView {
     /// The pill's STATE (`shownAuthor`, the tap target) is the new author at
     /// once; only the drawing waits for the transition's midpoint.
     /// `animated: false`, or a pill not in a window, swaps in one frame.
-    public func setAuthor(_ model: FeedItemDisplayModel, pipeline: ImagePipeline, animated: Bool = true) {
-        guard model != renderedModel else { return }
+    ///
+    /// `secondLine` replaces the handle (#2409: the followed author's sound,
+    /// scrolling), drawn in the same swap; nil is the handle.
+    public func setAuthor(
+        _ model: FeedItemDisplayModel, pipeline: ImagePipeline, secondLine: String? = nil, animated: Bool = true
+    ) {
+        guard model != renderedModel || secondLine != self.secondLine else { return }
+        self.secondLine = secondLine
         // The fast path is for PAGING between posts by one person: the face and
         // the name are already right, and there is no reason to refetch an
         // avatar. Only a handle the projection lacked can still move.
         let sameFace = showsSameFace(as: model)
-        let meta = Self.pillMetaLine(fromMeta: model.metaText)
+        let meta = secondLine ?? Self.pillMetaLine(fromMeta: model.metaText)
         renderedModel = model
         authorID = model.authorID
         guard !sameFace else {
             guard pill.handle != meta else { return }
-            contentTransition.perform(animated: animated) { self.pill.setHandle(meta) }
+            contentTransition.perform(animated: animated) {
+                self.pill.setHandle(meta)
+                self.pill.scrollsSecondLine = secondLine != nil
+            }
             return
         }
         var faceURL = model.avatarURL
@@ -198,6 +254,7 @@ final public class SnapAuthorIdentityView: UIView {
         #endif
         contentTransition.perform(animated: animated) {
             self.pill.setName(model.authorName, handle: meta)
+            self.pill.scrollsSecondLine = secondLine != nil
             self.pill.avatar.setMonogram(MonogramAvatarView.monogram(
                 name: model.authorName, handle: Self.handle(fromMeta: model.metaText)
             ))

@@ -24,6 +24,9 @@ protocol SnapPostActionsHost: UIViewController {
     var shareTargeting: (any ShareTargeting)? { get }
     var toolbarComposer: SnapToolbarComposer { get }
     var unavailablePostIDs: Set<PostID> { get }
+    /// The relation the badge and the page's Follow read (#2409's Unfollow).
+    var followStore: SnapAuthorFollowStore { get }
+    var layoutV2: Bool { get }
 }
 
 /// The full-screen feed's actions on a post (#2514): its share sheet — the
@@ -111,6 +114,9 @@ final class SnapPostActions {
             })
         }
         guard !host.unavailablePostIDs.contains(id) else { return actions }
+        // v2 (#2409): the page's Follow never undoes itself — Unfollow is
+        // here, and on the profile.
+        if let unfollow = unfollowAction(for: id) { actions.append(unfollow) }
         actions.append(ShareSheetAction(title: "Not interested", symbol: "hand.thumbsdown") { [weak self] in
             self?.markNotInterested(id)
         })
@@ -120,6 +126,20 @@ final class SnapPostActions {
             })
         }
         return actions
+    }
+
+    /// Unfollow, for a media post whose author the viewer follows, under
+    /// `-snap-layout-v2` (#2409): the shared store's, optimistic, a refusal
+    /// put back and said.
+    private func unfollowAction(for id: PostID) -> ShareSheetAction? {
+        guard host.layoutV2, let model = host.modelsByID[id], model.mediaURL != nil,
+              host.followStore.relation(for: model.authorID)?.isFollowing == true else { return nil }
+        let author = model.authorID
+        let handle = model.authorHandle
+        return ShareSheetAction(title: "Unfollow", symbol: "person.badge.minus") { [weak self] in
+            guard let self else { return }
+            host.followStore.unfollow(author, handle: handle, from: host)
+        }
     }
 
     /// Repost, from the share sheet (#1710). ⚠️ No client path publishes a

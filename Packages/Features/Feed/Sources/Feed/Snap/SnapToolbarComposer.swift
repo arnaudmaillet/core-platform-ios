@@ -34,6 +34,8 @@ protocol SnapToolbarComposerHost: UIViewController {
     /// `-snap-layout-v2` (#2407): a media page's footer is the author and
     /// repost, save and the sound being the column's (#2408).
     var layoutV2: Bool { get }
+    /// v2's Follow beside the pill (#2409).
+    var toolbarFollow: SnapToolbarFollow { get }
     func soundFace(for model: FeedItemDisplayModel) -> SnapSoundFace?
     func presentSoundSheet()
     func presentShareSheet(for id: PostID)
@@ -115,9 +117,10 @@ final class SnapToolbarComposer {
 
     /// A fresh item wearing THE pill, under the slot's one identifier.
     func makeAuthorItem() -> UIBarButtonItem {
-        BarItems.container(
-            id: Self.authorItemIdentifier(for: host.authorIdentityView.shownAuthor?.authorID), view: host.authorIdentityView
-        )
+        // v2: ONE item for the screen's life (#2409), its content blurred in
+        // place — the slot's own identifier, whoever is shown.
+        let author = host.layoutV2 ? nil : host.authorIdentityView.shownAuthor?.authorID
+        return BarItems.container(id: Self.authorItemIdentifier(for: author), view: host.authorIdentityView)
     }
 
     /// Mints the author item for the pill shown now and swaps it into the
@@ -411,15 +414,44 @@ final class SnapToolbarComposer {
         var items = defaultToolbarItems
         guard let like = footerLikeItem,
               let flexible = items.firstIndex(where: { $0 === footerFlexibleSpace }) else {
-            // ⚠️ v2's media page (#2408): `[author] ——— [⇄]`. Save and the
-            // sound moved to the column; the repost stays, in its own bubble.
-            guard host.layoutV2 else { return items }
-            return items.filter { $0 !== bookmarkItem && $0 !== shareSeparator && $0 !== footerSoundItem }
+            guard host.layoutV2, !items.isEmpty else { return items }
+            return v2MediaItems()
         }
         items.removeAll { $0 === repostToolbarItem || $0 === footerSoundItem || $0 === shareSeparator }
         items.insert(contentsOf: footerMergesLike ? [like] : [like, footerLikeSeparator], at: flexible + 1)
         if let save = items.firstIndex(where: { $0 === bookmarkItem }) { items.insert(shareItem, at: save + 1) }
         return items
+    }
+
+    /// ⚠️ v2's media page (#2408, #2409): save and the sound moved to the
+    /// column; the repost stays, in its own bubble; the author's Follow
+    /// stands beside the pill, in a bubble of its own, until the pill
+    /// stretches to the repost:
+    /// `[author] (Follow) ——— [⇄]`, followed `[author ———————] [⇄]`.
+    private func v2MediaItems() -> [UIBarButtonItem] {
+        let follow = host.toolbarFollow
+        var items = [authorItem]
+        if let item = follow.item { items += [followSeparator, item] }
+        // Stretched, the pill runs up to the repost — in a bubble of its own:
+        // adjacent items share one platter.
+        items.append(follow.stretchesPill ? repostSeparator : footerFlexibleSpace)
+        if let repost = repostToolbarItem { items.append(repost) }
+        return items
+    }
+
+    /// The Follow's own bubble beside the pill, and the repost's beside a
+    /// stretched pill.
+    private let followSeparator = BarItems.separator()
+    private let repostSeparator = BarItems.separator()
+
+    /// v2's Follow changed face, or the pill its stretch (#2409): the media
+    /// footer handed over again — only when its list changed, the staying
+    /// items the same instances (R3), through the bar's own animation.
+    func refreshFollowItems() {
+        guard host.layoutV2, footerLikeItem == nil, !defaultToolbarItems.isEmpty else { return }
+        let items = footerToolbarItems()
+        guard !(host.toolbarItems ?? []).elementsEqual(items, by: ===) else { return }
+        host.setToolbarItems(items, animated: host.canAnimateBarItems)
     }
 
     /// Whether a text page's like shares the star's platter (#2488, step 3),

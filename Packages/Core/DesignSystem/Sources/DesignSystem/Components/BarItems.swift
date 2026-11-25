@@ -67,6 +67,14 @@ public enum BarItems {
         return item
     }
 
+    /// A titled control opening `menu` — a quiet state that offers to undo
+    /// itself (the full-screen page's Requested, #2409).
+    public static func title(id: String, title: String, menu: UIMenu) -> UIBarButtonItem {
+        let item = UIBarButtonItem(title: title, menu: menu)
+        item.identifier = id
+        return item
+    }
+
     /// A control that takes the bar's free width (R5): `StretchedBarLabel` in
     /// an item whose bubble the bar draws — `prominent` tints it as the
     /// bar's own `.prominent` style does. It hugs nothing and asks, at the
