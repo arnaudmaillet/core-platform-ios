@@ -238,15 +238,16 @@ final class CommentStream: NSObject {
 
     /// The engaged bottom inset with the composer at rest (`applyEngagedInsets`).
     private(set) var restingBottomInset: CGFloat?
-    /// Popular riding the keyboard for a reply (#2487, `ReplyKeyboardRise`).
+    /// A reply riding the keyboard (#2487, `ReplyKeyboardRise`).
     var replyRise = ReplyKeyboardRise()
 
     /// ⚠️ RECENT RIDES THE KEYBOARD, as a conversation does (the owner,
     /// 2026-11-01): the composer's input row rising by `rise` lifts the
     /// conversation with it — its newest row stays just above the field, and
     /// a reader further up keeps the rows they were reading on screen. Popular
-    /// stays where it is, except for a reply (#2487, `ridesKeyboard`). Each
-    /// stream holds its own inset, so the tabs change with the keyboard up.
+    /// stays where it is, except for a reply (#2487, `ridesKeyboard`); in the
+    /// comments sheet, both tabs ride a reply's keyboard only. Each stream
+    /// holds its own inset, so the tabs change with the keyboard up.
     ///
     /// Called from the panel's layout pass, which a keyboard runs inside its
     /// own animation: the inset and the offset ride the keyboard's curve. The
@@ -260,14 +261,7 @@ final class CommentStream: NSObject {
         let offsetBefore = collectionView.contentOffset.y
         collectionView.contentInset.bottom = inset
         guard hasAppliedStream, !collectionView.isTracking else { return }
-        if kind == .popular {
-            followReplyRise(to: offsetBefore + delta)
-        } else if holdsRest {
-            pinToTail()
-        } else {
-            let insets = collectionView.adjustedContentInset
-            collectionView.contentOffset.y = min(max(offsetBefore + delta, -insets.top), tailOffset)
-        }
+        followKeyboardRise(from: offsetBefore, by: delta)
     }
 
     /// The stream moved to `offset` — by the reader, or not. Tests.
@@ -564,7 +558,7 @@ final class CommentStream: NSObject {
     // MARK: - Where the stream rests (#2007)
 
     /// The offset that shows the stream's last row.
-    private var tailOffset: CGFloat {
+    var tailOffset: CGFloat {
         let insets = collectionView.adjustedContentInset
         return max(-insets.top, collectionView.contentSize.height + insets.bottom - collectionView.bounds.height)
     }
@@ -584,7 +578,7 @@ final class CommentStream: NSObject {
     /// until the reader scrolls away from it, and again once they come back
     /// (`scrollViewDidScroll`). Popular's top keeps itself (UIKit holds the
     /// offset); Recent's end is held here (`keepRestingEnd`).
-    private var holdsRest = true
+    private(set) var holdsRest = true
 
     /// Set while the paging rows are being laid out at an offset the stream
     /// is about to leave: they must not ask for a page then.
@@ -594,7 +588,7 @@ final class CommentStream: NSObject {
     /// at the tail realise, so each pass lays out at the offset it just set,
     /// until the content stops moving (bounded), as a conversation's tail pin
     /// does (`ConversationThreadViewController.pinToTail`).
-    private func pinToTail(animated: Bool = false) {
+    func pinToTail(animated: Bool = false) {
         guard resting.pinsItsEnd, collectionView.bounds.height > 0 else { return }
         suppressesPaging = true
         defer { suppressesPaging = false }
@@ -642,7 +636,7 @@ final class CommentStream: NSObject {
     }
 
     func keepRestingEnd() {
-        guard resting.pinsItsEnd, holdsRest, !isAtRest, !collectionView.isTracking,
+        guard resting.pinsItsEnd, holdsRest, !replyRise.isRiding, !isAtRest, !collectionView.isTracking,
               !collectionView.isDecelerating, !isScrollingProgrammatically else { return }
         pinToTail()
     }

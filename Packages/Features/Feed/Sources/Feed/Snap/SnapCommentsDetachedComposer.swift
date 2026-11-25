@@ -12,9 +12,9 @@ import UIKit
 /// away. A field OUTSIDE the sheet leaves it be (measured, 2026-11-04): the
 /// sheet's own bar never edits — a tap on it, a reply, hand this bar the
 /// keyboard instead. It stands on the keys' guide, over the rows, on the
-/// soft frost the app's composers stand on; the sheet, its rows and the
-/// media do not move. The draft goes back to the sheet's bar as the
-/// keyboard goes.
+/// soft frost the app's composers stand on; the sheet and the media do not
+/// move, nor the rows but for a reply, which rises over the bar (#2487,
+/// `onRise`). The draft goes back to the sheet's bar as the keyboard goes.
 ///
 /// ⚠️ NOTHING CHANGES AT THE HAND-OVER (the owner, 2026-11-04): the bar
 /// takes the sheet's bar's place exactly, and its frost — across the sheet's
@@ -53,6 +53,10 @@ final class SnapCommentsDetachedComposer {
     /// Whether the bar edits, for the sheet (a tap on it ends editing, its
     /// height holds meanwhile).
     var onEditingChanged: ((Bool) -> Void)?
+    /// How far the bar stands over the sheet's bar, in the sheet's own
+    /// points, as the keys move it: the panel's rows follow it for a reply
+    /// (`PostDetailViewController.followDetachedComposer`, #2487).
+    var onRise: ((CGFloat) -> Void)?
     private(set) var isEditingDetached = false
     /// The window's whole bounds: its keyboard guide is the keys' (the
     /// window's own does not follow them, measured 2026-11-04). While the
@@ -172,6 +176,16 @@ final class SnapCommentsDetachedComposer {
         guard isEditing else { return }
         let rise = restingBottom - bar.frame.maxY
         band.setRampStrength(min(1, max(0, rise / Self.frostRise)))
+        onRise?(riseOverSource)
+    }
+
+    /// The bar's top over the sheet's bar's, carried into the sheet's
+    /// content: the floating sheet's scale is taken off (`beginEditing`).
+    /// Model frames both, so it reads where the keys and the sheet are going.
+    private var riseOverSource: CGFloat {
+        guard let source, let parent = source.superview else { return 0 }
+        let top = host.convert(CGPoint(x: bar.frame.midX, y: bar.frame.minY), to: parent).y
+        return max(0, source.frame.minY - top)
     }
 
     /// Through the sheet's bar, which holds the send in flight: while one
@@ -220,6 +234,7 @@ final class SnapCommentsDetachedComposer {
     func tearDown() {
         guard isEditing else { return }
         isEditing = false
+        onRise?(0)
         source?.draftText = bar.draftText
         bar.endEditing(true)
         bar.removeFromSuperview()
