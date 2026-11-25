@@ -76,11 +76,12 @@ final class PresentationBudgetUITests: XCTestCase {
         return true
     }
 
-    /// Opens the "+" menu from the tab bar and picks the named item.
+    /// Opens the "+" menu from Explore's top bar (#2489) and picks the named
+    /// item.
     @MainActor private static func createMenu(_ item: String) -> @MainActor (XCUIApplication) -> Bool {
         { app in
-            let plus = app.tabBars.buttons.allElementsBoundByIndex.last
-            guard let plus, plus.waitForExistence(timeout: 10) else { return false }
+            let plus = app.navigationBars.buttons["Create"]
+            guard plus.waitForExistence(timeout: 10) else { return false }
             plus.tap()
             let choice = app.buttons[item]
             guard choice.waitForExistence(timeout: 5) else { return false }

@@ -3,11 +3,10 @@ import Foundation
 /// The places of the app shell's bar, in bar order. In CoreNavigation since
 /// #2386, beside `AppRoute`, so the debug tools can name a tab.
 ///
-/// The bar shows a fourth item, DETACHED at the trailing edge — the "+"
-/// (`CreateTabItem`) — giving `| Explore  Messages  Profile |  + |` with no
-/// custom bar. It is deliberately NOT a case here: it opens a menu and is
-/// never selected, so nothing can route to it and `-select-tab` has no index
-/// for it.
+/// Three places since #2489 (the owner 2026-11-18): `| Explore  Messages |
+/// Profile |`, Profile apart on iOS 27 (`ShellTabs`). The "+" that stood
+/// detached at the trailing edge, never a place, moved to Explore's top bar
+/// (`CreateBarItem`).
 ///
 /// **For You left the bar on 2026-11-15 (#2453):** the app is the map's
 /// first, and For You comes back later. Its slot was 1, so `-select-tab 1`

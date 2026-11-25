@@ -16,10 +16,12 @@ final class BarTapShieldUITests: XCTestCase {
         return app
     }
 
-    /// The gap between the tab capsule and the "+" button, inside the bar's
-    /// band, where the inbox's rows lie underneath.
+    /// The gap between the tab capsule and the detached Profile bubble
+    /// (#2489; the "+"'s place before), inside the bar's band, where the
+    /// inbox's rows lie underneath. Measured on the iPhone 18 Pro (iOS 27):
+    /// the capsule ends at 209 pt and Profile starts at 318 pt.
     private func barGap(in app: XCUIApplication) -> XCUICoordinate {
-        app.coordinate(withNormalizedOffset: CGVector(dx: 318.0 / 402, dy: 848.0 / 874))
+        app.coordinate(withNormalizedOffset: CGVector(dx: 264.0 / 402, dy: 848.0 / 874))
     }
 
     func testATapBesideTheTabCapsuleOpensNothing() {
@@ -42,7 +44,7 @@ final class BarTapShieldUITests: XCTestCase {
         let before = firstRow.frame.minY
 
         let start = barGap(in: app)
-        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 318.0 / 402, dy: 0.45))
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 264.0 / 402, dy: 0.45))
         start.press(forDuration: 0.05, thenDragTo: end)
         sleep(1)
 

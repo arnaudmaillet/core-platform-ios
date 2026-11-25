@@ -31,8 +31,8 @@ extension MainTabCoordinator {
         }
 
         // Dev convenience: `-select-tab N` opens directly on a tab for testing,
-        // in bar order (0 = Explore … 3 = Profile; the "+" is not a tab and has
-        // no index). Every index is a plain selection now — 1 used to trigger
+        // in bar order (0 = Explore, 1 = Messages, 2 = Profile; the "+" is in
+        // Explore's top bar, #2489). Every index is a plain selection now — 1 used to trigger
         // the feed push instead, which it no longer does; use `-open-feed` for
         // the timeline.
         let arguments = ProcessInfo.processInfo.arguments
@@ -213,7 +213,7 @@ extension MainTabCoordinator {
         // composer's presentation off the launch's own turns; the hook then
         // waits for a shell in a window with nothing presented and no
         // transition running, and says GAVE UP if that never comes.
-        if let destination = LaunchArgument.openCreate.value(in: arguments).flatMap { CreateTabItem.Destination(rawValue: $0) } {
+        if let destination = LaunchArgument.openCreate.value(in: arguments).flatMap { CreateDestination(rawValue: $0) } {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
                 QAWait.until("-open-create \(destination.rawValue)", { [weak self] in
                     guard let self else { return true }
@@ -223,30 +223,6 @@ extension MainTabCoordinator {
                 }) { [weak self] in
                     self?.openCreate(destination)
                 }
-            }
-        }
-        // `-open-create-menu`: the "+" MENU itself, through the very path a
-        // tap takes (`shouldSelectTab`), ~1.5s in — the menu is a `UIMenu`
-        // no simulator tap can open, and `-presentation-budget` needs its
-        // presentation turn on its own, without a composer behind it.
-        if LaunchArgument.openCreateMenu.isPassed(in: arguments) {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-                guard let self else { return }
-                _ = self.tabBarController(self.tabBarController, shouldSelectTab: self.createItem.tab)
-            }
-        }
-        // `-plus-hold-demo <full|short|hold|drift>` holds the "+" through
-        // `CreateHoldShortcut`'s own press path — the recogniser's `.began`,
-        // `.changed` and `.ended` inputs, minus the recogniser, which no
-        // simulator script can hold down — so the disc, its ring, the arming
-        // and the camera opening can be filmed. Each step waits on the
-        // shortcut's state, never on a clock (the pauses are pacing, so a
-        // recording shows each state at rest), and prints GAVE UP if the
-        // state never comes. `[plus-hold]` lines go to stderr.
-        if LaunchArgument.plusHoldDemo.isPassed(in: arguments) {
-            let mode = LaunchArgument.plusHoldDemo.value(in: arguments) ?? "full"
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-                self?.debugPlusHoldDemo(mode: mode)
             }
         }
         // `-nav-stress <cycles>` drives deep cyclical navigation and audits
@@ -449,76 +425,6 @@ extension MainTabCoordinator {
                                 }
                             }
                         }
-                    }
-                }
-            }
-        }
-    }
-
-    /// Drives `-plus-hold-demo`: see the hook in `installQAHooks()`.
-    fileprivate func debugPlusHoldDemo(mode: String) {
-        let label = "-plus-hold-demo \(mode)"
-        let hold = createHold
-        QAWait.until("\(label): a resting shell with the + placed", { [weak self] in
-            guard let self else { return true }
-            return tabBarController.viewIfLoaded?.window != nil
-                && tabBarController.presentedViewController == nil
-                && tabBarController.transitionCoordinator == nil
-                && hold.debugBubbleCentre != nil
-        }) { [weak self] in
-            // Pacing: a second of the bar at rest before the finger lands.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-                self?.debugRunPlusHold(mode: mode, label: label)
-            }
-        }
-    }
-
-    private func debugRunPlusHold(mode: String, label: String) {
-        let hold = createHold
-        // The shell's own controller, alive as long as the app: holding it
-        // here keeps every step below free of `self`.
-        let controller = tabBarController
-        let presented = { controller.presentedViewController.map { "\(type(of: $0))" } ?? "nil" }
-        hold.debugLog("\(label): press")
-        hold.debugPress()
-        switch mode {
-        case "short":
-            // Let go with the ring half full: the disc must shrink away and
-            // nothing may open.
-            QAWait.until("\(label): half a ring", { hold.debugProgress >= 0.5 }) {
-                let disc = hold.debugDisc
-                hold.debugLog(String(format: "\(label): release at %.2f", hold.debugProgress))
-                hold.debugRelease()
-                QAWait.until("\(label): the disc gone", { disc?.superview == nil }) {
-                    hold.debugLog("\(label): disc gone, presented=\(presented())")
-                }
-            }
-        case "drift":
-            // Slide off with the ring under way: the disc goes at once, while
-            // the finger is still down, and the lift then does nothing.
-            QAWait.until("\(label): a ring under way", { hold.debugProgress >= 0.4 }) {
-                hold.debugDrag(by: CGVector(dx: -90, dy: -30))
-                QAWait.until("\(label): abandoned", { hold.debugPhase == .abandoned }) {
-                    hold.debugLog("\(label): abandoned while held")
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-                        hold.debugRelease()
-                        hold.debugLog("\(label): released, presented=\(presented())")
-                    }
-                }
-            }
-        case "hold":
-            // Stay armed, for a still of the full state.
-            QAWait.until("\(label): armed", { hold.debugPhase == .armed }) {
-                hold.debugLog("\(label): armed, holding")
-            }
-        default:
-            // "full": fill, hold armed a beat, let go — the camera opens.
-            QAWait.until("\(label): armed", { hold.debugPhase == .armed }) {
-                hold.debugLog("\(label): armed")
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-                    hold.debugRelease()
-                    QAWait.until("\(label): the camera presented", { controller.presentedViewController != nil }) {
-                        hold.debugLog("\(label): presented \(presented())")
                     }
                 }
             }

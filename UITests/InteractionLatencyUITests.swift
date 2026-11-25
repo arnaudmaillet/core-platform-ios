@@ -37,8 +37,8 @@ final class InteractionLatencyUITests: XCTestCase {
         let issue: String
     }
 
-    /// By label: the shell lays invisible menu buttons over its tab items
-    /// (the "+" menu, the profile switcher), so an index can land on one.
+    /// By label: the shell lays an invisible menu button over a tab item
+    /// (the profile switcher), so an index can land on it.
     @MainActor private static func tab(_ label: String) -> @MainActor (XCUIApplication) -> Bool {
         { app in
             let button = app.tabBars.buttons[label]

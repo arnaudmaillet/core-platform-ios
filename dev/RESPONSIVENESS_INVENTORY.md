@@ -26,10 +26,9 @@ Columns: area | screen | element | gesture | response | handler (async note) | h
 ### Shell / tab bar
 - shell | ShellTabBarController | Explore / For You / Messages / Profile tab | tap | tab switch | `MainTabCoordinator.swift:693`, sync | any launch
 - shell | ShellTabBarController | re-tap selected tab | tap | scroll-to-top (UIKit pops a pushed stack) | `:697-701`, sync | any
-- shell | ShellTabBarController | "+" | tap | UIMenu (Camera / Upload / Text) | `:693-719` → `createItem.presentMenu()` `CreateTabItem.swift:122`. Fallback action sheet `:137` | `-open-create-menu` (`MainTabCoordinator+QA.swift:224`)
-- shell | ShellTabBarController | "+" menu row Camera/Upload/Text | tap | present full-screen (CaptureViewController / MediaPicker / TextPostComposer) | `openCreate` → `MemberGates.perform(.create)` → `presentCreate` `:811-830`, sync for a member | `-open-create camera\|upload\|text` (`+QA:207`)
-- shell | ShellTabBarController | "+" | long press (hold to arm) | disc + ring → present camera | `CreateHoldShortcut.swift:108-127`, `fire` → `createItem.open(.camera)` | `-plus-hold-demo full\|short\|hold\|drift` (`+QA:238`)
-- shell | ShellTabBarController | "Sign in" bubble (guest) | tap | present sign-in sheet | `:705-707` → `AppCoordinator.presentSignUp` `AppCoordinator.swift:418-450`, sync | `-guest`
+- shell | ExploreTabCoordinator | "+" bar item (Explore's top bar, #2489) | tap | native UIMenu (Camera / Upload / Text) opened and anchored by UIKit | `CreateBarItem` (CoreNavigation) | a tap on the item
+- shell | ExploreTabCoordinator | "+" menu row Camera/Upload/Text | tap | present full-screen (CaptureViewController / MediaPicker / TextPostComposer) | `openCreate` → `MemberGates.perform(.create)` → `presentCreate`, sync for a member | `-open-create camera\|upload\|text`
+- shell | ExploreTabCoordinator | "Sign in" bar item (guest, #2489) | tap | present sign-in sheet | `CreateBarItem.showSignIn` → `onSignIn` → `AppCoordinator.presentSignUp`, sync | `-guest`
 - shell | ShellTabBarController | Profile tab | long press 0.4 s | profile switcher (tracking menu) | `profileOverlayHeld` `:153-169`, sync (switcher data prewarmed by `Task` at `:284`) | `-profile-switcher-hold` (`+QA:28`)
 - shell | switcher | "Add Profile" | tap | alert | `presentAddProfilePlaceholder` `:447-455` | same
 - shell | NotificationsBell (leading item on every root) | bell | tap | side drawer opens | `NotificationsBell.swift:54` → `NotificationsDrawer.open` `NotificationsDrawer.swift:88` | `-open-notifications`; `-notifications-progress 0.5`; `-notifications-drag-demo` (`+QA:398-423`)

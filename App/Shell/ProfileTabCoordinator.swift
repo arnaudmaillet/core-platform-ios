@@ -91,12 +91,13 @@ final class ProfileTabCoordinator: TabCoordinator {
         guard member else {
             walletBadge = nil
             // ⚠️ A GUEST'S TAB IS SETTINGS ITSELF (#626), not a sign-up page with
-            // Settings behind a gear: a guest has no profile, and the bar's own
-            // "Sign in" bubble is the way in. The settings a guest can use —
+            // Settings behind a gear: a guest has no profile, and the Sign in
+            // beside Explore's search is the way in (#2489). The settings a guest can use —
             // preferences, help, legal — are the tab's root.
             showsGuestSettings = true
             tab.title = "Settings"
-            // Said outright — see `CreateTabItem.showSignIn`.
+            // Said outright: a title changed on an item already in the bar
+            // left VoiceOver reading the old name (the #547 family).
             tab.accessibilityLabel = "Settings"
             tab.setFaces(outline: Self.guestSettingsFaces?.outline, fill: Self.guestSettingsFaces?.fill)
             let settings = container.settingsFeature.makeGuestSettingsViewController(onSignIn: onSignIn)
