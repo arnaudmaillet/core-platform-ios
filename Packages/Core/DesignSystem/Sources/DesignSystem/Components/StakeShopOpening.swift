@@ -9,8 +9,8 @@ import UIKit
 /// pushes). It is found UP THE RESPONDER CHAIN from the control the menu was
 /// raised on (`StakeShop.openAction(from:)`), so the rail, the composer and
 /// every card reach it without a closure threaded through each screen that
-/// draws them: a view's chain climbs its view controllers, then each
-/// presented controller's presenter, to the window's root.
+/// draws them (`firstController(as:)`: its view controllers, then from a
+/// sheet its presenter and the presenter's children, #2565).
 @MainActor
 public protocol StakeShopOpening: AnyObject {
     /// The Shop's screen, on its Boosts; nil when nothing sells packs (the

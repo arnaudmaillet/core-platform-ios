@@ -360,10 +360,9 @@ final class ProfileCardViewController: UIViewController {
 
     // MARK: - The bars
 
-    /// Who the member gate is asked of: the presenter's chain reaches the
-    /// shell, a sheet's own does not.
-    private var gateSource: UIResponder { navigationController?.presentingViewController ?? self }
-    private var isGuest: Bool { MemberGates.isGuest(gateSource) }
+    /// The card is a sheet: its gate is found through its presenter's
+    /// children (`firstController(as:)`, #2565).
+    private var isGuest: Bool { MemberGates.isGuest(self) }
 
     /// The bell stands while the viewer follows, for a member — the one
     /// rule the profile's header reads too (`ProfileRelationControl`, #2302).
@@ -664,7 +663,7 @@ final class ProfileCardViewController: UIViewController {
     // MARK: - Actions
 
     private func followTapped() {
-        MemberGates.perform(.follow(handle: viewModel.profile?.handle), from: gateSource) { [weak self] in
+        MemberGates.perform(.follow(handle: viewModel.profile?.handle), from: self) { [weak self] in
             // On at the optimistic flip; off is silent (#1886).
             if self?.viewModel.toggleFollow() == true { Haptics.play(.toggleOn) }
         }
@@ -672,7 +671,7 @@ final class ProfileCardViewController: UIViewController {
 
     /// The conversation opens on the presenter's stack: the card goes first.
     private func messageTapped() {
-        MemberGates.perform(.message(handle: viewModel.profile?.handle), from: gateSource) { [weak self] in
+        MemberGates.perform(.message(handle: viewModel.profile?.handle), from: self) { [weak self] in
             self?.closeThen { [weak self] in self?.viewModel.messageTapped() }
         }
     }

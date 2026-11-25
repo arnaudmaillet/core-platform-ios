@@ -7,8 +7,8 @@ import UIKit
 /// Adopted by the shell's tab bar controller. A control drawn deep inside a
 /// screen — a card's like chip, a rail button, a comment field — finds the
 /// gate from itself, without a dependency threaded through every screen that
-/// draws it: a view's chain climbs its view controllers, then each presented
-/// controller's presenter, to the window's root. The same shape as
+/// draws it (`firstController(as:)`: its view controllers, then from a sheet
+/// its presenter and the presenter's children, #2565). The same shape as
 /// `StakeShopOpening`.
 @MainActor
 public protocol MemberGateProviding: AnyObject {
