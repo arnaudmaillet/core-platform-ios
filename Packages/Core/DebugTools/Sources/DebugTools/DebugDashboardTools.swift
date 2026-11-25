@@ -39,7 +39,7 @@ public enum DebugDashboardTools {
             },
             DebugDashboard.Entry(title: "Preferences", symbol: "slider.horizontal.3") { preferencesList() },
             DebugDashboard.Entry(title: "Permissions", symbol: "hand.raised") { permissionsList() },
-            DebugDashboard.Entry(title: "Local Push", symbol: "bell.badge") {
+            DebugDashboard.Entry(title: "Local Push", symbol: AppSymbol.bellBadge.rawValue) {
                 DebugListViewController(title: "Local Push") { pushSections() }
             },
             DebugDashboard.Entry(title: "Mock Scenarios", symbol: "theatermasks") {

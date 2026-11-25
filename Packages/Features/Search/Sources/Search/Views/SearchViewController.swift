@@ -898,7 +898,7 @@ final class SearchViewController: UIViewController {
             apply(exploreSnapshot(model))
             if model.isEmpty {
                 showStatus(
-                    symbolName: "magnifyingglass",
+                    symbolName: AppSymbol.search.rawValue,
                     title: "Find people",
                     subtitle: "Search by name or @handle. What you search for shows up here."
                 )
@@ -970,7 +970,7 @@ final class SearchViewController: UIViewController {
             // Type-NEUTRAL is the honest register: it is true now and stays
             // true when the other kinds land.
             showStatus(
-                symbolName: "magnifyingglass",
+                symbolName: AppSymbol.search.rawValue,
                 title: "No results",
                 subtitle: "Nothing matched “\(query)”. Try different words."
             )

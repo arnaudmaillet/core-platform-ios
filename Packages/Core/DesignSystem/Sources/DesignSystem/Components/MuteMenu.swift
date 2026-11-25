@@ -37,8 +37,10 @@ public enum MuteMenu {
         Duration(title: "Until I Turn It Back On", toast: "Notifications muted", seconds: nil),
     ]
 
-    /// The bell's glyph for the mute it shows.
-    public static func symbol(muted: Bool) -> String { muted ? "bell.slash" : "bell" }
+    /// The bell's glyph for the mute it shows: the owner's bell (#2457).
+    /// Nonisolated: a name, read off the main actor too (the map's menu
+    /// actions, the profile's relation control).
+    public nonisolated static func symbol(muted: Bool) -> AppSymbol { muted ? .bellSlash : .bell }
 
     /// What VoiceOver says the bell holds.
     public static func accessibilityValue(muted: Bool) -> String { muted ? "Muted" : "On" }
@@ -52,11 +54,11 @@ public enum MuteMenu {
             UIAction(title: duration.title) { _ in onMute(duration) }
         }
         let mute = UIMenu(
-            title: muted ? "Mute Again" : "Mute Notifications", image: UIImage(systemName: "bell.slash"),
+            title: muted ? "Mute Again" : "Mute Notifications", image: AppSymbol.bellSlash.image(),
             options: muted ? [] : .displayInline, children: choices
         )
         guard muted else { return UIMenu(children: [mute]) }
-        let unmute = UIAction(title: "Unmute", image: UIImage(systemName: "bell")) { _ in onUnmute() }
+        let unmute = UIAction(title: "Unmute", image: AppSymbol.bell.image()) { _ in onUnmute() }
         return UIMenu(children: [unmute, mute])
     }
 }

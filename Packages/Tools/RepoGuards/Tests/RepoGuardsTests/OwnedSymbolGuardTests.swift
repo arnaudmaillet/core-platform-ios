@@ -17,6 +17,10 @@ struct OwnedSymbolGuardTests {
 
     static let names = [
         "\"heart\"", "\"heart.fill\"", "\"bookmark\"", "\"bookmark.fill\"", "\"star\"", "\"star.fill\"",
+        // The owner's gear, magnifier and bell (#2433, #2456, #2457).
+        "\"gearshape\"", "\"gearshape.fill\"", "\"gear\"",
+        "\"magnifyingglass\"",
+        "\"bell\"", "\"bell.fill\"", "\"bell.slash\"", "\"bell.slash.fill\"", "\"bell.badge\"",
         "\"diamond\"", "\"diamond.fill\"", "\"ellipsis.message\"", "\"ellipsis.message.fill\"",
         // The owner's megaphone, a channel's mark (#2415).
         "\"megaphone\"", "\"megaphone.fill\"",

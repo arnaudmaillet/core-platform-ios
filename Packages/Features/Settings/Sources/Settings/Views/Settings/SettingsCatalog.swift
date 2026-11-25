@@ -1,3 +1,4 @@
+import DesignSystem
 import Foundation
 
 /// Who a settings section applies to. One account owns several profiles, so
@@ -88,7 +89,7 @@ package enum SettingsSection: String, CaseIterable, Sendable {
         case .adsAndData: "chart.bar.doc.horizontal"
         case .privacy: "hand.raised"
         case .safety: "exclamationmark.shield"
-        case .notifications: "bell.badge"
+        case .notifications: AppSymbol.bellBadge.rawValue
         case .whatYouSee: "eye"
         case .activity: "clock.arrow.circlepath"
         case .playback: "play.rectangle"

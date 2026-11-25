@@ -152,7 +152,7 @@ final class ConversationListViewController: UIViewController {
         viewModel.onMuteAnswered = { [weak self] message, muting, confirmed in
             guard let self else { return }
             if confirmed {
-                Feedback.success(message, symbol: muting ? "bell.slash.fill" : "bell.fill", from: self)
+                Feedback.success(message, symbol: (muting ? AppSymbol.bellSlashFill : .bellFill).rawValue, from: self)
             } else {
                 Feedback.failure(message, from: self)
             }
@@ -169,7 +169,7 @@ final class ConversationListViewController: UIViewController {
         }
         viewModel.onMuteUndoable = { [weak self] message, undo in
             guard let self else { return }
-            Feedback.undoable(message, symbol: "bell.slash.fill", from: self, commit: {}, undo: undo)
+            Feedback.undoable(message, symbol: AppSymbol.bellSlashFill.rawValue, from: self, commit: {}, undo: undo)
         }
         updatePagingFooter()
         // The view model may have moved past `.loading` before this view was
@@ -554,7 +554,7 @@ extension ConversationListViewController: UITableViewDelegate {
         ) { [weak self] _ in self?.pin(id) }
         let mute = UIAction(
             title: isMuted ? "Unmute" : "Mute",
-            image: UIImage(systemName: isMuted ? "bell" : "bell.slash")
+            image: MuteMenu.symbol(muted: !isMuted).image()
         ) { [weak self] _ in self?.viewModel.toggleMute(id) }
         let delete: UIAction
         if let model = modelsByID[id], model.isChannel {

@@ -128,7 +128,7 @@ struct ProfileBellAndMapMenuTests {
         let (screen, _, _) = makeScreen(relationship: .other(isFollowing: true, isBlocked: false))
         let bell = try #require(await settle { screen.debugMuteBell != nil } ? screen.debugMuteBell : nil)
         #expect(screen.headerView.debugTrayItems == [.bell, .message, .qr, .more])
-        #expect(bell.content.symbol == "bell")
+        #expect(bell.content.symbol == AppSymbol.bell.rawValue)
         #expect(bell.content.title == nil, "the bell has words")
         #expect(bell.accessibilityLabel == "Notifications")
         #expect(bell.showsMenuAsPrimaryAction && bell.menu != nil, "the bell's tap is not its menu")
@@ -234,11 +234,11 @@ struct ProfileBellAndMapMenuTests {
         let bell = try #require(
             await settle { screen.debugMuteBell != nil && viewModel.canModerate } ? screen.debugMuteBell : nil
         )
-        #expect(bell.content.symbol == "bell")
+        #expect(bell.content.symbol == AppSymbol.bell.rawValue)
         #expect(bell.accessibilityValue == "Nothing muted")
 
         viewModel.toggleMute(.posts)
-        try #require(await settle { screen.debugMuteBell?.content.symbol == "bell.slash" })
+        try #require(await settle { screen.debugMuteBell?.content.symbol == AppSymbol.bellSlash.rawValue })
         #expect(screen.debugMuteBell === bell, "the bell is not the row's own button")
         #expect(bell.accessibilityValue == "Muted: Posts")
         let menu = try #require(screen.debugMuteMenuElements().first as? UIMenu)
@@ -252,7 +252,7 @@ struct ProfileBellAndMapMenuTests {
         // Wait for the first write to land before the second toggle: one at a time.
         try #require(await settle { !viewModel.muteInFlight })
         viewModel.toggleMute(.posts)
-        try #require(await settle { screen.debugMuteBell?.content.symbol == "bell" })
+        try #require(await settle { screen.debugMuteBell?.content.symbol == AppSymbol.bell.rawValue })
         #expect(screen.debugMuteBell?.accessibilityValue == "Nothing muted")
         #expect((screen.debugMuteMenuElements().first as? UIMenu)?.title == "Mute")
     }
@@ -260,8 +260,8 @@ struct ProfileBellAndMapMenuTests {
     /// The bell's glyph and spoken state from the scopes — one mapping, the
     /// page's and the card's.
     @Test func theBellsGlyphComesFromTheScopes() {
-        #expect(ProfileRelationControl.bellSymbol(for: .none) == "bell")
-        #expect(ProfileRelationControl.bellSymbol(for: MuteScopes(stories: true)) == "bell.slash")
+        #expect(ProfileRelationControl.bellSymbol(for: .none) == AppSymbol.bell.rawValue)
+        #expect(ProfileRelationControl.bellSymbol(for: MuteScopes(stories: true)) == AppSymbol.bellSlash.rawValue)
         #expect(ProfileRelationControl.bellAccessibilityValue(for: .none) == "Nothing muted")
         #expect(ProfileRelationControl.bellAccessibilityValue(for: MuteScopes(posts: true, messages: true))
                 == "Muted: Posts, Messages")
@@ -282,7 +282,7 @@ struct ProfileBellAndMapMenuTests {
         let isToast: (UIBarButtonItem) -> Bool = { $0.customView is ToastView }
 
         screen.debugToggleMute(.posts)
-        try #require(await settle { screen.debugMuteBell?.content.symbol == "bell.slash" },
+        try #require(await settle { screen.debugMuteBell?.content.symbol == AppSymbol.bellSlash.rawValue },
                      "the bell waited")
         #expect(!(screen.navigationItem.rightBarButtonItems ?? []).contains(where: isToast), "a toast took the bar")
         // ⚠️ THE TOAST'S ARRIVAL, NOT ITS PRESENCE (#1951): counted, it
@@ -299,7 +299,7 @@ struct ProfileBellAndMapMenuTests {
         // server answered and leaves after a few seconds; on a starved runner
         // a poll gap outlasted it. Counted, it cannot be missed.
         try #require(await settle { screen.debugMuteToastsShown == 1 }, "no toast for the unmute")
-        #expect(screen.debugMuteBell?.content.symbol == "bell")
+        #expect(screen.debugMuteBell?.content.symbol == AppSymbol.bell.rawValue)
     }
 
     /// Not followed: NO bell (the owner, 2026-10-15 — nothing of theirs to
@@ -570,7 +570,7 @@ extension ProfileBellAndMapMenuTests {
             screen.debugSetTrayScrolledAway(away)
             let items = screen.navigationItem.rightBarButtonItems ?? []
             #expect(items.map(\.accessibilityLabel) == ["Balance"], "away=\(away): \(items.map(\.accessibilityLabel))")
-            #expect(!items.contains { $0.image == UIImage(systemName: "bell") || $0.image == UIImage(systemName: "bell.slash") },
+            #expect(!items.contains { $0.image == AppSymbol.bell.image() || $0.image == AppSymbol.bellSlash.image() },
                     "a bell in the bar, away=\(away)")
             #expect(screen.debugBarRelationshipItem == nil, "a Follow item on a followed profile, away=\(away)")
             #expect(!items.contains { $0.title == "Following" }, "a Following item in the bar")

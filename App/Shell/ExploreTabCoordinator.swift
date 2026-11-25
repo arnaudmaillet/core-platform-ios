@@ -50,7 +50,7 @@ final class ExploreTabCoordinator: TabCoordinator {
     /// navigation-agnostic — exactly as the header "+" that stood opposite it
     /// used to be.
     private lazy var searchButtonItem: UIBarButtonItem = BarItems.icon(
-        id: BarItems.SharedID.search, image: UIImage(systemName: "magnifyingglass"), label: "Search"
+        id: BarItems.SharedID.search, image: AppSymbol.search.image(), label: "Search"
     ) { [weak self] in
         self?.container.router.route(to: .search)
     }

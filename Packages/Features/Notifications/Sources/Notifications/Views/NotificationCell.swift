@@ -341,7 +341,7 @@ final class KindBadgeView: UIView {
         case .supervisionStarted: ("figure.2.and.child.holdinghands", neutral)
         case .supervisionEnded: ("xmark", neutral)
         case .supervisionCameOfAge: ("party.popper.fill", neutral)
-        case .other: ("bell.fill", neutral)
+        case .other: (AppSymbol.bellFill.rawValue, neutral)
         }
     }
 

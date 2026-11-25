@@ -95,7 +95,7 @@ struct SearchRowRepresentationTests {
             suggestion: SearchSuggestion(text: "swift", kind: .other, id: "")
         )
 
-        #expect(row.subject == .symbol("magnifyingglass"))
+        #expect(row.subject == .symbol(AppSymbol.search.rawValue))
     }
 
     /// A profile completion the index answered without an id cannot be opened,
@@ -105,7 +105,7 @@ struct SearchRowRepresentationTests {
             suggestion: SearchSuggestion(text: "ada", kind: .profile, id: "")
         )
 
-        #expect(row.subject == .symbol("magnifyingglass"))
+        #expect(row.subject == .symbol(AppSymbol.search.rawValue))
         #expect(row.action == .search)
     }
 

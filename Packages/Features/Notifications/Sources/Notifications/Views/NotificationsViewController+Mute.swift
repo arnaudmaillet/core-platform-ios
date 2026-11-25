@@ -104,7 +104,7 @@ extension NotificationsViewController {
     private func dressMuteWideItem(_ item: UIBarButtonItem, paused: Bool, busy: Bool) {
         BarItems.update(
             stretched: item, title: paused ? "Unmute" : "Mute",
-            image: UIImage(systemName: paused ? "bell" : "bell.slash"), busy: busy
+            image: MuteMenu.symbol(muted: !paused).image(), busy: busy
         )
         item.customView?.accessibilityLabel = paused ? "Unmute notifications" : "Mute notifications for 8 hours"
     }
@@ -170,7 +170,7 @@ extension NotificationsViewController {
                 setWritingMute(false)
                 Feedback.success(
                     NotificationsMuteModel.confirmation(for: held, now: muteModel.clock),
-                    symbol: held.isPaused ? "bell.slash.fill" : "bell.fill",
+                    symbol: (held.isPaused ? AppSymbol.bellSlashFill : .bellFill).rawValue,
                     from: self
                 )
             } catch is CancellationError {

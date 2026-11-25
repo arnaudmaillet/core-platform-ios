@@ -292,7 +292,7 @@ final class SearchPeoplePage: UIViewController {
             showSkeleton(false)
             dataSource.apply(NSDiffableDataSourceSnapshot<Int, ProfileID>(), animatingDifferences: true)
             statusView.configure(
-                symbolName: "magnifyingglass",
+                symbolName: AppSymbol.search.rawValue,
                 title: "No results",
                 subtitle: "Nothing matched “\(query)”. Try different words."
             )

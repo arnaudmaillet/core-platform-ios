@@ -124,7 +124,7 @@ package final class SettingsViewController: UIViewController {
         let sectionRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, SettingsSection> { cell, _, section in
             var content = UIListContentConfiguration.cell()
             content.text = section.title
-            content.image = UIImage(systemName: section.symbolName)
+            content.image = UIImage.symbol(named: section.symbolName)
             content.imageProperties.tintColor = .label
             cell.contentConfiguration = content
             cell.accessories = [.disclosureIndicator()]

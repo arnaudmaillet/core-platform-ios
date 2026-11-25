@@ -6,8 +6,8 @@ import UIKit
 ///
 /// ⚠️ NEVER A PLAIN SYMBOL IMAGE ON A TAB. The bar draws a system symbol in its
 /// own way and prefers its fill variant whatever the selection: a guest's
-/// Settings gear (`gearshape`) showed filled when not selected, beside glyph
-/// tabs that showed their outline (#2073). A bitmap is drawn as given.
+/// Settings gear (then the system's) showed filled when not selected, beside
+/// glyph tabs that showed their outline (#2073). A bitmap is drawn as given.
 @MainActor
 public enum TabFaces {
     /// A system symbol pair, as the bar's two faces: drawn at
@@ -16,8 +16,20 @@ public enum TabFaces {
     /// shrinks it. Nil when the system does not know a name.
     public static func system(outline: String, fill: String) -> (outline: UIImage, fill: UIImage)? {
         let config = TabGlyph.symbolConfiguration
-        guard let line = UIImage(systemName: outline, withConfiguration: config),
-              let solid = UIImage(systemName: fill, withConfiguration: config) else { return nil }
+        return faces(UIImage(systemName: outline, withConfiguration: config), UIImage(systemName: fill, withConfiguration: config))
+    }
+
+    /// One of the app's own symbol pairs (`AppSymbol`, the owner's gear for a
+    /// guest's Settings tab, #2433), drawn the same way as `system`.
+    /// ⚠️ `UIImage(systemName:)` never finds a custom symbol: this reads the
+    /// app's catalogue.
+    public static func app(outline: AppSymbol, fill: AppSymbol) -> (outline: UIImage, fill: UIImage)? {
+        let config = TabGlyph.symbolConfiguration
+        return faces(outline.image(config), fill.image(config))
+    }
+
+    private static func faces(_ line: UIImage?, _ solid: UIImage?) -> (outline: UIImage, fill: UIImage)? {
+        guard let line, let solid else { return nil }
         let box = CGSize(width: max(line.size.width, solid.size.width), height: max(line.size.height, solid.size.height))
         let baseline = line.baselineOffsetFromBottom ?? 0
         return (template(line, inBox: box, baseline: baseline), template(solid, inBox: box, baseline: baseline))

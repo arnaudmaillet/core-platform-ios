@@ -1193,7 +1193,7 @@ final class ConversationThreadViewController: UIViewController {
     private func makeMuteItem() -> UIBarButtonItem {
         let item = UIBarButtonItem(
             title: nil,
-            image: UIImage(systemName: "bell"),
+            image: AppSymbol.bell.image(),
             primaryAction: UIAction { [weak self] _ in
                 guard let self, let muted else { return }
                 setMuted(!muted, until: nil)
@@ -1209,7 +1209,7 @@ final class ConversationThreadViewController: UIViewController {
     /// The bell's glyph, spoken value and menu for the mute now. Animated:
     /// the symbol is replaced in place, its bubble kept (see `muteItem`).
     private func applyBellLook(muted: Bool, animated: Bool) {
-        let image = UIImage(systemName: muted ? "bell.slash" : "bell")
+        let image = MuteMenu.symbol(muted: muted).image()
         if animated, let image {
             muteItem.setSymbolImage(image, contentTransition: .replace)
         } else {
@@ -1265,7 +1265,7 @@ final class ConversationThreadViewController: UIViewController {
             if confirmed, mute {
                 Feedback.undoable(
                     toast ?? "Notifications muted",
-                    symbol: "bell.slash.fill",
+                    symbol: AppSymbol.bellSlashFill.rawValue,
                     from: self,
                     commit: {},
                     undo: { [weak self] in self?.undoMute() }
@@ -1273,7 +1273,7 @@ final class ConversationThreadViewController: UIViewController {
             } else if confirmed {
                 Feedback.success(
                     toast ?? (mute ? "Notifications muted" : "Notifications on"),
-                    symbol: mute ? "bell.slash.fill" : "bell.fill",
+                    symbol: (mute ? AppSymbol.bellSlashFill : .bellFill).rawValue,
                     from: self
                 )
             } else {

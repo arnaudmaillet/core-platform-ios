@@ -277,23 +277,23 @@ package final class NotificationSettingsViewController: UIViewController {
             switch item {
             case .allow:
                 content.text = "Allow Notifications"
-                content.image = UIImage(systemName: "bell.badge")
+                content.image = AppSymbol.bellBadge.image()
                 content.textProperties.color = .tintColor
             case .turnOnInSettings:
                 content.text = "Turn On in Settings"
-                content.image = UIImage(systemName: "gear")
+                content.image = AppSymbol.settings.image() // one gear app-wide (#2433)
                 content.textProperties.color = .tintColor
             case .allowed:
                 content = .valueCell()
                 content.text = "Notifications"
                 content.secondaryText = "Allowed"
-                content.image = UIImage(systemName: "bell.badge")
+                content.image = AppSymbol.bellBadge.image()
                 content.imageProperties.tintColor = .label
                 cell.accessories = [.disclosureIndicator()]
             case .pause:
                 content = .valueCell()
                 content.text = "Pause All"
-                content.image = UIImage(systemName: "bell.slash")
+                content.image = AppSymbol.bellSlash.image()
                 content.imageProperties.tintColor = .label
                 content.secondaryText = preferences?.pausedUntil == nil ? "Off" : "On"
                 var actions = Self.pauseChoices.map { choice in
@@ -517,12 +517,12 @@ package final class NotificationSettingsViewController: UIViewController {
         case .permissionPending:
             var content = UIListContentConfiguration.cell()
             content.text = "Allow Notifications"
-            content.image = UIImage(systemName: "bell.badge")
+            content.image = AppSymbol.bellBadge.image()
             return content
         case .skeleton(0):
             var content = UIListContentConfiguration.valueCell()
             content.text = "Pause All"
-            content.image = UIImage(systemName: "bell.slash")
+            content.image = AppSymbol.bellSlash.image()
             return content
         case .skeleton(let index):
             var content = UIListContentConfiguration.cell()

@@ -160,19 +160,19 @@ struct ConversationThreadSendAndMuteTests {
         #expect(ids.suffix(2) == [ConversationThreadViewController.bellID, SnapFooterToolbar.ID.more],
                 "the bell is not just before ⋯: \(ids)")
         #expect(!(screen.navigationItem.rightBarButtonItems ?? []).contains { $0 === item }, "the bell is still on the top bar")
-        #expect(item.image == UIImage(systemName: "bell"))
+        #expect(item.image == AppSymbol.bell.image())
         #expect(item.accessibilityValue == "On")
 
         #expect(item.primaryAction != nil, "the bell does nothing")
         driver.toggleMuted()
         #expect(driver.muted == true)
         let muted = try #require(bell(screen))
-        #expect(muted.image == UIImage(systemName: "bell.slash"))
+        #expect(muted.image == AppSymbol.bellSlash.image())
         #expect(muted.accessibilityValue == "Muted")
 
         // Unmuted from elsewhere (the inbox's menu): the glyph follows.
         driver.onMutedChange?(false)
-        #expect(bell(screen)?.image == UIImage(systemName: "bell"))
+        #expect(bell(screen)?.image == AppSymbol.bell.image())
     }
 
     // MARK: - The header (#738)
@@ -207,13 +207,13 @@ struct ConversationThreadSendAndMuteTests {
         let (screen, driver, window) = makeScreen(phase: .content([Self.message("m1", mine: false, minutes: 1)]))
         defer { window.isHidden = true }
         let on = try #require(bell(screen))
-        #expect(on.image == UIImage(systemName: "bell"))
+        #expect(on.image == AppSymbol.bell.image())
         #expect(on.accessibilityValue == "On")
         driver.toggleMuted()
         let off = try #require(bell(screen))
         #expect(on === off, "a new item per state: the glass morphs through an empty bubble")
         #expect(off.identifier == ConversationThreadViewController.bellID)
-        #expect(off.image == UIImage(systemName: "bell.slash"))
+        #expect(off.image == AppSymbol.bellSlash.image())
         #expect(off.accessibilityValue == "Muted")
         #expect(off.menu?.children.first?.title == "Unmute", "the menu did not follow the mute")
     }
@@ -280,7 +280,7 @@ struct ConversationThreadSendAndMuteTests {
         driver.answerMute(true)
         let after = screen.toolbarItems ?? []
         #expect(after.map(\.identifier) == before, "the bar did not get back the items it had: \(after.map(\.identifier))")
-        #expect(bell(screen)?.image == UIImage(systemName: "bell"), "Undo did not turn the notifications back on")
+        #expect(bell(screen)?.image == AppSymbol.bell.image(), "Undo did not turn the notifications back on")
     }
 
     /// A message's Copy says so (#803): the pasteboard is off-screen.
@@ -297,9 +297,9 @@ struct ConversationThreadSendAndMuteTests {
         let (screen, driver, window) = makeScreen(phase: .content([Self.message("m1", mine: false, minutes: 1)]))
         defer { window.isHidden = true }
         screen.debugTapBell()
-        #expect(bell(screen)?.image == UIImage(systemName: "bell.slash"), "the bell waited for its answer")
+        #expect(bell(screen)?.image == AppSymbol.bellSlash.image(), "the bell waited for its answer")
         driver.answerMute(false)
-        #expect(bell(screen)?.image == UIImage(systemName: "bell"), "the refused mute stayed on")
+        #expect(bell(screen)?.image == AppSymbol.bell.image(), "the refused mute stayed on")
         let toast = try #require(Self.firstToast(in: screen.view), "the refusal was silent")
         #expect(toast.style == .failure)
     }
@@ -315,22 +315,22 @@ struct ConversationThreadSendAndMuteTests {
         try #require(screen.view.window != nil)
         screen.debugTapBell()
         #expect(driver.muted == true, "the write did not go out")
-        #expect(bell(screen)?.image == UIImage(systemName: "bell.slash"), "the bell waited for its toast")
+        #expect(bell(screen)?.image == AppSymbol.bellSlash.image(), "the bell waited for its toast")
         screen.debugTapBell()
         #expect(driver.mutes.count == 1, "a second tap went out while the first was on its way")
 
         driver.answerMute(true)
         let shown = screen.toolbarItems ?? []
         #expect(!shown.contains { $0.customView is ToastView }, "a toast took the bell's place")
-        #expect(bell(screen)?.image == UIImage(systemName: "bell.slash"), "the bell left with its toast")
+        #expect(bell(screen)?.image == AppSymbol.bellSlash.image(), "the bell left with its toast")
         let toast = try #require(Self.firstToast(in: screen.view), "no toast confirmed the mute")
 
         // Unmuting: at once too.
         toast.debugDismiss()
         screen.debugTapBell()
-        #expect(bell(screen)?.image == UIImage(systemName: "bell"), "the bell waited for its toast")
+        #expect(bell(screen)?.image == AppSymbol.bell.image(), "the bell waited for its toast")
         driver.answerMute(true)
-        #expect(bell(screen)?.image == UIImage(systemName: "bell"))
+        #expect(bell(screen)?.image == AppSymbol.bell.image())
     }
 
     private static func firstToast(in view: UIView) -> ToastView? {

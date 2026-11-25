@@ -79,25 +79,26 @@ final class NotificationsBell {
     /// The size a navigation bar draws a symbol item at.
     static let barSymbolConfiguration = UIImage.SymbolConfiguration(textStyle: .body, scale: .large)
 
-    /// The bell glyph for an unread state. When unread, a palette `bell.badge`
+    /// The bell glyph for an unread state. When unread, a palette `core.bell.badge`
     /// (badge in the accent pink, as the tab bar's badges — #1197 — bell in
     /// `.label`); otherwise a plain
-    /// template `bell` that the tint draws dark.
+    /// template `core.bell` that the tint draws dark.
     ///
     /// ⚠️ BAKED (#1178). A bar item re-renders a SYMBOL image with its own
     /// configuration: the palette was dropped and the badge came out in the
     /// system red whatever `counter` said. So the badged bell is drawn into a
     /// bitmap, for `traits` (see `baked`).
     static func image(unread: Bool, traits: UITraitCollection) -> UIImage? {
-        guard unread else { return UIImage(systemName: "bell") }
-        // `bell.badge`'s first layer is the BADGE, its second the bell.
+        guard unread else { return AppSymbol.bell.image() }
+        // The owner's bell (#2457). `core.bell.badge`'s first layer is the
+        // BADGE, its second the bell, as the system's `bell.badge`.
         // ⚠️ AT THE BAR'S SIZE (#1191): a bitmap is not re-sized as a symbol
         // is, so baked at the symbol's default size the badged bell stood
         // much smaller than the plain one. The bar draws its symbols at the
         // body style's large scale.
         let config = barSymbolConfiguration
             .applying(UIImage.SymbolConfiguration(paletteColors: [TabGlyph.badgeTint, .label]))
-        guard let symbol = UIImage(systemName: "bell.badge", withConfiguration: config) else { return nil }
+        guard let symbol = AppSymbol.bellBadge.image(config) else { return nil }
         return baked(symbol, traits: traits)
     }
 

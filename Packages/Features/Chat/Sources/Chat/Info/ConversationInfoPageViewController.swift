@@ -214,7 +214,7 @@ class ConversationInfoPageViewController: HeroPageViewController<ConversationInf
     /// it stays; its glyph and menu follow the mute (`applyBellLook`).
     private func makeBellItem() -> UIBarButtonItem {
         let item = UIBarButtonItem(
-            title: nil, image: UIImage(systemName: MuteMenu.symbol(muted: false)),
+            title: nil, image: MuteMenu.symbol(muted: false).image(),
             primaryAction: UIAction { [weak self] _ in
                 guard let self, let muted = bellMuted else { return }
                 setMute(!muted, until: nil)
@@ -255,7 +255,7 @@ class ConversationInfoPageViewController: HeroPageViewController<ConversationInf
     }
 
     private func applyBellLook(_ bell: UIBarButtonItem, muted: Bool, animated: Bool) {
-        let image = UIImage(systemName: MuteMenu.symbol(muted: muted))
+        let image = MuteMenu.symbol(muted: muted).image()
         if animated, let image {
             bell.setSymbolImage(image, contentTransition: .replace)
         } else {
