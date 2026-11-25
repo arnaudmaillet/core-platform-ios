@@ -293,20 +293,11 @@ final class ConversationListViewController: UIViewController {
         }
     }
 
-    /// The "+" on `model`'s face.
-    private func followHandler(for model: ConversationDisplayModel) -> (() -> Void)? {
-        guard let relations, relations.isEnabled, let peer = model.peerID else { return nil }
-        return { [weak self, weak relations] in
-            guard let self else { return }
-            relations?.follow(peer, handle: model.peerHandle, name: model.title, from: self)
-        }
-    }
-
     private func configure(_ cell: ConversationCell, with model: ConversationDisplayModel) {
         relations?.saw(model)
         cell.configure(
             with: model, imagePipeline: imagePipeline, avatars: avatars,
-            mark: relations?.mark(for: model.peerID) ?? .none, onFollow: followHandler(for: model)
+            mark: relations?.mark(for: model.peerID) ?? .none
         )
     }
 

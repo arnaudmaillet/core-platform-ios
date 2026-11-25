@@ -53,7 +53,7 @@ struct AuthorBandRelationMarkTests {
 
     /// Every state the binding answers, drawn as given, at the band's 40 pt:
     /// the badge's side from `RelationMarkMetrics`.
-    @Test(arguments: [PersonPill.Badge.loading, .follow, .pending, .following, .friends])
+    @Test(arguments: [PersonPill.Badge.loading, .following, .friends])
     func theBandDrawsTheMarkItIsGiven(_ mark: PersonPill.Badge) {
         let band = Self.band()
         band.setRelationMark(mark, animated: false)
@@ -78,7 +78,7 @@ struct AuthorBandRelationMarkTests {
     /// A bare band names nobody, so it wears no mark whatever it is given.
     @Test func aBareBandWearsNoMark() {
         let band = Self.band(showsIdentity: false)
-        band.setRelationMark(.follow, animated: false)
+        band.setRelationMark(.following, animated: false)
         #expect(band.relationMark == .none)
         #expect(band.model?.relationMark == PersonPill.Badge.none)
     }
@@ -94,40 +94,20 @@ struct AuthorBandRelationMarkTests {
         #expect(prop.relationMark == .friends)
     }
 
-    // MARK: - The "+"
+    // MARK: - Passive (#2419)
 
-    /// The "+" is the face's own control: its tap is told to the host's
-    /// follow, and a touch on it — below the band's bounds too — reaches it.
-    @Test func thePlusFollowsThroughTheHost() {
+    /// The badge is never a control: the face is the identity's, whatever
+    /// the mark, and the identity control stays the hit view on the badge.
+    @Test(arguments: [PersonPill.Badge.loading, .following, .friends])
+    func theBadgeIsPassive(_ mark: PersonPill.Badge) {
         let band = Self.band()
-        var follows = 0
-        band.onFollowTapped = { follows += 1 }
-        band.setRelationMark(.follow, animated: false)
+        band.setRelationMark(mark, animated: false)
         band.layoutIfNeeded()
         let badge = band.debugBadge
-        let centre = badge.convert(CGPoint(x: badge.bounds.midX, y: badge.bounds.midY), to: band)
-        #expect(band.hitTest(centre, with: nil) === badge)
-        let below = badge.convert(CGPoint(x: badge.bounds.midX, y: badge.bounds.maxY + 4), to: band)
-        #expect(below.y > band.bounds.maxY)
-        #expect(band.hitTest(below, with: nil) === badge)
-        badge.sendActions(for: .primaryActionTriggered)
-        #expect(follows == 1)
-        // A state mark takes no touch, and tells nothing.
-        band.setRelationMark(.following, animated: false)
-        #expect(band.hitTest(centre, with: nil) !== badge)
-        badge.sendActions(for: .primaryActionTriggered)
-        #expect(follows == 1)
-    }
-
-    /// Off the "+", the face is the identity's: the control stays the hit
-    /// view, as before the mark.
-    @Test func theFaceIsTheIdentitysElsewhere() {
-        let band = Self.band()
-        band.setRelationMark(.follow, animated: false)
-        band.layoutIfNeeded()
-        let hit = band.hitTest(CGPoint(x: 8, y: 8), with: nil)
-        #expect(hit is UIControl)
-        #expect(!(hit is RelationBadgeView))
+        let inside = badge.convert(CGPoint(x: 3, y: 3), to: band)
+        #expect(band.hitTest(inside, with: nil) !== badge)
+        #expect(!(band.hitTest(CGPoint(x: 8, y: 8), with: nil) is RelationBadgeView))
+        #expect(band.hitTest(CGPoint(x: 8, y: 8), with: nil) is UIControl)
     }
 
     // MARK: - The tap and the hold (#2145, role 1)
@@ -153,15 +133,19 @@ struct AuthorBandRelationMarkTests {
 
     // MARK: - Reuse
 
-    /// A recycled row never wears the previous author's mark or follow.
+    /// A recycled row never wears the previous author's mark or Follow.
     @Test func aRecycledRowForgetsTheMark() {
         let cell = Self.row()
-        var follows = 0
-        cell.onAuthorFollowTapped = { follows += 1 }
-        cell.setAuthorRelationMark(.follow, animated: false)
+        cell.onAuthorFollowTapped = {}
+        cell.onAuthorCancelFollowRequest = {}
+        cell.setAuthorRelationMark(.following, animated: false)
+        cell.setAuthorFollowOffer(.follow, animated: false)
         cell.prepareForReuse()
         #expect(cell.authorRelationMark == .none)
+        #expect(cell.authorFollowOffer == .none)
+        #expect(cell.debugAuthorFollowButton.isHidden)
         #expect(cell.onAuthorFollowTapped == nil)
+        #expect(cell.onAuthorCancelFollowRequest == nil)
         #expect(cell.onAuthorHeld == nil)
     }
 

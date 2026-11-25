@@ -1951,9 +1951,6 @@ final class SnapFeedViewController: UIViewController {
     /// the live field so a test can see a warm that was CONSUMED — which is the
     /// half that proves the mount paid nothing.
     var debugPrewarmedRestingID: PostID? { commentsCoordinator.debugPrewarmedRestingID }
-
-    /// Refused-follow toasts shown (#1979), counted by `SnapAuthorBar`.
-    var debugFollowFailureToastsShown: Int { authorBar.debugFollowFailureToastsShown }
     #endif
 
     #if DEBUG

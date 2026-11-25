@@ -68,6 +68,12 @@ extension ProfileRepository: FollowRequestSending, FollowRequestsManaging {
         return .following
     }
 
+    /// `SocialGraphWriting`'s withdrawal (#2419: a list row's Requested):
+    /// this one, the graph's own.
+    public func withdrawFollowRequest(to profileID: ProfileID) async throws {
+        try await cancelFollowRequest(to: profileID)
+    }
+
     public func cancelFollowRequest(to profileID: ProfileID) async throws {
         let viewer = try await resolveViewerProfileID(forWrite: "cancelFollowRequest")
         var request = SocialGraph_V1_CancelFollowRequestRequest()

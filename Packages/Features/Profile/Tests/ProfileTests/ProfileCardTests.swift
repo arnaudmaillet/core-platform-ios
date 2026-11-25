@@ -241,28 +241,18 @@ struct ProfileCardTests {
         }
     }
 
-    /// The card's avatar wears the "+" too (#2050): followed, the check
-    /// comes.
-    @Test func theCardsAvatarWearsThePlus() async throws {
+    /// NO "+" ON THE CARD'S AVATAR (#2419): not followed and requested
+    /// wear nothing; followed, the check comes; the badge takes no touch.
+    @Test func theCardsAvatarWearsOnlyTheRelation() async throws {
         let host = Host()
         let card = try await makeCard(following: false, host: host)
-        #expect(card.headerView.relationMark == .follow, "no + on the card's avatar")
+        #expect(card.headerView.relationMark == PersonRelationBadge.none, "a + on the card's avatar")
         card.debugApplyFollowButton(.following)
         #expect(card.headerView.relationMark == .following)
         card.debugApplyFollowButton(.requested)
-        #expect(card.headerView.relationMark == .pending, "the card's avatar lost the pending clock")
-    }
-
-    /// The card's "+" is its toolbar's Follow (#2050): the relation turns,
-    /// and the toolbar's Follow leaves with it.
-    @Test func theCardsPlusFollows() async throws {
-        let host = Host()
-        let card = try await makeCard(following: false, host: host)
+        #expect(card.headerView.relationMark == PersonRelationBadge.none, "a clock on the card's avatar")
         let badge = try #require(card.headerView.debugRelationBadge)
-        badge.sendActions(for: .primaryActionTriggered)
-        try #require(await settle { card.followButtonState == .following }, "the card's + did not follow")
-        #expect(card.headerView.relationMark == .following)
-        #expect(!(card.toolbarItems ?? []).compactMap(\.identifier).contains("profileCard.follow"))
+        #expect(!badge.isUserInteractionEnabled)
     }
 
     /// Followed, the bell comes in and Message takes the free width — Follow

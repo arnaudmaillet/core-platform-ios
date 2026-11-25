@@ -244,7 +244,7 @@ final class MessageRequestsViewController: UIViewController {
                 self.relations?.saw(model)
                 cell.configure(
                     with: model, imagePipeline: self.imagePipeline, avatars: self.avatars,
-                    mark: self.relations?.mark(for: model.peerID) ?? .none, onFollow: self.followHandler(for: model)
+                    mark: self.relations?.mark(for: model.peerID) ?? .none
                 )
             }
             // Decisions are captured per row: the diffable snapshot animates
@@ -372,17 +372,6 @@ final class MessageRequestsViewController: UIViewController {
         for case let cell as MessageRequestCell in tableView.visibleCells {
             guard let peer = cell.peerID, peers?.contains(peer) ?? true else { continue }
             cell.setRelationMark(relations.mark(for: peer), animated: true)
-        }
-    }
-
-    /// The "+" on `model`'s face: the inbox's follow (member gate,
-    /// optimistic flip, haptic, a failure put back and announced). It never
-    /// accepts the request: the row stays a request until Accept.
-    private func followHandler(for model: ConversationDisplayModel) -> (() -> Void)? {
-        guard let relations, relations.isEnabled, let peer = model.peerID else { return nil }
-        return { [weak self, weak relations] in
-            guard let self else { return }
-            relations?.follow(peer, handle: model.peerHandle, name: model.title, from: self)
         }
     }
 

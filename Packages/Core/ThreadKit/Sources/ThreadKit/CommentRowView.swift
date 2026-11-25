@@ -245,12 +245,6 @@ public final class CommentRowView: UIView {
         markedFace?.setMark(mark, animated: animated)
     }
 
-    /// The caption face's "+" tapped: the host follows (#2300).
-    public var onAuthorFollowTap: (() -> Void)? {
-        get { markedFace?.onFollowTapped }
-        set { markedFace?.onFollowTapped = newValue }
-    }
-
     #if DEBUG
     /// The caption face's badge, nil on a comment's row. Tests.
     public var debugAuthorBadge: RelationBadgeView? { markedFace?.badge }
@@ -443,7 +437,6 @@ public final class CommentRowView: UIView {
         // The previous post's author's mark never rides a recycled row: the
         // host binds the next one (#2300).
         markedFace?.setMark(.none, animated: false)
-        markedFace?.onFollowTapped = nil
         onAvatarHold = nil
         setBodyAccessory(nil)
         setBodyFooter(nil)
@@ -1204,12 +1197,6 @@ public final class CaptionBubbleCell: UICollectionViewCell {
     public var onAvatarHold: (() -> Void)? {
         get { row.onAvatarHold }
         set { row.onAvatarHold = newValue }
-    }
-
-    /// The face's "+" was tapped (#2300): the host follows the author.
-    public var onAuthorFollowTap: (() -> Void)? {
-        get { row.onAuthorFollowTap }
-        set { row.onAuthorFollowTap = newValue }
     }
 
     /// The relation mark the author's face wears now.

@@ -68,6 +68,11 @@ public protocol SocialGraphWriting: Sendable {
     /// surface drawing the relation (the person pill's badge, #968) has to
     /// know, since no follow edge exists until the owner approves.
     func follow(_ profileID: ProfileID) async throws -> FollowOutcome
+    /// Withdraws the viewer's pending request to a private `profileID`: a
+    /// list row's Requested offers it (#2419). Named apart from
+    /// `FollowRequestSending.cancelFollowRequest(to:)` (ProfileData), so a
+    /// type that is both never reads as ambiguous.
+    func withdrawFollowRequest(to profileID: ProfileID) async throws
 }
 
 extension SocialGraphWriting {
@@ -75,6 +80,11 @@ extension SocialGraphWriting {
     public func follow(_ profileID: ProfileID) async throws -> FollowOutcome {
         try await setFollowing(true, for: profileID)
         return .following
+    }
+
+    /// A writer that keeps no requests withdraws one as an unfollow.
+    public func withdrawFollowRequest(to profileID: ProfileID) async throws {
+        try await setFollowing(false, for: profileID)
     }
 }
 

@@ -95,10 +95,6 @@ final public class SnapAuthorIdentityView: UIView {
         }
         return opening
     }()
-    /// Called when the "+" is tapped, with the shown author. Never for a
-    /// state mark (`FollowBadge`): those take no tap of their own.
-    public var onFollowTapped: ((ProfileID) -> Void)?
-
     /// Everything the pill draws: the one view a content change fades
     /// (`contentTransition`) — a CONTAINER, because a platter flattens a
     /// label's own partial alpha to opaque.
@@ -143,10 +139,6 @@ final public class SnapAuthorIdentityView: UIView {
         // identity legible without a background (`setOverMedia`).
         pill.setOverMedia(true)
         pill.setBadge(followBadge, animated: false)
-        pill.onFollowTapped = { [weak self] in
-            guard let self, self.followBadge == .follow, let id = self.authorID else { return }
-            self.onFollowTapped?(id)
-        }
         pill.pin(to: self)
         // The tap and the hold are the HOST's, not the pill's: a swap fades
         // the pill to nothing at its midpoint, and a faded view takes no
@@ -401,12 +393,8 @@ final public class SnapAuthorIdentityView: UIView {
     /// The person cross-fades under way (`setPerson`).
     private var personFades = 0
 
-    /// Whether the "+" is on offer.
-    var offersFollow: Bool { followBadge == .follow }
-
-    /// The pill's own default is the "+": a host that offers no follow says
-    /// so (`setFollowBadge(.none)`).
-    public private(set) var followBadge: FollowBadge = .follow
+    /// The badge drawn now (#2419: passive, Following and Friends only).
+    public private(set) var followBadge: FollowBadge = .none
 
     /// The symbol the badge draws now — nil for none. Tests.
     var drawnBadgeSymbol: String? { pill.drawnBadgeSymbol }
@@ -424,16 +412,15 @@ final public class SnapAuthorIdentityView: UIView {
 }
 
 extension PersonPill.Badge {
-    /// What the pill draws for where the viewer stands — ONE rule for a
-    /// post's author and a conversation's correspondent (#752).
+    /// What the badge draws for where the viewer stands — ONE rule for a
+    /// post's author and a conversation's correspondent (#752): Following
+    /// and Friends only (#2419). Not followed, a follower, a pending request,
+    /// the viewer and someone blocked draw nothing.
     public init(_ relation: FollowRelation) {
         self = switch relation {
-        case .notFollowing, .followedBy: .follow
         case .following: .following
         case .mutual: .friends
-        // Drawn, not offered: the profile screen withdraws it.
-        case .requested: .pending
-        case .viewer, .blocked: .none
+        case .notFollowing, .followedBy, .requested, .viewer, .blocked: .none
         }
     }
 }

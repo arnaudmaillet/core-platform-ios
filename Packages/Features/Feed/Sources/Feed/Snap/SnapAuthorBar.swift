@@ -115,11 +115,8 @@ final class SnapAuthorBar {
         // A hold pushes the profile itself (#1669), as the leftward swipe
         // does; the tap keeps the card.
         pill.onAuthorLongPressed = { [weak self] id in self?.host.viewModel.didTapAuthor(id) }
-        // The "+" follows, in place (`followAuthor`). The followed and friends
-        // marks take no tap of their own — a tap on them is a tap on the pill,
-        // which opens the profile — so there is no unfollow here: that is the
-        // profile's Following button, one tap away.
-        pill.onFollowTapped = { [weak self] id in self?.followAuthor(id) }
+        // The badge is passive (#2419): no "+" on the face; until #2409's
+        // Follow, this screen follows from the profile.
         #if DEBUG
         pill.onContentSettled = { [weak self, weak pill] in
             guard let self, let pill else { return }
@@ -265,46 +262,10 @@ final class SnapAuthorBar {
         authorIdentityView.setFollowBadge(badge, animated: host.canAnimateBarItems)
     }
 
-    /// The pill's "+": follows the author, OPTIMISTICALLY — the profile's
-    /// Follow button's rule (`ProfileViewModel.toggleFollow`). The "+" turns
-    /// at once into the followed mark — the FRIENDS mark for someone who
-    /// already follows the viewer — through the badge's symbol replace, and comes
-    /// back if the graph refuses (`SnapAuthorFollowStore.follow`).
-    ///
-    /// Internal for tests.
-    func followAuthor(_ author: ProfileID) {
-        MemberGates.perform(.follow(handle: nil), from: host) { [weak self] in
-            self?.commitFollow(author)
-        }
-    }
-
-    private func commitFollow(_ author: ProfileID) {
-        // Named now, while the pill shows them: by the time the graph answers
-        // the viewer may have swiped to someone else.
-        let name = authorIdentityView.shownAuthor.flatMap { $0.authorID == author ? Self.followName(of: $0) : nil }
-        let followed = host.followStore.follow(author) { [weak self] in
-            guard let self else { return }
-            // The "+" comes back — and says why (#802): a mark that undoes
-            // itself without a word reads as a glitch, or is missed entirely.
-            #if DEBUG
-            self.debugFollowFailureToastsShown += 1
-            #endif
-            Feedback.failure(name.map { "Couldn't follow \($0)" } ?? "Couldn't follow", from: self.host)
-        }
-        // Turned on at the optimistic flip (#1885), not when the graph answers.
-        if followed { Haptics.play(.toggleOn) }
-    }
-
-    /// How a follow failure names the author: their `@handle` from the
-    /// model, otherwise their display name.
-    static func followName(of model: FeedItemDisplayModel) -> String {
-        model.authorHandle.map { "@" + $0 } ?? model.authorName
-    }
-
     /// A TEXT page's author face — its caption's row (#2300) — bound as the
     /// bar's pill is: one more face of `authorBadges`, redrawn
     /// on every answer for its author and on a viewer change, a page built
-    /// ahead included; the "+" is `followAuthor`'s; the face's tap is the
+    /// ahead included; the badge is passive (#2419); the face's tap is the
     /// card and its hold the profile, the author pill's routes (#2145).
     ///
     /// A media page's caption row is never bound: the bar's pill wears the
@@ -321,7 +282,6 @@ final class SnapAuthorBar {
                 host.viewModel.didTapAuthorPill(author, isViewer: host.followStore.relation(for: author) == .viewer)
             }
             cell.onAvatarHold = { [weak self] in self?.host.viewModel.didTapAuthor(author) }
-            cell.onAuthorFollowTap = { [weak self] in self?.followAuthor(author) }
         }
     }
 
@@ -479,13 +439,6 @@ final class SnapAuthorBar {
         trailingPlacementScheduled = false
         host.applyTrailingNavItems(host.engagedTrailingItems(), animated: true)
     }
-
-    #if DEBUG
-    /// Refused-follow toasts shown (#1979): their ARRIVAL, which a test
-    /// cannot miss, where the toast itself is gone after a few seconds — a
-    /// starved runner looked for it too late.
-    private(set) var debugFollowFailureToastsShown = 0
-    #endif
 }
 
 /// The bar's author pill as the author binding draws it (#1972): whichever

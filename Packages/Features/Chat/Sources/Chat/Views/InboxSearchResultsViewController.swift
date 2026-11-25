@@ -137,7 +137,7 @@ final class InboxSearchResultsViewController: UIViewController {
             self.relations?.saw(model)
             cell.configure(
                 with: model, imagePipeline: self.imagePipeline, avatars: self.avatars,
-                mark: self.relations?.mark(for: model.peerID) ?? .none, onFollow: self.followHandler(for: model)
+                mark: self.relations?.mark(for: model.peerID) ?? .none
             )
         }
 
@@ -329,15 +329,6 @@ final class InboxSearchResultsViewController: UIViewController {
         for case let cell as ConversationResultCell in collectionView.visibleCells {
             guard let peer = cell.peerID, peers?.contains(peer) ?? true else { continue }
             cell.setRelationMark(relations.mark(for: peer), animated: true)
-        }
-    }
-
-    /// The "+" on `model`'s face.
-    private func followHandler(for model: ConversationDisplayModel) -> (() -> Void)? {
-        guard let relations, relations.isEnabled, let peer = model.peerID else { return nil }
-        return { [weak self, weak relations] in
-            guard let self else { return }
-            relations?.follow(peer, handle: model.peerHandle, name: model.title, from: self)
         }
     }
 

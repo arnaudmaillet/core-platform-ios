@@ -44,13 +44,6 @@ final class ConversationRowView: UIView {
     /// channel since #2230, where it marked only the ones the viewer runs.
     private let channelBadge = UIImageView(image: AppSymbol.megaphoneFill.image())
 
-
-    /// Told when the face's "+" is tapped — never the row's own tap.
-    var onFollowTapped: (() -> Void)? {
-        get { avatarView.onFollowTapped }
-        set { avatarView.onFollowTapped = newValue }
-    }
-
     override init(frame: CGRect) {
         super.init(frame: frame)
         buildLayout()
@@ -69,7 +62,6 @@ final class ConversationRowView: UIView {
         // A reused row starts unknown for its next person, never wearing
         // the previous one's mark (#2098).
         avatarView.setMark(.loading, animated: false)
-        onFollowTapped = nil
     }
 
     /// The row draws immediately from `model`; the picture, if there is one,
@@ -164,38 +156,15 @@ final class ConversationRowView: UIView {
         return ink == .primary ? "\(model.unreadCount) new unread" : "\(model.unreadCount) unread"
     }
 
-    /// The relation the face wears, through the badge's replace and the
-    /// ring's fade on screen — the row draws first and the mark arrives,
-    /// moving nothing (#2049).
+    /// The relation the face wears, animated on screen (#2419) — the row
+    /// draws first and the mark arrives, moving nothing (#2049). Passive:
+    /// no follow from a conversation row; it happens on the profile.
     func setRelationMark(_ mark: PersonPill.Badge, animated: Bool) {
         avatarView.setMark(mark, animated: animated)
     }
 
     /// The mark on show.
     var relationMark: PersonPill.Badge { avatarView.mark }
-
-    /// VoiceOver's way to the "+" (the row is the element, and its tap
-    /// opens the conversation): a "Follow" action while the face shows it.
-    var followAccessibilityActions: [UIAccessibilityCustomAction]? {
-        guard relationMark == .follow, onFollowTapped != nil else { return nil }
-        return [UIAccessibilityCustomAction(name: "Follow") { [weak self] _ in
-            self?.onFollowTapped?()
-            return true
-        }]
-    }
-
-    /// ⚠️ THE "+" IS ASKED FIRST. Its touch area (grown by 8 pt) reaches past
-    /// the 56 pt disc, and past the stack the disc is laid out in, which
-    /// would refuse the touch before the badge saw it. Within the row, a
-    /// touch on the "+" is the badge's; everything else stays the row's (its
-    /// tap, swipe actions and context menu).
-    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
-        if let badge = avatarView.tappableBadge, !isHidden, alpha > 0.01,
-           badge.point(inside: convert(point, to: badge), with: event) {
-            return badge
-        }
-        return super.hitTest(point, with: event)
-    }
 
     /// The pin glyph alone; the band belongs to the host that has a background.
     func setPinnedIconHidden(_ isHidden: Bool) {

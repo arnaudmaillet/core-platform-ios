@@ -23,11 +23,13 @@ import UIKit
 /// viewer's own posts), no line at all: the band collapses and the caption
 /// starts at the card's top. The date then lives on the card's closing line.
 ///
-/// The trailing end is the "..." alone. Repost and save used to sit beside it
-/// in a capsule, which gave every card two clusters of controls — one at the
-/// top competing with the name, one at the bottom with the counts. They are
-/// in the row's closing line now, with the counts, where every control on a
-/// card lives.
+/// The trailing end is the "..." and, just left of it, the author's Follow
+/// (#2419) while the viewer doesn't follow them: `(◯) Name … (Follow) •••`.
+/// The face's badge is information only; following is this button's. Repost
+/// and save used to sit beside the "..." in a capsule, which gave every card
+/// two clusters of controls — one at the top competing with the name, one at
+/// the bottom with the counts. They are in the row's closing line now, with
+/// the counts, where every control on a card lives.
 ///
 /// ## Why it is a view and not a method on the cell
 ///
@@ -107,11 +109,17 @@ public final class PostAuthorBandView: UIView {
         didSet { opening.openProfile = onAuthorHeld }
     }
 
-    /// Fired when the face's "+" is tapped (#2300): the host follows, through
-    /// the same follow every "+" uses. Never for a state mark.
+    /// Told on a tap on Follow or Follow back (#2419): the host follows,
+    /// through the shared follow. The cell cannot see the follow.
     public var onFollowTapped: (() -> Void)? {
-        get { face.onFollowTapped }
-        set { face.onFollowTapped = newValue }
+        get { followButton.onFollow }
+        set { followButton.onFollow = newValue }
+    }
+
+    /// Told when the viewer cancels a pending request from Requested's menu.
+    public var onCancelFollowRequest: (() -> Void)? {
+        get { followButton.onCancelRequest }
+        set { followButton.onCancelRequest = newValue }
     }
 
     /// The tap and the hold on the identity — the shared contract (#2145).
@@ -197,12 +205,17 @@ public final class PostAuthorBandView: UIView {
     /// initials without one; an animated avatar plays by the rounds and
     /// rests on its still (#1358, #1424) — wearing the relation mark
     /// (#2300): the shared marked face, at the band's 40 pt, its badge from
-    /// `RelationMarkMetrics`. Only its "+" takes a touch; the rest of the
-    /// face is the identity control's.
+    /// `RelationMarkMetrics`. The badge is passive (#2419): the whole face
+    /// is the identity control's.
     private let face = RelationMarkedAvatarView(diameter: PostAuthorBandView.avatarDiameter, size: .avatar)
     private let nameLabel = UILabel()
     private let handleLabel = UILabel()
     private let menuButton = PostActionPillView.makeGlyphControl(systemName: menuSymbol, label: "More actions")
+    /// The author's Follow, just left of the "..." (#2419).
+    private let followButton = AuthorFollowButton()
+    /// The trailing controls: Follow, then the "...". A stack, so a control
+    /// that comes or goes closes its gap, and the name takes the room back.
+    private let trailingControls = UIStackView()
     private let identityControl = UIControl()
     /// The identity's vertical claim on the band — released for a bare band,
     /// whose height is the control's rather than the disc's.
@@ -256,9 +269,7 @@ public final class PostAuthorBandView: UIView {
         // the hit view IS — a control gets the touch immediately, anything else
         // is held and can be cancelled out from under it. This is the same
         // reason `UIButton` disables interaction on its own image and title.
-        // The face keeps its "+" alone (`takesOnlyBadgeTouches`): the one
-        // control inside the identity that is not the identity's.
-        face.takesOnlyBadgeTouches = true
+        face.isUserInteractionEnabled = false
         identity.isUserInteractionEnabled = false
         nameLabel.isUserInteractionEnabled = false
         handleLabel.isUserInteractionEnabled = false
@@ -293,10 +304,18 @@ public final class PostAuthorBandView: UIView {
         identityControl.addSubview(face)
         identityControl.addSubview(identity)
         addSubview(identityControl)
-        addSubview(menuButton)
+        // The controls keep their size: the name truncates first (#2419).
+        menuButton.setContentCompressionResistancePriority(.required, for: .horizontal)
+        trailingControls.addArrangedSubview(followButton)
+        trailingControls.addArrangedSubview(menuButton)
+        trailingControls.axis = .horizontal
+        trailingControls.alignment = .top
+        trailingControls.spacing = Spacing.xs
+        addSubview(trailingControls)
         face.translatesAutoresizingMaskIntoConstraints = false
         identity.translatesAutoresizingMaskIntoConstraints = false
         identityControl.translatesAutoresizingMaskIntoConstraints = false
+        trailingControls.translatesAutoresizingMaskIntoConstraints = false
         identityHeightConstraints = [
             identityControl.topAnchor.constraint(equalTo: topAnchor),
             identityControl.bottomAnchor.constraint(equalTo: bottomAnchor)
@@ -308,7 +327,7 @@ public final class PostAuthorBandView: UIView {
             // does: the tappable region is the person, and the empty run
             // between a short name and the "..." belongs to the card.
             identityControl.trailingAnchor.constraint(
-                lessThanOrEqualTo: menuButton.leadingAnchor, constant: -Spacing.sm
+                lessThanOrEqualTo: trailingControls.leadingAnchor, constant: -Spacing.sm
             ),
 
             face.leadingAnchor.constraint(equalTo: identityControl.leadingAnchor),
@@ -319,15 +338,17 @@ public final class PostAuthorBandView: UIView {
             identity.centerYAnchor.constraint(equalTo: face.centerYAnchor),
             identity.trailingAnchor.constraint(equalTo: identityControl.trailingAnchor),
 
-            menuButton.trailingAnchor.constraint(equalTo: trailingAnchor),
+            trailingControls.trailingAnchor.constraint(equalTo: trailingAnchor),
             // ⚠️ TOP-ALIGNED, and it is the CARD's corner that decides that.
             //
             // Centred on the disc, the control sat below the card's top-right
             // arc. Hung from the band's top edge it lands inset from that
             // corner by exactly what the band is inset by. As tall as a pill,
             // which on a bare band is the band itself.
-            menuButton.topAnchor.constraint(equalTo: topAnchor),
-            menuButton.heightAnchor.constraint(equalToConstant: PostMetaPillView.height)
+            trailingControls.topAnchor.constraint(equalTo: topAnchor),
+            menuButton.heightAnchor.constraint(equalToConstant: PostMetaPillView.height),
+            // Follow at the band's pill height, the "..."'s (#2419).
+            followButton.heightAnchor.constraint(equalToConstant: PostMetaPillView.height)
         ])
         NSLayoutConstraint.activate(identityHeightConstraints)
         menuButton.isHidden = true
@@ -336,23 +357,6 @@ public final class PostAuthorBandView: UIView {
 
     @available(*, unavailable)
     public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    /// ⚠️ THE "+" IS ASKED FIRST (#2300). Its touch area reaches past the
-    /// 40 pt disc and below the band's own bounds, which would refuse the
-    /// touch before the badge saw it — Chat's rows' rule.
-    public override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
-        if let badge = face.tappableBadge, !isHidden, alpha > 0.01, isUserInteractionEnabled,
-           !identityControl.isHidden, badge.point(inside: convert(point, to: badge), with: event) {
-            return badge
-        }
-        return super.hitTest(point, with: event)
-    }
-
-    public override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
-        if let badge = face.tappableBadge, !identityControl.isHidden,
-           badge.point(inside: convert(point, to: badge), with: event) { return true }
-        return super.point(inside: point, with: event)
-    }
 
     /// Whether a long press at `point` (in the band) is the author's hold
     /// (#2145): on the identity, with a hold to give. The card's own long
@@ -366,18 +370,43 @@ public final class PostAuthorBandView: UIView {
 
     /// The mark the face wears: the author's relation, as the host's binding
     /// draws it. `.none` for a bare band, the viewer's own post, a blocked
-    /// author, or a host with no follow.
+    /// author, an author not followed, or a host with no follow.
     public var relationMark: PersonPill.Badge { face.mark }
 
-    /// Wears `mark` on the face — through the badge's replace when
-    /// `animated` and on screen. A bare band draws no face, and no mark.
+    /// Wears `mark` on the face: animated when `animated` and on screen
+    /// (#2419), at once otherwise. A bare band draws no face, and no mark.
     public func setRelationMark(_ mark: PersonPill.Badge, animated: Bool) {
         let shown = model?.showsIdentity == true ? mark : .none
         model = model?.withRelationMark(shown)
         face.setMark(shown, animated: animated)
     }
 
+    // MARK: - Follow (#2419)
+
+    /// What the band offers beside its "...": the host's binding's answer.
+    public var followOffer: AuthorFollowOffer { followButton.offer }
+
+    /// Offers `offer` beside the "...": animated when the change is seen on
+    /// screen (the button coming in, "✓ Following" then the fold), at once
+    /// otherwise. A bare band offers nothing.
+    public func setFollowOffer(_ offer: AuthorFollowOffer, animated: Bool) {
+        let shown = model?.showsIdentity == true ? offer : .none
+        model = model?.withFollowOffer(shown)
+        followButton.show(shown, animated: animated)
+        // The band lays out the name against the controls: theirs changed.
+        setNeedsLayout()
+    }
+
     #if DEBUG
+    /// The author's Follow. Tests.
+    var debugFollowButton: AuthorFollowButton { followButton }
+    /// The name's and the "..."'s frames in the band. Tests.
+    var debugNameFrame: CGRect { nameLabel.convert(nameLabel.bounds, to: self) }
+    var debugMenuFrame: CGRect { menuButton.convert(menuButton.bounds, to: self) }
+    /// Whether the name is cut by its ellipsis. Tests.
+    var debugNameIsTruncated: Bool {
+        nameLabel.intrinsicContentSize.width > nameLabel.bounds.width + 0.5
+    }
     /// The face's badge. Tests.
     var debugBadge: RelationBadgeView { face.badge }
     /// Whether the face has the badge's cutout taken out. Tests.
@@ -412,6 +441,9 @@ public final class PostAuthorBandView: UIView {
         // reading wears the row's; a row from a post alone, none until its
         // host binds it.
         face.setMark(showsIdentity ? model.relationMark : .none, animated: false)
+        // The Follow the model carries (#2419), as the mark.
+        followButton.personName = model.name
+        followButton.show(showsIdentity ? model.followOffer : .none, animated: false)
     }
 
     /// Swaps the age on the band's second line, and nothing else.

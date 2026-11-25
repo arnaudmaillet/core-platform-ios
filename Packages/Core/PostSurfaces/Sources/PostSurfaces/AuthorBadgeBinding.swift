@@ -17,6 +17,14 @@ public protocol AuthorBadgeDrawing: AnyObject {
     var drawsAuthorBadgeOnScreen: Bool { get }
 }
 
+/// Something that also draws the author's Follow beside its badge: a list
+/// row's author band (#2419), from the same answer as the badge, so the two
+/// never disagree.
+@MainActor
+public protocol AuthorFollowDrawing: AuthorBadgeDrawing {
+    func drawAuthorFollow(_ offer: AuthorFollowOffer, animated: Bool)
+}
+
 /// ONE RELATION BINDING FOR EVERY AUTHOR PILL (#1972, the owner 2026-10-31):
 /// the page's author on Shots showed no badge on its first pass, only once
 /// the page was drawn again — while the bar's pill, re-read at every page
@@ -46,15 +54,19 @@ final public class AuthorBadgeBinding {
     }
 
     /// Binds `pill` to `author` — nil unbinds it, drawing no badge — and
-    /// draws what is known now, without animation.
-    public func bind(_ pill: any AuthorBadgeDrawing, to author: ProfileID?) {
+    /// draws what is known now, without animation. `offersFollow`: the pill
+    /// also draws the author's Follow (#2419), where it can
+    /// (`AuthorFollowDrawing`); otherwise it is told none.
+    public func bind(_ pill: any AuthorBadgeDrawing, to author: ProfileID?, offersFollow: Bool = false) {
         guard let author else {
             bound[ObjectIdentifier(pill)] = nil
             pill.drawAuthorBadge(.none, animated: false)
+            (pill as? any AuthorFollowDrawing)?.drawAuthorFollow(.none, animated: false)
             return
         }
-        bound[ObjectIdentifier(pill)] = Bound(pill: pill, author: author)
-        pill.drawAuthorBadge(store.badge(for: author), animated: false)
+        let entry = Bound(pill: pill, author: author, offersFollow: offersFollow)
+        bound[ObjectIdentifier(pill)] = entry
+        draw(entry, animated: false)
         trace("bind \(author.rawValue) known=\(store.relation(for: author) != nil) onScreen=\(pill.drawsAuthorBadgeOnScreen)")
         if store.relation(for: author) == nil { store.resolve(for: author) }
     }
@@ -68,18 +80,18 @@ final public class AuthorBadgeBinding {
     /// Draws `pill`'s badge again as known now, without animation: a page
     /// scrolling in shows the truth whatever it was configured with.
     public func reapply(_ pill: any AuthorBadgeDrawing) {
-        guard let author = author(of: pill) else { return }
-        pill.drawAuthorBadge(store.badge(for: author), animated: false)
+        guard let entry = bound[ObjectIdentifier(pill)], entry.pill === pill else { return }
+        draw(entry, animated: false)
     }
 
     /// `author`'s answer changed: every pill bound to it, redrawn —
     /// animated where it can be seen.
     public func relationDidChange(for author: ProfileID) {
-        let badge = store.badge(for: author)
-        let pills = pills(boundTo: author)
-        trace("answer \(author.rawValue) badge=\(badge) pills=\(pills.count) onScreen=\(pills.filter(\.drawsAuthorBadgeOnScreen).count)")
-        for pill in pills {
-            pill.drawAuthorBadge(badge, animated: pill.drawsAuthorBadgeOnScreen)
+        prune()
+        let entries = bound.values.filter { $0.author == author && $0.pill != nil }
+        trace("answer \(author.rawValue) badge=\(store.badge(for: author)) pills=\(entries.count)")
+        for entry in entries {
+            draw(entry, animated: entry.pill?.drawsAuthorBadgeOnScreen == true)
         }
     }
 
@@ -92,7 +104,7 @@ final public class AuthorBadgeBinding {
         for entry in bound.values {
             guard let pill = entry.pill else { continue }
             let author = entry.author
-            pill.drawAuthorBadge(store.badge(for: author), animated: pill.drawsAuthorBadgeOnScreen)
+            draw(entry, animated: pill.drawsAuthorBadgeOnScreen)
             if store.relation(for: author) == nil, asked.insert(author).inserted {
                 store.resolve(for: author)
             }
@@ -103,6 +115,14 @@ final public class AuthorBadgeBinding {
     func pills(boundTo author: ProfileID) -> [any AuthorBadgeDrawing] {
         prune()
         return bound.values.compactMap { $0.author == author ? $0.pill : nil }
+    }
+
+    /// Draws `entry`'s badge, and its Follow where it offers one, as known now.
+    private func draw(_ entry: Bound, animated: Bool) {
+        guard let pill = entry.pill else { return }
+        pill.drawAuthorBadge(store.badge(for: entry.author), animated: animated)
+        guard let follows = pill as? any AuthorFollowDrawing else { return }
+        follows.drawAuthorFollow(entry.offersFollow ? store.followOffer(for: entry.author) : .none, animated: animated)
     }
 
     /// Forgets the pills that went away.
@@ -121,6 +141,7 @@ final public class AuthorBadgeBinding {
     private struct Bound {
         weak var pill: (any AuthorBadgeDrawing)?
         let author: ProfileID
+        let offersFollow: Bool
     }
 }
 
@@ -135,10 +156,15 @@ extension CaptionBubbleCell: AuthorBadgeDrawing {
 }
 
 /// A list card's author band (#2300): the flat rows and a shelf's text card,
-/// bound by their host through `PostAuthorMarks`.
-extension PostGridListRowCell: AuthorBadgeDrawing {
+/// bound by their host through `PostAuthorMarks`. The flat rows draw its
+/// Follow too (#2419); a shelf's card is told none.
+extension PostGridListRowCell: AuthorFollowDrawing {
     public func drawAuthorBadge(_ badge: PersonPill.Badge, animated: Bool) {
         setAuthorRelationMark(badge, animated: animated)
+    }
+
+    public func drawAuthorFollow(_ offer: AuthorFollowOffer, animated: Bool) {
+        setAuthorFollowOffer(offer, animated: animated)
     }
 
     public var drawsAuthorBadgeOnScreen: Bool { window != nil }

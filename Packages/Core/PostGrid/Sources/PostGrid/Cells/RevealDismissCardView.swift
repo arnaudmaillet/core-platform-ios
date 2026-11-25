@@ -128,7 +128,8 @@ public final class RevealDismissCardView: UIView, RevealStandInShaping {
         ageText: String? = nil,
         height: CGFloat? = nil,
         captionLines: Int? = nil,
-        authorMark: PersonPill.Badge = .none
+        authorMark: PersonPill.Badge = .none,
+        authorFollow: AuthorFollowOffer = .none
     ) {
         card = PostGridListRowCell(frame: CGRect(x: 0, y: 0, width: width, height: 200))
         super.init(frame: .zero)
@@ -164,6 +165,9 @@ public final class RevealDismissCardView: UIView, RevealStandInShaping {
         // The ROW's relation mark (#2300), on the same terms: a badge that
         // appears or changes in the landing frame is the pop.
         card.setAuthorRelationMark(authorMark, animated: false)
+        // And its Follow (#2419): a button that appears or vanishes at the
+        // landing is the same pop.
+        card.setAuthorFollowOffer(authorFollow, animated: false)
         let attributes = UICollectionViewLayoutAttributes(
             forCellWith: IndexPath(item: 0, section: 0)
         )

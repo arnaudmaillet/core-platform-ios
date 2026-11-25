@@ -109,6 +109,8 @@ Look here before writing any of these. Add a row when you create a shared piece.
 | A person's face | `AvatarView` | MediaCore / `MediaUI` | `HandMadeAvatarGuardTests` |
 | A person in a list | `PersonRowContent`, `PersonListCell` | DesignSystem | |
 | Opening a person (card or profile) | `PersonOpening` | MediaCore / `MediaUI` | `PersonOpeningGuardTests` |
+| A person's relation on their face (Following, Friends; passive) | `RelationMarkedAvatarView`, `RelationBadgeView`, `FaceCutout` | MediaCore / `MediaUI` | `TextPostAuthorMarkTests.noPostAuthorFaceWithoutTheMark` |
+| Follow beside a list row's "…" (Follow, Follow back, Requested, "✓ Following" then the fold) | `AuthorFollowButton`, through `PostAuthorBandView` and `AuthorFollowOffer` | PostGrid | |
 | A remote picture | `MediaSlot`, `CoverSlot`, `ImageContentView` | MediaCore / `MediaUI` | `BareImageLoadGuardTests`, `DirectPipelineReadGuardTests` |
 | A banner | `HeroBannerView` through `HeroHeaderView` | HeroPage | `HandMadeBannerGuardTests` |
 | A page with a hero header | HeroPage | HeroPage | `HeroPageArithmeticGuardTests` |

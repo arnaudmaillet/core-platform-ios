@@ -1470,10 +1470,8 @@ open class HeroHeaderView: UIView {
     /// pill wears it (#2014): the badge on its rim at 45°, and no ring or
     /// rim round the disc whatever the relation (#2082, the owner
     /// 2026-11-03: the face alone, only the badge). `.none` draws nothing.
-    /// A `.custom` disc wears none. The "+" follows
-    /// (`onRelationBadgeTapped`, #2050, the owner 2026-11-02, reversing
-    /// #2014's "never the '+'"): the one mark is the same everywhere. Every
-    /// other tap on the disc stays the disc's.
+    /// A `.custom` disc wears none. Passive (#2419): Following and Friends
+    /// only, no touch; the header's Follow is the action.
     public func setRelationMark(_ mark: PersonPill.Badge, animated: Bool) {
         relationMark = mark
         applyRelationMark(animated: animated)
@@ -1491,15 +1489,10 @@ open class HeroHeaderView: UIView {
         shownRelationMark = mark
         let onScreen = animated && window != nil
         relationBadge.show(mark, animated: onScreen)
-        if !mark.cutsTheFace { avatarCutout.close(avatarView.layer, animated: onScreen) }
+        let metrics = relationBadge.metrics
+        avatarCutout.wear(mark, on: avatarView.layer, centre: avatarCutoutCentre(), metrics: metrics, animated: onScreen)
         applyAvatarCutout()
     }
-
-    /// Told when the badge's "+" is tapped (#2050) — and only then: a state
-    /// mark takes no touches, so check, friends and the clock pass through
-    /// to the disc. The badge sits over the disc, so where their touch
-    /// areas overlap (its 8 pt outset) the "+" wins.
-    public var onRelationBadgeTapped: (() -> Void)?
 
     /// A tap on the name — or the chevron it then wears. Nil: the name is
     /// text alone and wears no chevron.
@@ -1605,10 +1598,6 @@ open class HeroHeaderView: UIView {
         }
         relationBadgeOffsets = [trailing, bottom]
         relationBadge.speaksForItself = true
-        relationBadge.addAction(UIAction { [weak self] _ in
-            guard let self, shownRelationMark == .follow else { return }
-            onRelationBadgeTapped?()
-        }, for: .primaryActionTriggered)
     }
 
     /// The mark follows the disc's resolved side (Dynamic Type, 96 to 110 pt).
@@ -1627,15 +1616,17 @@ open class HeroHeaderView: UIView {
     /// from the disc's own side, never the badge's frame, which may not be
     /// laid out yet.
     private func applyAvatarCutout() {
-        guard let relationBadge, shownRelationMark.cutsTheFace, avatarView.bounds.width > 0 else {
+        guard let relationBadge, shownRelationMark.cutsTheFace, let centre = avatarCutoutCentre() else {
             if !avatarCutout.isClosing { avatarCutout.close(avatarView.layer, animated: false) }
             return
         }
-        let centre = relationBadge.metrics.badgeCentre(
-            inFaceOfSide: avatarView.bounds.width,
-            rightToLeft: effectiveUserInterfaceLayoutDirection == .rightToLeft
-        )
         avatarCutout.cut(avatarView.layer, centre: centre, metrics: relationBadge.metrics)
+    }
+
+    private func avatarCutoutCentre() -> CGPoint? {
+        guard let relationBadge, avatarView.bounds.width > 0 else { return nil }
+        let rightToLeft = effectiveUserInterfaceLayoutDirection == .rightToLeft
+        return relationBadge.metrics.badgeCentre(inFaceOfSide: avatarView.bounds.width, rightToLeft: rightToLeft)
     }
 
     #if DEBUG

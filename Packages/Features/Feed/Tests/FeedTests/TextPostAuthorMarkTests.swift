@@ -91,10 +91,10 @@ struct TextPostAuthorMarkTests {
         binding.bind(cell, to: ava)
         await Self.settle { cell.authorMark == .friends }
         #expect(cell.authorMark == .friends)
-        graph.answers[ava] = .notFollowing
+        graph.answers[ava] = .following
         entities.viewerDidChange()
-        await Self.settle { cell.authorMark == .follow }
-        #expect(cell.authorMark == .follow, "the new viewer's answer missed the caption row")
+        await Self.settle { cell.authorMark == .following }
+        #expect(cell.authorMark == .following, "the new viewer's answer missed the caption row")
     }
 
     /// Unbound — a media page's comments sheet, a pushed post — the caption
@@ -113,31 +113,30 @@ struct TextPostAuthorMarkTests {
         #expect(cell.authorMark == .none)
     }
 
-    /// The face's "+", tap and hold are the host's: the follow, then a person
-    /// beside content — the card on a tap, the profile on a hold.
-    @Test func theCaptionFacesPlusTapAndHold() throws {
+    /// The face's tap and hold are the host's: a person beside content —
+    /// the card on a tap, the profile on a hold. The badge is passive
+    /// (#2419): it takes no touch.
+    @Test func theCaptionFacesTapAndHold() throws {
         let cell = Self.captionCell()
         var events: [String] = []
         cell.onAvatarTap = { events.append("card") }
         cell.onAvatarHold = { events.append("profile") }
-        cell.onAuthorFollowTap = { events.append("follow") }
-        cell.setAuthorMark(.follow, animated: false)
+        cell.setAuthorMark(.following, animated: false)
         cell.debugTapAuthor()
         cell.debugHoldAuthor()
-        try #require(cell.debugAuthorBadge).sendActions(for: .primaryActionTriggered)
-        #expect(events == ["card", "profile", "follow"])
+        #expect(events == ["card", "profile"])
+        #expect(try #require(cell.debugAuthorBadge).isUserInteractionEnabled == false)
         // A recycled row forgets the author's mark and the routes.
         cell.prepareForReuse()
         #expect(cell.authorMark == .none)
         #expect(cell.onAvatarHold == nil)
-        #expect(cell.onAuthorFollowTap == nil)
     }
 
     /// The other rows of the stream stay bare: the mark is the post's
     /// author's, as on a media post.
     @Test func aCommentsRowWearsNoMark() {
         let row = CommentRowView()
-        row.setAuthorMark(.follow, animated: false)
+        row.setAuthorMark(.following, animated: false)
         #expect(row.authorMark == .none)
         #expect(row.debugAuthorBadge == nil)
         #expect(row.debugCaptionOpening == nil)
@@ -148,13 +147,13 @@ struct TextPostAuthorMarkTests {
     /// A list card's band, bound through the lists' binding: the badge
     /// drawn as known, the answer landing on a card in no window.
     @Test func theListsBandDrawsTheBindingsBadge() async {
-        let graph = MarkGraph(answers: [ava: .requested])
+        let graph = MarkGraph(answers: [ava: .mutual])
         let marks = PostAuthorMarks(writer: graph, reader: graph, entities: EntityStore(), viewer: { [viewer] in viewer })
         let cell = Self.listCell(author: ava)
         marks.bind(cell, to: ava)
-        await Self.settle { cell.authorRelationMark == .pending }
-        #expect(cell.authorRelationMark == .pending)
-        #expect(cell.debugAuthorBadge.drawn == .pending)
+        await Self.settle { cell.authorRelationMark == .friends }
+        #expect(cell.authorRelationMark == .friends)
+        #expect(cell.debugAuthorBadge.drawn == .friends)
     }
 
     /// The viewer's own post wears nothing on its band.
@@ -166,25 +165,33 @@ struct TextPostAuthorMarkTests {
         #expect(cell.authorRelationMark == .none)
     }
 
-    /// The band's "+" follows through the shared follow: the optimistic flip
-    /// lands on every face bound to the author — the band, and a text page's
-    /// caption row by the same author on the same store.
-    @Test func theBandsPlusFollowsThroughTheSharedFollow() async {
+    /// The band's Follow (#2419) follows through the shared follow: the
+    /// optimistic flip lands on every face bound to the author — the band's
+    /// badge and button, a second row by the same author, and a text page's
+    /// caption row on the same store.
+    @Test func theBandsFollowFollowsThroughTheSharedFollow() async {
         let entities = EntityStore()
         let graph = MarkGraph(answers: [ava: .notFollowing])
         let marks = PostAuthorMarks(writer: graph, reader: graph, entities: entities, viewer: { [viewer] in viewer })
         let cell = Self.listCell(author: ava)
+        let twin = Self.listCell(author: ava)
         let caption = Self.captionCell()
-        marks.bind(cell, to: ava)
+        marks.bind(cell, to: ava, offersFollow: true)
+        marks.bind(twin, to: ava, offersFollow: true)
         marks.bind(caption, to: ava)
-        await Self.settle { cell.authorRelationMark == .follow }
-        #expect(cell.authorRelationMark == .follow)
+        await Self.settle { cell.authorFollowOffer == .follow }
+        #expect(cell.authorFollowOffer == .follow)
+        #expect(cell.authorRelationMark == .none, "not followed wore a badge")
+        #expect(!cell.debugAuthorFollowButton.isHidden)
 
         cell.onAuthorFollowTapped = { [ava] in
             marks.follow(ava, handle: "ava", name: "Ava Moreau", from: cell)
         }
-        cell.debugAuthorBadge.sendActions(for: .primaryActionTriggered)
+        cell.debugAuthorFollowButton.debugTap()
         #expect(cell.authorRelationMark == .following, "the optimistic flip missed the band")
+        #expect(cell.authorFollowOffer == .following)
+        #expect(twin.authorFollowOffer == .following, "the same author's other row did not update")
+        #expect(twin.authorRelationMark == .following)
         #expect(caption.authorMark == .following, "a follow on the band missed the caption row")
         await Self.settle { graph.follows == [ava] }
         #expect(graph.follows == [ava])

@@ -277,7 +277,6 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     // MARK: - The autoplay surface: the video render view a row hosts — state here, behaviour in `PostGridListRowCell+Autoplay.swift`
     public var loadedVideoRenderView: VideoRenderView?
 
-
     // MARK: - Retained clips: the surfaces a row keeps, prewarms, adopts and donates — state here, behaviour in `PostGridListRowCell+RetainedClips.swift`
     /// A surface per clip page this row is keeping warm, keyed by page.
     ///
@@ -1015,12 +1014,13 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     private func bindAuthorBand(
         to post: GalleryPost, imagePipeline: ImagePipeline, showsIdentity: Bool
     ) {
-        // The same author again keeps the mark the host drew (#2300): a
+        // The same author again keeps the mark and Follow the host drew (#2300, #2419): a
         // reconfigure is not a new person, and the binding draws a new one.
-        let keepsMark = post.authorID != nil && post.authorID == bandAuthorID
+        let keeps = post.authorID != nil && post.authorID == bandAuthorID
         bandAuthorID = post.authorID
         let model = PostAuthorBandView.Model(post: post, showsIdentity: showsIdentity)
-            .withRelationMark(keepsMark ? authorBand.relationMark : .none)
+            .withRelationMark(keeps ? authorBand.relationMark : .none)
+            .withFollowOffer(keeps ? authorBand.followOffer : .none)
         authorBand.configure(with: model, imagePipeline: imagePipeline)
         // A bare band says nothing about WHEN; the closing line does.
         closingAgeLabel.text = model.age
@@ -1100,8 +1100,8 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         // profile.
         onAuthorTapped = nil
         onAuthorHeld = nil
-        onAuthorFollowTapped = nil
-        // The previous author's mark never rides a recycled row (#2300).
+        // The previous author's mark and Follow never ride a recycled row (#2300, #2419).
+        resetAuthorFollow()
         bandAuthorID = nil
         authorBand.setRelationMark(.none, animated: false)
         authorMenuActions = nil

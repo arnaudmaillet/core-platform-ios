@@ -40,7 +40,7 @@ struct HeroHeaderRelationMarkTests {
     /// Each relation's symbol on the disc, and NO EDGE round it whatever the
     /// relation (#2082, the owner 2026-11-03): no ring, no grey rim — the
     /// badge alone.
-    @Test(arguments: [PersonPill.Badge.follow, .following, .friends, .pending])
+    @Test(arguments: [PersonPill.Badge.following, .friends])
     func theAvatarWearsEachRelation(_ relation: PersonPill.Badge) throws {
         let header = makeHeader()
         header.setRelationMark(relation, animated: false)
@@ -98,17 +98,17 @@ struct HeroHeaderRelationMarkTests {
     @Test func theSkeletonWearsTheSkeletonsBadge() throws {
         let header = makeHeader()
         header.setRedacted(true)
-        header.setRelationMark(.follow, animated: false)
+        header.setRelationMark(.following, animated: false)
         layOut(header)
         #expect(header.shownRelationMark == .loading)
         #expect(header.debugRelationSymbol == nil)
         #expect(header.debugRelationBadge?.showsBone == true)
         #expect(header.debugAvatarIsCutOut, "the skeleton's badge with no cutout")
         let place = try #require(header.debugRelationBadge).frame
-        #expect(header.relationMark == .follow)
+        #expect(header.relationMark == .following)
         header.setRedacted(false)
         layOut(header)
-        #expect(header.debugRelationSymbol == "plus")
+        #expect(header.debugRelationSymbol == "checkmark.circle.fill")
         #expect(header.debugRelationBadge?.showsBone == false)
         #expect(header.debugRelationBadge?.frame == place, "the badge moved at the reveal")
         #expect(header.debugAvatarIsCutOut)
@@ -126,41 +126,23 @@ struct HeroHeaderRelationMarkTests {
         #expect(header.debugRelationBadge?.showsBone == false)
     }
 
-    /// A state mark takes no tap: it falls through to the disc's own, and
-    /// is read as its state, not as a button (#2050).
-    @Test(arguments: [PersonPill.Badge.following, .friends, .pending])
-    func aStateMarkTakesNoTap(_ relation: PersonPill.Badge) throws {
+    /// NO "+" ON THE HEADER'S FACE (#2419): the badge takes no touch and is
+    /// read as its state, never a button; the header's Follow is the action.
+    @Test(arguments: [PersonPill.Badge.following, .friends])
+    func theBadgeIsPassive(_ relation: PersonPill.Badge) throws {
         let header = makeHeader()
-        var taps = 0
-        header.onRelationBadgeTapped = { taps += 1 }
         header.setRelationMark(relation, animated: false)
         let badge = try #require(header.debugRelationBadge)
         #expect(!badge.isUserInteractionEnabled)
-        badge.sendActions(for: .primaryActionTriggered)
-        #expect(taps == 0, "a state mark followed")
+        #expect(!(badge as UIView is UIControl), "the badge is a control")
         #expect(!badge.accessibilityTraits.contains(.button))
-        #expect(badge.accessibilityLabel != nil)
-    }
-
-    /// The "+" is the header's follow (#2050): a button, "Follow", that
-    /// tells `onRelationBadgeTapped`.
-    @Test func thePlusTellsTheFollow() throws {
-        let header = makeHeader()
-        var taps = 0
-        header.onRelationBadgeTapped = { taps += 1 }
-        header.setRelationMark(.follow, animated: false)
-        let badge = try #require(header.debugRelationBadge)
-        #expect(badge.isUserInteractionEnabled)
-        badge.sendActions(for: .primaryActionTriggered)
-        #expect(taps == 1)
-        #expect(badge.isAccessibilityElement && badge.accessibilityTraits.contains(.button))
-        #expect(badge.accessibilityLabel == "Follow")
+        #expect(badge.accessibilityLabel == relation.accessibilityLabel)
     }
 
     /// A place's disc wears no relation.
     @Test func aCustomDiscWearsNone() {
         let header = makeHeader(avatar: .custom(UIView()))
-        header.setRelationMark(.follow, animated: false)
+        header.setRelationMark(.following, animated: false)
         #expect(header.debugRelationBadge == nil)
         #expect(header.debugAvatarRingWidth == 0)
     }

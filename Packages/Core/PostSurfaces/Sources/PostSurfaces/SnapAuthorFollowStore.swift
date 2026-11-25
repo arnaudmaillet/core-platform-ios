@@ -1,9 +1,11 @@
 import CoreModels
 import CoreStorage
 import EntityStore
+import PostGrid
 
-/// Where the viewer stands with each author the feed's pill shows, and the
-/// pill's "+" follow — the state behind the badge, without the pill.
+/// Where the viewer stands with each author a surface shows, and the shared
+/// follow: the state behind the badge (passive since #2419) and behind the
+/// Follow buttons that took over from the face's "+".
 ///
 /// The answers live in the app's `EntityStore` (#896), not here: every snap
 /// feed (For You's vertical feed, the Following feed, a pushed one) reads the
@@ -85,15 +87,14 @@ final public class SnapAuthorFollowStore {
         if case .everything = change { onEveryRelationChange?() }
     }
 
-    /// What the pill's badge draws for `author`: "+" for someone the viewer
-    /// does not follow, the followed mark for a one-way follow, the friends
-    /// mark for a mutual one — and nothing for the viewer's own posts, someone
+    /// What the badge draws for `author`: the followed mark for a one-way
+    /// follow, the friends mark for a mutual one, and nothing for someone the
+    /// viewer doesn't follow or asked (#2419), the viewer's own posts, someone
     /// blocked, or without a follow seam to act through.
     ///
-    /// Unknown is the SKELETON'S BADGE (#2098), never a guess: a "+" drawn
-    /// for someone the viewer follows and then withdrawn is worse than a mark
-    /// that lands late, and nothing at all opened a hole in the face when it
-    /// landed. A read that fails leaves it until a later one answers.
+    /// Unknown is the SKELETON'S BADGE (#2098), never a guess: a mark drawn
+    /// and then withdrawn is worse than one that lands late. A read that
+    /// fails leaves it until a later one answers.
     public func badge(for author: ProfileID?) -> SnapAuthorIdentityView.FollowBadge {
         guard writer != nil, let author else { return .none }
         if author == viewer() { return .none }
@@ -106,9 +107,21 @@ final public class SnapAuthorFollowStore {
         return SnapAuthorIdentityView.FollowBadge(known)
     }
 
-    /// Whether the pill offers "+" for `author`.
+    /// What a Follow button offers for `author` (#2419): Follow, Follow back,
+    /// Requested, or nothing (the viewer's own posts, someone blocked, a
+    /// relation not known yet, no follow seam). Followed reads `.following`,
+    /// which draws no button at rest.
+    public func followOffer(for author: ProfileID?) -> AuthorFollowOffer {
+        guard writer != nil, let author, author != viewer() else { return .none }
+        let known = relation(for: author)
+        if reported[author] == nil { reported[author] = .some(known) }
+        return AuthorFollowOffer(relation: known)
+    }
+
+    /// Whether a follow is on offer for `author`.
     func offersFollow(to author: ProfileID?) -> Bool {
-        badge(for: author) == .follow
+        guard writer != nil, let author, author != viewer() else { return false }
+        return relation(for: author)?.offersFollow == true
     }
 
     /// Asks the graph where the viewer stands with `author`, once per author
@@ -152,19 +165,19 @@ final public class SnapAuthorFollowStore {
         onRelationChange?(author)
     }
 
-    /// The pill's "+": follows the author, OPTIMISTICALLY — the profile's
-    /// Follow button's rule (`ProfileViewModel.toggleFollow`). The "+" turns
-    /// at once into the followed mark — the FRIENDS mark for someone who
-    /// already follows the viewer — and comes back if the graph refuses,
-    /// after which `onRefused` runs.
+    /// The shared follow (a Follow button's, #2419): follows the author,
+    /// OPTIMISTICALLY — the profile's Follow button's rule
+    /// (`ProfileViewModel.toggleFollow`). The relation turns at once into the
+    /// followed one (a FRIEND for someone who already follows the viewer) and
+    /// comes back if the graph refuses, after which `onRefused` runs.
     ///
     /// A PRIVATE author is asked, not followed (#968): the graph says so, and
-    /// the followed mark becomes the pending one. The pill cannot know
-    /// beforehand — the relation read carries no privacy — so the optimistic
-    /// mark is the followed one, as for everyone.
+    /// the relation becomes the pending request. Nothing tells beforehand,
+    /// since the relation read carries no privacy, so the optimistic answer
+    /// is the followed one, as for everyone.
     ///
-    /// Returns whether a follow was sent: nothing is for an author the pill
-    /// does not offer "+" for, or while one is already in flight.
+    /// Returns whether a follow was sent: nothing is for an author with no
+    /// follow on offer, or while one is already in flight.
     @discardableResult
     public func follow(_ author: ProfileID, onRefused: @escaping @MainActor () -> Void) -> Bool {
         guard let writer, offersFollow(to: author), !followsInFlight.contains(author),
@@ -182,6 +195,32 @@ final public class SnapAuthorFollowStore {
                 self.setRelation(before, for: author)
                 onRefused()
             }
+        }
+        return true
+    }
+
+    /// Cancels the pending request to `author` (#2419: Requested's menu),
+    /// OPTIMISTICALLY: the relation is "not followed" at once, then read
+    /// again (a follower is Follow back); it comes back to the request if
+    /// the graph refuses, after which `onRefused` runs.
+    /// Returns whether a withdrawal was sent.
+    @discardableResult
+    public func cancelRequest(to author: ProfileID, onRefused: @escaping @MainActor () -> Void) -> Bool {
+        guard let writer, relation(for: author) == .requested, !followsInFlight.contains(author) else { return false }
+        followsInFlight.insert(author)
+        setRelation(.notFollowing, for: author)
+        Task { [weak self] in
+            let withdrawn = (try? await writer.withdrawFollowRequest(to: author)) != nil
+            guard let self else { return }
+            self.followsInFlight.remove(author)
+            guard withdrawn else {
+                self.setRelation(.requested, for: author)
+                onRefused()
+                return
+            }
+            // A request carries no inbound half: whether they follow the
+            // viewer (Follow back) is the graph's to say again.
+            self.resolve(for: author, refresh: true)
         }
         return true
     }

@@ -5,8 +5,8 @@ import MediaUI
 import UIKit
 
 /// The app's person pill as a bar item (#1451): the post page's identity —
-/// the face, the name and @handle, and the relation as a badge on the face
-/// whose "+" follows. Feed builds it; another feature (the profile's bar)
+/// the face, the name and @handle, and the relation as a passive badge on
+/// the face (#2419). Feed builds it; another feature (the profile's bar)
 /// wears it through its composition root, so the profile shows the SAME
 /// view, never a second configuration of `PersonPill`.
 @MainActor
@@ -15,8 +15,6 @@ public protocol PersonBarItem: AnyObject {
     var view: UIView { get }
     /// A tap on the pill outside the badge, with the person shown.
     var onPersonTapped: ((ProfileID) -> Void)? { get set }
-    /// A tap on the "+", with the person shown. Never for a state mark.
-    var onFollowTapped: ((ProfileID) -> Void)? { get set }
     /// What the badge says now.
     var followBadge: PersonPill.Badge { get }
     /// Shows `name` and `meta` (the @handle), and the face at `avatarURL`.
