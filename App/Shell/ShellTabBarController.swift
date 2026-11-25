@@ -12,8 +12,10 @@ import UIKit
 /// change, the bar hiding and coming back — so the overlay needs a hook to
 /// follow it. `UITabBarController` publishes none, hence this.
 ///
-/// The window's root, so every screen's responder chain ends here — which is
-/// how the stake menu's "Get ×100 cartridges in the Shop" finds the Shop from
+/// Every tab's screens sit under it, and every sheet is presented by the
+/// window's root it is the child of (the notifications drawer's container),
+/// so `firstController(as:)` reaches it from anywhere (#2565) — which is how
+/// the stake menu's "Get ×100 cartridges in the Shop" finds the Shop from
 /// the feed rail, the composer or a card (`StakeShopOpening`) — and how any
 /// control finds the gate that asks a guest to sign up (`MemberGateProviding`).
 final class ShellTabBarController: UITabBarController, StakeShopOpening, MemberGateProviding, TextEntityOpening {
