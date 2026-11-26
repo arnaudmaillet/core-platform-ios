@@ -958,6 +958,8 @@ public final class PostDetailViewModel {
     /// Whether Popular has another ranked page: what makes the panel's
     /// Popular end on "See all" even when what it holds fits (#2298).
     var hasMorePopularComments: Bool { popular.hasMore }
+    /// The viewer's replies sent from this panel: Popular's cut leaves them out (#2572).
+    var repliesSentHere: Set<String> { popular.sentReplies(plus: pendingVoiceComments) }
 
     /// Whether Recent has older comments still to load (#2007): its caption,
     /// the post's first message, waits above them.
@@ -1166,8 +1168,7 @@ public final class PostDetailViewModel {
     // MARK: - Popular (#2007)
 
     /// Popular's first page, once — asked by the panel as it opens on the tab,
-    /// before Recent has answered, when the opener's count already reaches
-    /// the threshold.
+    /// before Recent has answered, when the opener's count already reaches the threshold.
     func loadPopularIfNeeded() {
         guard let commentsProvider, let postID, !popular.hasAnswered else { return }
         if popular.onChange == nil { popular.onChange = { [weak self] in self?.emitPopular() } }
@@ -1260,7 +1261,6 @@ public final class PostDetailViewModel {
             self.emitComments()
         }
     }
-
 
     /// A thread the viewer started (#921): a top-level comment by the face the
     /// composer is wearing. Its replies stay with it; the viewer's replies to

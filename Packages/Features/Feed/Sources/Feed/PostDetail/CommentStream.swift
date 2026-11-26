@@ -1425,9 +1425,8 @@ final class CommentStream: NSObject {
     /// want of a room to measure.
     private var appliedCut: (room: CGFloat, width: CGFloat, category: UIContentSizeCategory)?
 
-    /// Popular cut again when its room changed since the last cut, or is
-    /// known at last (#2298). Cheap when nothing has: the host asks on every
-    /// layout pass.
+    /// Popular cut again when its room changed since the last cut, or is known
+    /// at last (#2298). Cheap when nothing has: the host asks on every layout pass.
     func refitCut() {
         guard cutsToRoom, kind == .popular, hasAppliedStream, commentsLoaded, !latestComments.isEmpty,
               !isShowcase else { return }
@@ -1444,9 +1443,9 @@ final class CommentStream: NSObject {
     /// whole threads that fit after the caption, measured as they stand at
     /// rest, then "See all" when there is more than they show.
     ///
-    /// A thread the reader opened shows its replies: the cut was decided on
-    /// its resting height, so opening one never takes another away — the page
-    /// scrolls instead.
+    /// The rest leaves out the replies the viewer sent here (#2572): opening a
+    /// thread or replying to one never takes a thread away — the page scrolls
+    /// instead, its pull at its end (#2298 § 2).
     private func cutPopular(_ comments: [StreamItem], ordered: [CommentDisplayModel], lead: [StreamItem]) -> [StreamItem] {
         let room = popularRoom
         let width = streamRowWidth
@@ -1461,7 +1460,9 @@ final class CommentStream: NSObject {
             if case .comment(let id) = item { return models[id]?.parentID == nil }
             return false
         }
-        let atRest = PopularCommentsCut.threads(of: Self.rows(of: ordered, expanded: []), startsThread: startsThread)
+        let sent = viewModel.repliesSentHere
+        let unsent = ordered.filter { !sent.contains($0.id) }
+        let atRest = PopularCommentsCut.threads(of: Self.rows(of: unsent, expanded: []), startsThread: startsThread)
         let cut = PopularCommentsCut(
             threadHeights: atRest.map(threadHeight),
             room: room,
@@ -1502,8 +1503,7 @@ final class CommentStream: NSObject {
         }
     }
 
-    /// "See all n comments", the post's count — "See all comments" while it
-    /// is unknown.
+    /// "See all n comments", the post's count — "See all comments" while it is unknown.
     private var seeAllTitle: String {
         guard let count = host.postCommentCount, count > 1 else { return "See all comments" }
         return "See all \(count.formatted()) comments"

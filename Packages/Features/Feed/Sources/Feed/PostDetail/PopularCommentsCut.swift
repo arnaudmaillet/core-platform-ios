@@ -8,7 +8,10 @@ import CoreGraphics
 /// all it reads.
 ///
 /// - **A thread** is the way it stands at rest: a top-level comment with its
-///   reply fold (`CommentThreadPresentation`, nothing expanded).
+///   reply fold (`CommentThreadPresentation`, nothing expanded), without
+///   the replies the viewer sent from this panel (#2572): a reply never
+///   changes which threads show, nor does opening a thread. The stream
+///   grows past its room and scrolls instead, its pull at its end.
 /// - **When everything fits** and the server holds no more, there is no
 ///   "See all": the stream doesn't scroll.
 /// - **Never zero:** the first thread always shows, even when the caption
