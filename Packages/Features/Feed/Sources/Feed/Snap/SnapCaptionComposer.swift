@@ -38,6 +38,14 @@ enum SnapCaptionComposer {
         }()
     }
 
+    /// The bucket the caption's emotes are drawn at on a `scale` screen,
+    /// before any caption is laid out: the label's estimate for the
+    /// register's font (`EmoteLabel.emotePixelSide(for:scale:)`). What a
+    /// flight's take-off warm asks for when no page has drawn one yet (#2580).
+    static func emotePixelSide(scale: CGFloat) -> Int {
+        EmoteLabel.emotePixelSide(for: UIFont.appFont(forTextStyle: CaptionRegister.textStyle), scale: scale)
+    }
+
     /// The caption typography — the shared attributes for the caption glyphs
     /// (`.body`) and, for `secondary`, the appended timestamp: a SMALLER
     /// `.footnote` register in its own grey (`timestampInk`, #2052), so it

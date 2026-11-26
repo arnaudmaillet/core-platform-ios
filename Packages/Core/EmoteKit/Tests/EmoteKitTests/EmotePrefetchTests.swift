@@ -51,4 +51,30 @@ struct EmotePrefetchTests {
         #expect(prefetch.pendingKeys.isEmpty)
         withExtendedLifetime(engine) {}
     }
+
+    /// ⚠️ AN URGENT WARM DOES NOT WAIT OUT THE BAKE DELAY (#2580): a flight's
+    /// caption is certainly about to be drawn, and the label that draws it
+    /// joins the request already running. A delay of an hour stands in for
+    /// the ordinary 150 ms: only an urgent request reaches the bake.
+    @Test func anUrgentWarmBakesWithoutTheDelay() async throws {
+        let asked = AskCounter()
+        let engine = EmoteEngine(diskCache: nil, animationProvider: { _ in
+            asked.count += 1
+            return nil
+        })
+        engine.bakeDelay = .seconds(3_600)
+        let prefetch = EmotePrefetch(engine: engine)
+
+        prefetch.warm(["take-off 🔥"], pixelSide: 64, urgent: true)
+        let baked = await settle { asked.count > 0 }
+        #expect(baked, "the urgent warm waited out the bake delay")
+        prefetch.cancelAll()
+        withExtendedLifetime(engine) {}
+    }
+}
+
+/// How many bakes an engine started.
+@MainActor
+private final class AskCounter {
+    var count = 0
 }

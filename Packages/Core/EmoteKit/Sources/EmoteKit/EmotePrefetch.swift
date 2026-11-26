@@ -1,12 +1,14 @@
 import UIKit
 
 /// Warms the emotes of text about to be shown (#1504): the captions of the
-/// pages ahead of the one on screen, so their art is resident when they
-/// arrive and a label installs it in its first layout pass — no skeleton.
+/// pages ahead of the one on screen, and the caption a hero flight brings in
+/// (#2580), so their art is resident when they arrive and a label installs it
+/// in its first layout pass — no skeleton.
 ///
 /// A plain, non-urgent request per emote (`EmoteEngine.requestArt`): it waits
 /// `EmoteEngine.bakeDelay` before baking, so a page flicked past costs
 /// nothing, and a request no longer wanted is cancelled at the next `warm`.
+/// An URGENT warm is for text that is certainly about to be drawn.
 /// The motion is the label's (`EmoteMotion.policy`): the still frame when
 /// emotes may not move, the loop otherwise.
 @MainActor
@@ -21,7 +23,13 @@ public final class EmotePrefetch {
     /// Asks for the emotes of `texts` at `pixelSide` (the bucket the label
     /// that will draw them uses, `EmoteLabel.emotePixelSide`), and lets go of
     /// what an earlier `warm` asked for that `texts` no longer hold.
-    public func warm(_ texts: [String], pixelSide: Int) {
+    ///
+    /// `urgent`: the text is certainly about to be drawn — a flight's caption,
+    /// asked for at take-off (#2580). Its bakes start at once rather than
+    /// after `EmoteEngine.bakeDelay`: the label that draws it asks a moment
+    /// later and joins the request already running, and a non-urgent one
+    /// would have made it wait out the delay too.
+    public func warm(_ texts: [String], pixelSide: Int, urgent: Bool = false) {
         guard let engine else { return }
         let motion: EmoteEngine.Motion = EmoteMotion.policy == .still ? .still : .loop
         var wanted = Set<String>()
@@ -32,7 +40,9 @@ public final class EmotePrefetch {
                 guard wanted.insert(key).inserted, requests[key] == nil,
                       engine.cachedArt(for: emote, pixelSide: pixelSide, motion: motion) == nil else { continue }
                 var answered = false
-                let request = engine.requestArt(for: emote, pixelSide: pixelSide, motion: motion) { [weak self] _ in
+                let request = engine.requestArt(
+                    for: emote, pixelSide: pixelSide, motion: motion, urgent: urgent
+                ) { [weak self] _ in
                     answered = true
                     self?.requests[key] = nil
                 }

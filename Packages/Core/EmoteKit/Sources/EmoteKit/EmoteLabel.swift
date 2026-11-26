@@ -25,9 +25,10 @@ import UIKit
 /// animates, not for a frame: the square shows the emote's own art (moving,
 /// or one still frame under Reduce Motion), its skeleton while the art is on
 /// its way (`EmoteSkeleton`, #987), a still skeleton when no art can be had,
-/// the frame it was on while a flight is in the air (#922) — and nothing at
-/// all while the label cannot be seen. Only `animatesEmotes` off draws the
-/// glyphs.
+/// the frame it was on while a flight is in the air (#922) — its art's poster
+/// frame, or its skeleton, for a label that arrives with the flight (#2580) —
+/// and nothing at all while the label cannot be seen. Only `animatesEmotes`
+/// off draws the glyphs.
 ///
 /// ## What it costs
 ///
@@ -55,9 +56,16 @@ open class EmoteLabel: UILabel {
     /// The bucket an emote in this label is drawn at: the one its emotes last
     /// used, else the label's font's (an emoji's ink is about 1.2 em).
     public var emotePixelSide: Int {
-        if let lastEmotePixelSide { return lastEmotePixelSide }
-        let scale = traitCollection.displayScale > 0 ? traitCollection.displayScale : 3
-        return EmoteEngine.pixelSide(forPoints: font.pointSize * 1.2, scale: scale)
+        lastEmotePixelSide ?? Self.emotePixelSide(for: font, scale: traitCollection.displayScale)
+    }
+
+    /// The bucket an emote set in `font` is drawn at on a `scale` screen,
+    /// before any label has laid one out: an emoji's ink is about 1.2 em. For
+    /// a prefetch made before the label that will draw the text exists (a
+    /// flight's caption at take-off, #2580). A scale of 0 (no screen yet)
+    /// reads as 3.
+    public static func emotePixelSide(for font: UIFont, scale: CGFloat) -> Int {
+        EmoteEngine.pixelSide(forPoints: font.pointSize * 1.2, scale: scale > 0 ? scale : 3)
     }
 
     public var engine: EmoteEngine = .shared {
@@ -418,14 +426,22 @@ open class EmoteLabel: UILabel {
     /// Places, starts, moves and removes the players for the current layout.
     private func placeEmotes() {
         let textBox = emoteTextRect(forBounds: bounds)
-        // ⚠️ NOT WHILE A FLIGHT IS IN THE AIR (`FlightActivity`): what is
-        // placed holds the frame it was on (#922) — never the glyph (#1504) —
-        // and plays on when the flight lands.
-        if hasEmotes, animatesEmotes, FlightActivity.isActive(for: self) {
+        let inFlight = hasEmotes && animatesEmotes && FlightActivity.isActive(for: self)
+        // ⚠️ A LABEL ALREADY PLACED SITS A FLIGHT OUT (`FlightActivity`): what
+        // is placed holds the frame it was on (#922) — never the glyph
+        // (#1504) — is not moved, and plays on when the flight lands.
+        if inFlight, !players.isEmpty {
             players.values.forEach { $0.view.pause() }
             updateCoveredMarks()
             return
         }
+        // ⚠️ ONE THAT ARRIVES WITH THE FLIGHT PLACES ITS EMOTES (#2580): the
+        // post page a hero brings in (the flight's replica of its caption, a
+        // revealed thread) has no player yet, and its squares stayed empty
+        // until the landing — a label that can be seen, drawing nothing, which
+        // the charter forbids (#1504). It places them as on any first display,
+        // only paused: the art on its poster frame (`present`), or its
+        // skeleton while the art is on its way, and they play at the landing.
         let verdict: EmoteVisibility.Verdict = hasEmotes && animatesEmotes
             ? EmoteVisibility.verdict(for: self) : .invisible
         lastSeenVisible = verdict == .visible
@@ -476,6 +492,8 @@ open class EmoteLabel: UILabel {
             }
             player.view.frame = square
             player.skeleton.frame = square
+            // Nothing plays through a flight: what was just placed holds.
+            guard !inFlight else { continue }
             if player.awaitsSlot, let art = player.art {
                 // Art that arrived while every playback slot was taken.
                 present(art, in: player, index: index)
@@ -544,9 +562,14 @@ open class EmoteLabel: UILabel {
             player.holdsSlot = true
         }
         player.awaitsSlot = false
-        player.view.setArt(art)
-        // Art landing mid-flight holds its first frame until the landing.
-        if FlightActivity.isActive(for: self) { player.view.pause() }
+        if FlightActivity.isActive(for: self) {
+            // Art placed or landing while a flight is in the air holds its
+            // POSTER frame — never a blank first frame (`posterFrame`) — and
+            // plays on from it at the landing, on the shared clock (#2580).
+            player.view.setArt(art, phase: art.posterFrame(), paused: true)
+        } else {
+            player.view.setArt(art)
+        }
         player.view.isHidden = false
         player.isShowing = true
         // Over a skeleton, the arrival every emote place plays (#1071).

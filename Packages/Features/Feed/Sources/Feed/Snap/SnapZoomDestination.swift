@@ -1,5 +1,6 @@
 import CoreModels
 import DesignSystem
+import EmoteKit
 import LaunchArguments
 import MediaCore
 import MediaPlayback
@@ -77,6 +78,14 @@ final class SnapZoomDestination {
     /// The surface currently on loan to a dismissal's flight card, so a
     /// cancelled grab can take it back.
     var donatedLiveView: VideoRenderView?
+
+    /// The take-off warm of the flight's caption emotes (#2580).
+    private let flightEmotePrefetch = EmotePrefetch()
+    /// Where that warm goes: the shared engine, urgently. A test records it.
+    lazy var warmFlightEmotes: @MainActor (_ captions: [String], _ pixelSide: Int) -> Void = {
+        [prefetch = self.flightEmotePrefetch] captions, side in
+        prefetch.warm(captions, pixelSide: side, urgent: true)
+    }
 
     init(host: any SnapZoomDestinationHost) {
         self.host = host
@@ -401,6 +410,7 @@ final class SnapZoomDestination {
         // page it already holds; the first present stamps both flags on the
         // cell as it is realised (`apply` / `willDisplay`).
         host.activeSnapCell?.setChromeHeldForFlight(true)
+        warmFlightCaptionEmotes()
         #if DEBUG
         if LaunchArgument.zoomLiveLog.isPassed() {
             // Read against `[page-play] start` and the landing below: a start
@@ -611,13 +621,36 @@ final class SnapZoomDestination {
         return mirrored
     }
 
-    /// Configures the replica from the page the card flies to/from: the active
-    /// page if one is settled, else the first post (a map tap's feed opens on
-    /// its tapped post). No-op until that model exists.
-    func configureFlightChrome(_ chrome: SnapChromeView) {
+    /// The post the card flies to or from: the active page if one is
+    /// settled, else the first post (a map tap's feed opens on its tapped
+    /// post). Nil until that model exists.
+    private var flightModel: FeedItemDisplayModel? {
         let index = host.lifecycle.activeIndex ?? 0
-        guard host.orderedIDs.indices.contains(index),
-              let model = host.modelsByID[host.orderedIDs[index]] else { return }
+        guard host.orderedIDs.indices.contains(index) else { return nil }
+        return host.modelsByID[host.orderedIDs[index]]
+    }
+
+    /// ⚠️ THE CAPTION'S EMOTES ARE ASKED FOR AT TAKE-OFF (#2580), in the
+    /// staging turn, before the push: every hero that opens a post page lands
+    /// here — the map's, a profile's, the place page's, Discover's, search's —
+    /// so the warm lives in one place. The flight's replica draws the caption
+    /// from its first frame, paused (`EmoteLabel`), and the push's own work
+    /// (~100 ms before that frame, `ZoomFlightProfiler`) is time the art can
+    /// land in: poster frames rather than skeletons. Urgent, at the bucket the
+    /// page's caption draws at — the realised page's if there is one, else the
+    /// caption register's. A cold open has no post yet: its replica asks for
+    /// the art itself when the post lands mid-flight.
+    private func warmFlightCaptionEmotes() {
+        guard let caption = flightModel?.caption, !caption.isEmpty else { return }
+        let side = host.activeSnapCell?.captionEmotePixelSide
+            ?? SnapCaptionComposer.emotePixelSide(scale: host.traitCollection.displayScale)
+        warmFlightEmotes([caption], side)
+    }
+
+    /// Configures the replica from the page the card flies to/from
+    /// (`flightModel`). No-op until that model exists.
+    func configureFlightChrome(_ chrome: SnapChromeView) {
+        guard let model = flightModel else { return }
         // The page's column, so the replica flies the bubbles it lands on —
         // and no wheel under v2 (#2408).
         host.applyColumnLayout(to: chrome, for: model)
