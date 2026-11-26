@@ -3,6 +3,7 @@ import CoreStorage
 import DesignSystem
 import LaunchArguments
 import MediaCore
+import MediaUI
 import UIKit
 import CoreNavigation
 
@@ -171,11 +172,10 @@ final class SearchResultsViewController: UIViewController {
         postsPage = postSurfaces?.makePostSurface(style: .discover)
             ?? SearchPendingSurfaceViewController(kind: .posts)
         super.init(nibName: nil, bundle: nil)
-        // ⚠️ IN THE INITIALISER. A navigation controller reads this when the
-        // push BEGINS, and `viewDidLoad` can run inside that same push — set
-        // there it is a coin toss whether the bar goes. The screen underneath
-        // hides it too, so this only keeps it hidden rather than hiding it.
+        // ⚠️ IN THE INITIALISER: a navigation controller reads it when the push BEGINS, and `viewDidLoad` can run
+        // inside that push. The screen underneath hides the bar too; this only keeps it hidden.
         hidesBottomBarWhenPushed = true
+        traitOverrides.avatarMotionScreen = .search
     }
 
     @available(*, unavailable)

@@ -6,6 +6,7 @@ import CoreNetworkingMocks
 import Foundation
 import MediaCore
 import MediaUI
+import PostSurfaces
 import Testing
 import UIKit
 @testable import Chat
@@ -149,6 +150,46 @@ struct GroupAvatarChatTests {
         let cell = MessageRequestCell(style: .default, reuseIdentifier: nil)
         cell.configure(with: model)
         #expect(cell.debugGroupAvatar?.content == model.groupAvatar)
+    }
+
+    // MARK: - Motion (#2454)
+
+    /// The Messages list plays one face at a time, unread rows first: an
+    /// unread row raises its face, or its group's, whose first face alone may
+    /// play — one avatar, one turn.
+    @Test func anUnreadRowRaisesItsFaceAndAGroupOffersItsFirstFaceOnly() async throws {
+        let rows = try await make().loadInbox(.inbox, after: nil).conversations
+        let studio = try #require(rows.first { $0.id == ConversationID("grp-studio") })
+        let view = ConversationRowView()
+        view.configure(with: ConversationDisplayModel(conversation: studio, isUnread: true, unreadCount: 1))
+        let group = try #require(view.debugGroupAvatar)
+        #expect(group.motionPriority == .raised, "an unread group did not rank first")
+        #expect(group.stackPlayable == [true, false], "a face past the first may play")
+        view.configure(with: ConversationDisplayModel(conversation: studio))
+        #expect(group.motionPriority == .normal, "a read row kept the unread rank")
+
+        let direct = try #require(rows.first { $0.kind == .direct })
+        view.configure(with: ConversationDisplayModel(conversation: direct, isUnread: true, unreadCount: 1))
+        #expect(view.debugFacePriority == .raised, "an unread conversation did not rank first")
+
+        let invitation = try #require(rows.first { $0.id == ConversationID("grp-nightwalk") })
+        let cell = MessageRequestCell(style: .default, reuseIdentifier: nil)
+        cell.configure(with: ConversationDisplayModel(conversation: invitation, isUnread: true, unreadCount: 1))
+        #expect(cell.debugGroupAvatar?.motionPriority == .raised, "an unread invitation did not rank first")
+    }
+
+    /// Each Messages screen declares itself once (`AvatarMotionPolicy`): the
+    /// conversations and the requests one sequence each; a conversation's
+    /// header pill its own screen, the media pages' pill by default.
+    @Test func theMessagesScreensDeclareTheirMotion() {
+        let catalog = InboxCatalog(repository: make())
+        let chats = ConversationListViewController(viewModel: ConversationListViewModel(catalog: catalog))
+        let requests = MessageRequestsViewController(viewModel: MessageRequestsViewModel(catalog: catalog))
+        #expect(chats.traitOverrides.avatarMotionScreen == .messages)
+        #expect(requests.traitOverrides.avatarMotionScreen == .messages)
+        #expect(AvatarMotionPolicy.standard.rules[.messages] == .sequence(order: .unreadFirst))
+        #expect(SnapAuthorIdentityView(motionScreen: .threadHeader).traitOverrides.avatarMotionScreen == .threadHeader)
+        #expect(SnapAuthorIdentityView().traitOverrides.avatarMotionScreen == .authorPill)
     }
 
     /// A DM and a channel have no group picture: a DM is its peer, a

@@ -1,4 +1,5 @@
 import DesignSystem
+import MediaUI
 import UIKit
 
 /// The hero page's measures shared by every page kind.
@@ -142,6 +143,9 @@ open class HeroPageViewController<Tab: Equatable>: UIViewController {
         self.selectorPlacement = selectorPlacement
         self.dockedSlot = dockedSlot
         super.init(nibName: nil, bundle: nil)
+        // Its tabs list posts: their authors' motion is the table's
+        // (`AvatarMotionPolicy`); the header declares its own.
+        traitOverrides.avatarMotionScreen = .posts
     }
 
     @available(*, unavailable)

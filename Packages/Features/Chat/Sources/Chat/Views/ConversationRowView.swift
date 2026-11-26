@@ -117,6 +117,11 @@ final class ConversationRowView: UIView {
         timeLabel.text = model.timeText
         mutedIcon.isHidden = !model.isMuted
         applyUnreadStyle(model.isUnread)
+        // Unread rows play first in the Messages list's sequence
+        // (`AvatarMotionPolicy`: unread first), a group's face included.
+        let priority: AvatarMotionPriority = model.isUnread ? .raised : .normal
+        avatarView.avatar.motionPriority = priority
+        groupAvatar.motionPriority = priority
         // The COUNT, not just presence — `chat.v1` still serves no
         // `unread_count`, so this is counted from the history tail the inbox
         // already fetches (`Conversation.unreadCount`). Never at zero.
@@ -378,6 +383,8 @@ extension ConversationRowView {
     var debugGlyphs: [UIImageView] { [mutedIcon, pinnedIcon].filter { !$0.isHidden } }
     /// The face's badge. Tests.
     var debugBadge: RelationBadgeView? { avatarView.badge }
+    /// The face's rank in the Messages list's sequence (#2454). Tests.
+    var debugFacePriority: AvatarMotionPriority { avatarView.avatar.motionPriority }
     /// Whether the face has the badge's cutout taken out. Tests.
     var debugFaceIsCutOut: Bool { avatarView.faceIsCutOut }
     /// The members' faces stacked, while a photoless group shows them. Tests.

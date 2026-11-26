@@ -124,12 +124,12 @@ final class SearchViewController: UIViewController {
         // ⚠️ IN THE INITIALISER, not `viewDidLoad`. A navigation controller
         // reads this when the push BEGINS, and `viewDidLoad` can run inside
         // that same push — set there it is a coin toss whether the bar goes.
-        //
         // This screen is a destination now, not a tab root: it is pushed from
         // the Explore and For You headers, and the bar it would sit under
         // belongs to the screen it came from. UIKit puts that bar back on the
         // pop; the fade below is only about HOW it leaves and returns.
         hidesBottomBarWhenPushed = true
+        traitOverrides.avatarMotionScreen = .search
         #if DEBUG
         installKeyboardTraceIfRequested()
         #endif

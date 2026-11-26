@@ -206,6 +206,13 @@ public nonisolated enum GroupAvatarLayout {
 /// the quiet ground (`MonogramAvatarView.plateColor`): never given a picture,
 /// its plate never turns the final initials' grey.
 ///
+/// ⚠️ ONLY THE FIRST FACE MAY PLAY (#2454): the owner, first in the data
+/// plane's stable order, follows its screen's rule; the other faces, the
+/// "+N" and a group's photo keep their still. The group counts as one avatar
+/// in a sequence: one rank, one turn. Its floor is 24 pt, not 32
+/// (`AnimatedAvatarPlayer.groupFaceMinimumDiameter`): in a row, the first
+/// face of three or four is under 32.
+///
 /// It sizes itself from its bounds (a square; the stack centres in a
 /// rectangle) and is one accessibility element, "Group: Sofía, Tom and 2
 /// others" — a host that speaks for it (a row, the pill) turns that off.
@@ -239,6 +246,8 @@ public final class GroupAvatarView: UIView {
         self.size = size
         single = AvatarView(diameter: diameter, size: size)
         super.init(frame: .zero)
+        // A group's photo is a still (#2233 § 1).
+        single.animation.holdsStill = true
         isUserInteractionEnabled = false
         isAccessibilityElement = true
         accessibilityTraits = .image
@@ -253,6 +262,12 @@ public final class GroupAvatarView: UIView {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     public override var intrinsicContentSize: CGSize { CGSize(width: diameter, height: diameter) }
+
+    /// Where the group ranks in a sequence ordered by it (an unread row):
+    /// its first face's, the one that plays.
+    public var motionPriority: AvatarMotionPriority = .normal {
+        didSet { faceViews.first?.motionPriority = motionPriority }
+    }
 
     /// Draws `content` — nil for nothing (a recycled row). The same content
     /// again changes nothing; a change of faces keeps the faces already
@@ -318,7 +333,7 @@ public final class GroupAvatarView: UIView {
         let limit: Int = more > 0 ? GroupAvatarLayout.maximumFaces - 1 : GroupAvatarLayout.maximumFaces
         let shown: [GroupAvatarFace] = Array(faces.prefix(limit))
         while faceViews.count < shown.count {
-            faceViews.append(makeFaceView())
+            faceViews.append(makeFaceView(playable: faceViews.isEmpty))
             appliedFaces.append(nil)
         }
         for (index, view) in faceViews.enumerated() {
@@ -342,7 +357,7 @@ public final class GroupAvatarView: UIView {
             }
         }
         if more > 0 {
-            let view = moreView ?? makeFaceView()
+            let view = moreView ?? makeFaceView(playable: false)
             moreView = view
             view.isHidden = false
             view.setMonogram("+\(more)")
@@ -352,9 +367,13 @@ public final class GroupAvatarView: UIView {
     }
 
     /// A face of the stack: the app's avatar, cut by the faces in front of
-    /// it through a mask of its own.
-    private func makeFaceView() -> AvatarView {
+    /// it through a mask of its own. `playable`: the stack's first face,
+    /// the only one that may play; every other keeps its still.
+    private func makeFaceView(playable: Bool) -> AvatarView {
         let view = AvatarView(diameter: diameter, size: size)
+        view.animation.holdsStill = !playable
+        view.animation.isGroupFirstFace = playable
+        view.motionPriority = motionPriority
         view.isHidden = true
         view.isUserInteractionEnabled = false
         let mask = CAShapeLayer()
@@ -406,6 +425,13 @@ public final class GroupAvatarView: UIView {
         if case .stack(_, let more)? = drawing, more > 0 { return more }
         return nil
     }
+
+    /// Whether each stacked face may play, back to front, the "+N" last.
+    /// Tests.
+    public var stackPlayable: [Bool] { stackedViews.map { !$0.animation.holdsStill } }
+
+    /// Whether the photo or the initials' disc may play: never. Tests.
+    public var singlePlayable: Bool { !single.animation.holdsStill }
 
     /// Whether one disc is drawn — the photo or the initials. Tests.
     public var drawsSingleDisc: Bool { !single.isHidden }

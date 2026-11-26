@@ -233,7 +233,8 @@ public final class AvatarView: UIView {
     }
 
     /// An animated avatar's player over the picture (#1358): the sheet's
-    /// last frame at rest, played once by the rule (`AnimatedAvatarPlayer`).
+    /// last frame at rest, played once by its screen's rule
+    /// (`AnimatedAvatarPlayer`).
     /// A still avatar shows nothing of it.
     public private(set) lazy var animation: AnimatedAvatarPlayer = {
         let player = AnimatedAvatarPlayer.attach(to: picture)
@@ -254,12 +255,22 @@ public final class AvatarView: UIView {
         monogram.isCovered = true
     }
 
-    /// When this avatar plays: when the rounds pick it (the default), on its
-    /// first display on a screen where it is large and alone, or when its
-    /// person changes.
-    public var animationTrigger: AnimatedAvatarPlayer.Trigger {
-        get { animation.trigger }
-        set { animation.trigger = newValue }
+    // When this avatar plays is its screen's rule, never its own (#2454):
+    // the screen declares itself (`traitOverrides.avatarMotionScreen`) and
+    // the table (`AvatarMotionPolicy`) holds the rule.
+
+    /// Where it ranks in a sequence ordered by it: its host raises an unread
+    /// row (`AnimatedAvatarPlayer.motionPriority`).
+    public var motionPriority: AvatarMotionPriority {
+        get { animation.motionPriority }
+        set { animation.motionPriority = newValue }
+    }
+
+    /// A fresh view standing for a change of person: under `.change`, it
+    /// plays once on screen (`AnimatedAvatarPlayer.standsForChange`).
+    public var standsForChange: Bool {
+        get { animation.standsForChange }
+        set { animation.standsForChange = newValue }
     }
 
     /// The picture on show, nil while the initials are — an animated

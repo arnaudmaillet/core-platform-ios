@@ -2,6 +2,7 @@ import DesignSystem
 import CoreModels
 import CoreNavigation
 import MediaCore
+import MediaUI
 import UIKit
 
 /// The inbox's "Requests" surface: conversations from accounts the viewer
@@ -113,6 +114,8 @@ final class MessageRequestsViewController: UIViewController {
         self.avatars = relations?.recording(avatars) ?? avatars
         self.relations = relations
         super.init(nibName: nil, bundle: nil)
+        // The Messages list's rule: one face at a time (`AvatarMotionPolicy`).
+        traitOverrides.avatarMotionScreen = .messages
         // Published from the init, off the view model, and from off screen
         // too — a request landing while the viewer is on another tab is
         // exactly what the badge is for, and the inbox reads a surface's

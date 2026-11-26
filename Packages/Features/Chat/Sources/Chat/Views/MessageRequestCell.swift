@@ -125,6 +125,7 @@ final class MessageRequestCell: UITableViewCell {
             loadAvatar(for: model, imagePipeline: imagePipeline, avatars: avatars)
         }
         applyUnreadStyle(model.isUnread)
+        setMotionPriority(unread: model.isUnread)
         nameLabel.text = model.title
         previewLabel.text = Self.previewText(for: model)
         // The separator belongs to the timestamp, so a conversation with no
@@ -168,6 +169,14 @@ final class MessageRequestCell: UITableViewCell {
     /// conversation has no activity to date, so nothing is rendered at all.
     static func timestampText(for model: ConversationDisplayModel) -> String? {
         model.timeText.isEmpty ? nil : "· \(model.timeText)"
+    }
+
+    /// An unread row's face plays first in the Messages list's sequence
+    /// (`AvatarMotionPolicy`: unread first): the face, or the group's.
+    private func setMotionPriority(unread: Bool) {
+        let priority: AvatarMotionPriority = unread ? .raised : .normal
+        avatarView.avatar.motionPriority = priority
+        groupAvatar.motionPriority = priority
     }
 
     /// An unread request carries its preview in full strength and weight — the

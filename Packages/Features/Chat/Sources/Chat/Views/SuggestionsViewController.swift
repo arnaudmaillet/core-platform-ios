@@ -2,6 +2,7 @@ import DesignSystem
 import CoreModels
 import CoreNavigation
 import MediaCore
+import MediaUI
 import UIKit
 
 /// The inbox's "Suggestions" surface: accounts worth following, each with an
@@ -65,6 +66,7 @@ final class SuggestionsViewController: UIViewController {
         self.viewModel = viewModel
         self.imagePipeline = imagePipeline
         super.init(nibName: nil, bundle: nil)
+        traitOverrides.avatarMotionScreen = .suggestions
     }
 
     @available(*, unavailable)

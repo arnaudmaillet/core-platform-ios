@@ -98,6 +98,15 @@ struct HeroHeaderViewTests {
         }
     }
 
+    /// The header declares its screen once (#2454): its avatar takes the
+    /// table's header rule — a first display, then the rounds — and nobody
+    /// sets it by hand.
+    @Test func theHeaderTakesItsAvatarsMotionFromTheTable() {
+        let header = makeHeader(avatar: .person)
+        #expect(header.traitOverrides.avatarMotionScreen == .profileHeader)
+        #expect(AvatarMotionPolicy.standard.rules[.profileHeader] == .firstAppearance(then: .rounds(picks: 1...1)))
+    }
+
     /// The name wears a chevron only while it opens something, and a tap
     /// on it says so (the owner, 2026-11-08: the own profile's switcher).
     @Test func theNameWearsAChevronWhileItOpensSomething() {

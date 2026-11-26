@@ -76,6 +76,7 @@ final class InboxSearchResultsViewController: UIViewController {
         faces = PersonRowFaces(avatars: recorded, imagePipeline: imagePipeline)
         self.relations = relations
         super.init(nibName: nil, bundle: nil)
+        traitOverrides.avatarMotionScreen = .search
     }
 
     @available(*, unavailable)

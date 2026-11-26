@@ -35,6 +35,7 @@ final class PersonListPageViewController: UIViewController {
         self.feed = feed
         self.imagePipeline = imagePipeline
         super.init(nibName: nil, bundle: nil)
+        traitOverrides.avatarMotionScreen = .personLists
     }
 
     @available(*, unavailable)

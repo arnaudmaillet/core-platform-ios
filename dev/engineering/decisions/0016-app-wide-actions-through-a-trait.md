@@ -21,6 +21,8 @@ It is **not** right for anything else, which stays explicit (initializer, builde
 - anything **per page or per screen**: a page's staking, its saved pile, its router;
 - any **viewer state** ([ADR 0008](0008-viewer-state-injected-and-scoped.md)).
 
+This record is about dependencies. A plain value that says where a view is drawn, declared once by each screen the way UIKit's own traits are (the avatar motion screen, `AvatarMotionTrait`, #2454), is no dependency and may be a trait.
+
 ## Consequences
 - Adding a host of the card costs nothing: it inherits the trait.
 - The dependency is no longer visible at the card's construction site. Its doc comment and this record say where it comes from.
