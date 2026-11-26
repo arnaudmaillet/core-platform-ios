@@ -21,10 +21,10 @@ import UploadInterface
 /// coordinator only assembles them and holds them alive.
 ///
 /// Tabs are set via the modern `UITabBarController.tabs` API: three places
-/// (#2489, the owner 2026-11-18), `| Explore  Messages |  Profile |` with
-/// Profile apart on iOS 27, or in one bubble with `-tabbar-grouped` (and on
-/// iOS 26 either way) — see `ShellTabs`. For You left the bar with #2453, and
-/// the "+" with #2489: it is Explore's top bar item now (`CreateBarItem`).
+/// (#2489, the owner 2026-11-18) in one centred bubble, `[ Explore · Messages
+/// · Profile ]`, Profile no longer apart (#2579, the owner 2026-11-26) — see
+/// `ShellTabs`. For You left the bar with #2453, and the "+" with #2489: it
+/// is Explore's top bar item now (`CreateBarItem`).
 ///
 /// Profile is a root tab, carrying the viewer's own avatar as its icon
 /// (`ProfileTabCoordinator`) — it is the canonical entry point, so it is the one
@@ -117,14 +117,24 @@ final class MainTabCoordinator: NSObject, Coordinator {
     /// The Profile tab's hold, hung on the BAR: the iOS 26 bar takes a touch
     /// on its items for its own selection, so a recognizer on an overlay
     /// never began. It looks only at touches on the Profile tab
-    /// (`shouldReceive`), wherever that tab stands — apart or grouped
-    /// (#2489): `UITab.frame(in:)` follows it.
+    /// (`shouldReceive`): `UITab.frame(in:)` finds it in the bubble.
+    ///
+    /// ⚠️ **IT RUNS BESIDE THE BAR'S OWN SELECTION** (#2579). The bar selects
+    /// its tabs, and drives the lens's press response, through a recognizer
+    /// of its own on the same view. Left exclusive, that one won every touch
+    /// inside the bubble and the hold never began: measured in the iOS 27.2
+    /// simulator, a real hold on Profile selected the tab, and opened the
+    /// switcher once the bar's recognizer was disabled. Only Profile standing
+    /// apart (#2489) escaped it. So the two recognize together
+    /// (`shouldRecognizeSimultaneouslyWith`), and the bar keeps its press
+    /// response; once the hold is recognized, it takes the touch from the
+    /// bar's (`takeTouchFromBar`), so the lift selects nothing.
     ///
     /// **Hold, slide, release** as a system menu: the hold opens the switcher
     /// (`beginTracking`), the finger lights the rows it crosses, and lifting
     /// it on one picks it — lifted on none, the switcher stays open. A tap
     /// still selects the tab: before the hold is recognized a lift fails it,
-    /// and once recognized it cancels the touch, which is no tap.
+    /// and the bar's selection takes the tap as it always did.
     private lazy var profileHold: UILongPressGestureRecognizer = {
         let hold = UILongPressGestureRecognizer(target: self, action: #selector(profileOverlayHeld(_:)))
         hold.minimumPressDuration = 0.4
@@ -133,11 +143,14 @@ final class MainTabCoordinator: NSObject, Coordinator {
     }()
     /// The switcher the hold opened, following the finger until it lifts.
     private var switcherTracking: (any ProfileSwitcherTracking)?
+    /// The touch the hold is following, whose other recognizers on the bar
+    /// it cancels once recognized (`takeTouchFromBar`).
+    private weak var profileHoldTouch: UITouch?
 
     #if DEBUG
     /// `-profile-switcher-hold`: the Profile tab's hold, past its recognition
-    /// — the switcher opened from the tab, as the finger would open it. The
-    /// simulator delivers no hold to the bar's items.
+    /// — the switcher opened from the tab, as the finger would open it, for
+    /// captures taken with no finger on the screen.
     func debugHoldProfileTab() {
         alignMenuOverlays()
         switcherTracking = profileSwitcher?.beginTracking(
@@ -151,6 +164,7 @@ final class MainTabCoordinator: NSObject, Coordinator {
         switch gesture.state {
         case .began:
             guard isMember else { return }
+            takeTouchFromBar()
             switcherTracking = profileSwitcher?.beginTracking(
                 from: profileMenuOverlay, over: tabBarController, includesAddProfile: true,
                 onSwitch: {}, onAddProfile: { [weak self] in self?.presentAddProfilePlaceholder() }
@@ -172,10 +186,6 @@ final class MainTabCoordinator: NSObject, Coordinator {
         open: { [weak self] destination in self?.openCreate(destination) },
         signIn: { [weak self] in self?.onSignIn() }
     )
-
-    /// Where Profile stands: apart (iOS 27) or grouped (`-tabbar-grouped`).
-    /// Read once, at launch.
-    private let tabLayout = ShellTabs.layout()
 
     /// Tabs paired with their `AppTab`, in bar order — the lookup `selectTab`
     /// resolves against. Every bar button is in here.
@@ -285,8 +295,7 @@ final class MainTabCoordinator: NSObject, Coordinator {
             container: container, notificationsBell: notificationsBell, onSignIn: onSignIn
         )
         self.messagesTab = messagesTab
-        // Bar order: the three places (`ShellTabs`). Profile stands apart
-        // through `prominentTabIdentifier` below, not through its type.
+        // Bar order: the three places (`ShellTabs`), in one bubble.
         orderedTabs = [
             (.explore, ExploreTabCoordinator(
                 container: container,
@@ -338,10 +347,10 @@ final class MainTabCoordinator: NSObject, Coordinator {
         }
         tabBarController.tabBar.addGestureRecognizer(profileHold)
         // ⚠️ **iOS 27 DRAWS APART THE TAB `prominentTabIdentifier` NAMES**:
-        // Profile by default, none under `-tabbar-grouped` (#2489). With no
-        // `UISearchTab` left in the bar, nothing else stands apart, so iOS 26
-        // groups all three either way. See `ShellTabs`.
-        ShellTabs.applyProminence(tabLayout, to: tabBarController)
+        // none, so the bar is one centred bubble, for a member and a guest
+        // alike (#2579). With no `UISearchTab` left in the bar, iOS 26 has
+        // nothing to detach either. See `ShellTabs`.
+        ShellTabs.drawAsOneBubble(tabBarController)
         // Profile's long-press switcher. `UITab` carries no menu of its own —
         // `UITab`, `UITabBar`, `UITabBarItem` and the controller delegate were
         // all checked against the iOS 26 SDK and expose nothing — so it rides
@@ -490,9 +499,8 @@ extension MainTabCoordinator: UITabBarControllerDelegate {
     /// (`AppRoute.gatedAction`) and lands in the inbox after.
     ///
     /// ⚠️ THE SAME TAB OBJECTS, re-composed with `setTabs` — never rebuilt. The
-    /// Profile tab is re-dressed as Settings by its coordinator: the
-    /// prominent identifier, the hold and the switcher's anchor are keyed on
-    /// it.
+    /// Profile tab is re-dressed as Settings by its coordinator: the hold and
+    /// the switcher's anchor are keyed on it.
     ///
     /// A viewer standing on a tab that leaves (a member on Messages who logs
     /// out) lands on Explore — set before the bar changes, so the bar never
@@ -793,7 +801,31 @@ extension MainTabCoordinator: UIGestureRecognizerDelegate {
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
         guard gestureRecognizer === profileHold, isMember, tabBarController.presentedViewController == nil,
               let tab = profileTab?.tab, let bar = gestureRecognizer.view,
-              let frame = tab.frame(in: bar), !frame.isEmpty else { return false }
-        return frame.contains(touch.location(in: bar))
+              let frame = tab.frame(in: bar), !frame.isEmpty,
+              frame.contains(touch.location(in: bar)) else { return false }
+        profileHoldTouch = touch
+        return true
+    }
+
+    /// The hold and the bar's own recognizers, on the same view, follow the
+    /// same touch: the bar's selection keeps its press response and its tap
+    /// (see `profileHold`).
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+    ) -> Bool {
+        gestureRecognizer === profileHold && otherGestureRecognizer.view === gestureRecognizer.view
+    }
+
+    /// The hold is recognized: every other recognizer of the bar following
+    /// its touch is cancelled — disabled and enabled again, the public way —
+    /// so the lens returns to the selected tab and the lift selects nothing.
+    fileprivate func takeTouchFromBar() {
+        let bar = tabBarController.tabBar
+        for recognizer in profileHoldTouch?.gestureRecognizers ?? []
+        where recognizer !== profileHold && recognizer.view === bar {
+            recognizer.isEnabled = false
+            recognizer.isEnabled = true
+        }
     }
 }
