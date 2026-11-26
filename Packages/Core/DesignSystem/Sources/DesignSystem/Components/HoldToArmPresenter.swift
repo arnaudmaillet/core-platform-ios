@@ -1,23 +1,23 @@
 import QuartzCore
 import UIKit
 
-/// A hold that ARMS an action on any view (#1929): the tab bar "+"'s gesture,
-/// for the composer's slot — after a moment a glass disc rises over the view
-/// carrying what the hold will do, a ring fills while the finger stays down,
-/// and the moment it is full the action fires. Lifted or slid off before:
-/// nothing.
+/// A hold that ARMS an action on any view (#1929): after a moment a glass
+/// disc rises over the view carrying what the hold will do, a ring fills
+/// while the finger stays down, and the moment it is full the action fires.
+/// Lifted or slid off before: nothing.
 ///
 /// ```
 ///   touch ─ 0.22s ─▶ disc rises (held tick) ─ 0.6s fill ─▶ fires (armed tick)
 /// ```
 ///
-/// ONE PRESENTER FOR EVERY HOLD, the tab bar's "+" included
-/// (`CreateHoldShortcut`): the timing, the ticks, the disc and its clock live
-/// here once, so the holds cannot drift apart. A host with a placement of its
-/// own (the "+" is one bubble of a bar) says where the disc goes
-/// (`discFrame`, `host`) and hears the press come and go (`onPressBegan`,
-/// `onPressFinished`). A SHORTCUT, never the only road: the host keeps the
-/// action as an accessibility custom action, or a menu row.
+/// ONE PRESENTER FOR EVERY HOLD — today the full-screen sound bubble
+/// (`SnapChromeActionColumn`) and the comments' slot (`PostDetailRailSlot`):
+/// the timing, the ticks, the disc and its clock live here once, so the holds
+/// cannot drift apart. A host with a placement of its own (a view that is one
+/// part of a larger one) says where the disc goes (`discFrame`, `host`) and
+/// hears the press come and go (`onPressBegan`, `onPressFinished`). A
+/// SHORTCUT, never the only road: the host keeps the action as a tap, an
+/// accessibility custom action or a menu row.
 @MainActor
 public final class HoldToArmPresenter: NSObject {
     /// What the disc carries.
@@ -27,7 +27,7 @@ public final class HoldToArmPresenter: NSObject {
     }
 
     public enum Metrics {
-        /// The "+"'s: longer than a tap, shorter than a hesitation.
+        /// Longer than a tap, shorter than a hesitation.
         public static let recognitionDelay: TimeInterval = 0.22
         public static let preRecognitionSlop: CGFloat = 10
         /// Between the disc and the top of the view it floats over.
@@ -46,8 +46,9 @@ public final class HoldToArmPresenter: NSObject {
     /// The view the disc is added to. Nil: the window's root view.
     public var host: (@MainActor () -> UIView?)?
     /// Where the disc goes, in `host`'s space — for a hold whose view is not
-    /// the thing it floats over (the "+" hangs on the whole bar). Nil:
-    /// centred over the view, `Metrics.gap` above it, clear of the edges.
+    /// the thing it floats over (a hold hung on a whole bar for one of its
+    /// items). Nil: centred over the view, `Metrics.gap` above it, clear of
+    /// the edges.
     public var discFrame: (@MainActor (_ host: UIView) -> CGRect?)?
     /// A press was recognised, before anything shows.
     public var onPressBegan: (@MainActor () -> Void)?
