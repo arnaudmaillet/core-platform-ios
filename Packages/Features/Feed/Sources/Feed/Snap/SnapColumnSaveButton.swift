@@ -18,8 +18,9 @@ final class SnapColumnSaveButton: UIButton {
     /// What the star draws now.
     private(set) var isSaved = false
 
-    /// The star's size: the share glyph's beside it (`SnapSoundBubbleButton`),
-    /// so the two bubbles read as one family.
+    /// The star's size: 17 pt, the share glyph's point size when the column
+    /// was drawn (#2408). The button draws it at its `.large` scale; Share is
+    /// sized on its drawn ink since #2581 (`ShareBubbleGlyph`).
     static let glyphConfiguration = UIImage.SymbolConfiguration(pointSize: 17, weight: .semibold)
 
     override init(frame: CGRect) {

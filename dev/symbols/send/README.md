@@ -29,4 +29,5 @@ cd source
 
 ## Known limits
 - One outline, three masters, as the rest of the set: the stroke does not thicken with `.bold`.
+- **Alone in a round bubble it is drawn larger and moved (#2581, `ShareBubbleGlyph` in DesignSystem).** A diagonal plane fills less of its box than a heart, and its ink's centre of mass sits up and right of its box's centre. The template keeps the glyph centred by its box: a symbol image is as tall as its ink, so lowering the glyph in the template only moves its baseline, and the horizontal share (about 7 units) is past the 4-unit side margin. The bubbles (the action column, the composer's slot, the share sheet's chip) set the size and the move; bar items, menus and text draw the glyph as it is.
 - The owner judges it on a device after the merge.

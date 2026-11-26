@@ -202,3 +202,137 @@ struct AppSymbolSizeTests {
     }
 }
 
+
+/// What a glyph paints (#2581), measured on its bitmap at 3×: the box of
+/// its solid ink, the area it covers and its ink's centre of mass, in points
+/// from the image's top left.
+struct SymbolInk: CustomStringConvertible {
+    let box: CGRect
+    let area: CGFloat
+    let mass: CGPoint
+    let size: CGSize
+
+    init(_ image: UIImage) {
+        // Drawn into a bitmap of our own, 8 bits a channel with alpha last: a
+        // renderer's automatic format drew some symbols in a layout the
+        // byte reads took for no ink at all.
+        let scale: CGFloat = 3, pad: CGFloat = 4
+        size = image.size
+        let width = Int(ceil((image.size.width + 2 * pad) * scale))
+        let height = Int(ceil((image.size.height + 2 * pad) * scale))
+        guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(
+                data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+                space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+              ) else {
+            box = .zero; area = 0; mass = .zero
+            return
+        }
+        // UIKit's top-left origin, at 3×.
+        context.translateBy(x: 0, y: CGFloat(height))
+        context.scaleBy(x: scale, y: -scale)
+        UIGraphicsPushContext(context)
+        image.withTintColor(.black, renderingMode: .alwaysOriginal).draw(at: CGPoint(x: pad, y: pad))
+        UIGraphicsPopContext()
+        guard let data = context.data else {
+            box = .zero; area = 0; mass = .zero
+            return
+        }
+        let bytes = data.bindMemory(to: UInt8.self, capacity: width * height * 4)
+        var minX = Int.max, maxX = -1, minY = Int.max, maxY = -1
+        var sum: CGFloat = 0, sumX: CGFloat = 0, sumY: CGFloat = 0
+        for y in 0..<height {
+            for x in 0..<width {
+                let alpha = CGFloat(bytes[(y * width + x) * 4 + 3]) / 255
+                guard alpha > 0 else { continue }
+                sum += alpha
+                sumX += alpha * (CGFloat(x) + 0.5)
+                sumY += alpha * (CGFloat(y) + 0.5)
+                guard alpha >= 0.5 else { continue }
+                minX = min(minX, x); maxX = max(maxX, x); minY = min(minY, y); maxY = max(maxY, y)
+            }
+        }
+        box = maxX < 0 ? .zero : CGRect(
+            x: CGFloat(minX) / scale - pad, y: CGFloat(minY) / scale - pad,
+            width: CGFloat(maxX - minX + 1) / scale, height: CGFloat(maxY - minY + 1) / scale
+        )
+        area = sum / (scale * scale)
+        mass = sum > 0 ? CGPoint(x: sumX / sum / scale - pad, y: sumY / sum / scale - pad) : .zero
+    }
+
+    /// The ink's centre of mass from the image's centre: right and down.
+    var massOffset: UIOffset { UIOffset(horizontal: mass.x - size.width / 2, vertical: mass.y - size.height / 2) }
+
+    var description: String {
+        let numbers = [box.width, box.height, area, massOffset.horizontal, massOffset.vertical]
+        let shown = numbers.map { String(format: "%.2f", Double($0)) }
+        return "ink \(shown[0])×\(shown[1]) pt, \(shown[2]) pt², mass (\(shown[3]), \(shown[4])) from the centre"
+    }
+}
+
+/// Share in a bubble (#2581): the plane reads the like pill's heart's size by
+/// its drawn ink, and stands by its ink's centre of mass.
+extension AppSymbolSizeTests {
+    /// The like pill's heart as drawn: `SnapActionColumn.heartConfiguration`
+    /// (15 pt semibold) at the `.large` scale a `UIButton.Configuration`
+    /// gives a symbol that names none (`ShareBubbleGlyphTests` holds the pill
+    /// to it). 20.7 × 17.7 pt of ink, the owner's measure on a device.
+    static let drawnHeartConfiguration = AppSymbol.fixed(15, weight: .semibold)
+        .applying(UIImage.SymbolConfiguration(scale: .large))
+
+    /// Area and box (the box's mean side, √(w·h)) within 8 %. The plane's box
+    /// is square and the heart's wide, so the box compares by its mean side.
+    @Test func shareInABubbleIsAsLargeAsTheHeartBesideIt() throws {
+        let share = SymbolInk(try #require(ShareBubbleGlyph.image()))
+        let heart = SymbolInk(try #require(AppSymbol.like.image(Self.drawnHeartConfiguration)))
+        print("[share-ink] share \(share) · heart \(heart)")
+        let area = share.area / heart.area - 1
+        let box = ((share.box.width * share.box.height) / (heart.box.width * heart.box.height)).squareRoot() - 1
+        #expect(abs(area) <= 0.08, "Share paints \(share.area) pt², the heart \(heart.area) (\(area))")
+        #expect(abs(box) <= 0.08, "Share's ink box is \(share.box.size), the heart's \(heart.box.size) (\(box))")
+        // The composer's old 17 pt read a quarter narrower than the heart.
+        let old = SymbolInk(try #require(AppSymbol.send.image(AppSymbol.fixed(17, weight: .semibold))))
+        #expect(old.area / heart.area - 1 < -0.08, "the old size already matched: \(old)")
+    }
+
+    /// The move brings the ink's centre of mass within a quarter point of the
+    /// image's centre; unmoved, the plane stands over a point off.
+    @Test func shareInABubbleStandsByItsInk() throws {
+        let ink = SymbolInk(try #require(ShareBubbleGlyph.image()))
+        let move = ShareBubbleGlyph.offset()
+        let left = UIOffset(horizontal: ink.massOffset.horizontal + move.horizontal, vertical: ink.massOffset.vertical + move.vertical)
+        print("[share-ink] \(ShareBubbleGlyph.pointSize) pt: \(ink); moved \(move) → \(left)")
+        #expect(hypot(left.horizontal, left.vertical) <= 0.25, "the ink stands \(left) off the centre")
+        #expect(hypot(ink.massOffset.horizontal, ink.massOffset.vertical) > 1, "the plane is centred unmoved: the offset is stale")
+    }
+
+    /// A configured glass button wearing Share at `contentInsets(_:for:)`
+    /// stands its image `offset()` off its centre: the button centres the
+    /// image's alignment rectangle, which the insets take into account.
+    @Test(arguments: [UIUserInterfaceLayoutDirection.leftToRight, .rightToLeft])
+    func aConfiguredButtonStandsShareByItsInk(_ direction: UIUserInterfaceLayoutDirection) throws {
+        let image = try #require(ShareBubbleGlyph.image())
+        var configuration = UIButton.Configuration.glass()
+        configuration.image = image
+        configuration.contentInsets = ShareBubbleGlyph.contentInsets(configuration.contentInsets, for: image, direction: direction)
+        let button = UIButton(configuration: configuration)
+        button.semanticContentAttribute = direction == .rightToLeft ? .forceRightToLeft : .forceLeftToRight
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 200, height: 200))
+        button.frame = CGRect(x: 20, y: 20, width: 45, height: 45)
+        window.addSubview(button)
+        window.isHidden = false
+        defer { window.isHidden = true }
+        button.layoutIfNeeded()
+        func all(_ view: UIView) -> [UIView] { [view] + view.subviews.flatMap(all) }
+        let drawn = try #require(all(button).compactMap { $0 as? UIImageView }.first { $0.image != nil })
+        let frame = drawn.convert(drawn.bounds, to: button)
+        // Drawn at the bubble size: the `.medium` scale keeps the button's own.
+        #expect(abs(frame.width - image.size.width) < 0.01 && abs(frame.height - image.size.height) < 0.01, "\(frame.size)")
+        let stands = UIOffset(horizontal: frame.midX - button.bounds.midX, vertical: frame.midY - button.bounds.midY)
+        let move = ShareBubbleGlyph.offset()
+        print("[share-button] \(direction == .leftToRight ? "ltr" : "rtl"): the image stands \(stands), wanted \(move)")
+        // Within a device pixel: the button rounds the image's frame to the 3× grid.
+        #expect(abs(stands.horizontal - move.horizontal) <= 0.34 && abs(stands.vertical - move.vertical) <= 0.34,
+                "the image stands \(stands) off the centre, not \(move)")
+    }
+}

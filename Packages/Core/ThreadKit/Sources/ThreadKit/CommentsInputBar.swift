@@ -1274,7 +1274,7 @@ public final class CommentsInputBar: UIView {
 
     /// The column's glyphs: the like anchor's size, so the crossfade between
     /// the two layouts reads as ONE bubble.
-    private static let glyphConfiguration = UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
+    static let glyphConfiguration = UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
 
     /// The own bubble's faces. Send is the filled arrow in a disc —
     /// iMessage's own — in `sendTint`; at rest, the emote button's smile
@@ -2935,7 +2935,7 @@ public final class CommentsInputBar: UIView {
             railFaceSymbol = nil
         }
         if let symbol, railFaceSymbol != symbol {
-            railButton.configuration?.image = UIImage.symbol(named: symbol, configuration: Self.glyphConfiguration)
+            railButton.configuration = Self.railGlyph(symbol, of: railButton)
         }
         railFaceSymbol = symbol
         // The way back always answers, even on a draft with nothing to pin
