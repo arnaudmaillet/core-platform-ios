@@ -20,9 +20,9 @@ import UIKit
 /// ⚠️ THE ANSWERS LIVE IN THE APP'S ONE PLACE FOR THEM, `EntityStore` (the
 /// owner, 2026-11-02: one state per person, everywhere). The thread opened
 /// from a row starts from what the row knew instead of loading it again; a
-/// follow made anywhere — the thread's "+", a profile card, a profile, the
-/// feed — reaches the store through the follow channel and every mark
-/// follows. The store's viewer facts are wiped on a sign-out or a profile
+/// follow made anywhere — a profile card, a profile, the feed — reaches the
+/// store through the follow channel and every mark follows. The rows' mark
+/// is passive (#2419): no follow from a conversation row. The store's viewer facts are wiped on a sign-out or a profile
 /// switch (the cache coordinator), so a mark never outlives the viewer it
 /// was read for; reads in flight then are dropped (`generation`).
 ///
@@ -36,9 +36,6 @@ public final class InboxRelations {
     private let entities: any ProfileEntityReading & ProfileEntityWriting
     private var observation: EntityObservation?
     private var lookups: Set<ProfileID> = []
-    /// Peers with a follow on its way: a read that lands meanwhile is older
-    /// than the tap and is dropped.
-    private var follows: Set<ProfileID> = []
     /// Bumped by a viewer change: a read asked for the previous viewer is
     /// dropped when it lands.
     private var generation = 0
@@ -49,7 +46,7 @@ public final class InboxRelations {
     }
     private var observers: [Observer] = []
 
-    /// Nil `reader` or `writer`: no mark at all — the "+" would mean nothing.
+    /// Nil `reader` or `writer`: no mark at all — no graph to stand in.
     public init(
         entities: any ProfileEntityReading & ProfileEntityWriting,
         reader: (any SocialGraphReading)?,
@@ -83,18 +80,6 @@ public final class InboxRelations {
         return PersonPill.Badge(relation: entities.relation(to: peer))
     }
 
-    /// The row's "+", from `host`: through the member gate, then `follow`;
-    /// a refusal is said over `host` (#802), naming the handle, else the
-    /// conversation's title.
-    func follow(_ peer: ProfileID, handle: String?, name: String?, from host: UIViewController) {
-        MemberGates.perform(.follow(handle: handle), from: host) { [weak self, weak host] in
-            self?.follow(peer) {
-                guard let host else { return }
-                Feedback.failure(PlusFollow.failureMessage(handle: handle, name: name), from: host)
-            }
-        }
-    }
-
     /// Asks for `peers` not known yet — or again with `refresh`, for answers
     /// that may have moved while the inbox was covered (a follow in the
     /// thread or on the profile). A known answer keeps drawing until the new
@@ -102,37 +87,16 @@ public final class InboxRelations {
     func resolve(_ peers: [ProfileID], refresh: Bool = false) {
         guard isEnabled, let reader else { return }
         let generation = generation
-        for peer in Set(peers) where (refresh || relation(for: peer) == nil) && !lookups.contains(peer) && !follows.contains(peer) {
+        for peer in Set(peers) where (refresh || relation(for: peer) == nil) && !lookups.contains(peer) {
             lookups.insert(peer)
             Task { [weak self] in
                 let relation = try? await reader.followRelation(to: peer)
                 guard let self, self.generation == generation else { return }
                 self.lookups.remove(peer)
-                guard let relation, !self.follows.contains(peer) else { return }
+                guard let relation else { return }
                 self.set(relation, for: peer)
             }
         }
-    }
-
-    /// The "+": follows `peer` through the shared seam (`PlusFollow`) —
-    /// the check at once, the clock for a private person, the "+" back on a
-    /// failure, then a fresh read. `failed` is told when the graph refused.
-    /// Does nothing unless the "+" is what `peer` shows.
-    func follow(_ peer: ProfileID, failed: @escaping @MainActor () -> Void) {
-        guard let writer, let before = relation(for: peer), before.offersFollow, !follows.contains(peer) else { return }
-        follows.insert(peer)
-        let generation = generation
-        PlusFollow.commit(peer, from: before, through: writer, apply: { [weak self] relation in
-            guard let self, self.generation == generation else { return }
-            self.set(relation, for: peer)
-        }, completion: { [weak self] didFail in
-            guard let self, self.generation == generation else { return }
-            self.follows.remove(peer)
-            if didFail { failed() }
-            // What the graph now says: following someone who follows back
-            // is a friend, and the graph is the one to say so.
-            self.resolve([peer], refresh: true)
-        })
     }
 
     // MARK: - Who the peer is (#2049)
@@ -170,7 +134,6 @@ public final class InboxRelations {
         case .everything:
             generation += 1
             lookups = []
-            follows = []
             notify(nil)
         }
     }
@@ -208,19 +171,17 @@ private struct StoreRecordingAvatars: PeerAvatarProviding {
 }
 
 extension PersonPill.Badge {
-    /// The mark for a relation (#2049): the author pill's mapping — "+" for
-    /// someone not followed (a follower included: following back makes a
-    /// friend), the clock for a request, the check, friends — nothing for
-    /// the viewer or someone blocked, and the skeleton's badge for a relation
-    /// not known yet (#2098), never nothing. Stayed in Chat when the marked
-    /// face moved to MediaCore (#2300): MediaCore knows no `FollowRelation`.
+    /// The mark for a relation (#2049): the author pill's mapping — the
+    /// check, friends (#2419: Following and Friends only), nothing for
+    /// someone not followed, a request, the viewer or someone blocked, and
+    /// the skeleton's badge for a relation not known yet (#2098), never
+    /// nothing. Stayed in Chat when the marked face moved to MediaCore
+    /// (#2300): MediaCore knows no `FollowRelation`.
     init(relation: FollowRelation?) {
         self = switch relation {
-        case .notFollowing, .followedBy: .follow
         case .following: .following
         case .mutual: .friends
-        case .requested: .pending
-        case .viewer, .blocked: .none
+        case .notFollowing, .followedBy, .requested, .viewer, .blocked: .none
         case nil: .loading
         }
     }

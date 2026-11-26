@@ -45,9 +45,6 @@ public final class PersonPill: UIView {
         didSet { tapRecognizer.isEnabled = onTap != nil }
     }
     private lazy var tapRecognizer = UITapGestureRecognizer(target: self, action: #selector(tapped))
-    /// Called when the "+" is tapped. Never for a state mark: those take no
-    /// tap of their own.
-    public var onFollowTapped: (() -> Void)?
 
     /// The face: the initials, the picture dissolved in over them (#943).
     public let avatar: AvatarView
@@ -160,10 +157,6 @@ public final class PersonPill: UIView {
                 statusBadge.trailingAnchor.constraint(equalTo: avatar.trailingAnchor, constant: offset)
                 statusBadge.bottomAnchor.constraint(equalTo: avatar.bottomAnchor, constant: offset)
             }
-            statusBadge.addAction(UIAction { [weak self] _ in
-                guard let self, self.badge == .follow else { return }
-                self.onFollowTapped?()
-            }, for: .primaryActionTriggered)
         }
 
         // 999, never required: the bar pins its wrapper with autoresizing
@@ -182,8 +175,8 @@ public final class PersonPill: UIView {
         }
         setRedacted(true)
 
-        // ONE element (#1277): "Name, @handle, Following", the "+" offered as
-        // a custom action rather than a separate tiny target.
+        // ONE element (#1277): "Name, @handle, Following". The badge is
+        // passive (#2419): no action of its own.
         isAccessibilityElement = true
         accessibilityTraits = .button
         tapRecognizer.isEnabled = false
@@ -322,16 +315,18 @@ public final class PersonPill: UIView {
     /// The badge drawn now; `.none` on a pill that carries none.
     public private(set) var badge: Badge = .none
 
-    /// Draws `badge` — through SF Symbols' replace when `animated`, at once
-    /// otherwise. Nothing else on the pill moves. A pill that carries no
-    /// badge ignores it.
+    /// Draws `badge`: through SF Symbols' replace when `animated`, the face's
+    /// cutout opening or closing with it (#2098, #2419), at once otherwise.
+    /// Nothing else on the pill moves. A pill that carries no badge ignores
+    /// it.
     public func setBadge(_ badge: Badge, animated: Bool) {
         guard let statusBadge else { return }
         self.badge = badge
         statusBadge.show(badge, animated: animated)
-        // Gone for good (the skeleton's relation turned out to be none): the
-        // cutout closes as the bone fades, in the same motion (#2098).
-        if !badge.cutsTheFace { faceCutout.close(avatar.layer, animated: animated && window != nil) }
+        faceCutout.wear(
+            badge, on: avatar.layer, centre: cutoutCentre(in: avatar), metrics: Self.markMetrics,
+            animated: animated && window != nil
+        )
         setNeedsLayout()
         updateAccessibility()
     }
@@ -422,14 +417,7 @@ public final class PersonPill: UIView {
 
     private func updateAccessibility() {
         let lines = [nameLabel.text, handleLabel.text].compactMap { $0 }.filter { !$0.isEmpty }
-        let state = badge == .follow ? nil : badge.accessibilityLabel
-        accessibilityLabel = (lines + [state].compactMap { $0 }).joined(separator: ", ")
-        accessibilityCustomActions = badge == .follow ? [
-            UIAccessibilityCustomAction(name: "Follow") { [weak self] _ in
-                self?.onFollowTapped?()
-                return true
-            },
-        ] : nil
+        accessibilityLabel = (lines + [badge.accessibilityLabel].compactMap { $0 }).joined(separator: ", ")
     }
 
     private static func makeRedactionBar(width: CGFloat, height: CGFloat) -> UIView {
@@ -464,11 +452,9 @@ public final class PersonPill: UIView {
 }
 
 /// The person pill badge's inks (#968, #1197): one value in either
-/// appearance — black disc and white glyph at rest — except Friends' disc,
-/// a dark grey that resolves per appearance (#2440, #2476).
+/// appearance, except Friends' disc, a dark grey that resolves per
+/// appearance (#2440, #2476).
 public enum PersonPillBadgeInks {
-    public static let restingDisc = UIColor.black
-    public static let glyph = UIColor.white
     /// The tint's light value.
     public static let accent = UIColor { traits in
         Palette.tint.resolvedColor(with: traits.modifyingTraits { $0.userInterfaceStyle = .light })

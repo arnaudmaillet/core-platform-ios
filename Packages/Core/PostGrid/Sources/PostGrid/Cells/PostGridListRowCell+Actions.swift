@@ -24,11 +24,34 @@ extension PostGridListRowCell {
         set { authorBand.onAuthorHeld = newValue }
     }
 
-    /// Fired when the band's face shows the "+" and it is tapped (#2300):
-    /// the HOST follows — the cell cannot see the follow.
+    /// Fired when the band's Follow or Follow back is tapped (#2419): the
+    /// HOST follows. The cell cannot see the follow.
     public var onAuthorFollowTapped: (() -> Void)? {
         get { authorBand.onFollowTapped }
         set { authorBand.onFollowTapped = newValue }
+    }
+
+    /// Fired when the viewer cancels a pending request from the band's
+    /// Requested (#2419): the host withdraws it.
+    public var onAuthorCancelFollowRequest: (() -> Void)? {
+        get { authorBand.onCancelFollowRequest }
+        set { authorBand.onCancelFollowRequest = newValue }
+    }
+
+    /// Forgets the previous post's Follow and its handlers: a recycled row.
+    func resetAuthorFollow() {
+        onAuthorFollowTapped = nil
+        onAuthorCancelFollowRequest = nil
+        authorBand.setFollowOffer(.none, animated: false)
+    }
+
+    /// What the band offers beside its "..." (#2419).
+    public var authorFollowOffer: AuthorFollowOffer { authorBand.followOffer }
+
+    /// Offers `offer` beside the band's "..." (#2419): what the host's
+    /// binding answers for the post's author. A bare band offers nothing.
+    public func setAuthorFollowOffer(_ offer: AuthorFollowOffer, animated: Bool) {
+        authorBand.setFollowOffer(offer, animated: animated)
     }
 
     /// Whether a long press at `point` (in the cell) is the band's author's
@@ -67,6 +90,8 @@ extension PostGridListRowCell {
     public var debugShowsAuthorMenu: Bool { authorBand.debugShowsMenu }
     /// The band face's badge (#2300). Tests.
     public var debugAuthorBadge: RelationBadgeView { authorBand.debugBadge }
+    /// The band's Follow (#2419). Tests.
+    public var debugAuthorFollowButton: AuthorFollowButton { authorBand.debugFollowButton }
     /// A tap on the band's identity, as a finger's would land (#2145). Tests.
     public func debugTapAuthor() { authorBand.debugOpening.debugTap() }
     /// A hold on the band's identity, recognised. Tests.

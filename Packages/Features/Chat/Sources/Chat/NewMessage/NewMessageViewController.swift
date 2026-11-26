@@ -139,12 +139,8 @@ final class NewMessageViewController: UIViewController {
             // The marked face first: the slot holds one kind for the cell's life.
             let face = cell.markedAvatar
             cell.configure(with: person.rowContent)
+            // Passive, as on the inbox rows: the mark only says Following or Friends (#2419).
             face.setMark(self.relations?.mark(for: id) ?? .none, animated: false)
-            // The face's "+" follows, as on the inbox rows (#2049).
-            face.onFollowTapped = { [weak self] in
-                guard let self else { return }
-                self.relations?.follow(id, handle: person.handle, name: person.displayName, from: self)
-            }
             self.faces.lookUp(id, into: cell)
         }
         let actionCell = UICollectionView.CellRegistration<PersonListCell, NewMessageViewModel.Row> { cell, _, row in

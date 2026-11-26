@@ -2599,7 +2599,10 @@ final public class PostGridPageView: UIView {
             // The row's relation mark (#2300): a badge changing in the
             // landing frame is the pop.
             authorMark: (cell(for: postID) as? PostGridListRowCell)?.authorRelationMark
-                ?? authorMarks?.badge(for: post.authorID) ?? .none
+                ?? authorMarks?.badge(for: post.authorID) ?? .none,
+            // Its Follow (#2419), on the same terms.
+            authorFollow: (cell(for: postID) as? PostGridListRowCell)?.authorFollowOffer
+                ?? authorMarks?.followOffer(for: post.authorID) ?? .none
         )
     }
 
@@ -4147,36 +4150,8 @@ extension PostGridPageView: UICollectionViewDataSource, UICollectionViewDelegate
             cell.onMediaHoldChanged = { [weak self] held in
                 self?.playback?.setHeld(held, for: post.id)
             }
-            // The band's identity and its "...", if the post carries an author.
-            // Captured by AUTHOR and by POST for the same reason the caption's
-            // handler is captured by post: the row that asked can have moved by
-            // the time the answer is applied.
-            if let authorID = post.authorID {
-                // A person beside content (#2145, role 1; #2300): a tap the
-                // card where the host has one, a hold the profile.
-                cell.onAuthorTapped = { [weak self] in
-                    guard let self else { return }
-                    (onAuthorCardTapped ?? onAuthorTapped)?(post)
-                }
-                cell.onAuthorHeld = onAuthorTapped == nil ? nil : { [weak self] in self?.onAuthorTapped?(post) }
-                // The face's "+" (#2300): the shared follow.
-                cell.onAuthorFollowTapped = { [weak self] in
-                    guard let self else { return }
-                    authorMarks?.follow(authorID, handle: post.authorHandle, name: post.authorName, from: self)
-                }
-                // ONE menu with the long press's (#1498): the palette, the
-                // post's rows, then the author's.
-                cell.authorMenuActions = { [weak self, weak cell] in
-                    guard let self, let cell else { return [] }
-                    return menuActions(
-                        for: post, authorID: authorID, anchor: cell.authorMenuAnchor
-                    )
-                }
-            }
-            // The band's face wears its author's relation mark (#2300), bound
-            // like a feed page's author row: redrawn on every answer, on
-            // screen or not. A bare band names nobody, and is bound to no one.
-            authorMarks?.bind(cell, to: cell.authorBandModel?.showsIdentity == true ? post.authorID : nil)
+            // The band: its identity, its Follow and its "..." (#2145, #2419).
+            wireAuthorBand(of: cell, for: post)
             Self.applyHeroConcealment(isFlying, to: cell)
             return cell
         case .tile:

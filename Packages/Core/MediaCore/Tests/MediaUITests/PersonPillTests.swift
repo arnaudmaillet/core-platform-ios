@@ -19,7 +19,7 @@ struct PersonPillTests {
     /// 2026-10-28, #1793, replacing #1277's mid-height): the badge's centre
     /// sits on the face's rim, 45° below its trailing side; its size is
     /// unchanged and the name starts clear of it.
-    @Test(arguments: [PersonPill.Badge.follow, .following, .friends, .pending])
+    @Test(arguments: [PersonPill.Badge.following, .friends])
     func theBadgeSitsOnTheFacesBottomTrailingCorner(_ badge: PersonPill.Badge) throws {
         let pill = PersonPill(carriesBadge: true)
         pill.setBadge(badge, animated: false)
@@ -40,7 +40,7 @@ struct PersonPillTests {
         let pill = PersonPill(carriesBadge: true)
         pill.semanticContentAttribute = .forceRightToLeft
         pill.subviews.forEach { $0.semanticContentAttribute = .forceRightToLeft }
-        pill.setBadge(.follow, animated: false)
+        pill.setBadge(.following, animated: false)
         let geometry = Self.laidOut(pill).debugGeometry
         let drawn = try #require(geometry.badge)
         #expect(drawn.midX < geometry.face.midX, "the badge did not mirror: \(drawn) face \(geometry.face)")
@@ -51,7 +51,7 @@ struct PersonPillTests {
     /// at the row's plain gap from the face.
     @Test func aPillWithoutABadgeDrawsNone() {
         let pill = PersonPill(carriesBadge: false)
-        pill.setBadge(.follow, animated: false)
+        pill.setBadge(.following, animated: false)
         let geometry = Self.laidOut(pill).debugGeometry
         #expect(geometry.badge == nil)
         #expect(pill.badge == .none, "a badge-less pill took a relation")
@@ -63,7 +63,7 @@ struct PersonPillTests {
     @Test func noBadgeMovesTheWidth() {
         let pill = Self.laidOut(PersonPill(carriesBadge: true))
         var widths: [CGFloat] = []
-        for badge in [PersonPill.Badge.none, .follow, .following, .friends, .pending] {
+        for badge in [PersonPill.Badge.none, .loading, .following, .friends] {
             pill.setBadge(badge, animated: false)
             widths.append(pill.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width)
         }
@@ -106,17 +106,19 @@ struct PersonPillTests {
     /// A badge change is a symbol replace when animated, and nothing else.
     @Test func anAnimatedChangeIsOneReplace() {
         let pill = PersonPill(carriesBadge: true)
-        pill.setBadge(.follow, animated: false)
+        pill.setBadge(.following, animated: false)
         #expect(pill.badgeReplaceCount == 0)
-        pill.setBadge(.following, animated: true)
+        pill.setBadge(.friends, animated: true)
         #expect(pill.badgeReplaceCount == 1)
+        pill.setBadge(.following, animated: true)
+        #expect(pill.badgeReplaceCount == 2)
         #expect(pill.drawnBadgeSymbol == "checkmark.circle.fill")
     }
 
     /// NO RING ROUND THE FACE (#2082, the owner 2026-11-03), whatever the
     /// relation: the badge alone says it (it replaced #1298's grey and pink
     /// ring), and the face neither moves nor resizes.
-    @Test(arguments: [PersonPill.Badge.none, .follow, .pending, .following, .friends])
+    @Test(arguments: [PersonPill.Badge.none, .loading, .following, .friends])
     func theFaceWearsNoRing(_ relation: PersonPill.Badge) {
         let pill = Self.laidOut(PersonPill(carriesBadge: true))
         let before = pill.debugGeometry.face
@@ -160,7 +162,7 @@ struct PersonPillTests {
     /// The badge is cut out of the face it overlaps: its radius plus 1.5 pt.
     @Test func theBadgeIsCutOutOfTheFace() {
         let pill = Self.laidOut(PersonPill(carriesBadge: true))
-        pill.setBadge(.follow, animated: false)
+        pill.setBadge(.following, animated: false)
         pill.layoutIfNeeded()
         #expect(pill.drawnCutoutRadius == 10 + PersonPill.cutoutGap)
         pill.setBadge(.none, animated: false)
@@ -196,7 +198,6 @@ struct PersonPillTests {
         #expect(pill.drawnCutoutRadius == 10 + PersonPill.cutoutGap, "no cutout under the skeleton's badge")
         #expect(pill.drawnBadgeSymbol == nil, "a symbol on the bone")
         #expect(pill.debugBadgeShowsBone)
-        #expect(pill.accessibilityCustomActions == nil, "a Follow action for a relation not known")
         pill.setBadge(.none, animated: false)
         pill.layoutIfNeeded()
         #expect(pill.drawnCutoutRadius == nil)
@@ -205,7 +206,7 @@ struct PersonPillTests {
 
     /// The mark lands in the bone's place: the cutout never moves, only the
     /// disc's content changes.
-    @Test(arguments: [PersonPill.Badge.follow, .following, .friends, .pending])
+    @Test(arguments: [PersonPill.Badge.following, .friends])
     func theMarkLandsWhereTheBoneWas(_ mark: PersonPill.Badge) throws {
         let pill = Self.laidOut(PersonPill(carriesBadge: true))
         pill.setBadge(.loading, animated: false)
@@ -231,5 +232,21 @@ struct PersonPillTests {
         #expect(pill.drawnCutoutRadius != nil)
         #expect(pill.avatar.skeleton.subviews.allSatisfy { $0.backgroundColor == nil },
                 "the bone paints its ground as the view's background")
+    }
+
+    // MARK: - #2419: passive, read with the face
+
+    /// The badge is information, never a control: no touch, no Follow action
+    /// for VoiceOver; the pill says the relation with the person.
+    @Test(arguments: [PersonPill.Badge.none, .loading, .following, .friends])
+    func theBadgeIsPassiveAndReadWithTheFace(_ badge: PersonPill.Badge) {
+        let pill = Self.laidOut(PersonPill(carriesBadge: true))
+        pill.setBadge(badge, animated: false)
+        #expect(pill.accessibilityCustomActions?.isEmpty ?? true, "a Follow action on \(badge)")
+        let label = pill.accessibilityLabel ?? ""
+        if let words = badge.accessibilityLabel {
+            #expect(label.hasSuffix(words), "the relation is not read with the face: \(label)")
+        }
+        #expect(!label.contains("Follow,") && !label.hasSuffix("Follow"))
     }
 }

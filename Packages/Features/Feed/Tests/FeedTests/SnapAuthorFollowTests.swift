@@ -9,16 +9,13 @@ import UIKit
 @testable import Feed
 @testable import PostSurfaces
 
-/// THE PILL'S "+" FOLLOWS, AND IS ONLY THERE FOR SOMEONE TO FOLLOW.
-///
-/// It used to route to the author's profile, and it was drawn for everybody —
-/// the people the viewer follows and the viewer themself included. Now it is
-/// offered only when the graph says the viewer does not follow the author, and
-/// a tap follows them in place. Once followed the pill does not forget it: the
-/// "+" becomes the followed mark, or the FRIENDS mark when the author follows
-/// back. Every change of badge is drawn IN PLACE, as the badge's symbol
-/// replace and nothing else (#925): the item and its identifier never change,
-/// and the pill is never blurred for it.
+/// THE PILL'S BADGE IS INFORMATION, NEVER A CONTROL (#2419, the owner
+/// 2026-11-13): it keeps only Following and Friends. Someone the viewer
+/// doesn't follow, or asked, wears no badge, and the pill offers no follow:
+/// until #2409's Follow, the full-screen page follows from the profile. Every
+/// change of badge is drawn IN PLACE, as the badge's symbol replace and
+/// nothing else (#925): the item and its identifier never change, and the
+/// pill is never blurred for it.
 ///
 /// The graph is GATED (`SnapAuthorFollowStoreTests`' shape): every lookup and
 /// follow waits until the test answers it, and every wait is a bounded run of
@@ -72,106 +69,25 @@ struct SnapAuthorFollowTests {
         try #require(try authorItem(feed).customView as? SnapAuthorIdentityView)
     }
 
-    /// Unknown is no "+": on the Following feed every author is followed, and a
-    /// "+" drawn and then withdrawn is the worse of the two errors.
-    @Test func anAuthorWhoseRelationIsUnknownOffersNoFollow() throws {
+    /// An unknown relation is the skeleton's badge (#2098), under the slot's
+    /// one identifier.
+    @Test func anAuthorWhoseRelationIsUnknownWearsTheSkeleton() throws {
         let feed = Self.feed()
         feed.authorBar.showAuthor(Self.model(authorID: "prof-1"))
 
-        #expect(try Self.pill(feed).offersFollow == false)
+        #expect(try Self.pill(feed).followBadge == .loading)
         #expect(try Self.authorItem(feed).identifier == SnapToolbarComposer.authorItemIdentifier(for: nil))
     }
 
-    @Test(arguments: [FollowRelation.following, .mutual, .viewer, .blocked])
-    func anAuthorTheViewerCannotFollowOffersNoFollow(_ relation: FollowRelation) throws {
-        let feed = Self.feed()
-        feed.followStore.setRelation(relation, for: ProfileID("prof-1"))
-        feed.authorBar.showAuthor(Self.model(authorID: "prof-1"))
-
-        #expect(try Self.pill(feed).offersFollow == false)
-    }
-
-    @Test func anAuthorTheViewerDoesNotFollowOffersFollowInTheSameItem() throws {
-        let feed = Self.feed()
-        feed.followStore.setRelation(.notFollowing, for: ProfileID("prof-2"))
-        feed.authorBar.showAuthor(Self.model(authorID: "prof-2"))
-
-        #expect(try Self.pill(feed).offersFollow)
-        #expect(try Self.authorItem(feed).identifier == SnapToolbarComposer.authorItemIdentifier(for: nil))
-    }
-
-    /// The answer arriving for the author ON the pill re-draws its badge — in
-    /// the same item, so the glass does not morph.
-    @Test func theGraphsAnswerDrawsTheFollowInPlace() async throws {
-        let graph = GatedFollowGraph()
-        let feed = Self.feed(graph: graph)
-        feed.authorBar.showAuthor(Self.model(authorID: "prof-2"))
-        let before = try Self.authorItem(feed)
-        #expect(try Self.pill(feed).offersFollow == false, "precondition: not known yet")
-
-        feed.followStore.resolve(for: ProfileID("prof-2"))
-        await Self.settle { graph.pendingLookups == 1 }
-        #expect(graph.lookups == [ProfileID("prof-2")])
-        #expect(try Self.pill(feed).offersFollow == false, "nothing is drawn before the graph answers")
-        graph.answerLookup(.notFollowing)
-        await Self.settle { (try? Self.pill(feed).offersFollow) == true }
-
-        let after = try Self.authorItem(feed)
-        #expect(after === before, "a new item for a badge: iOS 26 morphs the glass between them")
-        #expect(after.identifier == SnapToolbarComposer.authorItemIdentifier(for: nil))
-        #expect(try Self.pill(feed).offersFollow)
-    }
-
-    /// Paging re-evaluates: the "+" belongs to the author, not to the pill.
-    @Test func pagingToAnotherAuthorReEvaluatesTheFollow() throws {
-        let feed = Self.feed()
-        feed.followStore.setRelation(.notFollowing, for: ProfileID("prof-2"))
-        feed.followStore.setRelation(.following, for: ProfileID("prof-1"))
-
-        feed.authorBar.showAuthor(Self.model(id: "p1", authorID: "prof-2"))
-        #expect(try Self.pill(feed).offersFollow)
-        feed.authorBar.showAuthor(Self.model(id: "p2", authorID: "prof-1"))
-        #expect(try Self.pill(feed).offersFollow == false)
-        feed.authorBar.showAuthor(Self.model(id: "p3", authorID: "prof-2"))
-        #expect(try Self.pill(feed).offersFollow)
-    }
-
-    /// The tap follows OPTIMISTICALLY (the profile's rule): the "+" goes at
-    /// once, in the same item, and the graph hears the follow.
-    @Test func tappingFollowFollowsAndTheFollowGoes() async throws {
-        let graph = GatedFollowGraph()
-        let feed = Self.feed(graph: graph)
-        feed.followStore.setRelation(.notFollowing, for: ProfileID("prof-2"))
-        feed.authorBar.showAuthor(Self.model(authorID: "prof-2"))
-        let offered = try Self.authorItem(feed)
-        let pill = try Self.pill(feed)
-
-        // Through the pill's own callback, as the button fires it.
-        pill.onFollowTapped?(ProfileID("prof-2"))
-
-        let followed = try Self.authorItem(feed)
-        #expect(followed === offered)
-        #expect(followed.identifier == SnapToolbarComposer.authorItemIdentifier(for: nil))
-        #expect(try Self.pill(feed).offersFollow == false)
-        #expect(try Self.pill(feed).followBadge == .following, "a follow is drawn, not forgotten")
-        await Self.settle { graph.pendingFollows == 1 }
-        #expect(graph.follows == [ProfileID("prof-2")])
-        graph.answerFollow(accepting: true)
-        await Self.settle { feed.followStore.followsInFlight.isEmpty }
-        #expect(feed.followStore.followsInFlight.isEmpty)
-        #expect(feed.followStore.relation(for: ProfileID("prof-2")) == .following)
-    }
-
-    /// Each relation draws its own badge — so a friend reads apart from a
-    /// one-way follow — under the slot's one identifier.
+    /// Each relation draws its badge: Following and Friends only.
     @Test(arguments: [
-        (FollowRelation.notFollowing, SnapAuthorIdentityView.FollowBadge.follow),
-        (.followedBy, .follow),
+        (FollowRelation.notFollowing, SnapAuthorIdentityView.FollowBadge.none),
+        (.followedBy, .none),
         (.following, .following),
         (.mutual, .friends),
         (.viewer, .none),
         (.blocked, .none),
-        (.requested, .pending),
+        (.requested, .none),
     ])
     func eachRelationDrawsItsOwnBadge(
         _ relation: FollowRelation, _ badge: SnapAuthorIdentityView.FollowBadge
@@ -185,64 +101,51 @@ struct SnapAuthorFollowTests {
         #expect(try Self.authorItem(feed).identifier == SnapToolbarComposer.authorItemIdentifier(for: nil))
     }
 
-    /// The badge's symbols are the owner's (#925): "+" to follow, a check
-    /// once followed, two people for friends, a clock for a pending request
-    /// (#968) — and nothing at all for the viewer or someone blocked.
+    /// The badge's symbols are the owner's (#925): a check once followed, two
+    /// people for friends, and nothing otherwise.
     @Test func eachBadgeWearsItsSymbol() {
         typealias Badge = SnapAuthorIdentityView.FollowBadge
-        #expect(Badge.follow.symbolName == "plus")
         #expect(Badge.following.symbolName == "checkmark.circle.fill")
         #expect(Badge.friends.symbolName == "person.2.fill")
-        #expect(Badge.pending.symbolName == "clock.circle.fill")
         #expect(Badge.none.symbolName == nil)
-        for name in [Badge.follow, .following, .friends, .pending].compactMap(\.symbolName) {
+        #expect(Badge.loading.symbolName == nil)
+        for name in [Badge.following, .friends].compactMap(\.symbolName) {
             #expect(UIImage(systemName: name) != nil, "\(name) is not a system symbol")
         }
     }
 
-    /// ⚠️ A FOLLOW TAP IS A SYMBOL REPLACE, NOTHING ELSE (#925): the "+" on the
-    /// avatar becomes the check through SF Symbols' replace, in the same item —
-    /// the pill is not blurred out and back in for it (it used to be).
-    @Test func aFollowTapReplacesTheBadgeAndNothingElse() async throws {
+    /// The answer arriving for the author ON the pill re-draws its badge — in
+    /// the same item, so the glass does not morph.
+    @Test func theGraphsAnswerDrawsTheBadgeInPlace() async throws {
         let graph = GatedFollowGraph()
-        let feed = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: FollowFeedProvider(), unavailablePosts: UnavailablePosts(viewerEvents: ViewerEvents())),
-            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
-            socialGraph: graph, followRelations: graph,
-            bookmarks: PostBookmarkStore(scope: StorageScope()),
-            savedSounds: SavedSoundStore(scope: StorageScope()),
-            viewer: { nil }
-        )
-        let nav = UINavigationController(rootViewController: UIViewController())
-        nav.pushViewController(feed, animated: false)
-        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
-        window.rootViewController = nav
-        window.isHidden = false
-        defer { window.isHidden = true }
-        window.layoutIfNeeded()
-        feed.followStore.setRelation(.notFollowing, for: ProfileID("prof-2"))
+        let feed = Self.feed(graph: graph)
         feed.authorBar.showAuthor(Self.model(authorID: "prof-2"))
-        let pill = try Self.pill(feed)
-        #expect(pill.window != nil, "the pill is not on screen: nothing to prove")
-        // The first author's own swap, over the redaction bars, lands first.
-        for _ in 0..<300 where pill.isRedrawingWholePill {
-            try await Task.sleep(for: .milliseconds(10))
-        }
-        #expect(!pill.isRedrawingWholePill)
-        #expect(pill.drawnBadgeSymbol == "plus")
-        let item = try Self.authorItem(feed)
-        let replaces = pill.badgeReplaceCount
+        let before = try Self.authorItem(feed)
 
-        feed.authorBar.followAuthor(ProfileID("prof-2"))
+        feed.followStore.resolve(for: ProfileID("prof-2"))
+        await Self.settle { graph.pendingLookups == 1 }
+        #expect(graph.lookups == [ProfileID("prof-2")])
+        graph.answerLookup(.following)
+        await Self.settle { (try? Self.pill(feed).followBadge) == .following }
 
-        #expect(pill.drawnBadgeSymbol == "checkmark.circle.fill")
-        #expect(pill.badgeReplaceCount == replaces + 1, "the badge changed without its symbol replace")
-        #expect(!pill.isRedrawingWholePill, "the follow tap blurred the whole pill")
-        #expect(try Self.authorItem(feed) === item, "the follow tap re-minted the item")
-        #expect(item.customView === pill)
-        await Self.settle { graph.pendingFollows == 1 }
-        graph.answerFollow(accepting: true)
-        await Self.settle { feed.followStore.followsInFlight.isEmpty }
+        let after = try Self.authorItem(feed)
+        #expect(after === before, "a new item for a badge: iOS 26 morphs the glass between them")
+        #expect(after.identifier == SnapToolbarComposer.authorItemIdentifier(for: nil))
+        #expect(try Self.pill(feed).followBadge == .following)
+    }
+
+    /// Paging re-evaluates: the badge belongs to the author, not to the pill.
+    @Test func pagingToAnotherAuthorReEvaluatesTheBadge() throws {
+        let feed = Self.feed()
+        feed.followStore.setRelation(.notFollowing, for: ProfileID("prof-2"))
+        feed.followStore.setRelation(.following, for: ProfileID("prof-1"))
+
+        feed.authorBar.showAuthor(Self.model(id: "p1", authorID: "prof-2"))
+        #expect(try Self.pill(feed).followBadge == .none)
+        feed.authorBar.showAuthor(Self.model(id: "p2", authorID: "prof-1"))
+        #expect(try Self.pill(feed).followBadge == .following)
+        feed.authorBar.showAuthor(Self.model(id: "p3", authorID: "prof-2"))
+        #expect(try Self.pill(feed).followBadge == .none)
     }
 
     /// A feed on screen in a window, wearing `relation`'s badge for "prof-2"
@@ -276,134 +179,52 @@ struct SnapAuthorFollowTests {
         return (feed, pill, window)
     }
 
-    /// The "+" turning on plays `toggleOn` at the optimistic flip (#1885);
-    /// a follow already under way plays nothing.
-    @Test func followingFromThePlusPlaysToggleOnOnce() async throws {
+    /// ⚠️ NO BADGE → A BADGE IS ONE SYMBOL REPLACE (#925, #2419): a relation
+    /// that turns into a friendship on screen grows the badge in by the
+    /// symbol's replace, in the same item, the pill never blurred; and the
+    /// reverse shrinks it out by one more.
+    @Test func aBadgeArrivingOrLeavingIsOneReplace() async throws {
         let graph = GatedFollowGraph()
-        let (feed, _, window) = try await Self.onScreenFeed(graph: graph, relation: .notFollowing)
-        defer { window.isHidden = true }
-        let first = HapticRecorder.recording { feed.authorBar.followAuthor(ProfileID("prof-2")) }
-        #expect(first == [.toggleOn])
-        let again = HapticRecorder.recording { feed.authorBar.followAuthor(ProfileID("prof-2")) }
-        #expect(again.isEmpty, "a follow under way played \(again)")
-        await Self.settle { graph.pendingFollows == 1 }
-        graph.answerFollow(accepting: true)
-        await Self.settle { feed.followStore.followsInFlight.isEmpty }
-    }
-
-    /// ⚠️ A FOLLOW ON A PRIVATE ACCOUNT ENDS ON THE PENDING MARK, BY SYMBOL
-    /// REPLACES ONLY (#968). The pill cannot know the account is private
-    /// before the graph answers, so the "+" is replaced by the optimistic
-    /// check, and the check by the clock once the graph says it only asked —
-    /// two replaces, the pill never blurred, the item never re-minted. It
-    /// used to stay on the check: a request drawn as a follow.
-    @Test func aFollowOnAPrivateAccountReplacesThePlusWithThePendingMark() async throws {
-        let graph = GatedFollowGraph()
-        graph.outcome = .requested
-        let (feed, pill, window) = try await Self.onScreenFeed(graph: graph, relation: .notFollowing)
+        let (feed, pill, window) = try await Self.onScreenFeed(graph: graph, relation: .followedBy)
         defer { window.isHidden = true }
         #expect(pill.window != nil, "the pill is not on screen: nothing to prove")
-        #expect(!pill.isRedrawingWholePill)
-        #expect(pill.drawnBadgeSymbol == "plus")
-        let item = try Self.authorItem(feed)
-        let replaces = pill.badgeReplaceCount
-
-        feed.authorBar.followAuthor(ProfileID("prof-2"))
-        #expect(pill.badgeReplaceCount == replaces + 1)
-        #expect(!pill.isRedrawingWholePill, "the follow tap blurred the whole pill")
-        await Self.settle { graph.pendingFollows == 1 }
-        graph.answerFollow(accepting: true)
-        await Self.settle { feed.followStore.followsInFlight.isEmpty && pill.followBadge == .pending }
-
-        #expect(feed.followStore.relation(for: ProfileID("prof-2")) == .requested)
-        #expect(pill.followBadge == .pending)
-        #expect(pill.drawnBadgeSymbol == "clock.circle.fill")
-        #expect(pill.badgeReplaceCount == replaces + 2, "plus → pending was not drawn by symbol replaces alone")
-        #expect(!pill.isRedrawingWholePill, "the request blurred the whole pill")
-        #expect(try Self.authorItem(feed) === item, "the request re-minted the item")
-        #expect(!pill.offersFollow, "a pending request offered the + again")
-    }
-
-    /// ⚠️ A REQUEST REFUSED OR WITHDRAWN PUTS THE "+" BACK BY ONE SYMBOL
-    /// REPLACE (#968): the relation read that lands after it (the screen
-    /// re-reads on appearance) says the viewer does not follow them, and the
-    /// clock is replaced by the "+", nothing else moving.
-    @Test func aRequestRefusedOrWithdrawnPutsThePlusBackByOneReplace() async throws {
-        let graph = GatedFollowGraph()
-        let (feed, pill, window) = try await Self.onScreenFeed(graph: graph, relation: .requested)
-        defer { window.isHidden = true }
-        #expect(pill.window != nil, "the pill is not on screen: nothing to prove")
-        #expect(pill.drawnBadgeSymbol == "clock.circle.fill")
+        #expect(pill.drawnBadgeSymbol == nil)
         let item = try Self.authorItem(feed)
         let replaces = pill.badgeReplaceCount
 
         feed.followStore.resolve(for: ProfileID("prof-2"), refresh: true)
         await Self.settle { graph.pendingLookups == 1 }
-        graph.answerLookup(.notFollowing)
-        await Self.settle { pill.followBadge == .follow }
-
-        #expect(pill.drawnBadgeSymbol == "plus")
-        #expect(pill.badgeReplaceCount == replaces + 1, "pending → plus was not one symbol replace")
-        #expect(!pill.isRedrawingWholePill, "pending → plus blurred the whole pill")
+        graph.answerLookup(.mutual)
+        await Self.settle { pill.followBadge == .friends }
+        #expect(pill.drawnBadgeSymbol == "person.2.fill")
+        #expect(pill.badgeReplaceCount == replaces + 1, "the badge arrived without its symbol replace")
+        #expect(!pill.isRedrawingWholePill, "the badge's arrival blurred the whole pill")
         #expect(try Self.authorItem(feed) === item)
-        #expect(pill.offersFollow)
-    }
 
-    /// Following someone who already follows the viewer makes a FRIEND, and
-    /// the optimistic draw says so at once.
-    @Test func followingBackDrawsTheFriendsMark() async throws {
-        let graph = GatedFollowGraph()
-        let feed = Self.feed(graph: graph)
         feed.followStore.setRelation(.followedBy, for: ProfileID("prof-2"))
-        feed.authorBar.showAuthor(Self.model(authorID: "prof-2"))
-        #expect(try Self.pill(feed).offersFollow, "following back is a follow")
-
-        feed.authorBar.followAuthor(ProfileID("prof-2"))
-
-        #expect(try Self.pill(feed).followBadge == .friends)
-        #expect(feed.followStore.relation(for: ProfileID("prof-2")) == .mutual)
-        await Self.settle { graph.pendingFollows == 1 }
-        #expect(graph.follows == [ProfileID("prof-2")])
-        graph.answerFollow(accepting: true)
-        await Self.settle { feed.followStore.followsInFlight.isEmpty }
-        #expect(feed.followStore.relation(for: ProfileID("prof-2")) == .mutual)
+        #expect(pill.followBadge == .none)
+        #expect(pill.badgeReplaceCount == replaces + 2, "the badge left without its symbol replace")
+        #expect(!pill.isRedrawingWholePill)
     }
 
-    /// A state mark is not an action: it takes no touch, so a tap on it is a
-    /// tap on the pill (the profile), and it never follows.
-    ///
-    /// VOICEOVER READS ONE ELEMENT (#1277): the pill says "Name, @handle,
-    /// Following"; the "+" is the pill's "Follow" custom action, not a
-    /// separate tiny target.
-    @Test(arguments: [SnapAuthorIdentityView.FollowBadge.following, .friends, .pending])
-    func aStateMarkTakesNoTap(_ badge: SnapAuthorIdentityView.FollowBadge) throws {
+    /// PASSIVE (#2419): the badge takes no touch and no Follow is offered to
+    /// VoiceOver; the pill is ONE element (#1277) saying "Name, @handle,
+    /// Following".
+    @Test(arguments: [SnapAuthorIdentityView.FollowBadge.none, .following, .friends])
+    func theBadgeIsPassive(_ badge: SnapAuthorIdentityView.FollowBadge) throws {
         let host = SnapAuthorIdentityView()
         host.setPerson(id: ProfileID("prof-2"), name: "Ava Moreau", meta: "@ava", avatarURL: nil,
                        pipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()), animated: true)
         host.setFollowBadge(badge)
-        let glyph = try #require(Self.badgeButton(in: host))
+        let glyph = try #require(Self.badgeView(in: host))
         let pill = try #require(Self.personPill(in: host))
 
         #expect(glyph.isAccessibilityElement == false, "the badge is read with the pill")
         #expect(glyph.isUserInteractionEnabled == false)
         #expect(pill.isAccessibilityElement)
-        #expect(pill.accessibilityLabel == "Ava Moreau, @ava, \(badge.accessibilityLabel ?? "")")
-        #expect(pill.accessibilityCustomActions == nil, "a state mark offers no action")
-
-        var followed: [ProfileID] = []
-        host.onFollowTapped = { followed.append($0) }
-        host.setFollowBadge(.follow)
-        #expect(glyph.isUserInteractionEnabled, "the \"+\" is the one badge that acts")
-        #expect(pill.accessibilityLabel == "Ava Moreau, @ava")
-        let action = try #require(pill.accessibilityCustomActions?.first)
-        #expect(action.name == "Follow")
-        _ = action.actionHandler?(action)
-        #expect(followed == [ProfileID("prof-2")], "the custom action did not follow")
-
-        host.setFollowBadge(.none)
-        #expect(host.drawnBadgeSymbol == nil)
-        #expect(glyph.isUserInteractionEnabled == false)
-        #expect(pill.accessibilityCustomActions == nil)
+        let words = ["Ava Moreau", "@ava", badge.accessibilityLabel].compactMap { $0 }.joined(separator: ", ")
+        #expect(pill.accessibilityLabel == words)
+        #expect(pill.accessibilityCustomActions?.isEmpty ?? true, "the badge offers an action")
     }
 
     private static func personPill(in view: UIView) -> PersonPill? {
@@ -414,76 +235,35 @@ struct SnapAuthorFollowTests {
         return nil
     }
 
-    private static func badgeButton(in view: UIView) -> UIButton? {
+    private static func badgeView(in view: UIView) -> RelationBadgeView? {
         for sub in view.subviews {
-            if let button = sub as? UIButton { return button }
-            if let found = badgeButton(in: sub) { return found }
+            if let badge = sub as? RelationBadgeView { return badge }
+            if let found = badgeView(in: sub) { return found }
         }
         return nil
     }
 
-    /// A refused follow puts the "+" back — and says so (#802), in a failure
-    /// toast naming the author.
-    @Test func aRefusedFollowBringsTheFollowBackAndSaysSo() async throws {
-        let graph = GatedFollowGraph()
-        let feed = Self.feed(graph: graph)
-        feed.followStore.setRelation(.notFollowing, for: ProfileID("prof-2"))
-        feed.authorBar.showAuthor(Self.model(authorID: "prof-2"))
-
-        feed.authorBar.followAuthor(ProfileID("prof-2"))
-        #expect(try Self.pill(feed).offersFollow == false)
-        await Self.settle { graph.pendingFollows == 1 }
-        #expect(try Self.pill(feed).offersFollow == false, "the \"+\" came back before the graph answered")
-        #expect(Self.toast(in: feed.view) == nil, "the failure was said before the graph answered")
-        #expect(feed.debugFollowFailureToastsShown == 0, "the failure was said before the graph answered")
-        graph.answerFollow(accepting: false)
-        await Self.settle { (try? Self.pill(feed).offersFollow) == true }
-        #expect(try Self.pill(feed).offersFollow)
-        // Counted on ARRIVAL (#1979): the toast is gone after a few seconds,
-        // and a starved runner looked for it once, too late.
-        await Self.settle { feed.debugFollowFailureToastsShown == 1 }
-        #expect(feed.debugFollowFailureToastsShown == 1, "the refused follow was silent")
-        if let toast = Self.toast(in: feed.view) { #expect(toast.style == .failure) }
-    }
-
-    /// The failure names the author by the model's handle, never by parsing
-    /// the meta line; a model with none falls back to the display name.
-    @Test func aFollowFailureNamesTheAuthorByTheModelsHandle() {
-        let named = FeedItemDisplayModel(
-            id: PostID("p"), authorID: ProfileID("a"), authorName: "Ava", metaText: "2h",
-            avatarURL: nil, caption: nil, mediaURL: nil, mediaKind: .image, thumbnailURL: nil,
-            audioText: nil, authorHandle: "ava"
-        )
-        #expect(SnapAuthorBar.followName(of: named) == "@ava")
-        #expect(SnapAuthorBar.followName(of: Self.model(authorID: "bo")) == "Name bo")
-    }
-
-    private static func toast(in view: UIView) -> ToastView? {
-        if let toast = view as? ToastView { return toast }
-        return view.subviews.lazy.compactMap { toast(in: $0) }.first
-    }
-
-    /// A follow accepted ELSEWHERE — on the author's own profile — takes the
-    /// "+" away, and an unfollow elsewhere brings it back: the pill and the
+    /// A follow accepted ELSEWHERE — on the author's own profile — draws the
+    /// check, and an unfollow elsewhere takes it away: the pill and the
     /// profile's button never disagree.
     @Test func aFollowOrUnfollowMadeElsewhereReachesThePill() async throws {
         let events = FollowGraphEvents()
         let feed = Self.feed(events: events)
         feed.followStore.setRelation(.notFollowing, for: ProfileID("prof-2"))
         feed.authorBar.showAuthor(Self.model(authorID: "prof-2"))
-        #expect(try Self.pill(feed).offersFollow)
+        #expect(try Self.pill(feed).followBadge == .none)
 
         events.publish(FollowChange(profileID: ProfileID("prof-2"), isFollowing: true))
-        await Self.settle { (try? Self.pill(feed).offersFollow) == false }
-        #expect(try Self.pill(feed).offersFollow == false)
+        await Self.settle { (try? Self.pill(feed).followBadge) == .following }
+        #expect(try Self.pill(feed).followBadge == .following)
 
         events.publish(FollowChange(profileID: ProfileID("prof-2"), isFollowing: false))
-        await Self.settle { (try? Self.pill(feed).offersFollow) == true }
-        #expect(try Self.pill(feed).offersFollow)
+        await Self.settle { (try? Self.pill(feed).followBadge) == SnapAuthorIdentityView.FollowBadge.none }
+        #expect(try Self.pill(feed).followBadge == .none)
     }
 
-    /// A friend unfollowed elsewhere still follows the viewer: the "+" comes
-    /// back, and following again from anywhere makes a friend again.
+    /// A friend unfollowed elsewhere still follows the viewer: the badge
+    /// goes, and following again from anywhere makes a friend again.
     @Test func aFriendUnfollowedElsewhereStillFollowsTheViewer() async throws {
         let events = FollowGraphEvents()
         let feed = Self.feed(events: events)
@@ -492,8 +272,8 @@ struct SnapAuthorFollowTests {
         #expect(try Self.pill(feed).followBadge == .friends)
 
         events.publish(FollowChange(profileID: ProfileID("prof-2"), isFollowing: false))
-        await Self.settle { (try? Self.pill(feed).followBadge) == .follow }
-        #expect(try Self.pill(feed).followBadge == .follow)
+        await Self.settle { (try? Self.pill(feed).followBadge) == SnapAuthorIdentityView.FollowBadge.none }
+        #expect(try Self.pill(feed).followBadge == .none)
         #expect(feed.followStore.relation(for: ProfileID("prof-2")) == .followedBy)
 
         events.publish(FollowChange(profileID: ProfileID("prof-2"), isFollowing: true))
@@ -521,14 +301,13 @@ struct SnapAuthorFollowTests {
         #expect(feed.followStore.relation(for: ProfileID("prof-3")) == .blocked)
     }
 
-    /// Nothing to follow THROUGH, nothing offered — an action that cannot act
-    /// is not drawn.
-    @Test func withoutAFollowSeamThereIsNoFollow() throws {
+    /// Nothing to follow THROUGH, no relation drawn.
+    @Test func withoutAFollowSeamThereIsNoBadge() throws {
         let feed = Self.feed(graph: nil)
-        feed.followStore.setRelation(.notFollowing, for: ProfileID("prof-2"))
+        feed.followStore.setRelation(.following, for: ProfileID("prof-2"))
         feed.authorBar.showAuthor(Self.model(authorID: "prof-2"))
 
-        #expect(try Self.pill(feed).offersFollow == false)
+        #expect(try Self.pill(feed).followBadge == .none)
     }
 }
 

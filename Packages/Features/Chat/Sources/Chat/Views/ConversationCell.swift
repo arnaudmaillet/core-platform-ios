@@ -47,19 +47,17 @@ final class ConversationCell: UITableViewCell {
     /// The peer this cell shows, for a relation that changes (#2049).
     private(set) var peerID: ProfileID?
 
-    /// `mark` and `onFollow`: the face's relation and its "+" (#2049).
+    /// `mark`: the face's relation, a passive badge (#2049, #2419).
     func configure(
         with model: ConversationDisplayModel,
         imagePipeline: ImagePipeline? = nil,
         avatars: (any PeerAvatarProviding)? = nil,
-        mark: PersonPill.Badge = .none,
-        onFollow: (() -> Void)? = nil
+        mark: PersonPill.Badge = .none
     ) {
         peerID = model.peerID
         accessibilityLabel = rowView.configure(
             with: model, imagePipeline: imagePipeline, avatars: avatars, mark: mark
         )
-        rowView.onFollowTapped = onFollow
         // Pinned reads twice, at two distances: a translucent band that
         // separates the pinned block at a glance (Telegram idiom; system fill
         // colors are translucent and adapt to dark mode), and a pin glyph under
@@ -72,17 +70,6 @@ final class ConversationCell: UITableViewCell {
         // what carries the change now; the colour is simply true on every frame
         // the row is drawn.
         applyPinnedTint(model.isPinned, animated: false)
-    }
-
-    /// VoiceOver's actions: the system's own (a table's swipe actions) and,
-    /// while the face shows the "+", "Follow" (#2049) — added, never in
-    /// their place.
-    override var accessibilityCustomActions: [UIAccessibilityCustomAction]? {
-        get {
-            let actions = (super.accessibilityCustomActions ?? []) + (rowView.followAccessibilityActions ?? [])
-            return actions.isEmpty ? nil : actions
-        }
-        set { super.accessibilityCustomActions = newValue }
     }
 
     /// The face's relation, changed on screen (#2049).

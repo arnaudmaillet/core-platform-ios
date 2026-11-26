@@ -775,69 +775,35 @@ struct ConversationThreadSendAndMuteTests {
 
     /// ONE STATE PER PERSON (#2049): a follow made elsewhere — a profile
     /// card over the thread moves the app's store through the follow
-    /// channel — reaches the pill; and the thread's own follow is written
-    /// there for every other surface.
+    /// channel — reaches the pill. Not followed draws no badge (#2419).
     @Test func thePillFollowsTheAppsOneCopy() async {
         let graph = Graph(.notFollowing)
         let entities = EntityStore()
         let (screen, driver, window) = makeScreen(graph: graph, entities: entities)
         defer { window.isHidden = true }
         driver.onPeerChange?(ConversationThreadPerson(id: ProfileID("them"), name: "Ava", avatarURL: nil))
-        #expect(await settle { screen.debugPeerFollowBadge == .follow })
-        #expect(entities.relation(to: ProfileID("them")) == .notFollowing, "the read was not written to the store")
+        #expect(await settle { entities.relation(to: ProfileID("them")) == .notFollowing }, "the read was not written to the store")
+        #expect(screen.debugPeerFollowBadge == SnapAuthorIdentityView.FollowBadge.none)
         entities.applyFollowChange(FollowChange(profileID: ProfileID("them"), isFollowing: true))
         #expect(await settle { screen.debugPeerFollowBadge == .following }, "a follow made elsewhere left the pill behind")
         entities.applyFollowChange(FollowChange(profileID: ProfileID("them"), isFollowing: false))
-        #expect(await settle { screen.debugPeerFollowBadge == .follow })
-        screen.followPeer(ProfileID("them"))
-        #expect(entities.relation(to: ProfileID("them")) == .following, "the thread's follow was not written to the store")
+        #expect(await settle { screen.debugPeerFollowBadge == SnapAuthorIdentityView.FollowBadge.none })
     }
 
-    /// ⚠️ A READ SENT BEFORE A FOLLOW NEVER UNDOES IT (#752): the screen
-    /// re-reads on every appearance, and its answer could land after the
-    /// follow it predates.
-    @Test func aStaleRelationAnswerNeverUndoesAFollow() async {
-        let graph = Graph(.notFollowing)
-        let (screen, driver, window) = makeScreen(graph: graph)
-        defer { window.isHidden = true }
-        driver.onPeerChange?(ConversationThreadPerson(id: ProfileID("them"), name: "Ava", avatarURL: nil))
-        #expect(await settle { screen.debugPeerFollowBadge == .follow })
-
-        graph.readDelay = .milliseconds(300)
-        screen.resolvePeerRelation(refresh: true)
-        screen.followPeer(ProfileID("them"))
-        #expect(await settle { graph.follows == [ProfileID("them")] })
-        try? await Task.sleep(for: .milliseconds(450))
-        #expect(screen.debugPeerFollowBadge == .following, "the read from before the follow put the + back")
-    }
-
-    /// A refused follow puts the "+" back — and says so (#802).
-    @Test func aRefusedFollowPutsThePlusBackAndSaysSo() async {
-        let graph = Graph(.notFollowing)
-        graph.refuses = true
-        let (screen, driver, window) = makeScreen(graph: graph)
-        defer { window.isHidden = true }
-        driver.onPeerChange?(ConversationThreadPerson(id: ProfileID("them"), name: "Ava", avatarURL: nil))
-        #expect(await settle { screen.debugPeerFollowBadge == .follow })
-        screen.followPeer(ProfileID("them"))
-        #expect(screen.debugPeerFollowBadge == .following, "no optimistic follow")
-        #expect(await settle { screen.debugPeerFollowBadge == .follow }, "the refusal stuck")
-        #expect(await settle { Self.firstToast(in: screen.view)?.style == .failure }, "the refused follow was silent")
-    }
-
-    /// The pill draws the relation as a vertical post's author pill does —
-    /// someone who follows the viewer gets "+", and a tap makes friends.
-    @Test func thePeerPillDrawsTheRelationAndTheFollowFollows() async {
+    /// THE PILL'S BADGE IS PASSIVE (#2419): someone who follows the viewer,
+    /// not followed back, wears no badge, and the pill follows nobody — no
+    /// follow from a conversation; it happens on the profile.
+    @Test func thePeerPillsBadgeIsPassive() async {
         let graph = Graph(.followedBy)
+        graph.holdsReads = true
         let (screen, driver, window) = makeScreen(graph: graph)
-        defer { window.isHidden = true }
-
+        defer { window.isHidden = true; graph.releaseReads() }
         driver.onPeerChange?(ConversationThreadPerson(id: ProfileID("them"), name: "Ava", avatarURL: nil))
-        #expect(await settle { screen.debugPeerFollowBadge == .follow }, "\(screen.debugPeerFollowBadge)")
-
-        screen.followPeer(ProfileID("them"))
-        #expect(screen.debugPeerFollowBadge == .friends, "following someone who follows back is a friend")
-        #expect(await settle { graph.follows == [ProfileID("them")] })
+        #expect(await settle { graph.hasHeldRead })
+        #expect(screen.debugPeerFollowBadge == .loading)
+        graph.releaseReads()
+        #expect(await settle { screen.debugPeerFollowBadge == SnapAuthorIdentityView.FollowBadge.none })
+        #expect(graph.follows.isEmpty)
     }
 
     // MARK: - The pill is drawn once (#889)
@@ -879,68 +845,6 @@ struct ConversationThreadSendAndMuteTests {
         #expect(after.first?.customView === pill, "the pill was replaced")
     }
 
-    /// ⚠️ THE FOLLOW TAP IS A SYMBOL REPLACE TOO (#925): the "+" on the
-    /// avatar turns into the friends mark through SF Symbols' replace, in the
-    /// same item, and the pill is never blurred for it (it used to be).
-    @Test func aFollowTapReplacesTheSymbolWithoutTheBlur() async throws {
-        let graph = Graph(.followedBy)
-        let (screen, _, window) = makeScreen(graph: graph)
-        defer { window.isHidden = true }
-        window.layoutIfNeeded()
-        let pill = try #require(peerPill(screen))
-        #expect(await settle { screen.debugPeerFollowBadge == .follow })
-        #expect(await settle { !pill.isRedrawingWholePill })
-        #expect(pill.drawnBadgeSymbol == "plus")
-        let items = try #require(screen.toolbarItems)
-        let replaces = pill.badgeReplaceCount
-
-        screen.followPeer(ProfileID("them"))
-
-        #expect(screen.debugPeerFollowBadge == .friends)
-        #expect(pill.drawnBadgeSymbol == "person.2.fill")
-        #expect(pill.badgeReplaceCount == replaces + 1, "the badge changed without its symbol replace")
-        #expect(!pill.isRedrawingWholePill, "the follow tap blurred the whole pill")
-        let after = try #require(screen.toolbarItems)
-        #expect(zip(after, items).allSatisfy { $0 === $1 } && after.count == items.count,
-                "the toolbar items were rebuilt")
-        #expect(after.first?.customView === pill)
-    }
-
-    /// ⚠️ A FOLLOW ON A PRIVATE CORRESPONDENT ENDS ON THE PENDING MARK, BY
-    /// SYMBOL REPLACES ONLY (#968): the "+" becomes the optimistic check, and
-    /// the check the clock once the graph says it only asked. A later read
-    /// saying the request is gone (refused or withdrawn) puts the "+" back by
-    /// one more replace. The pill is never blurred, the toolbar never rebuilt.
-    @Test func aFollowOnAPrivatePeerEndsOnThePendingMarkByReplaces() async throws {
-        let graph = Graph(.notFollowing)
-        graph.asks = true
-        let (screen, _, window) = makeScreen(graph: graph)
-        defer { window.isHidden = true }
-        window.layoutIfNeeded()
-        let pill = try #require(peerPill(screen))
-        #expect(await settle { screen.debugPeerFollowBadge == .follow })
-        #expect(await settle { !pill.isRedrawingWholePill })
-        #expect(pill.window != nil, "the pill is not on screen: nothing to prove")
-        let items = try #require(screen.toolbarItems)
-        let replaces = pill.badgeReplaceCount
-
-        screen.followPeer(ProfileID("them"))
-        #expect(await settle { screen.debugPeerFollowBadge == .pending })
-        #expect(pill.drawnBadgeSymbol == "clock.circle.fill")
-        #expect(pill.badgeReplaceCount == replaces + 2, "plus → pending was not drawn by symbol replaces alone")
-        #expect(!pill.isRedrawingWholePill, "the request blurred the whole pill")
-
-        graph.relation = .notFollowing
-        screen.resolvePeerRelation(refresh: true)
-        #expect(await settle { screen.debugPeerFollowBadge == .follow })
-        #expect(pill.drawnBadgeSymbol == "plus")
-        #expect(pill.badgeReplaceCount == replaces + 3, "pending → plus was not one symbol replace")
-        #expect(!pill.isRedrawingWholePill, "pending → plus blurred the whole pill")
-        let after = try #require(screen.toolbarItems)
-        #expect(zip(after, items).allSatisfy { $0 === $1 } && after.count == items.count,
-                "the toolbar items were rebuilt")
-    }
-
     /// ⚠️ THE SAME PERSON IS DRAWN ONCE (#889): their face and @handle land
     /// after their name, and change the pill in place; only someone else
     /// cross-fades the whole pill.
@@ -967,11 +871,12 @@ struct ConversationThreadSendAndMuteTests {
     /// The rule is the post pill's own: one mapping for both.
     @Test func theRelationMapsAsOnAPost() {
         typealias Badge = SnapAuthorIdentityView.FollowBadge
-        #expect(Badge(.notFollowing) == .follow)
+        #expect(Badge(.notFollowing) == .none)
+        #expect(Badge(.followedBy) == .none)
         #expect(Badge(.following) == .following)
         #expect(Badge(.mutual) == .friends)
         #expect(Badge(.viewer) == .none)
         #expect(Badge(.blocked) == .none)
-        #expect(Badge(.requested) == .pending)
+        #expect(Badge(.requested) == .none)
     }
 }

@@ -146,11 +146,11 @@ struct InboxRelationMarkTests {
 
     // MARK: - The mark
 
-    /// The mapping: the author pill's.
+    /// The mapping: the author pill's — Following and Friends only (#2419).
     @Test func theMarkFollowsTheRelation() {
-        #expect(PersonPill.Badge(relation: .notFollowing) == .follow)
-        #expect(PersonPill.Badge(relation: .followedBy) == .follow)
-        #expect(PersonPill.Badge(relation: .requested) == .pending)
+        #expect(PersonPill.Badge(relation: .notFollowing) == .none)
+        #expect(PersonPill.Badge(relation: .followedBy) == .none)
+        #expect(PersonPill.Badge(relation: .requested) == .none)
         #expect(PersonPill.Badge(relation: .following) == .following)
         #expect(PersonPill.Badge(relation: .mutual) == .friends)
         #expect(PersonPill.Badge(relation: .viewer) == .none)
@@ -160,7 +160,7 @@ struct InboxRelationMarkTests {
 
     /// NO RING ROUND THE FACE (#2082, the owner 2026-11-03), whatever the
     /// relation: the badge alone, its cutout kept.
-    @Test(arguments: [PersonPill.Badge.none, .loading, .follow, .pending, .following, .friends])
+    @Test(arguments: [PersonPill.Badge.none, .loading, .following, .friends])
     func theFaceWearsNoRing(_ mark: PersonPill.Badge) {
         let face = RelationMarkedAvatarView()
         face.frame = CGRect(x: 0, y: 0, width: 48, height: 48)
@@ -172,7 +172,7 @@ struct InboxRelationMarkTests {
 
     /// A group keeps its initials, with no mark.
     @Test func aGroupWearsNoMark() {
-        let (row, _) = laidOutRow(model(peers: ["a", "b"]), mark: .follow)
+        let (row, _) = laidOutRow(model(peers: ["a", "b"]), mark: .following)
         #expect(row.relationMark == .none)
     }
 
@@ -197,78 +197,31 @@ struct InboxRelationMarkTests {
         #expect(row.debugFaceIsCutOut)
     }
 
-    /// ⚠️ THE "+" IS THE BADGE'S ALONE: a touch on it reaches the badge, past
-    /// the disc's bounds and the stack round it — never the row's own tap.
-    @Test func aTouchOnThePlusIsTheBadges() throws {
-        let (row, _) = laidOutRow(model(), mark: .follow)
+    /// THE ROWS' BADGE IS PASSIVE (#2419): no mark takes a touch — the row
+    /// keeps it, its tap opens the conversation — and VoiceOver is offered
+    /// no Follow: following happens on the profile.
+    @Test(arguments: [PersonPill.Badge.loading, .following, .friends])
+    func theRowsBadgeIsPassive(_ mark: PersonPill.Badge) throws {
+        let (row, _) = laidOutRow(model(), mark: mark)
         let badge = try #require(row.debugBadge)
         let centre = badge.convert(CGPoint(x: badge.bounds.midX, y: badge.bounds.midY), to: row)
-        #expect(row.hitTest(centre, with: nil) === badge)
-        // Its grown touch area, below the disc.
-        let below = badge.convert(CGPoint(x: badge.bounds.midX, y: badge.bounds.maxY + 6), to: row)
-        #expect(row.hitTest(below, with: nil) === badge)
-        // A state mark takes no touch: the row keeps it.
-        row.setRelationMark(.following, animated: false)
-        #expect(row.hitTest(centre, with: nil) !== badge)
-    }
-
-    /// Only the "+" calls the follow.
-    @Test func onlyThePlusCallsTheFollow() throws {
-        let (row, _) = laidOutRow(model(), mark: .follow)
-        var follows = 0
-        row.onFollowTapped = { follows += 1 }
-        let badge = try #require(row.debugBadge)
-        for mark in [PersonPill.Badge.following, .friends, .pending] {
-            row.setRelationMark(mark, animated: false)
-            badge.sendActions(for: .primaryActionTriggered)
-        }
-        #expect(follows == 0)
-        row.setRelationMark(.follow, animated: false)
-        badge.sendActions(for: .primaryActionTriggered)
-        #expect(follows == 1)
-        #expect(row.followAccessibilityActions?.first?.name == "Follow")
+        #expect(row.hitTest(centre, with: nil) !== badge, "\(mark) took the touch")
+        #expect(!badge.isUserInteractionEnabled)
+        #expect(row.accessibilityCustomActions?.isEmpty ?? true)
     }
 
     // MARK: - The relations
 
-    /// The "+": the check at once, then the graph's answer.
-    @Test func thePlusFlipsAtOnce() async throws {
+    /// Someone the viewer doesn't follow, or asked, wears no badge: the face
+    /// stays whole.
+    @Test func notFollowedOrRequestedWearsNoBadge() async throws {
         let graph = Graph([Self.peer: .notFollowing])
         let relations = InboxRelations(entities: EntityStore(), reader: graph, writer: graph)
         relations.resolve([Self.peer])
         try #require(await settle { await relations.relation(for: Self.peer) == .notFollowing })
-        await graph.set(.following, for: Self.peer)
-        var failed = false
-        relations.follow(Self.peer) { failed = true }
-        #expect(relations.mark(for: Self.peer) == .following, "no optimistic flip")
-        try #require(await settle { await graph.follows == [Self.peer] })
-        try await Task.sleep(for: .milliseconds(50))
-        #expect(relations.mark(for: Self.peer) == .following)
-        #expect(!failed)
-    }
-
-    /// A private person: the clock.
-    @Test func aRequestGivesTheClock() async throws {
-        let graph = Graph([Self.peer: .notFollowing], outcome: .requested)
-        let relations = InboxRelations(entities: EntityStore(), reader: graph, writer: graph)
-        relations.resolve([Self.peer])
-        try #require(await settle { await relations.relation(for: Self.peer) == .notFollowing })
-        await graph.set(.requested, for: Self.peer)
-        relations.follow(Self.peer) {}
-        try #require(await settle { await relations.mark(for: Self.peer) == .pending }, "no clock")
-    }
-
-    /// A refusal puts the "+" back and is said.
-    @Test func aRefusalPutsThePlusBack() async throws {
-        let graph = Graph([Self.peer: .notFollowing], outcome: nil)
-        let relations = InboxRelations(entities: EntityStore(), reader: graph, writer: graph)
-        relations.resolve([Self.peer])
-        try #require(await settle { await relations.relation(for: Self.peer) == .notFollowing })
-        var failed = false
-        relations.follow(Self.peer) { failed = true }
-        #expect(relations.mark(for: Self.peer) == .following)
-        try #require(await settle { failed }, "the refusal was not said")
-        #expect(relations.mark(for: Self.peer) == .follow, "the + did not come back")
+        #expect(relations.mark(for: Self.peer) == .none)
+        let (row, _) = laidOutRow(model(), mark: relations.mark(for: Self.peer))
+        #expect(!row.debugFaceIsCutOut, "a cutout with no badge")
     }
 
     /// A viewer change wipes the store's answers, and the rows are told —

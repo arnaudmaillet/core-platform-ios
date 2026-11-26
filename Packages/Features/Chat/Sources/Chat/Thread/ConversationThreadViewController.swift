@@ -307,7 +307,6 @@ final class ConversationThreadViewController: UIViewController {
     private var relationAskedFor: ProfileID?
     /// A landed relation waiting for the navigation transition to end.
     private var landedRelationScheduled = false
-    private var followInFlight = false
     /// Bumped by every ask and every follow: an answer from before either
     /// is stale — a read sent before a follow undid the follow (#752).
     private var relationGeneration = 0
@@ -1159,7 +1158,6 @@ final class ConversationThreadViewController: UIViewController {
         // author then).
         peerPill.onAuthorTapped = { [weak self] _ in self?.driver.didTapIdentityPill() }
         peerPill.onAuthorLongPressed = { [weak self] _ in self?.driver.didTapIdentity() }
-        peerPill.onFollowTapped = { [weak self] id in self?.followPeer(id) }
         // The pill is the toolbar's (#671); a preview (no toolbar) keeps it
         // in the bar. No points badge on a conversation (#738), and no pin
         // or bell either: both are the footer's (#2305).
@@ -2618,13 +2616,13 @@ extension ConversationThreadViewController {
     /// until the new one lands.
     func resolvePeerRelation(refresh: Bool = false) {
         guard mode == .full, socialGraph != nil, let followRelations, let id = peer.id,
-              refresh || relationAskedFor != id, !followInFlight else { return }
+              refresh || relationAskedFor != id else { return }
         relationAskedFor = id
         relationGeneration += 1
         let generation = relationGeneration
         Task { [weak self] in
             guard let relation = try? await followRelations.followRelation(to: id) else { return }
-            guard let self, self.peer.id == id, !self.followInFlight, self.relationGeneration == generation else { return }
+            guard let self, self.peer.id == id, self.relationGeneration == generation else { return }
             // The graph's answer, for every surface showing them (#2049).
             self.entities?.setRelation(relation, for: id)
             self.setPeerRelation(relation)
@@ -2647,29 +2645,22 @@ extension ConversationThreadViewController {
     }
 
     /// The store's relation for the correspondent moved — a follow, a
-    /// request, an unfollow made elsewhere, or a viewer change. The thread's
-    /// own follow in flight draws its own answer.
+    /// request, an unfollow made elsewhere, or a viewer change. The pill's
+    /// badge is passive (#2419): the thread follows nobody itself.
     private func knownRelationDidChange(for id: ProfileID) {
-        guard peer.id == id, !followInFlight, let entities else { return }
+        guard peer.id == id, let entities else { return }
         let known = entities.relation(to: id)
         guard known != peerRelation else { return }
         relationGeneration += 1
         setPeerRelation(known)
     }
 
-    /// Either way the badge's symbol is replaced and nothing else moves
-    /// (#925), as on a post.
-    ///
-    /// - Parameter tapped: the viewer's own follow (or its refusal), drawn at
-    ///   once. Anything else is a value that LANDED — a read answering, a new
-    ///   peer — and waits out a push or pop under way (#889).
-    private func setPeerRelation(_ relation: FollowRelation?, tapped: Bool = false) {
+    /// The badge's symbol is replaced and nothing else moves (#925), as on a
+    /// post. A value that LANDED (a read answering, a new peer) waits out a
+    /// push or pop under way (#889).
+    private func setPeerRelation(_ relation: FollowRelation?) {
         peerRelation = relation
-        if tapped {
-            peerPill.setFollowBadge(badge(for: relation), animated: view.window != nil)
-        } else {
-            drawLandedRelation()
-        }
+        drawLandedRelation()
         fitTrailingRun()
     }
 
@@ -2710,38 +2701,6 @@ extension ConversationThreadViewController {
             landedRelationScheduled = false
         }
         peerPill.setFollowBadge(badge(for: peerRelation), animated: view.window != nil)
-    }
-
-    /// The "+": follows the correspondent, optimistically, as the feed's
-    /// author pill does; a refusal puts the relation back.
-    func followPeer(_ id: ProfileID) {
-        MemberGates.perform(.follow(handle: peer.handle), from: self) { [weak self] in
-            self?.commitFollow(id)
-        }
-    }
-
-    private func commitFollow(_ id: ProfileID) {
-        guard let socialGraph, peer.id == id, !followInFlight, let before = peerRelation,
-              SnapAuthorIdentityView.FollowBadge(before) == .follow else { return }
-        followInFlight = true
-        relationGeneration += 1
-        // Named now: the peer can change before the graph answers.
-        let message = PlusFollow.failureMessage(handle: peer.handle, name: peer.name)
-        // The inbox's "+" follows the same way (#2049): one seam, `PlusFollow`.
-        PlusFollow.commit(id, from: before, through: socialGraph, apply: { [weak self] relation in
-            guard let self else { return }
-            // Every surface showing them follows the tap (#2049).
-            self.entities?.setRelation(relation, for: id)
-            guard self.peer.id == id else { return }
-            self.setPeerRelation(relation, tapped: true)
-        }, completion: { [weak self] failed in
-            guard let self else { return }
-            self.followInFlight = false
-            // Said either way (#802), as the mute's is.
-            if failed { Feedback.failure(message, from: self) }
-            // The peer changed mid-follow: its relation was never asked.
-            if self.peer.id != id { self.resolvePeerRelation() }
-        })
     }
 
     /// The pill's relation badge. Tests.

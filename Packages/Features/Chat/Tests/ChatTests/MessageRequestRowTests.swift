@@ -72,10 +72,10 @@ struct MessageRequestRowTests {
     }
 
     private func laidOut(
-        _ model: ConversationDisplayModel, mark: PersonPill.Badge = .none, onFollow: (() -> Void)? = nil
+        _ model: ConversationDisplayModel, mark: PersonPill.Badge = .none
     ) -> MessageRequestCell {
         let cell = MessageRequestCell(style: .default, reuseIdentifier: nil)
-        cell.configure(with: model, mark: mark, onFollow: onFollow)
+        cell.configure(with: model, mark: mark)
         let height = cell.systemLayoutSizeFitting(
             CGSize(width: 402, height: UIView.layoutFittingCompressedSize.height),
             withHorizontalFittingPriority: .required, verticalFittingPriority: .fittingSizeLevel
@@ -93,29 +93,23 @@ struct MessageRequestRowTests {
     // MARK: - The face
 
     /// The face wears the mark it is given, every state, as an All row's.
-    @Test(arguments: [PersonPill.Badge.none, .follow, .pending, .following, .friends])
+    @Test(arguments: [PersonPill.Badge.none, .loading, .following, .friends])
     func theFaceWearsTheRelationMark(_ mark: PersonPill.Badge) {
         let cell = laidOut(model(), mark: mark)
         #expect(cell.relationMark == mark)
         #expect(cell.debugBadge.drawn == mark)
     }
 
-    /// Only the "+" calls the follow, and a touch on it is the badge's, not
-    /// the row's.
-    @Test func onlyThePlusCallsTheFollow() {
-        var follows = 0
-        let cell = laidOut(model(), mark: .follow, onFollow: { follows += 1 })
+    /// THE BADGE IS PASSIVE (#2419): no touch on it, no Follow offered to
+    /// VoiceOver; the row keeps its own decisions.
+    @Test(arguments: [PersonPill.Badge.loading, .following, .friends])
+    func theBadgeIsPassive(_ mark: PersonPill.Badge) {
+        let cell = laidOut(model(), mark: mark)
         let badge = cell.debugBadge
         let centre = badge.convert(CGPoint(x: badge.bounds.midX, y: badge.bounds.midY), to: cell)
-        #expect(cell.hitTest(centre, with: nil) === badge)
-        badge.sendActions(for: .primaryActionTriggered)
-        #expect(follows == 1)
-        #expect(cell.contentView.accessibilityCustomActions?.first?.name == "Follow")
-        cell.setRelationMark(.following, animated: false)
-        badge.sendActions(for: .primaryActionTriggered)
-        #expect(follows == 1, "a state mark followed")
         #expect(cell.hitTest(centre, with: nil) !== badge)
-        #expect(cell.contentView.accessibilityCustomActions == nil)
+        #expect(!badge.isUserInteractionEnabled)
+        #expect(cell.contentView.accessibilityCustomActions?.isEmpty ?? true)
     }
 
     // MARK: - The ✕
@@ -193,7 +187,7 @@ struct MessageRequestRowTests {
     /// relation the graph answers.
     @Test(arguments: [InboxFolder.requests, .hiddenRequests])
     func theRequestScreensWearTheMark(_ folder: InboxFolder) async throws {
-        let graph = Graph(.notFollowing)
+        let graph = Graph(.following)
         let relations = InboxRelations(entities: EntityStore(), reader: graph, writer: graph)
         let catalog = InboxCatalog(repository: OneRequestPerFolder())
         let screen = MessageRequestsViewController(
@@ -211,6 +205,6 @@ struct MessageRequestRowTests {
             return table.visibleCells.compactMap { $0 as? MessageRequestCell }.first
         }
         try #require(await settle { firstCell() != nil }, "no request row")
-        try #require(await settle { firstCell()?.relationMark == .follow }, "the face wears no mark")
+        try #require(await settle { firstCell()?.relationMark == .following }, "the face wears no mark")
     }
 }

@@ -61,15 +61,41 @@ struct RelationMarkTests {
         }
     }
 
-    /// Only the "+" takes a tap, at any size; the badge is never an
-    /// accessibility element of its own.
+    /// THE BADGE'S STATES (#2419): none, loading, following, friends —
+    /// the "+" and the clock are gone, and a relation that is "not followed"
+    /// or "requested" draws nothing.
+    @Test func theBadgeHasFourStates() {
+        let states: [PersonPill.Badge] = [.none, .loading, .following, .friends]
+        for state in states {
+            switch state {
+            case .none, .loading, .following, .friends: break
+            }
+        }
+        #expect(PersonPill.Badge.following.symbolName == "checkmark.circle.fill")
+        #expect(PersonPill.Badge.friends.symbolName == "person.2.fill")
+        #expect(PersonPill.Badge.none.symbolName == nil)
+        #expect(!PersonPill.Badge.none.cutsTheFace)
+        #expect(PersonPill.Badge.loading.cutsTheFace)
+    }
+
+    /// NEVER A CONTROL (#2419): no state takes a touch, at any size, and the
+    /// badge is no accessibility element of its own unless its host lets it
+    /// speak, and then as words, never a button.
     @Test(arguments: [36, 96] as [CGFloat])
-    func onlyThePlusTakesATap(_ face: CGFloat) {
+    func theBadgeNeverTakesATouch(_ face: CGFloat) {
         let badge = RelationBadgeView(metrics: RelationMarkMetrics(faceDiameter: face))
-        for relation in [PersonPill.Badge.none, .loading, .follow, .following, .friends, .pending] {
+        #expect(!(badge as UIView is UIControl), "the badge is a control")
+        for relation in [PersonPill.Badge.none, .loading, .following, .friends] {
             badge.show(relation, animated: false)
-            #expect(badge.isUserInteractionEnabled == (relation == .follow), "\(relation)")
+            #expect(!badge.isUserInteractionEnabled, "\(relation)")
             #expect(!badge.isAccessibilityElement, "\(relation)")
+        }
+        badge.speaksForItself = true
+        for relation in [PersonPill.Badge.following, .friends] {
+            badge.show(relation, animated: false)
+            #expect(badge.isAccessibilityElement)
+            #expect(badge.accessibilityLabel == relation.accessibilityLabel)
+            #expect(!badge.accessibilityTraits.contains(.button), "\(relation) reads as a button")
         }
     }
 
@@ -85,7 +111,7 @@ struct RelationMarkTests {
         #expect(!badge.isUserInteractionEnabled)
         #expect(!badge.isAccessibilityElement)
         #expect(RelationBadgeView.discInk(for: .loading) == .clear)
-        badge.show(.follow, animated: false)
+        badge.show(.following, animated: false)
         #expect(!badge.showsBone, "the bone outlived the mark")
         #expect(badge.isAccessibilityElement)
         badge.show(.loading, animated: false)
@@ -116,6 +142,94 @@ struct RelationMarkTests {
         cutout.close(face, animated: false)
         #expect(!cutout.isCut(face), "a plain close waited for the shrink")
         #expect(!cutout.isClosing)
+    }
+
+    /// AN OPEN GROWS THE DISC FROM NOTHING (#2419): a badge that arrives on
+    /// screen opens the cutout with an animation, the mask on the face from
+    /// its start; a layout pass leaves it to finish, and an open of a face
+    /// already cut is at once.
+    @Test func anAnimatedOpenGrowsTheDiscAndLayoutLeavesIt() {
+        let face = CALayer()
+        face.bounds = CGRect(x: 0, y: 0, width: 96, height: 96)
+        let cutout = FaceCutout()
+        cutout.reducesMotion = { false }
+        let metrics = RelationMarkMetrics(faceDiameter: 96)
+        let centre = CGPoint(x: 82, y: 82)
+        cutout.open(face, centre: centre, metrics: metrics, animated: true)
+        #expect(cutout.isCut(face))
+        #expect(cutout.isOpening)
+        #expect(cutout.mask.animation(forKey: "faceCutout.open") != nil, "the disc did not grow")
+        cutout.cut(face, centre: centre, metrics: metrics)
+        #expect(cutout.isOpening, "a layout pass cut the open short")
+        #expect(cutout.mask.animation(forKey: "faceCutout.open") != nil)
+        let cutAlready = FaceCutout()
+        cutAlready.cut(face, centre: centre, metrics: metrics)
+        cutAlready.open(face, centre: centre, metrics: metrics, animated: true)
+        #expect(!cutAlready.isOpening, "a face already cut opened again")
+    }
+
+    /// INTERRUPTIBLE (#2419): a close reversed mid-way opens from where it
+    /// is, and an open reversed closes; neither jumps to its end.
+    @Test func aReversedChangeStartsFromWhereItIs() {
+        let face = CALayer()
+        face.bounds = CGRect(x: 0, y: 0, width: 96, height: 96)
+        let cutout = FaceCutout()
+        cutout.reducesMotion = { false }
+        let metrics = RelationMarkMetrics(faceDiameter: 96)
+        let centre = CGPoint(x: 82, y: 82)
+        cutout.cut(face, centre: centre, metrics: metrics)
+        cutout.close(face, animated: true)
+        #expect(cutout.isClosing)
+        cutout.open(face, centre: centre, metrics: metrics, animated: true)
+        #expect(!cutout.isClosing)
+        #expect(cutout.isOpening, "a reversed close jumped back whole")
+        #expect(cutout.mask.animation(forKey: "faceCutout.close") == nil)
+        #expect(cutout.mask.animation(forKey: "faceCutout.open") != nil)
+        cutout.close(face, animated: true)
+        #expect(!cutout.isOpening)
+        #expect(cutout.isClosing, "a reversed open jumped shut")
+        #expect(cutout.isCut(face), "the mask left before its shrink")
+    }
+
+    /// REDUCE MOTION (#2419): the cutout cross-fades (its veil), it never
+    /// grows or shrinks; the badge's glyph cross-fades too, still counted
+    /// as an animated change.
+    @Test func underReduceMotionTheCutoutAndTheBadgeCrossFade() {
+        let face = CALayer()
+        face.bounds = CGRect(x: 0, y: 0, width: 96, height: 96)
+        let cutout = FaceCutout()
+        cutout.reducesMotion = { true }
+        let metrics = RelationMarkMetrics(faceDiameter: 96)
+        cutout.open(face, centre: CGPoint(x: 82, y: 82), metrics: metrics, animated: true)
+        #expect(cutout.mask.animation(forKey: "faceCutout.open") == nil, "the disc grew under Reduce Motion")
+        #expect(cutout.debugIsAnimating, "no cross-fade")
+        #expect(cutout.debugVeilOpacity == 0)
+        cutout.close(face, animated: true)
+        #expect(cutout.mask.animation(forKey: "faceCutout.close") == nil, "the disc shrank under Reduce Motion")
+        #expect(cutout.debugVeilOpacity == 1)
+        #expect(cutout.isCut(face), "the mask left before the fade")
+
+        let badge = RelationBadgeView(metrics: metrics)
+        badge.reducesMotion = { true }
+        badge.show(.following, animated: true)
+        #expect(badge.replaceCount == 1)
+        #expect(badge.drawn == .following)
+    }
+
+    /// The face's whole-or-cut answer for a mark (`wear`): a mark with no
+    /// badge closes the cutout, one with a badge opens it.
+    @Test func wearingAMarkOpensOrClosesTheCutout() {
+        let face = CALayer()
+        face.bounds = CGRect(x: 0, y: 0, width: 96, height: 96)
+        let cutout = FaceCutout()
+        let metrics = RelationMarkMetrics(faceDiameter: 96)
+        let centre = CGPoint(x: 82, y: 82)
+        cutout.wear(.following, on: face, centre: centre, metrics: metrics, animated: false)
+        #expect(cutout.isCut(face))
+        cutout.wear(.none, on: face, centre: centre, metrics: metrics, animated: false)
+        #expect(!cutout.isCut(face))
+        cutout.wear(.loading, on: face, centre: nil, metrics: metrics, animated: false)
+        #expect(!cutout.isCut(face), "cut with no centre to cut round")
     }
 
     /// Resized for a Dynamic-Type face, the badge takes its new side and

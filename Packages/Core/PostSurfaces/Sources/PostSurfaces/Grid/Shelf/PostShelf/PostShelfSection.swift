@@ -499,18 +499,14 @@ final public class PostShelfSection: UIView {
         if let authorID = post.authorID {
             cell.onAuthorTapped = { [weak self] in self?.onCardAuthorTapped?(post) }
             cell.onAuthorHeld = onCardAuthorHeld == nil ? nil : { [weak self] in self?.onCardAuthorHeld?(post) }
-            // The face's "+" (#2300): the list's follow.
-            cell.onAuthorFollowTapped = { [weak self] in
-                guard let self else { return }
-                authorMarks?.follow(authorID, handle: post.authorHandle, name: post.authorName, from: self)
-            }
             cell.authorMenuActions = { [weak self, weak cell] in
                 guard let self, let cell else { return [] }
                 return menuActions(for: post, anchor: cell.authorMenuAnchor)
             }
         }
         // The band's face wears its author's relation mark (#2300), bound
-        // as the list's rows are.
+        // as the list's rows are. No Follow on a card (#2419): two tiles wide,
+        // a button would cut the name to a few letters.
         authorMarks?.bind(cell, to: cell.authorBandModel?.showsIdentity == true ? post.authorID : nil)
         cell.isHidden = post.id == concealedCard
     }

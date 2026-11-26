@@ -56,9 +56,6 @@ final class ProfileHeaderView: HeroHeaderView {
         // "Views" total until 2026-09-30.
         super.init(imagePipeline: imagePipeline, counters: ["Followers", "Following", "Likes"])
         configureTray()
-        // The avatar's "+" is the tray's Follow, exactly (#2050): one
-        // relationship, two places.
-        onRelationBadgeTapped = { [weak self] in self?.onFollowTapped?() }
         // Followers and Following open the relationship lists; Likes is a
         // total with nothing behind it.
         for (stat, direction) in zip(counters, [RelationshipDirection.followers, .following]) {
@@ -371,32 +368,26 @@ final class ProfileHeaderView: HeroHeaderView {
 
     // MARK: - The relation mark (#2014)
 
-    /// THE ONE MAPPING from the relationship to the badge, for the bar's
-    /// pill (#1451) and the avatar (#2014), on the profile and its card:
-    /// "+" while not followed, pending while asked, following, friends when
-    /// mutual. Nil for a profile with no relation to show: the viewer's own,
-    /// one the viewer cannot follow, one not read yet.
+    /// THE ONE MAPPING from the relationship to the badge, for the avatar
+    /// (#2014), on the profile and its card: following, friends when mutual
+    /// (#2419: the badge keeps only those two, passive; no "+" and no clock,
+    /// the header's Follow is the action). Nil for a profile with no badge
+    /// to show: not followed, asked, the viewer's own, one the viewer cannot
+    /// follow, one not read yet.
     static func relationBadge(for state: ProfileViewModel.FollowButton, mutual: Bool) -> PersonPill.Badge? {
         switch state {
-        case .follow: .follow
-        case .requested: .pending
         case .following: mutual ? .friends : .following
         default: nil
         }
     }
 
-    /// The avatar's mark (#2014, #2050): the one mapping, WHOLE — "+",
-    /// the pending clock, the check and the two people, as the author pill
-    /// and the inbox wear it (the owner, 2026-11-02, reversing 2026-11-01's
-    /// "never the '+'" to avoid exceptions). The "+" follows, through the
-    /// tray's own Follow.
+    /// The avatar's mark (#2014, #2419): the one mapping, as the author pill
+    /// and the inbox wear it. Passive, never a control.
     ///
     /// None for good for the viewer's own profile (known at once, so it never
-    /// wears the skeleton's badge first), someone blocked, and a profile the
-    /// viewer cannot follow. A relation not read yet wears the skeleton's
-    /// badge (#2098), never nothing. A guest wears what the author pill shows
-    /// a guest: the "+" (their relation reads as not followed, #442), behind
-    /// the member gate the tray's Follow already goes through. Pure, for
+    /// wears the skeleton's badge first), someone blocked, a profile the
+    /// viewer cannot follow, one not followed or only asked. A relation not
+    /// read yet wears the skeleton's badge (#2098), never nothing. Pure, for
     /// tests.
     static func avatarMark(
         for state: ProfileViewModel.FollowButton, mutual: Bool, blocked: Bool, isOwnProfile: Bool

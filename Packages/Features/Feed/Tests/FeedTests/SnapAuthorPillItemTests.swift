@@ -3,6 +3,7 @@ import CoreStorage
 import DesignSystem
 import MediaCore
 import MediaCoreFixtures
+import MediaUI
 import Testing
 import UIKit
 @testable import Feed
@@ -88,7 +89,7 @@ struct SnapAuthorPillItemTests {
         feed.authorBar.showAuthor(Self.model(id: "p2", author: "Grace Hopper", authorID: "prof-2", meta: "@grace"))
         let fresh = try #require(Self.authorItem(feed)?.customView as? SnapAuthorIdentityView)
 
-        #expect(fresh.onAuthorTapped != nil && fresh.onFollowTapped != nil)
+        #expect(fresh.onAuthorTapped != nil)
         #expect(fresh.debugTakesLongPress == first.debugTakesLongPress)
         #expect(fresh.widthCap == first.widthCap)
     }
@@ -154,7 +155,6 @@ struct SnapAuthorPillItemTests {
             let pill = try #require(Self.authorItem(feed)?.customView as? SnapAuthorIdentityView)
             #expect(abs(pill.widthCap - cap) < 0.5, "\(id)'s cap is \(pill.widthCap), the toolbar leaves \(cap)")
             #expect(pill.onAuthorTapped != nil)
-            #expect(pill.onFollowTapped != nil)
             widths[id] = fitted(pill)
         }
         let short = try #require(widths["prof-1"])
@@ -174,7 +174,7 @@ struct SnapAuthorPillItemTests {
         pill.setAuthor(Self.model(id: "p1", author: "Ada Lovelace", authorID: "prof-1", meta: "@ada · 2h"),
                        pipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()), animated: false)
         var widths: [CGFloat] = []
-        for badge in [SnapAuthorIdentityView.FollowBadge.none, .follow, .following, .friends] {
+        for badge in [SnapAuthorIdentityView.FollowBadge.none, .loading, .following, .friends] {
             pill.setFollowBadge(badge)
             pill.setNeedsLayout()
             pill.layoutIfNeeded()
@@ -184,7 +184,8 @@ struct SnapAuthorPillItemTests {
 
         pill.frame.size = pill.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
         pill.layoutIfNeeded()
-        let badge = try #require(Self.firstButton(in: pill))
+        pill.setFollowBadge(.following)
+        let badge = try #require(Self.firstView(of: RelationBadgeView.self, in: pill))
         let avatar = try #require(Self.firstView(of: MonogramAvatarView.self, in: pill))
         let badgeFrame = badge.convert(badge.bounds, to: pill)
         let face = avatar.convert(avatar.bounds, to: pill)
@@ -201,13 +202,6 @@ struct SnapAuthorPillItemTests {
         #expect(labels.allSatisfy { $0.maxX <= pill.bounds.maxX + 0.5 }, "a label runs past the pill")
         #expect(badgeFrame.maxX <= (labels.map(\.minX).min() ?? .infinity),
                 "the badge runs into the name: \(badgeFrame) vs \(labels)")
-    }
-
-    private static func firstButton(in view: UIView) -> UIButton? {
-        for sub in view.subviews {
-            if let found = sub as? UIButton ?? firstButton(in: sub) { return found }
-        }
-        return nil
     }
 
     private static func firstView<T: UIView>(of type: T.Type, in view: UIView) -> T? {

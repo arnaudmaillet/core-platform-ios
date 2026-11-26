@@ -4,6 +4,7 @@ import DesignSystem
 import EntityStore
 import MediaCore
 import MediaUI
+import PostGrid
 import UIKit
 
 /// THE RELATION MARK ON THE LISTS' AUTHOR BANDS (#2300): a text post's author
@@ -21,8 +22,9 @@ import UIKit
 /// - the binding: `AuthorBadgeBinding` (#1972) — the face known now on bind,
 ///   every bound face redrawn on an answer (a card configured off screen
 ///   included) and on a viewer change;
-/// - the "+": `SnapAuthorFollowStore.follow` behind the member gate —
-///   optimistic flip, `.toggleOn`, failure put back and said.
+/// - the Follow beside the flat rows' "…" (#2419, the badge passive since):
+///   `SnapAuthorFollowStore.follow` behind the member gate — optimistic flip,
+///   `.toggleOn`, failure put back and said — and Requested's withdrawal.
 ///
 /// One per composition root (`FeedFeatureBuilder`), shared by the surfaces
 /// it builds.
@@ -52,9 +54,16 @@ final public class PostAuthorMarks {
     }
 
     /// Binds `face` to `author` — nil draws no mark (a bare band, a post
-    /// with no author).
-    public func bind(_ face: any AuthorBadgeDrawing, to author: ProfileID?) {
-        binding.bind(face, to: author)
+    /// with no author). `offersFollow`: the face's host draws the author's
+    /// Follow too (the flat rows, #2419); a shelf's card is told none.
+    public func bind(_ face: any AuthorBadgeDrawing, to author: ProfileID?, offersFollow: Bool = false) {
+        binding.bind(face, to: author, offersFollow: offersFollow)
+    }
+
+    /// The Follow for `author` as known now — for a still copy of a bound
+    /// band (the reveal's stand-in).
+    public func followOffer(for author: ProfileID?) -> AuthorFollowOffer {
+        store.followOffer(for: author)
     }
 
     /// The mark for `author` as known now — for a still copy of a bound face
@@ -63,9 +72,10 @@ final public class PostAuthorMarks {
         store.badge(for: author)
     }
 
-    /// The "+": follows `author` — the member gate first, then the store's
-    /// optimistic follow and the follow haptic; a refusal puts the "+" back
-    /// and says so from the screen `source` is on.
+    /// Follow (#2419): follows `author` — the member gate first (a guest's
+    /// sign-in prompt), then the store's optimistic follow and the follow
+    /// haptic; a refusal puts Follow back and says so from the screen
+    /// `source` is on.
     public func follow(_ author: ProfileID, handle: String?, name: String?, from source: UIResponder) {
         MemberGates.perform(.follow(handle: handle), from: source) { [weak self, weak source] in
             guard let self else { return }
@@ -75,6 +85,16 @@ final public class PostAuthorMarks {
             }
             // Turned on at the optimistic flip (#1885).
             if followed { Haptics.play(.toggleOn) }
+        }
+    }
+
+    /// Requested's "Cancel Request" (#2419): withdraws the pending request
+    /// to `author`, optimistically; a refusal puts Requested back and says so.
+    public func cancelRequest(to author: ProfileID, handle: String?, from source: UIResponder) {
+        store.cancelRequest(to: author) { [weak source] in
+            guard let screen = source?.firstController(as: UIViewController.self) else { return }
+            let who = handle.map { $0.isEmpty ? "" : " to @" + $0 } ?? ""
+            Feedback.failure("Couldn't cancel your request" + who, from: screen)
         }
     }
 }

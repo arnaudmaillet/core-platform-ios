@@ -29,11 +29,11 @@ struct SnapAuthorBadgeInkTests {
         return abs(pixel.r - c.r) < 0.05 && abs(pixel.g - c.g) < 0.05 && abs(pixel.b - c.b) < 0.05
     }
 
-    /// The owner's inks (#1197): the "+" a black disc with a white mark; a
-    /// FOLLOWED check and a PENDING clock a grey disc with a pink mark; FRIENDS
+    /// The owner's inks (#1197): a FOLLOWED check a grey disc with a pink
+    /// mark; FRIENDS
     /// a dark grey disc with a mint mark (#2440, #2476), its disc resolving per
     /// appearance. Each ink is read under the appearance it is drawn in.
-    @Test(arguments: [Badge.follow, .following, .friends, .pending],
+    @Test(arguments: [Badge.following, .friends],
           [UIUserInterfaceStyle.light, .dark])
     func eachBadgeWearsItsInks(_ badge: Badge, _ style: UIUserInterfaceStyle) throws {
         let pill = SnapAuthorIdentityView()
@@ -46,8 +46,7 @@ struct SnapAuthorBadgeInkTests {
         #expect(glyph.renderingMode != .alwaysTemplate, "the glass can re-tint the badge")
 
         let (discInk, markInk): (UIColor, UIColor) = switch badge {
-        case .follow: (.black, .white)
-        case .following, .pending: (PersonPillBadgeInks.quietDisc, PersonPillBadgeInks.accent)
+        case .following: (PersonPillBadgeInks.quietDisc, PersonPillBadgeInks.accent)
         case .friends: (PersonPillBadgeInks.friendsDisc, PersonPillBadgeInks.friendsGlyph)
         case .none, .loading: (.clear, .clear)
         }
@@ -64,7 +63,7 @@ struct SnapAuthorBadgeInkTests {
     /// The same badge, pixel for pixel, in light and dark mode — all but
     /// Friends, whose dark grey disc is a step lighter in the dark so it keeps
     /// its outline on the black page (#2440, #2476).
-    @Test(arguments: [Badge.follow, .following, .pending])
+    @Test(arguments: [Badge.following])
     func theBadgeIsTheSameInEitherAppearance(_ badge: Badge) throws {
         let pill = SnapAuthorIdentityView()
         pill.setFollowBadge(badge)
@@ -86,17 +85,15 @@ struct SnapAuthorBadgeInkTests {
         #expect(try Self.opaquePixels(of: [try #require(images.glyph)], style: .light).isEmpty)
     }
 
-    /// A pending request wears the filled clock (#968), takes no tap of its
-    /// own, and says so to VoiceOver.
-    @Test func aPendingRequestWearsTheClock() {
-        #expect(Badge.pending.symbolName == "clock.circle.fill")
-        #expect(UIImage(systemName: "clock.circle.fill") != nil)
-        #expect(Badge(.requested) == .pending)
-        #expect(Badge.pending.accessibilityLabel == "Requested")
+    /// A pending request wears NO badge any more (#2419): "Requested" reads
+    /// on the Follow buttons, never on a face.
+    @Test func aPendingRequestWearsNoBadge() throws {
+        #expect(Badge(.requested) == .none)
+        #expect(Badge(.notFollowing) == .none)
         let pill = SnapAuthorIdentityView()
-        pill.setFollowBadge(.pending)
-        #expect(pill.drawnBadgeSymbol == "clock.circle.fill")
-        #expect(!pill.offersFollow, "a pending request is not a follow on offer")
+        pill.setFollowBadge(Badge(.requested))
+        #expect(pill.drawnBadgeSymbol == nil)
+        #expect(try Self.opaquePixels(of: [try #require(pill.drawnBadgeImages.glyph)], style: .light).isEmpty)
     }
 
     // MARK: - Pixels

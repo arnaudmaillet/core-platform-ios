@@ -23,6 +23,10 @@ public struct PostAuthorBandModel: Equatable, Sendable {
     /// model so a reveal's prop, configured from the row's reading, wears
     /// the row's mark and nothing pops in at the landing.
     public private(set) var relationMark: PersonRelationBadge = .none
+    /// The Follow beside the "…" (#2419): what the host's binding offered,
+    /// `.none` from a post alone. Carried for the same reason as the mark:
+    /// the reveal's stand-in draws the button exactly as the row does.
+    public private(set) var followOffer: AuthorFollowOffer = .none
 
     /// Whether the band draws a person at all.
     public var showsIdentity: Bool { name != nil }
@@ -58,6 +62,7 @@ public struct PostAuthorBandModel: Equatable, Sendable {
     public func withAge(_ age: String) -> PostAuthorBandModel {
         var model = PostAuthorBandModel(name: name, handle: handle, avatarURL: avatarURL, monogram: monogram, age: age)
         model.relationMark = relationMark
+        model.followOffer = followOffer
         return model
     }
 
@@ -66,6 +71,14 @@ public struct PostAuthorBandModel: Equatable, Sendable {
     public func withRelationMark(_ mark: PersonRelationBadge) -> PostAuthorBandModel {
         var model = self
         model.relationMark = showsIdentity ? mark : .none
+        return model
+    }
+
+    /// The same band offering `offer` beside its "…" (#2419): nothing for a
+    /// bare band, which names nobody to follow.
+    public func withFollowOffer(_ offer: AuthorFollowOffer) -> PostAuthorBandModel {
+        var model = self
+        model.followOffer = showsIdentity ? offer : .none
         return model
     }
 

@@ -65,31 +65,63 @@ struct RelationMarkedAvatarViewTests {
         #expect(abs(face.badge.frame.maxX - (60 + metrics.cornerOffset)) < 0.34)
     }
 
-    /// Only the "+" takes a touch — past the face's own bounds too; a host
-    /// that holds the face's taps keeps them everywhere else.
-    @Test func onlyThePlusTakesATouch() {
+    /// NEVER A CONTROL (#2419): no mark takes a touch; a tap on the face is
+    /// the face's (its host's).
+    @Test func theBadgeNeverTakesATouch() {
         let face = laidOut(RelationMarkedAvatarView(diameter: 40))
-        face.takesOnlyBadgeTouches = true
-        face.setMark(.follow, animated: false)
-        face.superview?.layoutIfNeeded()
-        let badgeCentre = CGPoint(x: face.badge.frame.midX, y: face.badge.frame.midY)
-        #expect(face.hitTest(badgeCentre, with: nil) === face.badge)
-        #expect(face.hitTest(CGPoint(x: 10, y: 10), with: nil) == nil)
-        face.setMark(.following, animated: false)
-        #expect(face.hitTest(badgeCentre, with: nil) == nil)
-        face.takesOnlyBadgeTouches = false
-        #expect(face.hitTest(CGPoint(x: 10, y: 10), with: nil) != nil)
+        for mark in [PersonPill.Badge.none, .loading, .following, .friends] {
+            face.setMark(mark, animated: false)
+            face.superview?.layoutIfNeeded()
+            let inside = CGPoint(x: face.badge.frame.minX + 2, y: face.badge.frame.minY + 2)
+            #expect(face.hitTest(inside, with: nil) !== face.badge, "\(mark) took the touch")
+            #expect(!face.badge.isUserInteractionEnabled)
+        }
     }
 
-    /// The "+"'s tap is told; a state mark's never.
-    @Test func thePlusTellsItsTap() {
-        let face = RelationMarkedAvatarView(diameter: 40)
-        var taps = 0
-        face.onFollowTapped = { taps += 1 }
-        face.setMark(.follow, animated: false)
-        face.badge.sendActions(for: .primaryActionTriggered)
+    /// EVERY CHANGE SEEN ON SCREEN IS ANIMATED (#2419): no badge → a badge
+    /// opens the cutout as the badge grows in, a badge → no badge closes it
+    /// as it shrinks out, and the skeleton → no badge closes it as the bone
+    /// fades.
+    @Test func aChangeOnScreenAnimatesTheCutoutAndTheBadge() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 200, height: 200))
+        window.isHidden = false
+        defer { window.isHidden = true }
+        let face = RelationMarkedAvatarView(diameter: 56)
+        face.debugFaceCutout.reducesMotion = { false }
+        face.badge.reducesMotion = { false }
+        face.frame = CGRect(x: 20, y: 20, width: 56, height: 56)
+        window.addSubview(face)
+        face.layoutIfNeeded()
+
+        face.setMark(.following, animated: true)
+        #expect(face.badge.replaceCount == 1, "the badge did not grow in")
+        #expect(face.debugFaceCutout.isOpening, "the cutout did not open")
+        face.setMark(.none, animated: true)
+        #expect(face.badge.replaceCount == 2, "the badge did not shrink out")
+        #expect(face.debugFaceCutout.isClosing, "the cutout did not close")
+        #expect(face.faceIsCutOut, "the cutout left before its shrink")
+
+        face.setMark(.loading, animated: false)
+        face.setMark(.none, animated: true)
+        #expect(face.debugFaceCutout.isClosing, "the skeleton's cutout was cut, not closed")
+    }
+
+    /// A FACE FILLED AFRESH DRAWS ITS STATE AT ONCE (#2419): a reused cell's
+    /// known relation is no animation, on screen or not.
+    @Test func aFaceFilledAfreshDrawsItsStateAtOnce() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 200, height: 200))
+        window.isHidden = false
+        defer { window.isHidden = true }
+        let face = RelationMarkedAvatarView(diameter: 56)
+        face.frame = CGRect(x: 20, y: 20, width: 56, height: 56)
+        window.addSubview(face)
+        face.layoutIfNeeded()
+        face.setMark(.loading, animated: false)
+        face.setMark(.friends, animated: false)
+        face.setMark(.none, animated: false)
         face.setMark(.following, animated: false)
-        face.badge.sendActions(for: .primaryActionTriggered)
-        #expect(taps == 1)
+        #expect(face.badge.replaceCount == 0)
+        #expect(!face.debugFaceCutout.debugIsAnimating)
+        #expect(face.faceIsCutOut)
     }
 }

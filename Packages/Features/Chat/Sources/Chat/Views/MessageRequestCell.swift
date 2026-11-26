@@ -96,26 +96,22 @@ final class MessageRequestCell: UITableViewCell {
         // A reused row starts unknown for its next person, never wearing
         // the previous one's mark (#2098).
         avatarView.setMark(.loading, animated: false)
-        avatarView.onFollowTapped = nil
     }
 
     /// Same contract as `ConversationCell`: the row is complete on initials,
     /// and the picture streams in behind it if `profile.v1` has one.
     ///
-    /// `mark` and `onFollow`: the face's relation and its "+" (#2088), as an
-    /// All row's — `.none` for a relation not known yet, or a host with no
-    /// graph.
+    /// `mark`: the face's relation, a passive badge (#2088, #2419), as an
+    /// All row's — `.none` for no badge, or a host with no graph.
     func configure(
         with model: ConversationDisplayModel,
         imagePipeline: ImagePipeline? = nil,
         avatars: (any PeerAvatarProviding)? = nil,
-        mark: PersonPill.Badge = .none,
-        onFollow: (() -> Void)? = nil
+        mark: PersonPill.Badge = .none
     ) {
         peerID = model.peerID
         avatarView.setMonogram(model.monogram)
         avatarView.setMark(model.peerID == nil ? .none : mark, animated: false)
-        avatarView.onFollowTapped = onFollow
         let isGroup = model.groupAvatar != nil
         groupAvatar.setContent(model.groupAvatar, pipeline: imagePipeline)
         groupAvatar.isHidden = !isGroup
@@ -148,37 +144,11 @@ final class MessageRequestCell: UITableViewCell {
         contentView.accessibilityLabel = [
             model.title, model.isUnread ? Self.newWords : nil, model.timeText, Self.previewText(for: model)
         ].compactMap(\.self).filter { !$0.isEmpty }.joined(separator: ", ")
-        updateFollowAccessibility()
     }
 
     /// The face's relation, changed on screen.
     func setRelationMark(_ mark: PersonPill.Badge, animated: Bool) {
         avatarView.setMark(mark, animated: animated)
-        updateFollowAccessibility()
-    }
-
-    /// VoiceOver's way to the "+": a "Follow" action on the row while the
-    /// face shows it, and the mark's state otherwise read by the badge.
-    private func updateFollowAccessibility() {
-        guard avatarView.mark == .follow, let follow = avatarView.onFollowTapped else {
-            contentView.accessibilityCustomActions = nil
-            return
-        }
-        contentView.accessibilityCustomActions = [UIAccessibilityCustomAction(name: "Follow") { _ in
-            follow()
-            return true
-        }]
-    }
-
-    /// ⚠️ THE "+" IS ASKED FIRST, as on an All row: its touch area reaches
-    /// past the 56 pt disc and the stack round it, which would refuse the
-    /// touch before the badge saw it.
-    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
-        if let badge = avatarView.tappableBadge, !isHidden, alpha > 0.01,
-           badge.point(inside: convert(point, to: badge), with: event) {
-            return badge
-        }
-        return super.hitTest(point, with: event)
     }
 
     /// What VoiceOver says of a request the viewer has not opened yet.
