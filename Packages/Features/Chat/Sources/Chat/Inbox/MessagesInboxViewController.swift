@@ -555,6 +555,10 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         }
     }
 
+    /// Once the bar has laid the group out: equal gaps either side of the
+    /// selector when nothing was swept (#2577), a narrower selector when
+    /// something was.
+    ///
     /// ⚠️ **THE BAR'S ALLOWANCE IS UIKIT'S, NOT PUBLIC, AND A GROUP IT CANNOT
     /// FIT IS SWEPT WHOLE INTO A `•••`** — the bell with the selector, as the
     /// first cut of #2337 did on an iPhone 18 Pro (iOS 27.0) with the August
@@ -572,12 +576,20 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         // The compose item swept alone (#2411): the strip is hosted, the
         // trailing group is a `•••`.
         let trailingSwept = Self.showsOverflow(in: navigation.navigationBar)
-        guard !selector.isHosted || trailingSwept, selector.narrowAfterOverflow(selectorBudget) else { return }
-        applyLeadingGroup()
-        if trailingSwept {
-            // A swept group is measured again only when it is handed back.
-            setOwnTrailingBarItems([], animated: false)
-            setOwnTrailingBarItems(trailingItems, animated: false)
+        if selector.isHosted, !trailingSwept {
+            // Nothing swept: the same gap on both sides of the selector, as
+            // the bar drew them (#2577).
+            guard selector.balanceGaps(in: navigation.navigationBar, budget: selectorBudget) else { return }
+            navigation.navigationBar.setNeedsLayout()
+            traceSelector("balance")
+        } else {
+            guard selector.narrowAfterOverflow(selectorBudget) else { return }
+            applyLeadingGroup()
+            if trailingSwept {
+                // A swept group is measured again only when it is handed back.
+                setOwnTrailingBarItems([], animated: false)
+                setOwnTrailingBarItems(trailingItems, animated: false)
+            }
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
             self?.recoverSelectorFromOverflow(attempt: attempt + 1)
@@ -600,12 +612,15 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         guard LaunchArgument.inboxSelectorTrace.isPassed() else { return }
         let budget = selectorBudget
         let strip = categoryBar
+        let gaps = navigationController.flatMap { selector.drawnGaps(in: $0.navigationBar) }
         let line = String(
-            format: "[inbox-selector] %@ barW=%.0f room=%.0f ceiling=%.0f regular=%.0f compact=%.0f stated=%.0f size=%@ trim=%.0f hosted=%@ leading=%d",
+            format: "[inbox-selector] %@ barW=%.0f room=%.0f ceiling=%.0f regular=%.0f compact=%.0f "
+                + "stated=%.0f size=%@ trim=%.0f balance=%.0f hosted=%@ leading=%d gaps=%.2f/%.2f",
             moment, budget.barWidth, budget.room, selector.ceiling(for: budget),
             strip.preferredWidth(at: .regular), strip.preferredWidth(at: .compact),
             strip.intrinsicContentSize.width, strip.titleSize == .regular ? "regular" : "compact",
-            selector.trim, selector.isHosted ? "yes" : "NO", navigationItem.leftBarButtonItems?.count ?? 0
+            selector.trim, selector.balance, selector.isHosted ? "yes" : "NO",
+            navigationItem.leftBarButtonItems?.count ?? 0, gaps?.leading ?? -1, gaps?.trailing ?? -1
         )
         print(line)
         #endif
@@ -650,6 +665,10 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     var debugCategories: [MessagesCategory] { surfaces.map(\.category) }
     /// The compose item's tap, as the bar fires it (#2411). Tests.
     func debugTapCompose() { composeTapped() }
+    /// The gaps the bar drew either side of the selector (#2577). Tests.
+    var debugSelectorGaps: (leading: CGFloat, trailing: CGFloat)? {
+        navigationController.flatMap { selector.drawnGaps(in: $0.navigationBar) }
+    }
     #endif
 
     /// Opens search, focused — what `-inbox-search-query` drives.

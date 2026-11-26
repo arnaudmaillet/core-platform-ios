@@ -668,6 +668,18 @@ public final class PagedTabBar: UIControl {
         }
     }
 
+    /// A hugging bar that states its `widthCeiling` even when its titles
+    /// need less (#2577): the platter runs to the gap its host keeps, and
+    /// the row stays centred in it at the widths it asks for, so the slack
+    /// lands as equal end margins inside the capsule, never as a stretched
+    /// segment or lens. No effect without a ceiling. Set by `BarSelectorItem`.
+    public var fillsCeiling = false {
+        didSet {
+            guard fillsCeiling != oldValue else { return }
+            invalidateIntrinsicContentSize()
+        }
+    }
+
     /// Whether the bar is currently taking its width from its host rather than
     /// stating one — true for a floating bar always, and for a hugging bar that
     /// has been told to fill.
@@ -1115,40 +1127,18 @@ public final class PagedTabBar: UIControl {
         ]
         NSLayoutConstraint.activate(rowArrangement == .naturalsHug ? rowHugsConstraints : rowFillsConstraints)
 
-        // How the content relates to the capsule's width — and this is what
-        // decides whether "too much content" becomes SCROLLING or TRUNCATION.
+        // How the content relates to the capsule's width: `>=`, for every
+        // style, so "too much content" SCROLLS and never truncates. (A title
+        // view once pinned its content `==` to the capsule, which pushed the
+        // shortfall into the segments as a truncated title; that variant and
+        // its `scrollsWhenCrowded` picker are gone.) When the titles fit, the
+        // two are indistinguishable: Auto Layout satisfies `>=` at the
+        // smallest width that works, the frame's, and a row narrower than
+        // the frame stays centred in it (`rowHugsConstraints`).
         //
-        // `.floating` uses `>=`: the row's own minimums push `content` wider
-        // than the capsule when they have to, and the scroll view takes it from
-        // there. That is right for a bar that spans the screen.
-        //
-        // `.navigationTitle` uses `==`, and it is load-bearing. A title view
-        // cannot grow past what the side buttons leave it (measured: the bar
-        // caps the slot at 258pt however much more the bar asks for), so a row
-        // allowed to exceed that does not scroll gracefully — the trailing
-        // badge is simply cropped by the capsule's edge, which is the one thing
-        // the badge rules exist to prevent. Pinning the content TO the capsule
-        // pushes the shortfall down into the segments, where the breakable
-        // width minimums and the labels' low compression resistance turn it
-        // into a truncated title and intact badges.
-        //
-        // Symptom this fixes, in numbers: after a pull-to-refresh the bar's
-        // request grew 245 → 258 (the cap) with 25pt of content still
-        // outstanding, and "Short 99" lost half its badge off the trailing edge
-        // while "Activity" sat there untruncated with room to give.
-        //
-        // ⚠️ **`>=` IS WHAT SHIPS, for both styles** — the `==` variant and the
-        // `scrollsWhenCrowded` picker that chose between them are gone, so the
-        // paragraphs above describe history, not behaviour. A crowded title
-        // view SCROLLS today; it does not truncate. When the titles DO fit the
-        // two are indistinguishable — Auto Layout satisfies `>=` at the
-        // smallest width that works, which is the frame's.
-        //
-        // The profile's relationship lists depend on this: three counted titles
-        // ("12.4K Followers") in the title slot must stay whole, and truncation
-        // would collapse two of them into indistinguishable stubs. Pinned by
-        // `PagedTabBarTitleOverflowTests` — flipping this back to `==` fails
-        // there rather than in a screenshot nobody takes.
+        // The profile's relationship lists depend on this: three counted
+        // titles ("12.4K Followers") in the title slot must stay whole.
+        // Pinned by `PagedTabBarTitleOverflowTests`.
         content.widthAnchor.constraint(
             greaterThanOrEqualTo: scroller.frameLayoutGuide.widthAnchor
         ).isActive = true
@@ -1216,8 +1206,9 @@ public final class PagedTabBar: UIControl {
         guard !spansItsHost else {
             return CGSize(width: UIView.noIntrinsicMetric, height: style.height)
         }
+        let fitted = min(fittedWidth(for: activeDistribution), widthCeiling ?? .greatestFiniteMagnitude)
         return CGSize(
-            width: min(fittedWidth(for: activeDistribution), widthCeiling ?? .greatestFiniteMagnitude),
+            width: fillsCeiling ? widthCeiling ?? fitted : fitted,
             height: effectiveCapsuleHeight + style.topMargin + style.bottomMargin
         )
     }

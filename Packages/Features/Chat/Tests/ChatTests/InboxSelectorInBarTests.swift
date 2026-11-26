@@ -72,7 +72,8 @@ struct InboxSelectorInBarTests {
     }
 
     /// ⚠️ ONE ITEM, ONE IDENTIFIER, WHATEVER THE COUNTS. A count widens its
-    /// segment; the selector re-fits in place — the same item, around the
+    /// segment, not the platter, which fills the room (#2577); the selector
+    /// re-fits in place — the same item, around the
     /// same strip, under the same identifier (a re-minted item lost its strip
     /// on the simulator, `BarSelectorItem`).
     @Test func theSelectorsIdentifierIsStableAcrossACount() throws {
@@ -82,6 +83,7 @@ struct InboxSelectorInBarTests {
         let before = try #require(screen.navigationItem.leftBarButtonItems?.last)
         let strip = try #require(before.customView as? PagedTabBar)
         let width = strip.intrinsicContentSize.width
+        let wanted = strip.preferredWidth(at: .regular)
 
         surfaces[1].publish(6)
 
@@ -89,7 +91,9 @@ struct InboxSelectorInBarTests {
         #expect(after === before, "the selector's item was re-minted")
         #expect(after.identifier == before.identifier)
         #expect(after.customView === strip, "a new strip where the same one belongs")
-        #expect(strip.intrinsicContentSize.width > width, "the count did not widen the selector")
+        #expect(strip.preferredWidth(at: .regular) > wanted, "the count did not widen the titles")
+        // The platter fills the room whatever its titles ask (#2577).
+        #expect(abs(strip.intrinsicContentSize.width - width) < 0.5, "the count moved a platter that fills the room")
         #expect(screen.navigationItem.leftBarButtonItems?.count == 3)
     }
 
