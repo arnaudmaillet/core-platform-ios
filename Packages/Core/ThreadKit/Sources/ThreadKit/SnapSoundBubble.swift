@@ -191,11 +191,21 @@ public final class SnapSoundBubbleButton: UIButton {
     /// Whether the way back points down (#2007).
     public private(set) var returnPointsDown = false
 
-    /// The glyph's symbol and its size: the composer slot's (`CommentsInputBar`),
-    /// so the two chevrons read alike.
+    /// The glyph's symbol and its size: the way back's chevrons at the
+    /// composer slot's 15 pt (`CommentsInputBar`), so the two read alike;
+    /// Share as it reads in a bubble, the heart's size by its ink
+    /// (`ShareBubbleGlyph`, #2581).
     private static func glyphImage(_ symbol: String) -> UIImage? {
-        let size: CGFloat = symbol == CommentsInputBar.shareRailSymbol ? 17 : 15
-        return UIImage.symbol(named: symbol, configuration: UIImage.SymbolConfiguration(pointSize: size, weight: .semibold))
+        guard symbol != CommentsInputBar.shareRailSymbol else { return ShareBubbleGlyph.image() }
+        return UIImage.symbol(named: symbol, configuration: AppSymbol.fixed(15, weight: .semibold))
+    }
+
+    /// How far the glyph stands off the record's centre: Share moved so its
+    /// ink's centre of mass is the bubble's (#2581), a chevron not at all.
+    /// Kept while the record shows, so the fading glyph never slides.
+    private var glyphMove = UIOffset.zero
+    private var glyphCentre: CGPoint {
+        CGPoint(x: record.center.x + glyphMove.horizontal, y: record.center.y + glyphMove.vertical)
     }
 
     /// The bubble as the post's Share (#1999), or back to its sound: Share's
@@ -232,9 +242,11 @@ public final class SnapSoundBubbleButton: UIButton {
             }
         }
         glyphSymbol = symbol
+        if let symbol { glyphMove = symbol == CommentsInputBar.shareRailSymbol ? ShareBubbleGlyph.offset() : .zero }
         let apply = {
             self.record.recordAlpha = symbol != nil ? 0 : 1
             self.glyph.alpha = symbol != nil ? 1 : 0
+            self.glyph.center = self.glyphCentre
         }
         // A cross-fade, not a motion: Reduce Motion keeps it.
         if animated {
@@ -262,7 +274,7 @@ public final class SnapSoundBubbleButton: UIButton {
         record.center = CGPoint(x: bounds.midX, y: bounds.midY)
         bringSubviewToFront(record)
         glyph.bounds = record.bounds
-        glyph.center = record.center
+        glyph.center = glyphCentre
         bringSubviewToFront(glyph)
     }
 
@@ -312,5 +324,7 @@ public final class SnapSoundBubbleButton: UIButton {
     var debugShareGlyphAlpha: CGFloat { sharesPost && !showsReturn ? glyph.alpha : 0 }
     /// The glyph's symbol now. Tests.
     var debugGlyphSymbol: String? { glyphSymbol }
+    /// The glyph's view, for the specs that measure its size and place.
+    var debugGlyph: UIImageView { glyph }
     #endif
 }
