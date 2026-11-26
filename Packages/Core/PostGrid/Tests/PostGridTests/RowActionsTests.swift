@@ -236,7 +236,9 @@ struct RowActionsTests {
         let standIn = row(wired: false)
         let shown = wired.visibleRowActions
 
-        standIn.showRowActionsAsScenery(repost: shown.repost, bookmark: shown.bookmark, saved: shown.saved)
+        standIn.showRowActionsAsScenery(
+            repost: shown.repost, bookmark: shown.bookmark, share: shown.share, saved: shown.saved
+        )
 
         #expect(standIn.visibleRowActions == shown)
     }

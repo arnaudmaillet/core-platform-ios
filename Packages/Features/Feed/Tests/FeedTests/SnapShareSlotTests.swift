@@ -4,9 +4,11 @@ import UIKit
 @testable import Feed
 @testable import ThreadKit
 
-/// A pushed text page's Share, in the slot right of the comment field
-/// (#1999): the toolbar's action, the way back over it (#1929), and
-/// VoiceOver's road while the chevron shows.
+/// Share in the slot right of the comment field (#1999): the toolbar's old
+/// action, the way back over it (#1929), and VoiceOver's road while the
+/// chevron shows. A media page's since #2488 — a text page's Share is the
+/// footer's `[☆ ↗]` (`SnapTextFooterLikeTests`); these pin the slot's own
+/// contract, which any page may still ask for.
 @MainActor
 struct SnapShareSlotTests {
     private typealias Layout = SnapActionColumnLayoutTests
@@ -61,10 +63,10 @@ struct SnapShareSlotTests {
         #expect(panel.debugRailCustomActions == nil)
     }
 
-    /// The page's column on a pushed text page: its bubble is Share — a tap
+    /// The page's column with no sound: its bubble can wear Share — a tap
     /// shares; under the way back the hold arms nothing and VoiceOver keeps
-    /// "Share" (#1999).
-    @Test func thePagesBubbleIsShareOnATextPage() throws {
+    /// "Share" (#1999). (A text page no longer asks for it, #2488.)
+    @Test func aBubbleWithNoSoundCanWearShare() throws {
         let chrome = SnapChromeView()
         chrome.setSoundFace(nil)
         chrome.setSlotSharesPost(true)

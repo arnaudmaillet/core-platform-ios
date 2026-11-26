@@ -131,6 +131,11 @@ public enum SnapFooterToolbar {
         return ceil(width) + 10
     }
 
-    // Share left the bar for the page's column on every pushed page (#1999);
-    // `ID.share` names it there.
+    /// A text page's Share (#2488, the owner 2026-11-18): a stock item right
+    /// of the star, with no separator, so the bar draws `[☆ ↗]` in one
+    /// platter. The post's share glyph (`PostActionSymbol.share`). A media
+    /// page's Share stays at the end of its column (#1999).
+    public static func makeShareItem(action: @escaping () -> Void) -> UIBarButtonItem {
+        BarItems.icon(id: ID.share, image: UIImage.symbol(named: PostActionSymbol.share), label: "Share", action: action)
+    }
 }

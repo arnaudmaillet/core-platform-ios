@@ -92,24 +92,23 @@ struct SnapComposerSoundSlotTests {
         thumbnailURL: nil, audioText: nil, likeCount: 3
     )
 
-    /// ⚠️ THE SLOT'S ONE DECISION (#1999, `applyRailSlot`): every pushed
-    /// page wears Share — a text page never its sound, even one the provider
-    /// names, and a media page's sound moves to the footer.
-    /// (Rewritten from #1929's "a text page's slot opens the sheet".)
-    @Test func theSlotIsShareOnEveryPage() throws {
+    /// ⚠️ THE SLOT'S ONE DECISION (#1999, #2488, `applyRailSlot`): a media
+    /// page's slot wears Share (its sound in the footer); a text page's
+    /// composer reserves NO slot — Share is the footer's `[☆ ↗]` and the field
+    /// runs to the own bubble.
+    @Test func theSlotIsShareOnAMediaPageAndGoneOnATextPage() throws {
         let (panel, window) = Layout.engagedPanel()
         defer { window.isHidden = true }
 
         feed(model: Self.textPage).applyRailSlot(to: panel)
         let bar = try Layout.composerColumn(in: panel.view, space: window).bar
-        #expect(bar.railFace == .share, "a pushed text page's slot is not Share")
-        #expect(bar.debugRailButton.accessibilityLabel == "Share")
-        #expect(bar.debugRailButton.accessibilityIdentifier == SnapFooterToolbar.ID.share)
+        #expect(bar.railFace == .noSlot, "a text page's composer keeps a slot")
+        #expect(!bar.keepsRailSlot)
         #expect(bar.onRailLongPress == nil, "the slot's hold still does something")
 
         feed(model: Self.mediaPage).applyRailSlot(to: panel)
         #expect(bar.railFace == .share, "a pushed media page's slot is not Share")
-
+        #expect(bar.debugRailButton.accessibilityIdentifier == SnapFooterToolbar.ID.share)
     }
 
     /// ⚠️ A TEXT PAGE'S RECORD TURNS (#692): the slot's cover turns while

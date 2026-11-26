@@ -5,10 +5,11 @@ import DesignSystem
 import PostGrid
 import UIKit
 
-/// A post menu's own rows (#1498 §3), for every host that shows a post: Save,
-/// Repost, Comment and Like in the palette — each in its state, each doing
-/// what the card's control does — then Share, Copy Text, Copy Link and,
-/// where the card draws its caption, Select Text.
+/// A post menu's own rows (#1498 §3), for every host that shows a post: Copy
+/// Text and Copy Link at the top (#2441), Save, Repost, Comment and Like in
+/// the palette — each in its state, each doing what the card's control does —
+/// then Share, unless the card draws its own, and, where the card draws its
+/// caption, Select Text.
 ///
 /// One builder, so the grid's pages, the shelf and the sound sheet cannot
 /// word or wire the same row two ways. Each seam is optional and gates its
@@ -28,8 +29,16 @@ public struct PostMenuRows {
     /// Selects the caption where the card draws it (#1498 §4). Nil: no
     /// Select Text row — a tile, which draws no caption.
     public var selectText: (() -> Void)?
+    /// Whether the menu offers Share. False where the card draws its own share
+    /// in its closing line (#2441): one place for an action, not two.
+    public var offersShare: Bool = true
     /// Whether channel showcases are drawn (`-channels`); tests set it.
     public var showsEmbeds: Bool = PostEmbeds.areDrawn
+    /// Where Copy Text writes. Tests record it instead: ⚠️ a test that reads
+    /// or writes `UIPasteboard.general` blocks the main thread on a CI
+    /// simulator (80 s locally, past the 600 s limit on a hosted runner,
+    /// taking every main-actor test of its process down with it).
+    var copyToPasteboard: @MainActor (String) -> Void = { UIPasteboard.general.string = $0 }
 
     public func rows(for post: GalleryPost, anchor: UIView) -> [PostCardMenuAction] {
         var rows: [PostCardMenuAction] = []
@@ -53,14 +62,17 @@ public struct PostMenuRows {
         if let staking, let amounts = staking.stakeMenu(for: id, from: anchor) {
             rows.append(.like(isOn: staking.viewerStake(on: id) > 0, amounts: amounts))
         }
-        rows.append(.share { [weak anchor] in
-            guard let anchor else { return }
-            Self.presentShareSheet(for: post, from: anchor)
-        })
+        if offersShare {
+            rows.append(.share { [weak anchor] in
+                guard let anchor else { return }
+                Self.presentShareSheet(for: post, from: anchor)
+            })
+        }
         let caption = post.caption.trimmingCharacters(in: .whitespacesAndNewlines)
         if !caption.isEmpty {
+            let copyToPasteboard = copyToPasteboard
             rows.append(.copyText { [weak anchor] in
-                UIPasteboard.general.string = caption
+                copyToPasteboard(caption)
                 if let screen = anchor.flatMap(Self.screen(of:)) {
                     Feedback.success("Text copied", symbol: "doc.on.doc", from: screen)
                 }

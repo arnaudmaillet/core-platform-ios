@@ -77,14 +77,16 @@ struct RowColumnTests {
     }
 
     /// Where the closing line's first ink starts and its last ink ends, from
-    /// the cell's edges.
+    /// the cell's edges. The like's slot is as wide as the widest count
+    /// (#2441), so its last ink is where "999K" would end: the slot's box
+    /// less its content inset, whatever the count drawn now.
     private func lineInk(_ cell: PostGridListRowCell) throws -> (leading: CGFloat, trailing: CGFloat) {
         let actions = line(cell)
         try #require(actions.count == 4)
         let save = try ink(of: actions[0], in: cell)
-        let count = try #require(actions[3].titleLabel)
-        let text = count.convert(count.bounds, to: cell.contentView)
-        return (save.minX, cell.contentView.bounds.maxX - text.maxX)
+        let slot = actions[3].convert(actions[3].bounds, to: cell.contentView)
+        let inset = try #require(actions[3].configuration?.contentInsets.trailing)
+        return (save.minX, cell.contentView.bounds.maxX - (slot.maxX - inset))
     }
 
     /// Where the "..." glyph's ink ends, from the cell's trailing edge.
@@ -97,7 +99,7 @@ struct RowColumnTests {
     // MARK: - A row: one column, both sides
 
     /// The closing line's first ink (the save glyph) and its last (the like
-    /// count) stand on the caption's column, a text row and a media row alike.
+    /// slot's widest count, #2441) stand on the caption's column, a text row and a media row alike.
     @Test func aRowsClosingLineStandsOnTheCaptionsColumn() throws {
         for kind in [GalleryPost.Kind.text, .photo] {
             let ends = try lineInk(cell(.row, kind: kind))

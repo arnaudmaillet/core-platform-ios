@@ -66,15 +66,17 @@ public enum PostCardMenuAction {
     /// Raise a moderation case against the post.
     case report(perform: () -> Void)
 
-    /// Where a row sits in the menu.
+    /// Where a row sits in the menu, in reading order: the copies at the top
+    /// (#2441, the row holds no copy button), then the palette.
     enum Group {
-        case palette, post, own, author
+        case copy, palette, post, own, author
     }
 
     var group: Group {
         switch self {
+        case .copyText, .copyLink: .copy
         case .save, .repost, .comment, .like: .palette
-        case .share, .copyText, .copyLink, .selectText: .post
+        case .share, .selectText: .post
         case .edit, .delete, .removeFromHistory: .own
         case .viewProfile, .follow, .unfollow, .hide, .mute, .block, .report: .author
         }
@@ -225,8 +227,9 @@ public extension GalleryPost {
 /// Builds a post's menu from the rows a surface can service (#1498 §3):
 ///
 /// ```
+/// Copy Text · Copy Link                     ← at the top (#2441)
 /// [ ☆ ] [ ⟳ ] [ 💬 ] [ ♡ ]        ← the palette: one row of icons
-/// Share · Copy Text · Copy Link · Select Text
+/// Share · Select Text                        ← Share where the card has none
 /// Edit post · Delete post · Remove from History   ← the viewer's own
 /// @handle ▸  View Profile · Follow/Unfollow · Hide This Post · Mute · Block · Report
 /// ```
@@ -251,6 +254,8 @@ public enum PostCardMenu {
             actions.filter { $0.group == group }.map(\.element)
         }
         var sections: [UIMenuElement] = []
+        let copies = rows(.copy)
+        if !copies.isEmpty { sections.append(UIMenu(options: .displayInline, children: copies)) }
         let palette = rows(.palette)
         if !palette.isEmpty {
             sections.append(UIMenu(options: [.displayInline, .displayAsPalette], children: palette))

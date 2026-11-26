@@ -52,6 +52,8 @@ public final class RevealDismissCardView: UIView, RevealStandInShaping {
     public struct RowActions: Sendable, Equatable {
         public var repost: Bool
         public var bookmark: Bool
+        /// The row's share (#2441).
+        public var share: Bool
         public var saved: Bool
         /// What the VIEWER has staked on the post when the row's like stakes,
         /// nil when the row's like is a plain counter.
@@ -63,16 +65,17 @@ public final class RevealDismissCardView: UIView, RevealStandInShaping {
         /// be told.
         public var stake: Int?
 
-        public init(repost: Bool, bookmark: Bool, saved: Bool, stake: Int? = nil) {
+        public init(repost: Bool, bookmark: Bool, share: Bool, saved: Bool, stake: Int? = nil) {
             self.repost = repost
             self.bookmark = bookmark
+            self.share = share
             self.saved = saved
             self.stake = stake
         }
 
         /// A row whose host wired neither control — a profile gallery's, until
         /// it does.
-        public static let none = RowActions(repost: false, bookmark: false, saved: false)
+        public static let none = RowActions(repost: false, bookmark: false, share: false, saved: false)
     }
 
     private let card: PostGridListRowCell
@@ -149,7 +152,7 @@ public final class RevealDismissCardView: UIView, RevealStandInShaping {
         // The closing line's controls, on the same terms: drawn, never wired,
         // and only what the row itself is showing.
         card.showRowActionsAsScenery(
-            repost: actions.repost, bookmark: actions.bookmark, saved: actions.saved
+            repost: actions.repost, bookmark: actions.bookmark, share: actions.share, saved: actions.saved
         )
         if let stake = actions.stake {
             card.showStakeAsScenery(viewerStake: stake)

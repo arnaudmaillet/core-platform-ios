@@ -178,10 +178,10 @@ struct SnapTextFooterLikeTests {
         // Repost is the share sheet's there, or an SE folds the run into •••.
         #expect(!items.contains { $0.identifier == SnapFooterToolbar.ID.repost }, "repost is still on the footer")
         #expect(feed.shareSheetActions(for: PostID("a")).contains { $0.title == "Repost" }, "no repost in the sheet")
-        // Share is the slot's, right of the comment field, and a text post
-        // has no sound (#1999): the footer reads [author] [♥ count] [☆].
+        // A text post has no sound (#1999), and Share follows the star in its
+        // platter (#2488): the footer reads [author] [♥ count] [☆ ↗].
         #expect(!items.contains { $0.identifier == SnapFooterToolbar.ID.sound }, "a text page's footer wears a sound")
-        #expect(items.last?.identifier == SnapFooterToolbar.ID.save, "the footer does not end on the star")
+        #expect(items.last?.identifier == SnapFooterToolbar.ID.share, "the footer does not end on Share")
 
         // A media page: its pill, no footer like.
         try settle(feed, on: 1)
@@ -194,6 +194,62 @@ struct SnapTextFooterLikeTests {
         #expect(!feed.shareSheetActions(for: PostID("b")).contains { $0.title == "Repost" })
         #expect(feed.toolbarItems?.last?.identifier == SnapFooterToolbar.ID.sound,
                 "a media page's footer does not end on its sound (#1999)")
+        withExtendedLifetime(feed) {}
+    }
+
+    /// ⚠️ THE TEXT FOOTER'S SHAPE (#2488): `[author, flexible, like,
+    /// separator, save, share]` — no separator between save and share, so the
+    /// bar draws them in ONE platter — read as VoiceOver reads it: author,
+    /// like, Save, Share. A media page's footer does not change.
+    @Test func aTextPageFooterRunsLikeThenSaveAndShareInOnePlatter() throws {
+        let panels = Panels(posts: Posts(gone: []))
+        let feed = makeFeed([text("a"), media("b")], panels: panels, wallet: makeWallet())
+        try settle(feed, on: 0)
+        let items = try #require(feed.toolbarItems)
+        #expect(items.count == 6, "\(items.map { $0.identifier ?? "-" })")
+        #expect(items[0].customView is SnapAuthorIdentityView)
+        #expect(items[2] === footerLike(in: feed))
+        // The like's own bubble: a fixed space parts it from the star.
+        #expect(items[3].customView == nil && items[3].identifier == nil && items[3].image == nil,
+                "the like shares the star's platter with room to spare")
+        #expect(items[4].identifier == SnapFooterToolbar.ID.save)
+        // Save and Share side by side, nothing between: one platter.
+        #expect(items[5].identifier == SnapFooterToolbar.ID.share)
+        #expect(items[5].accessibilityLabel == "Share")
+
+        try settle(feed, on: 1)
+        let media = try #require(feed.toolbarItems)
+        #expect(!media.contains { $0.identifier == SnapFooterToolbar.ID.share }, "a media page's footer wears Share")
+        #expect(media.last?.identifier == SnapFooterToolbar.ID.sound)
+        withExtendedLifetime(feed) {}
+    }
+
+    /// Share's tap opens the share sheet of the page in front at the moment of
+    /// the tap, like the other footer actions.
+    @Test func theFootersShareSharesTheActivePost() throws {
+        let panels = Panels(posts: Posts(gone: []))
+        let feed = makeFeed([text("a", author: "x"), text("b", author: "y")], panels: panels, wallet: makeWallet())
+        try settle(feed, on: 1)
+        let share = try #require(feed.toolbarItems?.first { $0.identifier == SnapFooterToolbar.ID.share })
+        share.primaryAction?.performWithSender(nil, target: nil)
+        #expect(feed.postActions.debugSharedPostIDs == [PostID("b")])
+        withExtendedLifetime(feed) {}
+    }
+
+    /// Step 3 (#2488): too narrow for the face beside the like's own bubble,
+    /// the like's separator goes — `[♥ n ☆ ↗]` — and comes back with the room.
+    @Test func aFooterTooNarrowRunsTheLikeIntoTheStarsPlatter() throws {
+        let panels = Panels(posts: Posts(gone: []))
+        let feed = makeFeed([text("a")], panels: panels, wallet: makeWallet())
+        try settle(feed, on: 0)
+        feed.toolbarComposer.setFooterMergesLike(true)
+        let merged = try #require(feed.toolbarItems)
+        #expect(merged.count == 5)
+        #expect(merged[2] === footerLike(in: feed))
+        #expect(merged[3].identifier == SnapFooterToolbar.ID.save, "a separator still parts the like from the star")
+        #expect(merged[4].identifier == SnapFooterToolbar.ID.share)
+        feed.toolbarComposer.setFooterMergesLike(false)
+        #expect(feed.toolbarItems?.count == 6)
         withExtendedLifetime(feed) {}
     }
 

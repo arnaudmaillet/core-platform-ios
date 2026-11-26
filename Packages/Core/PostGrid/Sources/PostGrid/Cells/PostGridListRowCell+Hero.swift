@@ -289,6 +289,8 @@ extension PostGridListRowCell {
         public static let comments = PostActionSymbol.comments
         public static let like = AppSymbol.like.rawValue
         public static let repost = PostActionSymbol.repost
+        /// Share, the left group's last (#2441): the post's share glyph.
+        public static let share = PostActionSymbol.share
         public static let save = SaveStar.outlineGlyph
         public static let saved = SaveStar.glyph
     }

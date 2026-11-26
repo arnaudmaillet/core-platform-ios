@@ -164,7 +164,7 @@ extension PostGridListRowCell {
         let staked = viewerStake > 0
         let content = AppIconButton.Content(
             symbol: staked ? LikesSymbol.glyph : ActionSymbol.like,
-            count: baseReactionCount.map { Int(clamping: $0) }
+            count: Self.drawnCount(baseReactionCount)
         )
         let animates = animated && actionsAnimate && likesAction.window != nil && !likesAction.isHidden
         likesAction.setContent(content, animated: animates)
@@ -176,9 +176,16 @@ extension PostGridListRowCell {
     func applyCommentCount(_ count: Int64?, animated: Bool) {
         let animates = animated && actionsAnimate && commentsAction.window != nil && !commentsAction.isHidden
         commentsAction.setContent(
-            .init(symbol: ActionSymbol.comments, count: count.map { Int(clamping: $0) }), animated: animates
+            .init(symbol: ActionSymbol.comments, count: Self.drawnCount(count)), animated: animates
         )
         commentsAction.isHidden = count == nil
+    }
+
+    /// The number a count's slot writes: none at zero, the glyph alone in its
+    /// slot (#2441).
+    static func drawnCount(_ count: Int64?) -> Int? {
+        guard let count, count > 0 else { return nil }
+        return Int(clamping: count)
     }
 
 
@@ -196,7 +203,7 @@ extension PostGridListRowCell {
         authorBand.showMenuControlAsScenery()
     }
 
-    /// Draws the band's repost and save controls without wiring them, for the
+    /// Draws the band's repost, save and share controls without wiring them, for the
     /// same reason and with the same care as the "..." above: a stand-in must
     /// show what the ROW shows, and both ways of being wrong end the transition
     /// with a control appearing or disappearing in the last frame.
@@ -205,9 +212,10 @@ extension PostGridListRowCell {
     /// every text dismissal flew a card whose header was missing its trailing
     /// pill — the one visible difference between the window and the row it
     /// lands on.
-    public func showRowActionsAsScenery(repost: Bool, bookmark: Bool, saved: Bool) {
+    public func showRowActionsAsScenery(repost: Bool, bookmark: Bool, share: Bool, saved: Bool) {
         repostAction.isHidden = !repost
         bookmarkAction.isHidden = !bookmark
+        shareAction.isHidden = !share
         isBookmarked = saved
         syncClosingLine()
     }
@@ -246,7 +254,7 @@ extension PostGridListRowCell {
 
     /// What the row's closing line is actually drawing, so a test can compare
     /// a stand-in against a row rather than against a literal.
-    public var visibleRowActions: (repost: Bool, bookmark: Bool, saved: Bool) {
-        (!repostAction.isHidden, !bookmarkAction.isHidden, isBookmarked)
+    public var visibleRowActions: (repost: Bool, bookmark: Bool, share: Bool, saved: Bool) {
+        (!repostAction.isHidden, !bookmarkAction.isHidden, !shareAction.isHidden, isBookmarked)
     }
 }

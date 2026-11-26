@@ -393,12 +393,16 @@ final class SnapAuthorBar {
         applyAuthorWidthBudget(bar: bar, sortOnBar: sortOnBar)
     }
 
-    /// The pill's room: the footer's, less the like's on a text post (#1924),
-    /// so the run never folds.
+    /// The pill's room: the footer's, less the like's and `[☆ ↗]` on a text
+    /// post (#1924, #2488), so the run never folds. The steps, in order: the
+    /// name shortens, the pill folds to its face (`PersonPill`), and the like
+    /// joins the star's platter (`textFooterMergesLike`).
     func applyAuthorWidthBudget(bar: CGFloat? = nil, sortOnBar: Bool? = nil) {
         guard let widths = barPillWidths else { return }
-        authorWidthBudget = host.toolbarComposer.footerLikeItem == nil ? widths.toolbarAuthor : widths.toolbarAuthorBesideLike
+        let textPage = host.toolbarComposer.footerLikeItem != nil
+        authorWidthBudget = textPage ? widths.toolbarAuthorBesideLike : widths.toolbarAuthor
         authorIdentityView.setWidthBudget(authorWidthBudget)
+        host.toolbarComposer.setFooterMergesLike(widths.textFooterMergesLike)
     }
 
     /// The widths `applyBarPillWidths` last gave the pills.

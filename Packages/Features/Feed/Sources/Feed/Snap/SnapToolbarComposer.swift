@@ -33,6 +33,7 @@ protocol SnapToolbarComposerHost: UIViewController {
     var canAnimateBarItems: Bool { get }
     func soundFace(for model: FeedItemDisplayModel) -> SnapSoundFace?
     func presentSoundSheet()
+    func presentShareSheet(for id: PostID)
     func performBoost(on id: PostID, spend: WalletStakeSpend, from source: UIResponder?)
     func snapCell(for id: PostID) -> SnapFeedCell?
     func applyAuthorWidthBudget(bar: CGFloat?, sortOnBar: Bool?)
@@ -70,6 +71,12 @@ final class SnapToolbarComposer {
     private(set) lazy var bookmarkItem = SnapFooterToolbar.makeSaveItem { [weak self] in
         guard let self, let model = self.host.activeModel else { return }
         self.toggleBookmark(for: model.id)
+    }
+    /// A text page's Share, right of the star in its platter (#2488): the
+    /// active page's sheet at the moment of the tap.
+    private(set) lazy var shareItem = SnapFooterToolbar.makeShareItem { [weak self] in
+        guard let self, let model = self.host.activeModel else { return }
+        self.host.presentShareSheet(for: model.id)
     }
 
     /// The one living toolbar's items (keep-and-stack): built once. The
@@ -315,6 +322,7 @@ final class SnapToolbarComposer {
     func applyToolbarPostActions(for id: PostID) {
         let available = !host.unavailablePostIDs.contains(id)
         bookmarkItem.isEnabled = available
+        shareItem.isEnabled = available
         repostToolbarItem?.isEnabled = available
         footerSoundItem?.isEnabled = available
         footerSoundButton.isUserInteractionEnabled = available
@@ -388,18 +396,32 @@ final class SnapToolbarComposer {
         host.setToolbarItems(footerToolbarItems(), animated: animated && host.canAnimateBarItems)
     }
 
-    /// The footer as it stands. On a text page the like follows the author,
-    /// in a bubble of its own, and repost moves into the share sheet — as on
-    /// Shots (`shareSheetActions`) — or the run folds into `•••` on an
-    /// iPhone SE (the owner, 2026-10-30). ⚠️ Share leaves it for the slot
-    /// right of the comment field (#1999): `[author] [♥ 382] [☆]`.
-    private func footerToolbarItems() -> [UIBarButtonItem] {
+    /// The footer as it stands. On a text page (#1924, #2488):
+    /// `[author] [♥ 382] [☆ ↗]` — the like in a bubble of its own, Share
+    /// beside the star with no separator so the bar puts them in one platter,
+    /// repost in the share sheet (`shareSheetActions`). ⚠️ NEVER `•••` (the
+    /// owner, 2026-11-18): when even the pill's face does not fit, the like
+    /// joins them, `[♥ 382 ☆ ↗]` (`footerMergesLike`).
+    func footerToolbarItems() -> [UIBarButtonItem] {
         var items = defaultToolbarItems
         guard let like = footerLikeItem,
               let flexible = items.firstIndex(where: { $0 === footerFlexibleSpace }) else { return items }
         items.removeAll { $0 === repostToolbarItem || $0 === footerSoundItem || $0 === shareSeparator }
-        items.insert(contentsOf: [like, footerLikeSeparator], at: flexible + 1)
+        items.insert(contentsOf: footerMergesLike ? [like] : [like, footerLikeSeparator], at: flexible + 1)
+        if let save = items.firstIndex(where: { $0 === bookmarkItem }) { items.insert(shareItem, at: save + 1) }
         return items
+    }
+
+    /// Whether a text page's like shares the star's platter (#2488, step 3),
+    /// from the measured widths (`SnapBarPillWidths.textFooterMergesLike`).
+    private(set) var footerMergesLike = false
+
+    /// The widths decided the like's platter: set again only on a change.
+    func setFooterMergesLike(_ merges: Bool) {
+        guard merges != footerMergesLike else { return }
+        footerMergesLike = merges
+        guard footerLikeItem != nil else { return }
+        host.setToolbarItems(footerToolbarItems(), animated: host.canAnimateBarItems)
     }
 
     /// The footer's spacer and the like's separator, kept so the like goes

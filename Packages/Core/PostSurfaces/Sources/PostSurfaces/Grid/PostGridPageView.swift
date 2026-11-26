@@ -2583,7 +2583,7 @@ final public class PostGridPageView: UIView {
             // state is read from the same store the row reads, so a post saved
             // a moment ago flies home filled in.
             actions: .init(
-                repost: onRepostRequested != nil, bookmark: bookmarks != nil,
+                repost: onRepostRequested != nil, bookmark: bookmarks != nil, share: true,
                 saved: bookmarks?.isSaved(postID.rawValue) ?? false,
                 // The like stakes on every row `staking` binds, and its heart
                 // is red once the viewer has — the stand-in reads the same
@@ -4092,19 +4092,13 @@ extension PostGridPageView: UICollectionViewDataSource, UICollectionViewDelegate
             // The control never toggles itself: `isBookmarked` is set from the
             // store's answer, before and after, so a store that refused would
             // leave the glyph telling the truth.
-            // ⚠️ REPOST HAS NO ACTION YET, so it is NOT DRAWN (#801).
-            //
-            // The band hides a button whose handler is nil — visibility tracks
-            // the answer. This used to set a closure anyway, forwarding to
-            // `onRepostRequested`, which nothing sets: the chip drew, pressed
-            // with its wash, and did nothing, so it looked as if it worked.
-            // `repostHandler(for:)` is nil until a handler exists.
-            //
-            // What it needs is a real mutation, not a handler: `CreatePost`
-            // carries `parent_id` on the wire and `GalleryPost.isRepost` already
-            // reads it (the profile's Posts/Reposts split), but `PostComposer`
-            // takes no parent, so there is no client path that publishes one.
+            // ⚠️ REPOST HAS NO ACTION YET, so it is NOT DRAWN (#801): a nil
+            // handler hides the button (a chip that pressed and did nothing
+            // looked as if it worked). It needs a real mutation: `PostComposer`
+            // takes no parent, so no client path publishes a repost yet.
             cell.onRepostTapped = repostHandler(for: post)
+            // Share, the row's left group's last (#2441): the menu's sheet.
+            cell.onShareTapped = { [weak cell] in cell.map { PostMenuRows.presentShareSheet(for: post, from: $0.shareAnchor) } }
             // The like chip stakes — see `PostCardStaking`.
             staking?.bind(cell, to: post.id)
             if let bookmarks {
@@ -4569,7 +4563,9 @@ extension PostGridPageView: UICollectionViewDataSource, UICollectionViewDelegate
                     guard let self, let card = cell(for: id) as? PostGridListRowCell else { return }
                     captionSelection.begin(in: card)
                 }
-                : nil
+                : nil,
+            // A card that draws its own share offers none here (#2441).
+            offersShare: (cell(for: id) as? PostGridListRowCell)?.drawsShare != true
         ).rows(for: post, anchor: anchor)
     }
 

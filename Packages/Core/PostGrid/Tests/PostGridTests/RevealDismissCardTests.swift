@@ -56,14 +56,14 @@ struct RevealDismissCardTests {
         let wired = RevealDismissCardView(
             post: post(), width: 343,
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
-            actions: .init(repost: true, bookmark: true, saved: true)
+            actions: .init(repost: true, bookmark: true, share: true, saved: true)
         )
         let card = try #require(wired.subviews.first as? PostGridListRowCell)
-        #expect(card.visibleRowActions == (repost: true, bookmark: true, saved: true))
+        #expect(card.visibleRowActions == (repost: true, bookmark: true, share: true, saved: true))
 
         let bare = standIn(width: 343)
         let bareCard = try #require(bare.subviews.first as? PostGridListRowCell)
-        #expect(bareCard.visibleRowActions == (repost: false, bookmark: false, saved: false))
+        #expect(bareCard.visibleRowActions == (repost: false, bookmark: false, share: false, saved: false))
     }
 
     /// ⚠️ THE ROW'S DATE, NOT THIS INSTANT'S.

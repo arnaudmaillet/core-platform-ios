@@ -159,6 +159,48 @@ struct SnapSoundReturnTests {
         #expect(sheets == 2)
     }
 
+    /// ⚠️ A TEXT PAGE'S WAY BACK RIDES ABOVE THE OWN BUBBLE (#2488): its
+    /// composer keeps no slot, so the way back shows in a bubble of its own,
+    /// the own bubble's size, centred on its axis `Spacing.sm` above it, only
+    /// once the reader scrolled away; the composer never moves for it, and a
+    /// tap heads back to the stream's start.
+    @Test func aTextPagesWayBackRidesAboveTheOwnBubble() async throws {
+        let (panel, window) = Layout.engagedPanel()
+        defer { window.isHidden = true }
+        panel.setActionColumnHostedByPage(true, foldsIntoSlot: true)
+        panel.setRailShare(nil)
+        panel.setRailSoundFace(nil, keepsSlot: false)
+        panel.setWayBackAboveOwnBubble(true)
+        #expect(panel.debugRailFace == .noSlot, "a text page's composer keeps a slot")
+        #expect(panel.wayBackBubble.debugButton?.isHidden ?? true, "the way back shows at the start")
+
+        // The composer as the folded column lays it, before any scroll.
+        panel.showStream(.recent, animated: false)
+        panel.view.layoutIfNeeded()
+        let composer = panel.composeBar.frame
+        panel.debugScroll(to: 3000, userScroll: true)
+        panel.view.layoutIfNeeded()
+        let bubble = try #require(panel.wayBackBubble.debugButton)
+        #expect(!bubble.isHidden)
+        // Recent's start is its newest (#2007).
+        #expect(bubble.accessibilityLabel == "Scroll to latest comment")
+        let own = panel.composeBar.ownBubbleAnchor
+        let ownFrame = own.convert(own.bounds, to: panel.view)
+        let side = CommentsInputBar.ownBubbleSide
+        #expect(abs(bubble.bounds.width - side) < 0.5 && abs(bubble.bounds.height - side) < 0.5)
+        #expect(abs(bubble.center.x - ownFrame.midX) < 0.5, "not on the own bubble's axis")
+        #expect(abs(bubble.center.y + side / 2 - (ownFrame.minY - Spacing.sm)) < 0.5, "not just above the own bubble")
+        #expect(panel.composeBar.frame == composer, "the composer moved for the way back")
+        #expect(panel.debugRailFace == .noSlot)
+
+        let away = panel.debugStreamOffset
+        bubble.sendActions(for: .primaryActionTriggered)
+        for _ in 0..<100 where panel.debugStreamOffset >= away { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(panel.debugStreamOffset < away, "the tap did not head for the start")
+        panel.debugScroll(to: panel.debugStreamTopOffset, userScroll: false)
+        #expect(panel.wayBackBubble.shownDirection == nil, "the way back stayed at the start")
+    }
+
     /// A text post with no sound has no slot (#1790), so no way back.
     @Test func noSlotMeansNoWayBack() {
         let (panel, window) = Layout.engagedPanel()

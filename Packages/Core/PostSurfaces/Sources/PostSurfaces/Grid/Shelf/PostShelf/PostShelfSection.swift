@@ -472,10 +472,8 @@ final public class PostShelfSection: UIView {
     }
 
     /// A text card: the list's own card (`PostGridListRowCell`) held to the
-    /// row's two lines, wired as the list wires its cards — the like stakes,
-    /// the save writes the shared pile, the band opens the author and its
-    /// "..." offers the host's rows, the comment count opens the post. A tap
-    /// anywhere else is the row's own selection.
+    /// row's two lines, wired as the list wires its cards (stake, save, share,
+    /// the band, the comment count opens the post); a tap elsewhere selects.
     private func configureTextCard(_ cell: PostGridListRowCell, with post: GalleryPost) {
         cell.configure(
             with: post, imagePipeline: imagePipeline, captionLines: PostShelfRows.textLines
@@ -495,8 +493,9 @@ final public class PostShelfSection: UIView {
             }
         }
         // Captured by POST, never by index path — the list's rule: the row
-        // can have changed by the time the finger arrives.
+        // can have changed by the time the finger arrives. Share as the list's (#2441).
         cell.onCommentsTapped = { [weak self] in self?.open(post.id) }
+        cell.onShareTapped = { [weak cell] in cell.map { PostMenuRows.presentShareSheet(for: post, from: $0.shareAnchor) } }
         if let authorID = post.authorID {
             cell.onAuthorTapped = { [weak self] in self?.onCardAuthorTapped?(post) }
             cell.onAuthorHeld = onCardAuthorHeld == nil ? nil : { [weak self] in self?.onCardAuthorHeld?(post) }
@@ -804,7 +803,7 @@ final public class PostShelfSection: UIView {
             imagePipeline: imagePipeline,
             showsAuthorMenu: showsAuthorMenu(for: post),
             actions: .init(
-                repost: onCardRepostRequested != nil, bookmark: true, saved: bookmarks.isSaved(id.rawValue),
+                repost: onCardRepostRequested != nil, bookmark: true, share: true, saved: bookmarks.isSaved(id.rawValue),
                 stake: staking?.viewerStake(on: id)
             ),
             ageText: cell?.renderedAgeText,
@@ -1040,7 +1039,8 @@ final public class PostShelfSection: UIView {
             comment: { [weak self] in self?.open(id) },
             savedDidChange: { [weak self] saved in
                 (self?.cardCell(for: id) as? PostGridListRowCell)?.isBookmarked = saved
-            }
+            },
+            offersShare: (cardCell(for: id) as? PostGridListRowCell)?.drawsShare != true
         ).rows(for: post, anchor: anchor)
         guard post.authorID != nil else { return rows }
         return rows + (cardAuthorMenuActions?(post, anchor) ?? [])
