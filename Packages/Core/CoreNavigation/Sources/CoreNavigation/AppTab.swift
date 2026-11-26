@@ -3,10 +3,10 @@ import Foundation
 /// The places of the app shell's bar, in bar order. In CoreNavigation since
 /// #2386, beside `AppRoute`, so the debug tools can name a tab.
 ///
-/// Three places since #2489 (the owner 2026-11-18): `| Explore  Messages |
-/// Profile |`, Profile apart on iOS 27 (`ShellTabs`). The "+" that stood
-/// detached at the trailing edge, never a place, moved to Explore's top bar
-/// (`CreateBarItem`).
+/// Three places since #2489 (the owner 2026-11-18), in one centred bubble
+/// since #2579: `[ Explore · Messages · Profile ]` (`ShellTabs`). The "+"
+/// that stood detached at the trailing edge, never a place, moved to
+/// Explore's top bar (`CreateBarItem`).
 ///
 /// **For You left the bar on 2026-11-15 (#2453):** the app is the map's
 /// first, and For You comes back later. Its slot was 1, so `-select-tab 1`
