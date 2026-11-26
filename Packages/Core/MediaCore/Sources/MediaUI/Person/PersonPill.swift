@@ -59,6 +59,8 @@ public final class PersonPill: UIView {
     private let faceSize: ImageBucket
     private let nameLabel = UILabel()
     private let handleLabel = UILabel()
+    /// The handle's line, which may scroll (#2409): it hosts `handleLabel`.
+    private lazy var handleLine = PersonPillScrollingLine(label: handleLabel)
     /// The relation's mark, centred on the face's edge — nil when the pill
     /// carries none (the profile).
     private let statusBadge: RelationBadgeView?
@@ -109,7 +111,7 @@ public final class PersonPill: UIView {
             label.layer.shadowOffset = .zero
         }
 
-        for view in [nameLabel, namePlaceholder, handleLabel, handlePlaceholder] {
+        for view in [nameLabel, namePlaceholder, handleLine, handlePlaceholder] {
             labelsStack.addArrangedSubview(view)
         }
         labelsStack.axis = .vertical
@@ -195,13 +197,30 @@ public final class PersonPill: UIView {
         setRedacted(false)
         nameLabel.text = name
         handleLabel.text = handle
+        handleLine.textDidChange()
         updateAccessibility()
     }
 
     /// The handle line alone.
     public func setHandle(_ handle: String) {
         handleLabel.text = handle
+        handleLine.textDidChange()
         updateAccessibility()
+    }
+
+    /// Whether a second line longer than the room slides through it instead
+    /// of truncating (#2409: the full-screen page's sound line).
+    public var scrollsSecondLine: Bool {
+        get { handleLine.scrolls }
+        set { handleLine.scrolls = newValue }
+    }
+
+    /// Whether the second line is sliding now. Tests.
+    public var isScrollingSecondLine: Bool { handleLine.scrollDistance != nil }
+
+    /// The second line's frame in `space` — where a tap on it lands (#2409).
+    public func secondLineFrame(in space: UICoordinateSpace) -> CGRect {
+        handleLine.isHidden || labelsStack.isHidden ? .null : handleLine.convert(handleLine.bounds, to: space)
     }
 
     public var name: String? { nameLabel.text }
@@ -214,7 +233,7 @@ public final class PersonPill: UIView {
         isRedacted = redacted
         nameLabel.isHidden = redacted
         namePlaceholder.isHidden = !redacted
-        handleLabel.isHidden = redacted
+        handleLine.isHidden = redacted
         handlePlaceholder.isHidden = !redacted
         // The stand-in bars need a gap of their own; label line-heights carry
         // it once hydrated.
@@ -229,11 +248,57 @@ public final class PersonPill: UIView {
     /// Returns whether the cap changed, so a host can ask its bar for a pass.
     @discardableResult
     public func setWidthBudget(_ budget: CGFloat?) -> Bool {
-        let target = min(ceiling, budget ?? ceiling)
+        widthBudget = budget
+        return applyCap()
+    }
+
+    /// The room the bar leaves the pill (`setWidthBudget`).
+    private var widthBudget: CGFloat?
+
+    /// Whether the pill stands AT its budget, past its ceiling (#2409): the
+    /// full-screen page's followed author, stretched to the repost. The
+    /// budget is then its width — the room its bar leaves it, read off the
+    /// bar's measured platters, as the toolbar pill's fixed width always was
+    /// (`SnapBarPillWidths`).
+    ///
+    /// ⚠️ A WIDTH, NOT A STRETCH: a view that asks for the bar's free width
+    /// at the lowest priority (`StretchedBarLabel`) loses to the labels'
+    /// stack, which hugs its widest line above that priority — measured on
+    /// the simulator (2026-11-25), the pill stayed at its content's width.
+    /// Returns whether the cap changed.
+    @discardableResult
+    public func setStretches(_ stretches: Bool) -> Bool {
+        guard stretches != self.stretches else { return false }
+        self.stretches = stretches
+        let changed = applyCap()
+        applyStretch()
+        return changed
+    }
+
+    public private(set) var stretches = false
+
+    /// The stretched width, at the cap (999: the bar's first pass pins its
+    /// wrapper, as for the height).
+    private lazy var stretchWidth: NSLayoutConstraint = {
+        let width = widthAnchor.constraint(equalToConstant: 0)
+        width.priority = UILayoutPriority(999)
+        return width
+    }()
+
+    private func applyStretch() {
+        let cap = widthCap
+        stretchWidth.constant = cap.isFinite ? cap : 0
+        stretchWidth.isActive = stretches && cap.isFinite
+    }
+
+    private func applyCap() -> Bool {
+        let roof = stretches ? .greatestFiniteMagnitude : ceiling
+        let target = min(roof, widthBudget ?? roof)
         guard target > 0, target.isFinite, maxWidthConstraint?.constant != target else { return false }
         maxWidthConstraint?.constant = target
         applyWidthFloor()
         applyFaceOnly()
+        if stretches { applyStretch() }
         return true
     }
 
@@ -437,7 +502,7 @@ public final class PersonPill: UIView {
     #if DEBUG
     /// The lines the pill shows, top to bottom.
     public var debugShownLines: [String] {
-        [nameLabel, handleLabel].filter { !$0.isHidden }.compactMap(\.text)
+        [nameLabel, handleLabel].filter { !$0.isHidden && $0.superview?.isHidden != true }.compactMap(\.text)
     }
     public var debugNameFont: UIFont { nameLabel.font }
     public var debugHandleFont: UIFont { handleLabel.font }

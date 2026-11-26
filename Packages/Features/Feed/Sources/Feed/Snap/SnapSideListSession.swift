@@ -145,7 +145,8 @@ final class SnapSideListSession {
         let point = host.collectionView.convert(origin, from: host.view)
         guard let hit = host.collectionView.hitTest(point, with: nil) else { return false }
         return sequence(first: hit, next: { $0.superview }).contains {
-            $0 is SnapShortcutRailView || $0 is SnapWheelGlassView || $0 is SnapRailBoostButton || $0 is SnapSoundBubbleButton
+            $0 is SnapShortcutRailView || $0 is SnapWheelGlassView || $0 is SnapRailBoostButton
+                || $0 is SnapSoundBubbleButton || $0 is SnapColumnSaveButton
         }
     }
 

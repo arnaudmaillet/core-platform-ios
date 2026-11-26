@@ -224,4 +224,33 @@ final public class SnapAuthorFollowStore {
         }
         return true
     }
+
+    /// Whether `author` is the viewer: their own posts offer no follow, and
+    /// the full-screen page's pill stands stretched from the start (#2409).
+    public func isViewer(_ author: ProfileID?) -> Bool {
+        author != nil && author == viewer()
+    }
+
+    /// Unfollows the author (#2409: the share sheet's Unfollow, the page's
+    /// Follow never undoing itself), OPTIMISTICALLY — the inbound half kept
+    /// (`settingFollow`), so a friend becomes a follower. Put back if the
+    /// graph refuses, after which `onRefused` runs. Returns whether an
+    /// unfollow was sent: nothing for an author the viewer does not follow,
+    /// or while a follow is in flight.
+    @discardableResult
+    public func unfollow(_ author: ProfileID, onRefused: @escaping @MainActor () -> Void) -> Bool {
+        guard let writer, let before = relation(for: author), before.isFollowing,
+              !followsInFlight.contains(author) else { return false }
+        followsInFlight.insert(author)
+        setRelation(before.settingFollow(false), for: author)
+        Task { [weak self] in
+            let done = (try? await writer.setFollowing(false, for: author)) != nil
+            guard let self else { return }
+            self.followsInFlight.remove(author)
+            guard !done else { return }
+            self.setRelation(before, for: author)
+            onRefused()
+        }
+        return true
+    }
 }

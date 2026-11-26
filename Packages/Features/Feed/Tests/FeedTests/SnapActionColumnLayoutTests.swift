@@ -362,6 +362,24 @@ struct SnapActionColumnLayoutTests {
         _ = window
     }
 
+    /// ⚠️ THE SAME CONTRACT UNDER `-snap-layout-v2` (#2408): with the comments
+    /// up, the four bubbles fold into the sound, and the sound lands on the
+    /// composer's slot — the classic column's engaged frame, which the test
+    /// above holds to the composer's.
+    @Test func theV2ColumnFoldsOntoTheComposersSlot() throws {
+        let classic = Self.mediaColumn()
+        let chrome = SnapChromeView(frame: Self.screen)
+        chrome.setFixedInsets(Self.insets)
+        chrome.actionColumn.setLayoutV2(true)
+        chrome.configure(with: Self.mediaModel())
+        chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true))
+        chrome.layoutIfNeeded()
+        chrome.actionColumn.setCommentsSheetShare(1)
+        #expect(chrome.debugColumnItems == [[SnapChromeActionColumn.ColumnItem.sound]], "the column did not fold")
+        let sound = chrome.debugFrame(of: chrome.debugSoundBubble)
+        #expect(Self.same(sound, classic.sound), "v2's sound \(sound) vs the composer's slot \(classic.sound)")
+    }
+
     /// The column's entrance is alpha only — a slide would move the bubbles.
     @Test func theColumnComposerEntersWithoutSliding() {
         let (controller, window) = Self.engagedPanel()

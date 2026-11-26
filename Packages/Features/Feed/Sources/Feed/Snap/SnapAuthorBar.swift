@@ -40,6 +40,11 @@ protocol SnapAuthorBarHost: UIViewController {
     var commentTabs: CommentTabsSelector { get }
     var walletBadge: WalletBadgeButton { get }
     var walletBadgeItem: UIBarButtonItem? { get }
+    /// `-snap-layout-v2` (#2409): one pill in place, the Follow beside it.
+    var layoutV2: Bool { get }
+    func presentSoundSheet()
+    /// The followed pill's second line: `♪ title · artist`, nil with no sound.
+    func pillSoundLine(for model: FeedItemDisplayModel) -> String?
     func isTextPage(_ id: PostID?) -> Bool
     func applyChromeTheme(hasMedia: Bool)
     /// The navigation bar's trailing run as the bars stand.
@@ -67,9 +72,9 @@ protocol SnapAuthorBarHost: UIViewController {
 /// its own, as it did.
 @MainActor
 final class SnapAuthorBar {
-    /// File-private, not private: `BarAuthorBadge` asks whether the pill is
-    /// in a window.
-    fileprivate unowned let host: any SnapAuthorBarHost
+    /// Not private: `BarAuthorBadge` asks whether the pill is in a window,
+    /// and v2's half (`SnapAuthorBar+LayoutV2`) reads the screen.
+    unowned let host: any SnapAuthorBarHost
 
     init(host: any SnapAuthorBarHost) {
         self.host = host
@@ -87,6 +92,8 @@ final class SnapAuthorBar {
     /// transition. The same author keeps the pill and the item, and changes
     /// in place (`showAuthor`).
     private(set) var authorIdentityView = SnapAuthorIdentityView()
+    /// The page's Follow under `-snap-layout-v2` (#2409).
+    private(set) lazy var follow = SnapToolbarFollow(host: self)
 
     // MARK: - Author pill
 
@@ -115,8 +122,9 @@ final class SnapAuthorBar {
         // A hold pushes the profile itself (#1669), as the leftward swipe
         // does; the tap keeps the card.
         pill.onAuthorLongPressed = { [weak self] id in self?.host.viewModel.didTapAuthor(id) }
-        // The badge is passive (#2419): no "+" on the face; until #2409's
-        // Follow, this screen follows from the profile.
+        // The badge is passive (#2419). Under v2 the Follow is the bar's own
+        // item (`follow`), and the sound line opens the sound (#2409).
+        if host.layoutV2 { pill.onSecondLineTapped = { [weak self] in self?.host.presentSoundSheet() } }
         #if DEBUG
         pill.onContentSettled = { [weak self, weak pill] in
             guard let self, let pill else { return }
@@ -159,8 +167,11 @@ final class SnapAuthorBar {
     func showAuthor(_ model: FeedItemDisplayModel) {
         let badge = host.followStore.badge(for: model.authorID)
         // The bar's pill follows this author's answers from now on (#1972);
-        // drawn below with the pill's own swap rules.
-        defer { authorBadges.bind(barAuthorBadge, to: model.authorID) }
+        // drawn below with the pill's own swap rules — and under v2 its
+        // Follow too, from the same answer (#2409), on a media page.
+        let offersFollow = host.layoutV2 && model.mediaURL != nil
+        defer { authorBadges.bind(barAuthorBadge, to: model.authorID, offersFollow: offersFollow) }
+        if host.layoutV2 { return showAuthorInPlace(model, badge: badge) }
         let shown = authorIdentityView.shownAuthor?.authorID
         guard let shown, shown != model.authorID else {
             pendingAuthor = nil
@@ -247,7 +258,7 @@ final class SnapAuthorBar {
     private(set) lazy var authorBadges = AuthorBadgeBinding(store: host.followStore)
 
     /// The bar's pill, as the binding sees it: whichever pill is shown now.
-    private lazy var barAuthorBadge = BarAuthorBadge(owner: self)
+    private(set) lazy var barAuthorBadge = BarAuthorBadge(owner: self)
 
     /// Re-draws the bar pill's badge — its symbol replaced, nothing else
     /// (#925). During a presentation the landing install is armed and draws
@@ -333,6 +344,7 @@ final class SnapAuthorBar {
             toolbarLike: host.defaultToolbarItems.isEmpty ? nil : SnapFooterToolbar.likeBubbleWidth(for: host.traitCollection)
         )
         barPillWidths = widths
+        toolbarRoom = (toolbar, SnapBarPillWidths.toolbarIcon(for: host.traitCollection))
         // ⚠️ THE DAY GIVES WAY FIRST (#757): it takes what the run leaves —
         // bar margins, the back arrow and the sort on the left, the ✕ and the
         // points on the right — and truncates in it.
@@ -360,13 +372,15 @@ final class SnapAuthorBar {
     func applyAuthorWidthBudget(bar: CGFloat? = nil, sortOnBar: Bool? = nil) {
         guard let widths = barPillWidths else { return }
         let textPage = host.toolbarComposer.footerLikeItem != nil
-        authorWidthBudget = textPage ? widths.toolbarAuthorBesideLike : widths.toolbarAuthor
+        authorWidthBudget = textPage ? widths.toolbarAuthorBesideLike : v2PillBudget() ?? widths.toolbarAuthor
         authorIdentityView.setWidthBudget(authorWidthBudget)
         host.toolbarComposer.setFooterMergesLike(widths.textFooterMergesLike)
     }
 
     /// The widths `applyBarPillWidths` last gave the pills.
     private var barPillWidths: SnapBarPillWidths?
+    /// The toolbar's width and a glyph item's, as last read (v2's budget).
+    private(set) var toolbarRoom: (width: CGFloat, icon: CGFloat)?
 
     // MARK: - The day under the header (#757)
 
@@ -444,7 +458,7 @@ final class SnapAuthorBar {
 /// The bar's author pill as the author binding draws it (#1972): whichever
 /// pill is shown now, through the bar's own rules (`drawBarAuthorBadge`).
 @MainActor
-private final class BarAuthorBadge: AuthorBadgeDrawing {
+final class BarAuthorBadge: AuthorFollowDrawing {
     private weak var owner: SnapAuthorBar?
 
     init(owner: SnapAuthorBar) {
@@ -453,6 +467,11 @@ private final class BarAuthorBadge: AuthorBadgeDrawing {
 
     func drawAuthorBadge(_ badge: PersonPill.Badge, animated: Bool) {
         owner?.drawBarAuthorBadge(badge)
+    }
+
+    /// v2's Follow, from the same answer as the badge (#2409).
+    func drawAuthorFollow(_ offer: AuthorFollowOffer, animated: Bool) {
+        owner?.drawBarAuthorFollow(offer, animated: animated)
     }
 
     var drawsAuthorBadgeOnScreen: Bool { owner?.host.view.window != nil }

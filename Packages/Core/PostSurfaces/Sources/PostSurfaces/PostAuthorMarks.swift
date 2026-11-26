@@ -77,24 +77,12 @@ final public class PostAuthorMarks {
     /// haptic; a refusal puts Follow back and says so from the screen
     /// `source` is on.
     public func follow(_ author: ProfileID, handle: String?, name: String?, from source: UIResponder) {
-        MemberGates.perform(.follow(handle: handle), from: source) { [weak self, weak source] in
-            guard let self else { return }
-            let followed = store.follow(author) { [weak source] in
-                guard let screen = source?.firstController(as: UIViewController.self) else { return }
-                Feedback.failure(PlusFollow.failureMessage(handle: handle, name: name), from: screen)
-            }
-            // Turned on at the optimistic flip (#1885).
-            if followed { Haptics.play(.toggleOn) }
-        }
+        store.follow(author, handle: handle, name: name, from: source)
     }
 
     /// Requested's "Cancel Request" (#2419): withdraws the pending request
     /// to `author`, optimistically; a refusal puts Requested back and says so.
     public func cancelRequest(to author: ProfileID, handle: String?, from source: UIResponder) {
-        store.cancelRequest(to: author) { [weak source] in
-            guard let screen = source?.firstController(as: UIViewController.self) else { return }
-            let who = handle.map { $0.isEmpty ? "" : " to @" + $0 } ?? ""
-            Feedback.failure("Couldn't cancel your request" + who, from: screen)
-        }
+        store.cancelRequest(to: author, handle: handle, from: source)
     }
 }
