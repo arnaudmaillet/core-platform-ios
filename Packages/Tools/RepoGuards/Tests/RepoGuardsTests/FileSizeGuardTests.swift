@@ -31,7 +31,7 @@ struct FileSizeGuardTests {
         "Packages/Core/CoreStorage/Sources/CoreStorage/WalletStore.swift": 1430,
         "Packages/Core/DesignSystem/Sources/DesignSystem/Components/AppButton.swift": 1437,
         "Packages/Core/DesignSystem/Sources/DesignSystem/Components/HeroBannerFade.swift": 1365,
-        "Packages/Core/DesignSystem/Sources/DesignSystem/Components/PagedTabBar.swift": 3076,
+        "Packages/Core/DesignSystem/Sources/DesignSystem/Components/PagedTabBar.swift": 3067,
         "Packages/Core/DesignSystem/Sources/DesignSystem/Components/PressFeedback.swift": 1019,
         "Packages/Core/DesignSystem/Sources/DesignSystem/Components/SelectorLiquidLens.swift": 1167,
         "Packages/Core/DesignSystem/Sources/DesignSystem/Components/ToastView.swift": 2138,

@@ -342,7 +342,11 @@ struct InboxComposeItemTests {
         let strip = composing.debugSelector
         let ceiling = try #require(strip.widthCeiling)
         let bareCeiling = try #require(bare.debugSelector.widthCeiling)
-        #expect(ceiling <= bareCeiling - BarSelectorBudget.platter + 0.5,
+        // The compose item's platter, and the gap before it in place of the
+        // bar's own reserve (#2577: the leading spacing on iOS 27).
+        let charged = BarSelectorBudget.platter + BarSelectorBudget.systemInterGroupGap
+            - BarSelectorBudget.trailingReserve
+        #expect(ceiling <= bareCeiling - charged + 0.5,
                 "the compose item's platter was not taken first: \(ceiling) vs \(bareCeiling)")
         #expect(strip.titleSize == bare.debugSelector.titleSize, "a title shrank for the compose item")
         #expect(strip.debugContentWidth > strip.debugViewportWidth + 0.5,
@@ -355,5 +359,45 @@ struct InboxComposeItemTests {
         let pill = strip.debugPillInViewport
         #expect(pill.minX >= -0.5 && pill.maxX <= strip.debugViewportWidth + 0.5,
                 "the selected tab is cut: \(pill) in \(strip.debugViewportWidth)")
+    }
+
+    /// #2577: `[bell][selector] ——— [✎]` in a real bar, the shell's bell, at
+    /// an iPhone 18 Pro's width and an SE's — once the screen is on show, the
+    /// gap the bar drew after the bell equals the one before the compose
+    /// item, to within a point, and nothing went into a `•••`. (iOS 26 keeps
+    /// its own 24pt before the trailing group: not balanced there.)
+    @Test(arguments: [CGSize(width: 402, height: 874), CGSize(width: 375, height: 667)])
+    func theGapsEitherSideOfTheSelectorAreEqual(size: CGSize) async throws {
+        let (screen, surfaces) = inbox(composes: true)
+        let bell = BarItems.icon(
+            id: BarItems.SharedID.notificationsBell, image: UIImage(systemName: "bell"),
+            label: "Notifications", action: {}
+        )
+        bell.sharesBackground = false
+        screen.setLeadingAccessoryItem(bell)
+        let window = UIWindow(frame: CGRect(origin: .zero, size: size))
+        window.rootViewController = UINavigationController(rootViewController: screen)
+        window.isHidden = false
+        defer { window.isHidden = true }
+        surfaces[0].publish(44)
+        surfaces[1].publish(8)
+        window.layoutIfNeeded()
+
+        let label = "\(Int(size.width))pt"
+        let balances = BarSelectorBudget.systemInterGroupGap <= BarSelectorBudget.leadingGap
+        func settled() -> Bool {
+            guard let gaps = screen.debugSelectorGaps else { return false }
+            return !balances || abs(gaps.leading - gaps.trailing) <= 1
+        }
+        for _ in 0..<100 where !settled() {
+            try await Task.sleep(for: .milliseconds(50))
+            window.layoutIfNeeded()
+        }
+        let gaps = try #require(screen.debugSelectorGaps, "\(label): the selector or a neighbour is not in the bar")
+        if balances {
+            #expect(abs(gaps.leading - gaps.trailing) <= 1,
+                    "\(label): bell → selector \(gaps.leading), selector → compose \(gaps.trailing)")
+        }
+        #expect(screen.debugSelector.window != nil, "\(label): the selector went into a •••")
     }
 }
