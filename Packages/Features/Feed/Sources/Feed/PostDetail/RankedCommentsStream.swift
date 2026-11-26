@@ -19,6 +19,9 @@ final class RankedCommentsStream {
     private var ranked: [CommentEntry] = []
     /// The viewer's top-level comments sent here, newest first.
     private var own: [CommentEntry] = []
+    /// The ids of the viewer's replies sent here (#2572): Popular's cut is
+    /// decided without them, so a reply never changes which threads it shows.
+    private var sentReplyIDs: Set<String> = []
     private var nextToken: String?
     private var load: Task<Void, Never>?
     private var generation = 0
@@ -36,6 +39,12 @@ final class RankedCommentsStream {
             + ranked.filter { !ownIDs.contains($0.id) && !ownIDs.contains($0.parentID ?? "") }
     }
 
+    /// The replies the viewer sent here, `pending` ones still on their way
+    /// included: the rows Popular's cut leaves out (#2572).
+    func sentReplies(plus pending: [PostDetailViewModel.PendingVoiceComment]) -> Set<String> {
+        sentReplyIDs.union(pending.lazy.filter { $0.parentID != nil }.map(\.commentID))
+    }
+
     /// Whether another page is there to ask for.
     var hasMore: Bool { nextToken != nil }
 
@@ -46,6 +55,7 @@ final class RankedCommentsStream {
         load = nil
         ranked = []
         own = []
+        sentReplyIDs = []
         nextToken = nil
         hasAnswered = false
         hasFailed = false
@@ -89,7 +99,7 @@ final class RankedCommentsStream {
     }
 
     /// The viewer's comment: a top-level one leads the tab; a reply goes
-    /// under its parent, wherever that is.
+    /// under its parent, wherever that is, and is kept out of the cut.
     /// `notify` false for a caller that emits next anyway.
     func addOwn(_ entry: CommentEntry, notify: Bool = true) {
         guard !own.contains(where: { $0.id == entry.id }), !ranked.contains(where: { $0.id == entry.id }) else { return }
@@ -97,6 +107,7 @@ final class RankedCommentsStream {
             own.insert(entry, at: 0)
         } else if ranked.contains(where: { $0.id == entry.parentID }) || own.contains(where: { $0.id == entry.parentID }) {
             ranked = PostDetailViewModel.inserting(entry, into: ranked)
+            sentReplyIDs.insert(entry.id)
         }
         if notify { onChange?() }
     }
