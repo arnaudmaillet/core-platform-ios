@@ -159,8 +159,8 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         self.shareTargeting = shareTargeting
         let header = ProfileHeaderView(imagePipeline: imagePipeline)
         header.bannerVideoPool = videoPlayback
-        // The header closes with the posts' hairline (#2289), over every tab.
-        header.drawsFootHairline = true
+        // No hairline under the header's selector (the owner, 2026-11-28,
+        // revising #2289 for the profile): the glass selector closes it.
         headerView = header
         // Every profile can carry Saved and Liked (#411, #837): someone
         // else's only when its owner shows them — the server answers empty

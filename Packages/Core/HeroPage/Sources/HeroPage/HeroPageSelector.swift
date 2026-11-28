@@ -184,9 +184,12 @@ public final class HeroPageSelector {
 }
 
 /// The header's home for a hero page's selector (#2475): where a profile's
-/// action row stood, the strip on the header's own flat grey capsule — the
-/// quiet tray buttons' ground (`HeroTray.fill`), never glass: the header sits
-/// on the page with nothing passing beneath it (`HeroTray`'s rule).
+/// action row stood, the strip on Liquid Glass of its own (`.standalone`),
+/// the same material it wears in the bar (the owner, 2026-11-28: the flat
+/// grey tray read as another control than the bar's).
+///
+/// ⚠️ The slot itself draws nothing: glass inside a ground loses its edge
+/// (`SelectorHosting.drawsBackdrop`).
 ///
 /// The strip spans it and scrolls inside when its titles need more room
 /// (the cut side fading, `PagedTabBar.fadesCutEdges`). It keeps its height
@@ -195,7 +198,7 @@ public final class HeroPageSelector {
 public final class HeroSelectorSlot: UIView {
     public override init(frame: CGRect) {
         super.init(frame: frame)
-        backgroundColor = HeroTray.fill
+        backgroundColor = .clear
         layer.cornerCurve = .continuous
         accessibilityIdentifier = "heroPage.selectorSlot"
     }
@@ -211,11 +214,11 @@ public final class HeroSelectorSlot: UIView {
     /// Whether the strip is in the header now.
     public var hostsStrip: Bool { subviews.contains { $0 is PagedTabBar } }
 
-    /// Takes `strip` in: drawn on this capsule (`.container`: no glass of its
-    /// own), spanning it, at its full width — no ceiling.
+    /// Takes `strip` in: on its own glass (`.standalone`), spanning the
+    /// slot, at its full width — no ceiling.
     func host(_ strip: PagedTabBar) {
         strip.removeFromSuperview()
-        strip.hosting = .container
+        strip.hosting = .standalone
         strip.fillsCeiling = false
         strip.widthCeiling = nil
         strip.fillsWidth = true

@@ -141,7 +141,7 @@ struct ProfileSelectorHandoverTests {
         defer { window.isHidden = true }
         #expect(screen.selector.isPlaced && !screen.selector.isInBar)
         #expect(screen.selectorBar.superview === screen.selector.headerSlot, "the strip is not in the header")
-        #expect(screen.selectorBar.hosting == .container, "the header's strip draws a glass of its own")
+        #expect(screen.selectorBar.hosting == .standalone, "the header's strip draws no glass of its own")
         #expect(screen.selector.headerSlot.window != nil, "the header's slot is not on screen")
         #expect(!(screen.toolbarItems ?? []).contains { $0.customView is PagedTabBar }, "a toolbar strip")
         #expect(screen.debugLeadingIDs == (pushed ? [] : ["shell.notifications-bell"]))

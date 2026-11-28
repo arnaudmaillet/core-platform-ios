@@ -174,7 +174,7 @@ struct HeroPageSelectorTests {
         #expect(placed == [true])
         #expect(screen.toolbarItems == nil, "a header placement wrote the toolbar")
         #expect(bar.superview === selector.headerSlot && selector.headerSlot.hostsStrip)
-        #expect(bar.hosting == .container && bar.fadesCutEdges, "the header's strip draws no glass, its cut side fades")
+        #expect(bar.hosting == .standalone && bar.fadesCutEdges, "the header's strip draws its own glass, its cut side fades")
         bar.select(2)
 
         let first = try #require(selector.moveIntoBar())
@@ -185,7 +185,7 @@ struct HeroPageSelectorTests {
 
         selector.moveIntoHeader()
         #expect(!selector.isInBar && bar.superview === selector.headerSlot)
-        #expect(bar.hosting == .container && bar.selectedIndex == 2)
+        #expect(bar.hosting == .standalone && bar.selectedIndex == 2)
 
         let again = try #require(selector.moveIntoBar())
         #expect(again === first, "the bar selector is kept")
