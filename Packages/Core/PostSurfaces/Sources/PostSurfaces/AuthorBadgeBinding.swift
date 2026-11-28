@@ -18,8 +18,8 @@ public protocol AuthorBadgeDrawing: AnyObject {
 }
 
 /// Something that also draws the author's Follow beside its badge: a list
-/// row's author band (#2419), from the same answer as the badge, so the two
-/// never disagree.
+/// row's author band and a text page's caption row (#2419), from the same
+/// answer as the badge, so the two never disagree.
 @MainActor
 public protocol AuthorFollowDrawing: AuthorBadgeDrawing {
     func drawAuthorFollow(_ offer: AuthorFollowOffer, animated: Bool)
@@ -145,11 +145,16 @@ final public class AuthorBadgeBinding {
     }
 }
 
-/// A text page's author face (#2300): its caption's row, as the screen's
-/// binding draws it — bound at configure, redrawn on every answer.
-extension CaptionBubbleCell: AuthorBadgeDrawing {
+/// A text page's author face (#2300) and its Follow left of the ♥ count
+/// (#2419): its caption's row, as the screen's binding draws it — bound at
+/// configure, redrawn on every answer.
+extension CaptionBubbleCell: AuthorFollowDrawing {
     public func drawAuthorBadge(_ badge: PersonPill.Badge, animated: Bool) {
         setAuthorMark(badge, animated: animated)
+    }
+
+    public func drawAuthorFollow(_ offer: AuthorFollowOffer, animated: Bool) {
+        setAuthorFollowOffer(offer, animated: animated)
     }
 
     public var drawsAuthorBadgeOnScreen: Bool { window != nil }

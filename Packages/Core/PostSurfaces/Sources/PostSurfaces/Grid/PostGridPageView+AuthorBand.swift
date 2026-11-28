@@ -42,6 +42,15 @@ extension PostGridPageView {
         // redrawn on every answer, on screen or not. A bare band names
         // nobody, and is bound to no one.
         let bandAuthor = cell.authorBandModel?.showsIdentity == true ? post.authorID : nil
-        authorMarks?.bind(cell, to: bandAuthor, offersFollow: true)
+        authorMarks?.bind(cell, to: bandAuthor, offersFollow: offersAuthorFollow)
+    }
+
+    /// The Follow a stand-in of `post`'s row draws (the reveal's dismissal
+    /// card): the row's own when it is realized, else what the row would
+    /// draw — none on a host that offers no Follow (a profile's lists).
+    func standInAuthorFollow(for post: GalleryPost) -> AuthorFollowOffer {
+        if let row = cell(for: post.id) as? PostGridListRowCell { return row.authorFollowOffer }
+        guard offersAuthorFollow else { return .none }
+        return authorMarks?.followOffer(for: post.authorID) ?? .none
     }
 }

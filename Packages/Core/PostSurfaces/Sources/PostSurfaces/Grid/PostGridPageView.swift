@@ -107,10 +107,12 @@ final public class PostGridPageView: UIView {
     /// (`PostCardStaking.bindReadout`).
     public var staking: PostCardStaking?
 
-    /// Where the rows' author bands get their relation mark and their "+"
-    /// (#2300): the composition root's one binding. Nil (a host with no
-    /// follow, a test): the bands wear no mark.
+    /// Where the rows' author bands get their relation mark (#2300) and
+    /// their Follow (#2419): the composition root's one binding. Nil (a host
+    /// with no follow, a test): the bands wear no mark.
     public var authorMarks: PostAuthorMarks?
+    /// See `PostGridPage.offersAuthorFollow`: off on a profile's lists.
+    public var offersAuthorFollow = true
 
     /// Whether this page's MOSAIC tiles wear their post's author and caption
     /// when they are large enough (the rule is `PostTileInfo`). For You's own
@@ -2596,13 +2598,11 @@ final public class PostGridPageView: UIView {
             // The ROW's own height when it is realized — see the profile's
             // twin, and `RevealDismissCardView.init`.
             height: cell(for: postID)?.bounds.height,
-            // The row's relation mark (#2300): a badge changing in the
-            // landing frame is the pop.
+            // The row's relation mark (#2300) and its Follow (#2419): a
+            // badge or a button changing in the landing frame is the pop.
             authorMark: (cell(for: postID) as? PostGridListRowCell)?.authorRelationMark
                 ?? authorMarks?.badge(for: post.authorID) ?? .none,
-            // Its Follow (#2419), on the same terms.
-            authorFollow: (cell(for: postID) as? PostGridListRowCell)?.authorFollowOffer
-                ?? authorMarks?.followOffer(for: post.authorID) ?? .none
+            authorFollow: standInAuthorFollow(for: post)
         )
     }
 
@@ -3282,7 +3282,7 @@ final public class PostGridPageView: UIView {
         return added
     }
 
-    private func cell(for postID: PostID) -> UICollectionViewCell? {
+    func cell(for postID: PostID) -> UICollectionViewCell? {
         guard let index = posts.firstIndex(where: { $0.id == postID }) else { return nil }
         return collectionView.cellForItem(at: indexPath(for: index))
     }

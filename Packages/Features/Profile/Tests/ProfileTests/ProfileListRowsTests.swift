@@ -52,6 +52,30 @@ struct ProfileListRowsTests {
         #expect(screen.headerView.drawsFootHairline)
         #expect(!ProfileHeaderView(imagePipeline: pipeline).drawsFootHairline, "on by default")
     }
+
+    /// ⚠️ NO FOLLOW ON A PROFILE'S POST LISTS (#2419, the owner 2026-11-28):
+    /// the header's Follow is the one (#2248, #2302). Every page the profile
+    /// builds — its tabs and its media gallery, the same factory — offers no
+    /// author Follow on its bands, while the same page built for another
+    /// host does.
+    @Test func theProfilesListsOfferNoAuthorFollow() throws {
+        let pipeline = ImagePipeline(fetcher: PlaceholderImageFetcher())
+        let factory = TestGridPages.factory(imagePipeline: pipeline)
+        #expect(factory(.list, false).offersAuthorFollow, "another host's list lost its Follow")
+        let screen = ProfileViewController(
+            viewModel: ProfileViewModel(repository: NoProfiles()),
+            imagePipeline: pipeline,
+            makeGridPage: factory, presence: SectionPresenceStore(scope: StorageScope()),
+            onLogout: nil
+        )
+        screen.loadViewIfNeeded()
+        for style in [PostGridPageStyle.list, .discover, .grid, .rows] {
+            #expect(!screen.makeGridPage(style, false).offersAuthorFollow, "\(style) offers the band's Follow")
+            #expect(!screen.makeGridPage(style, true).offersAuthorFollow, "\(style) (saves) offers the band's Follow")
+        }
+        let posts = try #require(screen.galleryPager.builtPage(for: .format(.activity)), "Posts was not built")
+        #expect(!posts.offersAuthorFollow, "the Posts tab offers the band's Follow")
+    }
 }
 
 /// No profile behind it: the header only has to be built.
