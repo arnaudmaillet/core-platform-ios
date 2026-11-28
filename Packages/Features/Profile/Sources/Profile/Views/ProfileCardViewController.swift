@@ -17,12 +17,15 @@ import UIKit
 ///  ░░░░ the band card, 2nd notch ░░░░
 ///      (avatar)  Name ✓ · counters      ← the PROFILE'S header, same views
 ///   bio … link
-///  [ Follow ] [ Message ]       [•••]  ← native toolbar items
+///  [——Follow——][💬][QR]                ← the relationship's toolbar
 /// ```
 ///
-/// - **The header is the profile's** (`ProfileHeaderView`), its tray hidden
-///   (`showsActionTray`): its actions are this sheet's bars. A change to the
+/// - **The header is the profile's** (`ProfileHeaderView`): it has no action
+///   row (#2475), its actions are this sheet's bars. A change to the
 ///   profile's header shows here too.
+/// - **The toolbar is someone else's profile's** (`ProfileRelationToolbar`,
+///   #2475): one source, so the card and the page draw one relationship the
+///   same way.
 /// - **The banner stands where the profile's does at its second notch**: the
 ///   header is laid out as on the profile and climbed by `bandAvatarDetent`
 ///   (`HeroBannerMetrics.bandAvatarDetentGap`), the same arithmetic the
@@ -215,7 +218,6 @@ final class ProfileCardViewController: UIViewController {
     }
 
     private func configureHeader() {
-        headerView.showsActionTray = false
         headerClip.clipsToBounds = true
         headerClip.translatesAutoresizingMaskIntoConstraints = false
         headerView.translatesAutoresizingMaskIntoConstraints = false
@@ -242,8 +244,6 @@ final class ProfileCardViewController: UIViewController {
         headerClip.addGestureRecognizer(infoTap)
         headerView.onRelationshipsTapped = { [weak self] direction in self?.openRelationships(direction) }
         headerView.onWebsiteTapped = { url in UIApplication.shared.open(url) }
-        // The avatar's "+" (#2050): the toolbar's Follow, exactly.
-        headerView.onFollowTapped = { [weak self] in self?.followTapped() }
         // The header re-measures itself when its content changes.
         headerView.onPicturesSettled = { [weak self] in self?.remeasure() }
         // And when the text size changes under it: at XXXL the bio grew under
@@ -365,7 +365,7 @@ final class ProfileCardViewController: UIViewController {
     private var isGuest: Bool { MemberGates.isGuest(self) }
 
     /// The bell stands while the viewer follows, for a member — the one
-    /// rule the profile's header reads too (`ProfileRelationControl`, #2302).
+    /// rule the profile's toolbar reads too (`ProfileRelationControl`, #2302).
     var showsMuteBell: Bool {
         Self.showsMuteBell(followButton: followButtonState, canMute: viewModel.canMute, isGuest: isGuest)
     }
@@ -377,75 +377,19 @@ final class ProfileCardViewController: UIViewController {
         ProfileRelationControl.showsMuteBell(followButton: followButton, canMute: canMute, isGuest: isGuest)
     }
 
-    /// The toolbar's items for a relationship. Pure, for tests.
-    nonisolated enum ToolbarItem: Equatable, Sendable {
-        case follow, requested, openProfile, message, bell, qr
-    }
-
-    /// ⚠️ THE OWNER'S BARS (#1562, 2026-10-22): `[——Follow——][Message][QR]`
-    /// while not followed, `[bell][——Message——][QR]` once followed — the
-    /// mute bell down from the top bar, Following gone (Unfollow is in the
-    /// ••• menu, now top left). `showsBell`: a member who can mute;
-    /// `showsQR`: a share card to show (or the profile not loaded yet).
-    ///
-    /// The relationship's control is the ONE RULE the profile's header reads
-    /// too (`ProfileRelationControl.control`, #2302): the card and the page
-    /// show one relationship the same way.
+    /// The toolbar's items for a relationship — someone else's profile's
+    /// rule (`ProfileRelationToolbar.items`, one source, #2475). Pure, for
+    /// tests.
     nonisolated static func toolbarItems(
         for followButton: ProfileViewModel.FollowButton, showsBell: Bool = true, showsQR: Bool = true
-    ) -> [ToolbarItem] {
-        let qr: [ToolbarItem] = showsQR ? [.qr] : []
-        switch followButton {
-        // A private profile asked: its request is withdrawn from its item.
-        case .follow, .following, .requested:
-            let control: [ToolbarItem] = switch ProfileRelationControl.control(for: followButton, showsBell: showsBell) {
-            case .follow?: [.follow]
-            case .requested?: [.requested]
-            case .bell?: [.bell]
-            case nil: []
-            }
-            return control + [.message] + qr
-        // Not followable (#726), or unknown yet: what does not depend on it.
-        case .unavailable, .hidden: return [.message] + qr
-        // The viewer's own profile, reached by id: nothing to do here but
-        // open it.
-        case .edit: return [.openProfile]
-        }
+    ) -> [ProfileRelationToolbar.Item] {
+        ProfileRelationToolbar.items(for: followButton, showsBell: showsBell, showsQR: showsQR)
     }
 
     /// Whether the top bar carries the ••• menu: everywhere but the viewer's
     /// own profile, which only opens it. Pure, for tests.
     nonisolated static func showsMoreMenu(for followButton: ProfileViewModel.FollowButton) -> Bool {
         followButton != .edit
-    }
-
-    /// The item that takes the toolbar's free width (#1542, the owner): Follow
-    /// while the viewer does not follow — `[——Follow——][Message][QR]` — and
-    /// Requested once asked, in the same slot — `[——Requested——][Message][QR]`
-    /// (#1668: the same item to UIKit, `barIdentifier`, never a bar whose
-    /// stretched slot moves to Message); Message once followed or not
-    /// followable.
-    /// Nil: nothing stretches (the viewer's own profile). Pure, for tests.
-    nonisolated static func wideItem(in items: [ToolbarItem]) -> ToolbarItem? {
-        if items.contains(.follow) { return .follow }
-        if items.contains(.requested) { return .requested }
-        if items.contains(.message) { return .message }
-        return nil
-    }
-
-    /// The identity UIKit matches a bar item by across a rebuild
-    /// (`UIBarButtonItem.identifier`): by what it DOES, so Follow and
-    /// Requested are one item in two states, Message stays Message when it
-    /// takes the free width, and Follow is never taken for the bell that
-    /// replaces it once followed (#1678). Pure, for tests.
-    nonisolated static func barIdentifier(for item: ToolbarItem) -> String {
-        switch item {
-        case .follow, .requested: "profileCard.follow"
-        case .message: "profileCard.message"
-        case .openProfile: "profileCard.openProfile"
-        case .bell: "profileCard.bell"
-        case .qr: "profileCard.qr"
-        }
     }
 
     /// The ••• menu's identity, top left, across rebuilds.
@@ -456,32 +400,28 @@ final class ProfileCardViewController: UIViewController {
     private struct BarState: Equatable {
         var muteScopes: MuteScopes
         var more: Bool
-        var toolbar: [ToolbarItem]
+        var toolbar: [ProfileRelationToolbar.Item]
     }
 
     private var shownBars: BarState?
 
-    /// The toolbar's items and the ••• menu's, kept by identifier (#2331):
-    /// an item that stays is the same instance.
-    private let toolbarStore = BarItemStore()
+    /// The relationship's toolbar — someone else's profile's own
+    /// (`ProfileRelationToolbar`, #2475) — and the ••• menu, kept by
+    /// identifier (#2331): an item that stays is the same instance.
+    private lazy var toolbar = ProfileRelationToolbar(actions: .init(
+        follow: { [weak self] in self?.followTapped() },
+        message: { [weak self] in self?.messageTapped() },
+        qrCode: { [weak self] in self?.relationActions.presentShareSheet() },
+        openProfile: { [weak self] in self?.infoTapped() },
+        muteScopes: { [weak self] in self?.viewModel.muteScopes ?? .none },
+        toggleMute: { [weak self] scope in self?.viewModel.toggleMute(scope) }
+    ))
     private let leadingStore = BarItemStore()
 
-    /// ⚠️ ONLY THE ITEM THAT CHANGED MOVES (#2331, the owner 2026-11-11).
-    /// Every item used to be a new instance on every change — under its old
-    /// identifier (#1678), so UIKit matched it — and UIKit runs its content
-    /// transition on a matched NEW item: Requested turning back into Follow
-    /// blurred Message and the QR out and back with it (the owner's
-    /// recording). Now:
-    ///
-    /// - every item is kept by identifier (`BarItemStore`), and a state
-    ///   change dresses it in place: Follow ↔ Requested is one item whose
-    ///   word and prominence change, the bell takes its new glyph, Message
-    ///   stretches or not;
-    /// - the bar is handed the items only when the list changes (Follow →
-    ///   the bell once followed, #2302; the QR once the share card loads), and
-    ///   the staying items are the same instances then too.
-    ///
-    /// No animation of ours (#1672): the bar draws every bubble.
+    /// ⚠️ ONLY THE ITEM THAT CHANGED MOVES (#2331, the owner 2026-11-11):
+    /// the toolbar keeps its items by identifier and dresses them in place
+    /// (`ProfileRelationToolbar`), and the bar is handed the items only when
+    /// the list changes. No animation of ours (#1672).
     private func applyBars() {
         let state = BarState(
             muteScopes: viewModel.muteScopes,
@@ -502,95 +442,16 @@ final class ProfileCardViewController: UIViewController {
         }] : []
         leadingStore.apply(leading: leading, to: navigationItem, animated: animated)
 
-        var items: [UIBarButtonItem] = []
-        let wide = Self.wideItem(in: state.toolbar)
-        for kind in state.toolbar {
-            // Each in its own bubble: the zero-width fixed space keeps UIKit
-            // from joining two items in one shared platter (the sound
-            // sheet's toolbar) — kept with the item it stands before.
-            let id = Self.barIdentifier(for: kind)
-            if !items.isEmpty { items.append(toolbarStore.separator(before: id)) }
-            items.append(toolbarItem(for: kind, wide: kind == wide))
-        }
-        toolbarStore.apply(toolbar: items, to: self, animated: animated)
+        toolbar.apply(state.toolbar, muteScopes: state.muteScopes, to: self, animated: animated)
     }
-
-    /// The kept item for `kind`, dressed for now.
-    private func toolbarItem(for kind: ToolbarItem, wide: Bool) -> UIBarButtonItem {
-        let id = Self.barIdentifier(for: kind)
-        switch kind {
-        case .follow, .requested:
-            // One item in two states (#1668): its word and its prominence
-            // change in place. It always takes the free width (`wideItem`).
-            return toolbarStore.item(id) {
-                let made = BarItems.stretched(id: id, title: "Follow", prominent: true) { [weak self] in
-                    self?.followTapped()
-                }
-                made.label.accessibilityIdentifier = "profileCard.follow"
-                return made.item
-            } update: { item in
-                BarItems.update(stretched: item, title: kind == .follow ? "Follow" : "Requested", prominent: kind == .follow)
-                (item.customView as? StretchedBarLabel)?.stretches = wide
-            }
-        case .message:
-            // The same item whether it takes the free width (followed, or not
-            // followable) or stands beside Follow: only its stretch changes,
-            // so Following does not redraw it (#2331). A plain view in the
-            // bar's bubble either way (`StretchedBarLabel`), never a stock
-            // title item turned into one.
-            return toolbarStore.item(id) {
-                let made = BarItems.stretched(id: id, title: "Message") { [weak self] in self?.messageTapped() }
-                made.label.accessibilityIdentifier = "profileCard.message"
-                return made.item
-            } update: { item in
-                (item.customView as? StretchedBarLabel)?.stretches = wide
-            }
-        case .bell:
-            return toolbarStore.item(id) {
-                BarItems.icon(id: id, image: nil, label: "Notifications", menu: UIMenu(children: [
-                    UIDeferredMenuElement.uncached { [weak self] completion in
-                        guard let self else { return completion([]) }
-                        completion(ProfileMenuBuilder.muteMenuElements(viewModel.muteScopes) { [weak self] scope in
-                            self?.viewModel.toggleMute(scope)
-                        })
-                    },
-                ]))
-            } update: { item in
-                // Its glyph in place (R7), written only when the scope moves
-                // it; the menu reads the scopes as it opens.
-                let scopes = viewModel.muteScopes
-                let symbol = ProfileRelationControl.bellSymbol(for: scopes)
-                if item.image == nil || shownBellSymbol != symbol {
-                    item.image = UIImage.symbol(named: symbol)
-                    shownBellSymbol = symbol
-                }
-                item.accessibilityValue = ProfileRelationControl.bellAccessibilityValue(for: scopes)
-            }
-        case .qr:
-            return toolbarStore.item(id) {
-                BarItems.icon(id: id, image: UIImage(systemName: "qrcode"), label: "QR Code") { [weak self] in
-                    self?.relationActions.presentShareSheet()
-                }
-            }
-        case .openProfile:
-            return toolbarStore.item(id) {
-                BarItems.title(id: id, title: "View Profile", prominent: true) { [weak self] in self?.infoTapped() }
-            }
-        }
-    }
-
-    /// The glyph the bell wears now.
-    private var shownBellSymbol: String?
 
     /// The item taking the toolbar's free width, its view — what a test reads.
-    var wideLabel: StretchedBarLabel? {
-        (toolbarItems ?? []).lazy.compactMap { $0.customView as? StretchedBarLabel }.first { $0.stretches }
-    }
+    var wideLabel: StretchedBarLabel? { relationToolbarWideLabel }
 
     #if DEBUG
     /// How many times the toolbar and the top bar's leading run were handed
     /// their items. Tests.
-    var debugToolbarWrites: Int { toolbarStore.debugWrites }
+    var debugToolbarWrites: Int { toolbar.debugWrites }
     var debugLeadingWrites: Int { leadingStore.debugWrites }
     #endif
 
@@ -662,7 +523,7 @@ final class ProfileCardViewController: UIViewController {
 
     // MARK: - Actions
 
-    private func followTapped() {
+    func followTapped() {
         MemberGates.perform(.follow(handle: viewModel.profile?.handle), from: self) { [weak self] in
             // On at the optimistic flip; off is silent (#1886).
             if self?.viewModel.toggleFollow() == true { Haptics.play(.toggleOn) }
@@ -670,7 +531,7 @@ final class ProfileCardViewController: UIViewController {
     }
 
     /// The conversation opens on the presenter's stack: the card goes first.
-    private func messageTapped() {
+    func messageTapped() {
         MemberGates.perform(.message(handle: viewModel.profile?.handle), from: self) { [weak self] in
             self?.closeThen { [weak self] in self?.viewModel.messageTapped() }
         }

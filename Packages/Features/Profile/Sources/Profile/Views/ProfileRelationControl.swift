@@ -9,8 +9,8 @@ import ProfileData
 /// card's toolbar read `[——Follow——][Message][QR]` → `[bell][——Message——][QR]`
 /// since #1562; the page's header kept Following and stood the bell in the
 /// top bar. The page follows the card now, and both read the control from
-/// here — the header's row (`ProfileHeaderView.trayItems`) and the card's
-/// toolbar (`ProfileCardViewController.toolbarItems`) — so the two can no
+/// here — someone else's toolbar and the card's (`ProfileRelationToolbar`,
+/// one source since #2475) — so the two can no
 /// longer show one relationship two ways.
 ///
 /// | Relation                          | Control   |
