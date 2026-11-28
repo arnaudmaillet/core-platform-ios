@@ -1,6 +1,5 @@
 import CoreModels
 import DesignSystem
-import LaunchArguments
 import MediaCore
 import PostGrid
 import UIKit
@@ -37,13 +36,6 @@ import VoiceKitUI
 /// - **Liquid Glass**, the system's own, its round end concentric with the
 ///   round marker. No shadow: a shadow renders a glass or a blur offscreen,
 ///   cut off from the map it samples (a blur came out flat).
-/// - **Rounded (#2330, behind `-map-bubble-rounded`)**: a rounded rectangle,
-///   not a capsule — a bubble shows content, as a voice panel does (#2329).
-///   The marker sits at the TOP-LEFT, `markerPadding` from the top and the
-///   leading edge, whatever the height; the four corners take one radius,
-///   `roundedCorner` (#2347: a top-left concentric with the marker read as
-///   a defect on the device). Folded, it is still the circle round the
-///   marker. The showcase takes the same corners.
 final class MapTextBubbleView: UIView {
     /// What the bubble says.
     struct Content: Equatable {
@@ -90,20 +82,6 @@ final class MapTextBubbleView: UIView {
     /// Between the author's line and the words.
     static let lineGap: CGFloat = 1
 
-    /// Whether new bubbles are the rounded ones (#2330): read once, at
-    /// launch.
-    nonisolated static let roundsByDefault = DebugFlags.isOn("-map-bubble-rounded")
-    /// The rounded bubble's four corners, one radius (#2347): clear of the
-    /// words' corner, `insets` inside (an 18 pt curve passes about 5 pt from
-    /// the edges at 45°). The marker, `markerPadding` from the top and the
-    /// leading edge, stands about 8–9 pt from the top-left curve along its
-    /// diagonal.
-    static let roundedCorner: CGFloat = 18
-
-    /// The rounded bubble (#2330) or today's, fixed at its birth: a test
-    /// picks it without touching the flag.
-    let isRounded: Bool
-
     /// The grown marker's diameter, set by the halo.
     var markerSide: CGFloat = 44 {
         didSet { if markerSide != oldValue { setNeedsLayout() } }
@@ -131,8 +109,7 @@ final class MapTextBubbleView: UIView {
         timer: .label
     )
 
-    init(frame: CGRect = .zero, isRounded: Bool = MapTextBubbleView.roundsByDefault) {
-        self.isRounded = isRounded
+    override init(frame: CGRect) {
         super.init(frame: frame)
         // Only the voice takes a touch (`hitTest`): the rest of the bubble is
         // its marker's, which opens the post.
@@ -275,19 +252,15 @@ final class MapTextBubbleView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         glass.frame = bounds
-        applyCorners()
+        // Round about the marker: its end concentric with the disc, a circle
+        // while the bubble is still folded.
+        let radius = min(markerSide / 2 + Self.markerPadding, bounds.height / 2)
+        glass.cornerConfiguration = .corners(radius: .fixed(radius))
         // The column keeps its unfolded size, held to the marker's right: an
-        // unfolding bubble shows it, it never reflows it. Rounded (#2330), it
-        // is held to the top, level with the marker — centred on the marker
-        // when shorter than it, `insets.top` down otherwise — so the
-        // author's line sits beside the marker's upper half whatever the
-        // bubble's height, and the column does not move as the bubble grows.
+        // unfolding bubble shows it, it never reflows it.
         let text = columnSize
-        let top = isRounded
-            ? max(Self.insets.top, Self.markerPadding + markerSide / 2 - text.height / 2)
-            : (bounds.height - text.height) / 2
         column.frame = CGRect(
-            x: Self.markerPadding + markerSide + Self.markerGap, y: top,
+            x: Self.markerPadding + markerSide + Self.markerGap, y: (bounds.height - text.height) / 2,
             width: text.width, height: text.height
         )
         let author = ceil(authorLabel.sizeThatFits(CGSize(width: text.width, height: .greatestFiniteMagnitude)).height)
@@ -324,82 +297,9 @@ final class MapTextBubbleView: UIView {
         return player.hitTest(local, with: event)
     }
 
-    /// Where the marker's centre stands in the bubble: its left end —
-    /// rounded (#2330), its top-left corner.
-    var markerCentre: CGPoint { markerCentre(for: bounds.size) }
-
-    /// Where the marker's centre stands in a bubble of `size`.
-    func markerCentre(for size: CGSize) -> CGPoint {
-        let inset = Self.markerPadding + markerSide / 2
-        return CGPoint(x: inset, y: isRounded ? inset : size.height / 2)
-    }
-
-    // MARK: - The corners
-
-    /// The four corners' radii.
-    struct Corners: Equatable {
-        var topLeft: CGFloat
-        var topRight: CGFloat
-        var bottomLeft: CGFloat
-        var bottomRight: CGFloat
-
-        init(topLeft: CGFloat, topRight: CGFloat, bottomLeft: CGFloat, bottomRight: CGFloat) {
-            self.topLeft = topLeft
-            self.topRight = topRight
-            self.bottomLeft = bottomLeft
-            self.bottomRight = bottomRight
-        }
-
-        init(all radius: CGFloat) {
-            self.init(topLeft: radius, topRight: radius, bottomLeft: radius, bottomRight: radius)
-        }
-    }
-
-    /// A bubble's corners at `size`. Pure, for tests.
-    ///
-    /// - **Today's:** one radius, concentric with the marker's disc, half
-    ///   the height at most — a circle while folded.
-    /// - **Rounded (#2330, #2347):** the four corners at `roundedCorner`,
-    ///   one radius; folded (as narrow as the marker and its padding), every
-    ///   corner half the height — the circle round the marker. The unfold
-    ///   animates the four together from one into the other.
-    static func corners(for size: CGSize, markerSide: CGFloat, isRounded: Bool) -> Corners {
-        let half = size.height / 2
-        guard isRounded else { return Corners(all: min(markerSide / 2 + markerPadding, half)) }
-        let isFolded = size.width <= markerSide + 2 * markerPadding + 0.5
-        return Corners(all: isFolded ? half : min(roundedCorner, half))
-    }
-
-    /// The glass's corners for its bounds. Set inside the halo's unfold, it
-    /// animates with the size: one motion.
-    ///
-    /// ⚠️ ROUNDED, THE RADII NEVER OVERSHOOT (#2330: no frame squarer than
-    /// the end). The unfold's spring bounces; a radius riding it would dip
-    /// under 18 pt and come back. Inside an animation they take a spring of
-    /// the same duration with no bounce, so they land without passing their
-    /// end value — the four together, on one curve (#2347: no frame with one
-    /// corner rounder than the others).
-    private func applyCorners() {
-        let radii = Self.corners(for: bounds.size, markerSide: markerSide, isRounded: isRounded)
-        guard isRounded else {
-            glass.cornerConfiguration = .corners(radius: .fixed(radii.topLeft))
-            return
-        }
-        let configuration = UICornerConfiguration.corners(
-            topLeftRadius: .fixed(radii.topLeft), topRightRadius: .fixed(radii.topRight),
-            bottomLeftRadius: .fixed(radii.bottomLeft), bottomRightRadius: .fixed(radii.bottomRight)
-        )
-        let duration = UIView.inheritedAnimationDuration
-        guard duration > 0 else {
-            glass.cornerConfiguration = configuration
-            return
-        }
-        UIView.animate(
-            springDuration: duration, bounce: 0,
-            options: [.allowUserInteraction, .beginFromCurrentState, .overrideInheritedDuration, .overrideInheritedCurve]
-        ) {
-            self.glass.cornerConfiguration = configuration
-        }
+    /// Where the marker's centre stands in the bubble: its left end.
+    var markerCentre: CGPoint {
+        CGPoint(x: Self.markerPadding + markerSide / 2, y: bounds.midY)
     }
 
     /// The glass on or off — set inside an animation, the system's own
@@ -418,7 +318,7 @@ final class MapTextBubbleView: UIView {
     var debugHasGlass: Bool { glass.effect != nil }
     /// The words' column, in the bubble.
     var debugColumnFrame: CGRect { column.frame }
-    /// The glass, whose corners are the bubble's (#2330).
+    /// The glass, whose corners are the bubble's.
     var debugGlass: UIView { glass }
     /// The voice shown, nil for none (#2208).
     var debugVoice: VoicePostCaptionView? { voiceCaption.isHidden ? nil : voiceCaption }
