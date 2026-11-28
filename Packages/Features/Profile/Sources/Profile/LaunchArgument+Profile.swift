@@ -5,11 +5,13 @@ import LaunchArguments
 extension LaunchArgument {
     static let openSettings = LaunchArgument("-open-settings")
     static let postMenuAudit = LaunchArgument("-post-menu-audit")
+    static let profileBarDemo = LaunchArgument("-profile-bar-demo")
     static let profileBarTree = LaunchArgument("-profile-bar-tree")
     static let profileBlockDemo = LaunchArgument("-profile-block-demo")
     static let profileDock = LaunchArgument("-profile-dock")
     static let profileEditPrivacy = LaunchArgument("-profile-edit-privacy")
     static let profileFirstFrameLog = LaunchArgument("-profile-first-frame-log")
+    static let profileHistorySelect = LaunchArgument("-profile-history-select")
     static let profileFollowTap = LaunchArgument("-profile-follow-tap")
     static let profileInkAudit = LaunchArgument("-profile-ink-audit")
     static let profileLayoutAudit = LaunchArgument("-profile-layout-audit")

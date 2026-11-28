@@ -192,6 +192,52 @@ extension ProfileViewController {
         }
     }
 
+    /// `-profile-bar-demo` (#2475): scrolls past the threshold over a second
+    /// and a half, taps the last page, the first and a middle one, then
+    /// scrolls back to the top — what the hand-off recording films.
+    func qaRunBarDemo() {
+        let past = headerTravel + 60
+        func glide(from start: CGFloat, to end: CGFloat, began: CFTimeInterval, then: @escaping () -> Void) {
+            let t = min(1, (CACurrentMediaTime() - began) / 1.5)
+            let eased = t * t * (3 - 2 * t)
+            _ = galleryPager.debugSetVerticalOffset(start + (end - start) * eased)
+            guard t < 1 else { return then() }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0 / 60) { glide(from: start, to: end, began: began, then: then) }
+        }
+        print("[bar-demo] travel=\(headerTravel) tabs=\(tabs.map(\.title))")
+        glide(from: 0, to: past, began: CACurrentMediaTime()) { [weak self] in
+            guard let self else { return }
+            let last = tabs.count - 1
+            let steps = [last, 0, last / 2]
+            for (index, tab) in steps.enumerated() {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5 * Double(index + 1)) { [weak self] in
+                    guard let self, tabs.indices.contains(tab) else { return }
+                    selectTab(at: tab)
+                    // The new page keeps the threshold: the header's travel.
+                    _ = galleryPager.debugSetVerticalOffset(past)
+                }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5 * Double(steps.count + 1)) {
+                glide(from: past, to: 0, began: CACurrentMediaTime()) { print("[bar-demo] done") }
+            }
+        }
+    }
+
+    /// `-profile-history-select` (#2475): History, past the threshold, in
+    /// its select mode.
+    func qaSelectHistory() {
+        guard let history = tabs.firstIndex(of: .history) else {
+            print("[history-select] no History page: \(tabs.map(\.title))")
+            return
+        }
+        selectTab(at: history)
+        _ = galleryPager.debugSetVerticalOffset(headerTravel + 60)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+            self?.setSelectingHistory(true)
+            print("[history-select] selecting=\(self?.isSelectingHistory ?? false)")
+        }
+    }
+
     /// Fires the relationship item through its own primary action — the same
     /// closure UIKit invokes on a tap, reached from the item rather than from
     /// a copy of the call. The Follow capsule is a bar item, which the
@@ -199,10 +245,11 @@ extension ProfileViewController {
     /// survived the conversion off target/action.
     func qaTapFollowItem() {
         print("PROFILE-FOLLOW-TAP before=\(followButtonState)")
-        guard headerView.debugTapFollow() else {
-            print("PROFILE-FOLLOW-TAP the header shows no follow capsule")
+        guard let follow = relationToolbarItem(.follow)?.customView as? StretchedBarLabel else {
+            print("PROFILE-FOLLOW-TAP the toolbar shows no Follow")
             return
         }
+        follow.debugTap()
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
             guard let self else { return }
             print("PROFILE-FOLLOW-TAP after=\(self.followButtonState)")
@@ -269,16 +316,39 @@ extension ProfileViewController {
 // MARK: - Accessors
 
 extension ProfileViewController {
-    /// What the header's relationship capsule says, nil while it is the blank
-    /// placeholder — for tests and QA probes.
-    var debugFollowTitle: String? { headerView.debugFollowTitle }
-    /// The header's row reads "followed" (#2302): the bell, or Message alone
-    /// where there is no bell — never Following, never Follow.
+    /// What the toolbar's Follow says — Follow or Requested — nil while it
+    /// shows none (#2475) — for tests and QA probes.
+    var debugFollowTitle: String? { (relationToolbarItem(.follow)?.customView as? StretchedBarLabel)?.title }
+    /// The toolbar reads "followed" (#2302): the bell beside Message, or
+    /// Message alone where there is no bell — never Following, never Follow.
     var debugShowsFollowed: Bool {
-        followButtonState == .following
-            && [[.bell, .message, .qr, .more], [.message, .qr, .more]].contains(headerView.debugTrayItems)
+        followButtonState == .following && relationActions.toolbar.shownItems.map {
+            !$0.contains(.follow) && !$0.contains(.requested) && $0.contains(.message)
+        } == true
     }
-    var debugFollowIsProminent: Bool { headerView.debugFollowIsProminent }
+    /// Whether the toolbar's Follow is the prominent call to action.
+    var debugFollowIsProminent: Bool { relationToolbarItem(.follow)?.style == .prominent && debugFollowTitle == "Follow" }
+    /// The toolbar's items, leading to trailing (#2475) — nil before the
+    /// first composition.
+    var debugToolbarKinds: [ProfileRelationToolbar.Item]? { relationActions.toolbar.shownItems }
+    /// The bell's glyph, while the toolbar shows it (#2302).
+    var debugMuteBellSymbol: String? { relationActions.toolbar.debugBellSymbol }
+    /// The bar's groups by identifier, the spaces left out: the leading
+    /// group after the chevron, the trailing one from the bar's edge in.
+    var debugLeadingIDs: [String] { Self.identifiers(navigationItem.leftBarButtonItems) }
+    var debugTrailingIDs: [String] { Self.identifiers(navigationItem.rightBarButtonItems) }
+    private static func identifiers(_ items: [UIBarButtonItem]?) -> [String] {
+        (items ?? []).compactMap { item in
+            let isSpace = item.customView == nil && item.image == nil && item.title == nil && item.menu == nil
+                && item.primaryAction == nil
+            return isSpace ? nil : (item.identifier ?? "?")
+        }
+    }
+    /// The bar's item for `identifier`, if it shows one.
+    func debugBarItem(_ identifier: String) -> UIBarButtonItem? {
+        ((navigationItem.leftBarButtonItems ?? []) + (navigationItem.rightBarButtonItems ?? []))
+            .first { $0.identifier == identifier }
+    }
     var debugIsHeaderRedacted: Bool { headerView.debugIsRedacted }
     var debugHasAvatarPicture: Bool { headerView.debugHasAvatarPicture }
 

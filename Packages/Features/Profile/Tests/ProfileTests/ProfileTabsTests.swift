@@ -463,8 +463,9 @@ struct ProfileHistoryDaysTests {
         }
     }
 
-    /// The viewer's own profile, three posts in its history, the shell's
-    /// balance on its bar, its tabs landed. Tests of History's bar (#2307).
+    /// The viewer's own profile, three posts in its history, a balance the
+    /// shell hands in (which no profile shows, #2475), its tabs landed.
+    /// Tests of History's bar (#2307, #2475).
     private struct OwnProfile {
         let screen: ProfileViewController
         let store: PostViewHistoryStore
@@ -472,7 +473,8 @@ struct ProfileHistoryDaysTests {
         let history: Int
 
         /// The bar's trailing items, outermost first, by what VoiceOver
-        /// reads — the gear says "Settings", the balance "Balance".
+        /// reads — the gear says "Settings", ⋯ "More actions", ✎ "Edit Profile"; a
+        /// balance would say "Balance".
         var bar: [String] {
             let items: [UIBarButtonItem] = screen.navigationItem.rightBarButtonItems ?? []
             return items.compactMap { item -> String? in item.accessibilityLabel ?? item.title }
@@ -513,12 +515,11 @@ struct ProfileHistoryDaysTests {
         return OwnProfile(screen: screen, store: store, history: history)
     }
 
-    /// The own profile's bar per state (#2307, the owner 2026-11-11): the
-    /// gear and the balance at rest on every tab, History included; on
-    /// History once the tray has scrolled away, Select in the gear's place;
-    /// selecting, Done there, wherever the scroll is. The balance is never
-    /// replaced.
-    @Test func historysSelectStandsInTheGearsPlaceOnceTheTrayHasGone() async throws {
+    /// The own profile's bar per state (#2307, #2475): `[✎][⋯ ⚙]` at rest on
+    /// every tab, History included; on History past the threshold, Select
+    /// in ✎'s place; selecting, Done there, wherever the scroll is. No
+    /// balance, ever.
+    @Test func historysSelectStandsInEditsPlacePastTheThreshold() async throws {
         let name = "history-bar-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: name))
         defer { defaults.removePersistentDomain(forName: name) }
@@ -526,20 +527,20 @@ struct ProfileHistoryDaysTests {
         let screen = own.screen
 
         // At rest, on Posts and on History alike.
-        #expect(own.bar == ["Settings", "Balance"], "Posts at rest: \(own.bar)")
+        #expect(own.bar == ["Settings", "More actions", "Edit Profile"], "Posts at rest: \(own.bar)")
         screen.selectTab(at: own.history)
-        #expect(own.bar == ["Settings", "Balance"], "History at rest wears Select: \(own.bar)")
+        #expect(own.bar == ["Settings", "More actions", "Edit Profile"], "History at rest wears Select: \(own.bar)")
 
-        // The tray goes under the bar: Select, in the gear's place, under its
-        // own identifier — the bar's morph, not a re-titled gear (R3).
-        screen.debugSetTrayScrolledAway(true)
-        #expect(own.bar == ["Select", "Balance"], "History, tray away: \(own.bar)")
+        // Past the threshold: Select, in ✎'s place, under its own
+        // identifier — the bar's morph, not a re-titled ✎ (R3).
+        screen.debugSetPastThreshold(true)
+        #expect(own.bar == ["Select"], "History, past the threshold: \(own.bar)")
         #expect(own.item("profile.history.select")?.isEnabled == true)
         #expect(own.item("profile.settings") == nil)
 
-        // Back up: the gear.
-        screen.debugSetTrayScrolledAway(false)
-        #expect(own.bar == ["Settings", "Balance"], "History, tray back: \(own.bar)")
+        // Back up: ✎ and ⋯ ⚙.
+        screen.debugSetPastThreshold(false)
+        #expect(own.bar == ["Settings", "More actions", "Edit Profile"], "History, back up: \(own.bar)")
     }
 
     /// Done holds while selecting, whatever the scroll — without it there
@@ -551,31 +552,31 @@ struct ProfileHistoryDaysTests {
         let own = try await ownProfile(defaults: defaults)
         let screen = own.screen
         screen.selectTab(at: own.history)
-        screen.debugSetTrayScrolledAway(true)
+        screen.debugSetPastThreshold(true)
 
         screen.setSelectingHistory(true)
-        #expect(own.bar == ["Done", "Balance"], "selecting, scrolled: \(own.bar)")
+        #expect(own.bar == ["Done"], "selecting, scrolled: \(own.bar)")
         #expect(own.item("profile.history.done")?.style == .prominent)
 
-        // Back to the top: Done stays.
-        screen.debugSetTrayScrolledAway(false)
+        // Back to the top: Done stays, in ✎'s place.
+        screen.debugSetPastThreshold(false)
         #expect(screen.isSelectingHistory)
-        #expect(own.bar == ["Done", "Balance"], "selecting, at the top: \(own.bar)")
+        #expect(own.bar == ["Settings", "More actions", "Done"], "selecting, at the top: \(own.bar)")
 
-        // Done at the top: the gear. Selecting again and Done scrolled: Select.
+        // Done at the top: ✎. Selecting again and Done scrolled: Select.
         screen.setSelectingHistory(false)
-        #expect(own.bar == ["Settings", "Balance"], "after Done, tray in sight: \(own.bar)")
+        #expect(own.bar == ["Settings", "More actions", "Edit Profile"], "after Done, at the top: \(own.bar)")
         screen.setSelectingHistory(true)
-        #expect(own.bar == ["Done", "Balance"], "selecting from the top: \(own.bar)")
-        screen.debugSetTrayScrolledAway(true)
+        #expect(own.bar == ["Settings", "More actions", "Done"], "selecting from the top: \(own.bar)")
+        screen.debugSetPastThreshold(true)
         screen.setSelectingHistory(false)
-        #expect(own.bar == ["Select", "Balance"], "after Done, tray away: \(own.bar)")
+        #expect(own.bar == ["Select"], "after Done, past the threshold: \(own.bar)")
     }
 
-    /// Select only on History (#2307): another tab with the tray away keeps
-    /// the gear; leaving History with the tray away puts the gear back, and
-    /// coming back brings Select.
-    @Test func selectIsHistorysOnlyWhenTheTrayIsAway() async throws {
+    /// Select only on History (#2307): another tab past the threshold keeps
+    /// ✎, prominent (#2475); leaving History puts it back, and coming back
+    /// brings Select.
+    @Test func selectIsHistorysOnlyPastTheThreshold() async throws {
         let name = "history-tabs-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: name))
         defer { defaults.removePersistentDomain(forName: name) }
@@ -583,18 +584,19 @@ struct ProfileHistoryDaysTests {
         let screen = own.screen
 
         // A tab change re-reads the page's real scroll (nil in a test), so
-        // the tray's state is stated again after each, as a scroll would.
-        screen.debugSetTrayScrolledAway(true)
-        #expect(own.bar == ["Settings", "Balance"], "Posts, tray away: \(own.bar)")
+        // the threshold is stated again after each, as a scroll would.
+        screen.debugSetPastThreshold(true)
+        #expect(own.bar == ["Edit Profile"], "Posts, past the threshold: \(own.bar)")
+        #expect(own.item(ProfileNavigationBarComposer.editItemID)?.style == .prominent, "✎ is not filled")
         screen.selectTab(at: own.history)
-        screen.debugSetTrayScrolledAway(true)
-        #expect(own.bar == ["Select", "Balance"], "History, tray away: \(own.bar)")
+        screen.debugSetPastThreshold(true)
+        #expect(own.bar == ["Select"], "History, past the threshold: \(own.bar)")
         screen.selectTab(at: 0)
-        screen.debugSetTrayScrolledAway(true)
-        #expect(own.bar == ["Settings", "Balance"], "left History, tray away: \(own.bar)")
+        screen.debugSetPastThreshold(true)
+        #expect(own.bar == ["Edit Profile"], "left History, past the threshold: \(own.bar)")
         screen.selectTab(at: own.history)
-        screen.debugSetTrayScrolledAway(true)
-        #expect(own.bar == ["Select", "Balance"], "back on History, tray away: \(own.bar)")
+        screen.debugSetPastThreshold(true)
+        #expect(own.bar == ["Select"], "back on History, past the threshold: \(own.bar)")
     }
 
     /// Select stays disabled while History is empty (#2307, as #2188).
@@ -605,23 +607,22 @@ struct ProfileHistoryDaysTests {
         let own = try await ownProfile(defaults: defaults)
         let screen = own.screen
         screen.selectTab(at: own.history)
-        screen.debugSetTrayScrolledAway(true)
+        screen.debugSetPastThreshold(true)
         #expect(own.item("profile.history.select")?.isEnabled == true)
 
-        // The store emptied under the page: Select stays, disabled, and the
-        // balance where it is.
+        // The store emptied under the page: Select stays, disabled.
         for id in ["a", "b", "c"] { own.store.remove(id) }
         screen.debugRebuildNavigationState()
-        #expect(own.bar == ["Select", "Balance"], "\(own.bar)")
+        #expect(own.bar == ["Select"], "\(own.bar)")
         #expect(own.item("profile.history.select")?.isEnabled == false)
         screen.setSelectingHistory(true)
         #expect(!screen.isSelectingHistory, "selected with nothing to select")
     }
 
     /// History's select mode (the owner, 2026-11-08): selecting, Done in
-    /// the gear's place (#2307), and the foot's "Remove from History (n)"
-    /// takes the selected rows out and ends the mode. Off History, the
-    /// gear, and no select mode.
+    /// ✎'s place (#2307), and "Remove from History (n)" in the selector's
+    /// place in the bar, after the bell (#2475), takes the selected rows out
+    /// and ends the mode. Off History, ✎, and no select mode.
     @Test func historysSelectModeRemovesTheSelectedRows() async throws {
         let name = "history-select-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: name))
@@ -629,11 +630,12 @@ struct ProfileHistoryDaysTests {
         let own = try await ownProfile(defaults: defaults)
         let screen = own.screen
         screen.selectTab(at: own.history)
-        screen.debugSetTrayScrolledAway(true)
+        screen.debugSetPastThreshold(true)
 
         screen.setSelectingHistory(true)
         #expect(screen.isSelectingHistory)
-        #expect(own.bar == ["Done", "Balance"], "\(own.bar)")
+        #expect(own.bar == ["Done"], "\(own.bar)")
+        #expect(screen.debugLeadingIDs.last == "profile.history.remove", "Remove is not in the selector's place")
         #expect(!screen.debugAllowsPaging, "selecting still pages to the other tabs")
         #expect(screen.debugHistoryPage?.isSelectingRows == true)
         #expect(screen.debugHistoryRemoveTitle == "Remove from History")
@@ -643,18 +645,20 @@ struct ProfileHistoryDaysTests {
         screen.debugHistoryPage?.onRowSelectionChanged?([PostID("a"), PostID("c")])
         #expect(screen.debugHistoryRemoveTitle == "Remove from History (2)")
         #expect(screen.debugHistoryRemoveEnabled)
+        #expect(screen.debugBarItem("profile.history.remove")?.customView?.accessibilityLabel == "Remove 2 from History")
         screen.debugTapHistoryRemove()
         #expect(own.store.postIDs == ["b"])
         #expect(!screen.isSelectingHistory)
         #expect(screen.debugHistoryPage?.isSelectingRows == false)
-        #expect(own.bar == ["Select", "Balance"], "\(own.bar)")
+        #expect(own.bar == ["Select"], "\(own.bar)")
+        #expect(!screen.debugLeadingIDs.contains("profile.history.remove"), "Remove outlived the mode")
         #expect(screen.debugAllowsPaging)
 
-        // Off History: the gear and the balance, and no select mode.
+        // Off History: ✎, and no select mode.
         screen.setSelectingHistory(true)
         screen.selectTab(at: 0)
         #expect(!screen.isSelectingHistory)
-        #expect(own.bar == ["Settings", "Balance"], "\(own.bar)")
+        #expect(own.bar == ["Edit Profile"], "\(own.bar)")
     }
 
     /// History holds still while the viewer is on it (the owner,

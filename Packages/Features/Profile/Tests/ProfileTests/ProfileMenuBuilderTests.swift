@@ -71,6 +71,21 @@ struct ProfileMenuBuilderTests {
         #expect(groups(menu) == [["Share", "Copy Link"]])
     }
 
+    /// The own profile's ⋯ holds its QR code (#2475 §4), beside Share and
+    /// Copy Link; its row runs the QR handler.
+    @Test func yourOwnProfileOffersItsQRCode() throws {
+        var state = state(canModerate: false)
+        state.showsQRCode = true
+        var fired: [String] = []
+        var handlers = Taps().handlers
+        handlers.qrCode = { fired.append("qr") }
+        let menu = ProfileMenuBuilder.moreMenuElements(state, handlers: handlers)
+        #expect(groups(menu) == [["Share", "Copy Link", "QR Code"]])
+        let qr = try #require(action("QR Code", in: menu))
+        qr.performWithSender(nil, target: nil)
+        #expect(fired == ["qr"])
+    }
+
     @Test func aProfileNotLoadedYetHasAnEmptyMenu() {
         let menu = ProfileMenuBuilder.moreMenuElements(
             state(canShare: false, canModerate: false), handlers: Taps().handlers

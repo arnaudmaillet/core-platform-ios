@@ -4,22 +4,21 @@ import PostGrid
 import UIKit
 
 /// What History's select mode asks of its screen (#2522): whose profile it
-/// is and the tab on screen, the tray's place, the pager, the foot's
-/// accessory and the bar it recomposes.
+/// is and the tab on screen, the threshold, the pager and the bar it
+/// recomposes.
 @MainActor
 protocol ProfileHistorySelectionHost: UIViewController {
-    var dayLeads: Bool { get }
+    var isAccountRoot: Bool { get }
     var viewModel: ProfileViewModel { get }
     var shownTab: ProfileTab? { get }
-    var isTrayScrolledAway: Bool { get }
+    var isPastThreshold: Bool { get }
     var galleryPager: ProfileGalleryPagerView { get }
-    var selectorAccessory: SelectorAccessory? { get }
     func applyNavigationState(animated: Bool)
 }
 
 /// History's select mode, out of `ProfileViewController` (#2522): the rows'
-/// selection, Select and Done in the gear's place, and "Remove from History
-/// (n)" at the foot.
+/// selection, Select and Done in ✎'s place, and "Remove from History (n)"
+/// in the selector's place in the bar (#2475).
 ///
 /// ⚠️ SELECT AND DONE ARE KEPT INSTANCES (R3): the bar morphs one into the
 /// other by reference, and Select's enabling changes in place.
@@ -31,38 +30,58 @@ final class ProfileHistorySelection {
         self.host = host
     }
 
-    /// History's rows wear their selection circles; the bar says Done and the
-    /// foot of the screen "Remove from History (n)" in the tabs' place.
+    /// History's rows wear their selection circles; the bar says Done, and
+    /// "Remove from History (n)" in the selector's place.
     private(set) var isSelectingHistory = false
     private var historySelection: [PostID] = []
 
-    /// The own profile, on its History page, in the gear's place (#2307, the
-    /// owner 2026-11-11):
+    /// The own profile, on its History page, in ✎'s place (#2307, #2475 §4):
     ///
-    /// | History                    | the corner |
-    /// |----------------------------|------------|
-    /// | tray in sight              | the gear (nil here) |
-    /// | tray scrolled away         | Select (disabled with no history) |
-    /// | selecting, wherever scrolled | Done |
+    /// | History                       | the corner          |
+    /// |-------------------------------|---------------------|
+    /// | at rest                       | ✎ (nil here)        |
+    /// | past the threshold            | Select (disabled with no history) |
+    /// | selecting, wherever scrolled  | Done                |
     ///
-    /// No Select at rest: it comes in once the header's tray has gone under
-    /// the bar, as someone else's Follow does (#2248). Done holds while
-    /// selecting, even back at the top — without it there would be no way
-    /// out; after it, the scroll's rule again. The word, not a pencil: iOS's
-    /// word for the mode (Photos, Files, Mail), beside the header's Edit
-    /// profile.
+    /// No Select at rest: it comes in past the threshold, as the selector
+    /// does. Done holds while selecting, even back at the top — without it
+    /// there would be no way out; after it, the scroll's rule again. The
+    /// word: iOS's word for the mode (Photos, Files, Mail).
     var historySelectBarItem: UIBarButtonItem? {
-        guard host.dayLeads, !host.viewModel.namesNoOne, host.shownTab == .history else { return nil }
+        guard host.isAccountRoot, !host.viewModel.namesNoOne, host.shownTab == .history else { return nil }
         if isSelectingHistory { return historyDoneItem }
-        guard host.isTrayScrolledAway else { return nil }
+        guard host.isPastThreshold else { return nil }
         historySelectItem.isEnabled = host.viewModel.hasHistory
         return historySelectItem
     }
 
-    /// History's Select or Done, if the bar wears one now.
-    var shownHistoryBarItem: UIBarButtonItem? {
-        host.ownTrailingBarItems.first { $0 === historySelectItem || $0 === historyDoneItem }
+    /// "Remove from History (n)", while selecting: in the selector's place
+    /// in the bar, after the bell (#2475 — the selector's band at the foot,
+    /// which wore it until then, went with the tab bar's accessory), in red.
+    ///
+    /// ⚠️ A NEW ITEM WHEN ITS WORD CHANGES, under the same identifier: a bar
+    /// freezes an item's width when the item is made, and the count changes
+    /// the word's width. The bar morphs one into the other (R3).
+    var historyRemoveBarItem: UIBarButtonItem? {
+        guard isSelectingHistory else { return nil }
+        let title = historyRemoveTitle
+        if let kept = historyRemoveItem, kept.title == title {
+            kept.label.isEnabled = !historySelection.isEmpty
+            return kept.item
+        }
+        let made = BarItems.labeled(
+            id: Self.historyRemoveItemID, title: title, image: nil, ink: .systemRed, textStyle: .headline
+        ) { [weak self] in self?.removeSelectedHistory() }
+        made.label.isEnabled = !historySelection.isEmpty
+        made.label.accessibilityLabel = historyRemoveAccessibilityLabel
+        historyRemoveItem = (made.item, made.label, title)
+        return made.item
     }
+
+    static let historyRemoveItemID = "profile.history.remove"
+
+    /// The Remove item, its view and the word it was made with.
+    private var historyRemoveItem: (item: UIBarButtonItem, label: StretchedBarLabel, title: String)?
 
     private lazy var historySelectItem = BarItems.title(id: "profile.history.select", title: "Select") { [weak self] in
         self?.setSelectingHistory(true)
@@ -72,23 +91,8 @@ final class ProfileHistorySelection {
         [weak self] in self?.setSelectingHistory(false)
     }
 
-    /// The select mode's one action, in the selector's place: "Remove from
-    /// History (n)", in red, the accessory's own capsule around it.
-    private lazy var historyRemoveButton: UIButton = {
-        var configuration = UIButton.Configuration.plain()
-        configuration.baseForegroundColor = .systemRed
-        configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
-            var attributes = attributes
-            attributes.font = UIFont.scaledFont(forTextStyle: .headline, weight: .semibold)
-            return attributes
-        }
-        let button = UIButton(configuration: configuration)
-        button.addAction(UIAction { [weak self] _ in self?.removeSelectedHistory() }, for: .primaryActionTriggered)
-        return button
-    }()
-
     /// Into, or out of, History's select mode. `restoresFoot` false: the
-    /// screen is leaving, and its own disappearance takes the band down.
+    /// screen is leaving (the bar recomposes at rest).
     func setSelectingHistory(_ selecting: Bool, restoresFoot: Bool = true) {
         guard selecting != isSelectingHistory else { return }
         guard !selecting || (host.shownTab == .history && host.viewModel.hasHistory) else { return }
@@ -99,9 +103,8 @@ final class ProfileHistorySelection {
         page?.onRowSelectionChanged = { [weak self] ids in self?.historySelectionChanged(ids) }
         page?.setSelectingRows(selecting)
         historySelection = page?.selectedRowPostIDs ?? []
-        applyHistoryRemoveTitle()
-        swapFootForHistoryRemove(selecting, restoresFoot: restoresFoot)
-        host.applyNavigationState(animated: host.view.window != nil)
+        if !selecting { historyRemoveItem = nil }
+        host.applyNavigationState(animated: host.view.window != nil && restoresFoot)
     }
 
     /// History changed: Select is offered while there is something to
@@ -113,15 +116,18 @@ final class ProfileHistorySelection {
 
     private func historySelectionChanged(_ ids: [PostID]) {
         historySelection = ids
-        applyHistoryRemoveTitle()
+        // The count is in the word: the bar takes the new item.
+        host.applyNavigationState(animated: host.view.window != nil)
     }
 
-    private func applyHistoryRemoveTitle() {
+    private var historyRemoveTitle: String {
         let count = historySelection.count
-        historyRemoveButton.configuration?.title = count == 0 ? "Remove from History" : "Remove from History (\(count))"
-        historyRemoveButton.isEnabled = count > 0
-        historyRemoveButton.accessibilityLabel = count == 0
-            ? "Remove from History" : "Remove \(count) from History"
+        return count == 0 ? "Remove from History" : "Remove from History (\(count))"
+    }
+
+    private var historyRemoveAccessibilityLabel: String {
+        let count = historySelection.count
+        return count == 0 ? "Remove from History" : "Remove \(count) from History"
     }
 
     /// The selected rows leave the history, with the list's own animation;
@@ -133,19 +139,9 @@ final class ProfileHistorySelection {
         setSelectingHistory(false)
     }
 
-    /// The foot of the screen: the selector's own accessory wears "Remove
-    /// from History (n)" in the strip's place while selecting — the same
-    /// capsule, its content replaced (the owner, 2026-11-08) — and the strip
-    /// again after. `restoresFoot` is kept for a screen leaving, whose band
-    /// its own disappearance takes down with the stand-in in it.
-    private func swapFootForHistoryRemove(_ selecting: Bool, restoresFoot: Bool) {
-        let animated = host.view.window != nil && restoresFoot
-        host.selectorAccessory?.showStandIn(selecting ? historyRemoveButton : nil, animated: animated)
-    }
-
     #if DEBUG
-    var debugHistoryRemoveTitle: String? { historyRemoveButton.configuration?.title }
-    var debugHistoryRemoveEnabled: Bool { historyRemoveButton.isEnabled }
+    var debugHistoryRemoveTitle: String? { isSelectingHistory ? historyRemoveTitle : nil }
+    var debugHistoryRemoveEnabled: Bool { isSelectingHistory && !historySelection.isEmpty }
     func debugTapHistoryRemove() { removeSelectedHistory() }
     #endif
 }

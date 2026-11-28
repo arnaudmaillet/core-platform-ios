@@ -7,26 +7,18 @@ import UIKit
 @testable import Profile
 @testable import ProfileData
 
-/// **The header's injected trailing item — the wallet balance, from the shell.**
-///
-/// The same number stands in the Explore header and on the post screen, so this
-/// screen does not learn what a wallet is: the shell builds one item and hands
-/// it over. What this screen promises is that the item stays in its trailing
-/// run — and that promise is worth pinning here, because this run is REBUILT.
-///
-/// `applyNavigationState` composes the bar's items from scratch every time
-/// the follow state, the switcher or the identity moves, and it is guarded by
-/// "say nothing unless it changed" — a guard that exists because handing UIKit
-/// the same set mid-transition tears the capsule down. An item that arrives
-/// from outside has to pass through both.
+/// **The shell's items on the profile's bar (#2475).** The bell leads the
+/// own profile's bar; a balance the shell hands in is never shown — no
+/// profile, own or someone else's, wears the wallet's badge any more
+/// (revising #2336): the wallet is Settings' (Wallet and Purchases).
 @MainActor
 struct ProfileHeaderAccessoryTests {
     private struct SilentFetcher: ImageFetching {
         func fetchImageData(for url: URL) async throws -> Data { Data() }
     }
 
-    /// The OWN profile, which is the only one the shell puts a balance on: it
-    /// is built with an `onLogout`, which is also what gives it the gear.
+    /// The OWN profile, built with an `onLogout`, which is what gives it the
+    /// gear and the bell.
     private func ownProfile() -> ProfileViewController {
         ProfileViewController(
             viewModel: ProfileViewModel(repository: StubAccessoryProfiles()),
@@ -43,75 +35,28 @@ struct ProfileHeaderAccessoryTests {
         return item
     }
 
-    /// ⚠️ THE BALANCE STANDS INBOARD, and the gear keeps the corner.
-    ///
-    /// `rightBarButtonItems[0]` is nearest the screen edge, so appending puts
-    /// the balance furthest from it — the same arrangement as the Explore
-    /// header, where the coin sits inboard of the bell.
-    @Test func theBalanceStandsInboardOfTheScreensOwnItems() throws {
+    /// ⚠️ NO BALANCE ON A PROFILE (#2475): handed one, the bar shows none —
+    /// before a rebuild and after it.
+    @Test func aBalanceHandedInIsNeverShown() throws {
         let screen = ownProfile()
         screen.loadViewIfNeeded()
-        let badge = accessory()
+        let before = screen.navigationItem.rightBarButtonItems ?? []
 
-        screen.setTrailingAccessoryItem(badge)
-
-        let items = try #require(screen.navigationItem.rightBarButtonItems)
-        #expect(items.count > 1, "the screen's own trailing items went missing")
-        #expect(items.last === badge, "the balance took the corner")
-    }
-
-    /// ⚠️ AND IT SURVIVES A REBUILD.
-    ///
-    /// The run is recomposed whenever the screen's state moves. Nothing about
-    /// that state knows about an injected item, so the recomposition is exactly
-    /// where one gets dropped.
-    @Test func theBalanceSurvivesARebuildOfTheTrailingRun() throws {
-        let screen = ownProfile()
-        screen.loadViewIfNeeded()
-        let badge = accessory()
-        screen.setTrailingAccessoryItem(badge)
+        screen.setTrailingAccessoryItem(accessory())
+        let items = screen.navigationItem.rightBarButtonItems ?? []
+        #expect(!items.contains { $0.accessibilityLabel == "Balance" }, "the balance came into the bar")
+        #expect(items.elementsEqual(before, by: ===), "a balance handed in moved the bar")
 
         screen.debugRebuildNavigationState()
-
-        let items = try #require(screen.navigationItem.rightBarButtonItems)
-        #expect(items.contains { $0 === badge }, "a rebuild dropped the injected item")
+        #expect(!(screen.navigationItem.rightBarButtonItems ?? []).contains { $0.accessibilityLabel == "Balance" })
     }
 
-    /// Replacing swaps rather than accumulates — the badge hands over a FRESH
-    /// item every time its count changes width, because a bar measures a custom
-    /// view once, at install.
-    @Test func replacingTheItemLeavesOneOfIt() throws {
-        let screen = ownProfile()
-        screen.loadViewIfNeeded()
+    // MARK: - The own profile's bar (#2475 §4)
 
-        screen.setTrailingAccessoryItem(accessory())
-        let before = try #require(screen.navigationItem.rightBarButtonItems).count
-        let second = accessory()
-        screen.setTrailingAccessoryItem(second)
-
-        let items = try #require(screen.navigationItem.rightBarButtonItems)
-        #expect(items.count == before)
-        #expect(items.last === second)
-    }
-
-    /// And clearing it leaves the screen exactly as it was.
-    @Test func clearingItRestoresTheRun() throws {
-        let screen = ownProfile()
-        screen.loadViewIfNeeded()
-        let before = try #require(screen.navigationItem.rightBarButtonItems).count
-
-        screen.setTrailingAccessoryItem(accessory())
-        screen.setTrailingAccessoryItem(nil)
-
-        #expect(screen.navigationItem.rightBarButtonItems?.count == before)
-    }
-
-    // MARK: - The own profile's pair
-
-    /// ⚠️ THE OWN PROFILE'S BAR: the gear in the corner, the balance inboard
-    /// of it — no switcher any more (the owner, 2026-11-08): its name wears
-    /// a chevron that opens the switcher.
-    @Test func theOwnProfileCarriesSettingsThenTheBalance() throws {
+    /// ⚠️ THE OWN PROFILE'S BAR AT REST: `[✎][⋯ ⚙]` — the gear in the corner,
+    /// ⋯ beside it in the same bubble, ✎ in its own; no switcher (its name
+    /// wears the chevron), no title.
+    @Test func theOwnProfileCarriesEditThenMoreAndSettings() throws {
         let screen = ProfileViewController(
             viewModel: ProfileViewModel(repository: StubAccessoryProfiles()),
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
@@ -123,18 +68,54 @@ struct ProfileHeaderAccessoryTests {
             trayPlacement: .aboveBottomSafeArea
         )
         screen.loadViewIfNeeded()
-        let badge = accessory()
-        badge.sharesBackground = false
-
-        screen.setTrailingAccessoryItem(badge)
 
         let items = try #require(screen.navigationItem.rightBarButtonItems)
-        #expect(items.map(\.accessibilityLabel) == ["Settings", "Balance"])
-        // The bar contract (#1679, R2): the viewer's own items by function.
-        #expect(items[0].identifier == "profile.settings")
+        #expect(screen.debugTrailingIDs == ["profile.settings", "profile.more", "profile.edit"])
+        // ⋯ and the gear share a bubble; a space keeps ✎ in its own.
+        #expect(items.count == 4 && items[2].customView == nil && items[2].image == nil, "no space before ✎")
+        #expect(items[3].style == .plain, "✎ is filled at rest")
+        #expect(items[1].menu != nil, "⋯ opens no menu")
         #expect(!items.contains { $0.identifier == "profile.switcher" })
+        #expect(screen.navigationItem.title == nil, "the own profile is titled")
         // The switcher is the name's.
         #expect(screen.headerView.debugShowsTitleChevron)
+    }
+
+    /// Past the threshold: `[✎]`, filled in the primary — the SAME item,
+    /// its style changed in place (#2331) — ⋯ and the gear gone; and back.
+    @Test func pastTheThresholdEditIsFilledAndAlone() throws {
+        let screen = ownProfile()
+        screen.loadViewIfNeeded()
+        let edit = try #require(screen.debugBarItem(ProfileNavigationBarComposer.editItemID))
+
+        screen.debugSetPastThreshold(true)
+        #expect(screen.debugTrailingIDs == ["profile.edit"])
+        #expect(screen.debugBarItem(ProfileNavigationBarComposer.editItemID) === edit, "✎ was minted anew")
+        #expect(edit.style == .prominent, "✎ is not filled past the threshold")
+
+        screen.debugSetPastThreshold(false)
+        #expect(screen.debugTrailingIDs == ["profile.settings", "profile.more", "profile.edit"])
+        #expect(screen.debugBarItem(ProfileNavigationBarComposer.editItemID) === edit)
+        #expect(edit.style == .plain)
+    }
+
+    /// QR code is a row of the own ⋯ menu (#2475 §4): the header's QR
+    /// bubble went with its action row.
+    @Test func theOwnMoreMenuHoldsTheQRCode() async throws {
+        let viewModel = ProfileViewModel(repository: NamedAccessoryProfiles())
+        let screen = ProfileViewController(
+            viewModel: viewModel,
+            imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
+            makeGridPage: TestGridPages.factory(), presence: SectionPresenceStore(scope: StorageScope()),
+            onLogout: {},
+            trayPlacement: .aboveBottomSafeArea
+        )
+        screen.loadViewIfNeeded()
+        for _ in 0..<400 where viewModel.shareCard == nil { try await Task.sleep(for: .milliseconds(5)) }
+        try #require(viewModel.shareCard != nil, "guard: the profile has a share card")
+        let rows = screen.debugMoreMenuElements().flatMap { ($0 as? UIMenu)?.children ?? [$0] }.map(\.title)
+        #expect(rows.contains("QR Code"), "no QR Code in the own ⋯: \(rows)")
+        #expect(rows.contains("Share"))
     }
 
     /// Someone else's profile, or a pushed one: the name is text alone.
@@ -149,9 +130,9 @@ struct ProfileHeaderAccessoryTests {
         #expect(!screen.headerView.debugShowsTitleChevron)
     }
 
-    /// A pushed profile — built without `onLogout` — has neither: its trailing
-    /// run is whatever the shell hands in, the balance alone.
-    @Test func aPushedProfileCarriesOnlyTheBalance() throws {
+    /// A pushed own profile — built without `onLogout` — has no gear: its
+    /// bar is `[‹] … [✎][⋯]`, and no balance.
+    @Test func aPushedOwnProfileCarriesEditAndMoreWithoutTheGear() throws {
         let screen = ProfileViewController(
             viewModel: ProfileViewModel(repository: StubAccessoryProfiles()),
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
@@ -159,13 +140,8 @@ struct ProfileHeaderAccessoryTests {
             onLogout: nil
         )
         screen.loadViewIfNeeded()
-        let badge = accessory()
-
-        screen.setTrailingAccessoryItem(badge)
-
-        let items = try #require(screen.navigationItem.rightBarButtonItems)
-        #expect(items.count == 1)
-        #expect(items.first === badge)
+        screen.setTrailingAccessoryItem(accessory())
+        #expect(screen.debugTrailingIDs == ["profile.more", "profile.edit"])
     }
 
     // MARK: - The leading item (the shell's bell)
@@ -184,7 +160,7 @@ struct ProfileHeaderAccessoryTests {
         #expect(items.first === bell)
     }
 
-    /// And, like the balance, it survives a rebuild of the bar.
+    /// And it survives a rebuild of the bar.
     @Test func theBellSurvivesARebuild() throws {
         let screen = ownProfile()
         let bell = accessory()
@@ -221,6 +197,24 @@ private struct StubAccessoryProfiles: ProfileProviding {
         displayName: String, bio: String, website: String, links: [ProfileLink]
     ) async throws -> UserProfile { throw CancellationError() }
     func changeHandle(_ newHandle: String) async throws -> UserProfile { throw CancellationError() }
+}
+
+/// The viewer's own profile, loaded: what a share card needs.
+private struct NamedAccessoryProfiles: ProfileProviding {
+    private static let me = UserProfile(
+        id: ProfileID("prof-me"), handle: "me", displayName: "Me", bio: "", avatarURL: nil, websiteURL: nil,
+        isVerified: false, followerCount: .exact(1), followingCount: .exact(1), reactionCount: .exact(1)
+    )
+    func currentUserProfile() async throws -> UserProfile { Self.me }
+    func profile(id: ProfileID) async throws -> UserProfile { Self.me }
+    func relationship(for profileID: ProfileID) async throws -> ProfileRelationship { .me }
+    func setFollowing(_ following: Bool, for profileID: ProfileID) async throws {}
+    func setBlocked(_ blocked: Bool, for profileID: ProfileID) async throws {}
+    func blockAccount(behind profileID: ProfileID) async throws -> [ProfileID] { [] }
+    func updateCurrentUserProfile(
+        displayName: String, bio: String, website: String, links: [ProfileLink]
+    ) async throws -> UserProfile { Self.me }
+    func changeHandle(_ newHandle: String) async throws -> UserProfile { Self.me }
 }
 
 /// No account behind it — the switcher item only has to exist.
