@@ -137,7 +137,9 @@ struct BarItemsTests {
         #expect(!(short.item.customView is UIControl), "a control in the bar item")
         let width = short.label.intrinsicContentSize.width
         #expect(width > 44 && width < 120, "Select is \(width)pt")
-        #expect(BarSelectorBudget.width(of: short.item) == width, "the budget reads another width than drawn")
+        // The bar's glass runs 4pt past the view on each side (probed).
+        #expect(BarSelectorBudget.width(of: short.item) == width + 2 * SelectorCapsuleMetrics.platterOverhang,
+                "the budget reads another width than drawn")
 
         let long = BarItems.word(id: "test.select", title: "Sélectionner plusieurs éléments", maximumWidth: 120) {}
         #expect(long.label.intrinsicContentSize.width == 120, "the cap did not hold")

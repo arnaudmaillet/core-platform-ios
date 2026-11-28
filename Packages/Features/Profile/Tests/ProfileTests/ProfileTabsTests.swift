@@ -596,7 +596,7 @@ struct ProfileHistoryDaysTests {
         // (the owner, 2026-11-28).
         let select = try #require(own.item("profile.pile.select"))
         #expect(select.style == .prominent && select.customView is StretchedBarLabel)
-        #expect(BarSelectorBudget.width(of: select) <= 120)
+        #expect(BarSelectorBudget.width(of: select) <= 120 + 2 * SelectorHosting.platter.overhang)
         screen.selectTab(at: 0)
         screen.debugSetPastThreshold(true)
         #expect(own.bar.isEmpty, "left History, past the threshold: \(own.bar)")

@@ -461,7 +461,15 @@ public struct BarSelectorBudget: Equatable, Sendable {
             return max(platter, ceil(image.size.width) + imageInset * 2)
         }
         let intrinsic = custom.intrinsicContentSize.width
-        return intrinsic > 0 ? intrinsic : max(platter, custom.bounds.width)
+        let view = intrinsic > 0 ? intrinsic : max(platter, custom.bounds.width)
+        // ⚠️ THE BAR'S GLASS RUNS PAST A CUSTOM VIEW (#2475, probed on the
+        // iOS 27.2 simulator, 2026-11-28): Select's 72pt view sat in an 80pt
+        // platter, 4pt a side, as the selector's own does
+        // (`SelectorHosting.platter`). Charged the view alone, the strip was
+        // 8pt too wide on a tab's first show and the bar swept Select into a
+        // `•••` until the settle loop trimmed it. A view that draws its own
+        // capsule has no platter around it.
+        return item.hidesSharedBackground ? view : view + 2 * SelectorCapsuleMetrics.platterOverhang
     }
 
     /// The room a bubble keeps each side of its glyph.
