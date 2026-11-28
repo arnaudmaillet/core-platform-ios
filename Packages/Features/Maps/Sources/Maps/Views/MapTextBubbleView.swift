@@ -8,9 +8,9 @@ import VoiceKitUI
 /// The text bubble (#2203, the owner, 2026-11-09): the text marker nearest the
 /// map's centre opens a bubble round it — display first, the words where the
 /// post is. It unfolds out of the marker, both ways, the marker sliding to
-/// its LEFT end and the words appearing on its right (`MapFeaturedHalo`); it
-/// moves with the map, as the marker does, and the whole of it opens the
-/// post.
+/// its TOP-LEFT corner and the words appearing on its right
+/// (`MapFeaturedHalo`); it moves with the map, as the marker does, and the
+/// whole of it opens the post.
 ///
 /// ```
 ///   ╭──────────────────────────────────────╮
@@ -33,9 +33,17 @@ import VoiceKitUI
 ///   too: the shared embed card, full size, under the author's words —
 ///   Join, Request to Join, Open from the map. Only its action button takes
 ///   a touch; the rest of the bubble still opens the post.
-/// - **Liquid Glass**, the system's own, its round end concentric with the
-///   round marker. No shadow: a shadow renders a glass or a blur offscreen,
-///   cut off from the map it samples (a blur came out flat).
+/// - **Liquid Glass**, the system's own. No shadow: a shadow renders a glass
+///   or a blur offscreen, cut off from the map it samples (a blur came out
+///   flat).
+/// - **A rounded rectangle, not a capsule (#2330)**: a bubble shows content,
+///   as a voice panel does (#2329). The marker sits at the TOP-LEFT,
+///   `markerPadding` from the top and the leading edge, whatever the height;
+///   the four corners take one radius, `roundedCorner` (#2347: a top-left
+///   concentric with the marker read as a defect on the device). Folded, it
+///   is still the circle round the marker. The showcase takes the same
+///   corners. The only bubble, unflagged: the owner's decision, 2026-11-28
+///   (the capsule kept that morning, reversed the same day).
 final class MapTextBubbleView: UIView {
     /// What the bubble says.
     struct Content: Equatable {
@@ -81,6 +89,13 @@ final class MapTextBubbleView: UIView {
     static let markerGap: CGFloat = 8
     /// Between the author's line and the words.
     static let lineGap: CGFloat = 1
+
+    /// The bubble's four corners, one radius (#2347): clear of the
+    /// words' corner, `insets` inside (an 18 pt curve passes about 5 pt from
+    /// the edges at 45°). The marker, `markerPadding` from the top and the
+    /// leading edge, stands about 8–9 pt from the top-left curve along its
+    /// diagonal.
+    static let roundedCorner: CGFloat = 18
 
     /// The grown marker's diameter, set by the halo.
     var markerSide: CGFloat = 44 {
@@ -252,15 +267,17 @@ final class MapTextBubbleView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         glass.frame = bounds
-        // Round about the marker: its end concentric with the disc, a circle
-        // while the bubble is still folded.
-        let radius = min(markerSide / 2 + Self.markerPadding, bounds.height / 2)
-        glass.cornerConfiguration = .corners(radius: .fixed(radius))
+        applyCorners()
         // The column keeps its unfolded size, held to the marker's right: an
-        // unfolding bubble shows it, it never reflows it.
+        // unfolding bubble shows it, it never reflows it. It is held to the
+        // top, level with the marker (#2330) — centred on the marker when
+        // shorter than it, `insets.top` down otherwise — so the author's line
+        // sits beside the marker's upper half whatever the bubble's height,
+        // and the column does not move as the bubble grows.
         let text = columnSize
+        let top = max(Self.insets.top, Self.markerPadding + markerSide / 2 - text.height / 2)
         column.frame = CGRect(
-            x: Self.markerPadding + markerSide + Self.markerGap, y: (bounds.height - text.height) / 2,
+            x: Self.markerPadding + markerSide + Self.markerGap, y: top,
             width: text.width, height: text.height
         )
         let author = ceil(authorLabel.sizeThatFits(CGSize(width: text.width, height: .greatestFiniteMagnitude)).height)
@@ -297,9 +314,73 @@ final class MapTextBubbleView: UIView {
         return player.hitTest(local, with: event)
     }
 
-    /// Where the marker's centre stands in the bubble: its left end.
+    /// Where the marker's centre stands in the bubble: its top-left corner
+    /// (#2330), `markerPadding` from the top and the leading edge, whatever
+    /// the bubble's size.
     var markerCentre: CGPoint {
-        CGPoint(x: Self.markerPadding + markerSide / 2, y: bounds.midY)
+        let inset = Self.markerPadding + markerSide / 2
+        return CGPoint(x: inset, y: inset)
+    }
+
+    // MARK: - The corners
+
+    /// The four corners' radii.
+    struct Corners: Equatable {
+        var topLeft: CGFloat
+        var topRight: CGFloat
+        var bottomLeft: CGFloat
+        var bottomRight: CGFloat
+
+        init(topLeft: CGFloat, topRight: CGFloat, bottomLeft: CGFloat, bottomRight: CGFloat) {
+            self.topLeft = topLeft
+            self.topRight = topRight
+            self.bottomLeft = bottomLeft
+            self.bottomRight = bottomRight
+        }
+
+        init(all radius: CGFloat) {
+            self.init(topLeft: radius, topRight: radius, bottomLeft: radius, bottomRight: radius)
+        }
+    }
+
+    /// A bubble's corners at `size`. Pure, for tests.
+    ///
+    /// The four corners at `roundedCorner`, one radius (#2330, #2347);
+    /// folded (as narrow as the marker and its padding), every corner half
+    /// the height — the circle round the marker. The unfold animates the
+    /// four together from one into the other.
+    static func corners(for size: CGSize, markerSide: CGFloat) -> Corners {
+        let half = size.height / 2
+        let isFolded = size.width <= markerSide + 2 * markerPadding + 0.5
+        return Corners(all: isFolded ? half : min(roundedCorner, half))
+    }
+
+    /// The glass's corners for its bounds. Set inside the halo's unfold, it
+    /// animates with the size: one motion.
+    ///
+    /// ⚠️ THE RADII NEVER OVERSHOOT (#2330: no frame squarer than
+    /// the end). The unfold's spring bounces; a radius riding it would dip
+    /// under 18 pt and come back. Inside an animation they take a spring of
+    /// the same duration with no bounce, so they land without passing their
+    /// end value — the four together, on one curve (#2347: no frame with one
+    /// corner rounder than the others).
+    private func applyCorners() {
+        let radii = Self.corners(for: bounds.size, markerSide: markerSide)
+        let configuration = UICornerConfiguration.corners(
+            topLeftRadius: .fixed(radii.topLeft), topRightRadius: .fixed(radii.topRight),
+            bottomLeftRadius: .fixed(radii.bottomLeft), bottomRightRadius: .fixed(radii.bottomRight)
+        )
+        let duration = UIView.inheritedAnimationDuration
+        guard duration > 0 else {
+            glass.cornerConfiguration = configuration
+            return
+        }
+        UIView.animate(
+            springDuration: duration, bounce: 0,
+            options: [.allowUserInteraction, .beginFromCurrentState, .overrideInheritedDuration, .overrideInheritedCurve]
+        ) {
+            self.glass.cornerConfiguration = configuration
+        }
     }
 
     /// The glass on or off — set inside an animation, the system's own
@@ -318,7 +399,7 @@ final class MapTextBubbleView: UIView {
     var debugHasGlass: Bool { glass.effect != nil }
     /// The words' column, in the bubble.
     var debugColumnFrame: CGRect { column.frame }
-    /// The glass, whose corners are the bubble's.
+    /// The glass, whose corners are the bubble's (#2330).
     var debugGlass: UIView { glass }
     /// The voice shown, nil for none (#2208).
     var debugVoice: VoicePostCaptionView? { voiceCaption.isHidden ? nil : voiceCaption }

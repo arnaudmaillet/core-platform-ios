@@ -52,8 +52,8 @@ final class MapFeaturedHalo {
     /// The bubble round the featured marker with `content`, or none.
     ///
     /// It starts as the marker's own circle, where it stands, and unfolds
-    /// both ways; the marker slides to its LEFT end — always (the owner) —
-    /// and the author and the words appear on its right as it opens. Centred
+    /// both ways; the marker slides to its top-left corner (#2330) and the
+    /// author and the words appear on its right as it opens. Centred
     /// on the marker's place, always — it may run off the screen, as the map
     /// does — and it moves with the map, as the marker does. Its glass
     /// materialises as it opens and dissolves as it folds: the system's own
@@ -88,8 +88,11 @@ final class MapFeaturedHalo {
         }
         let size = shown.bounds.size
         let centre = card.center
-        let markerX = centre.x - size.width / 2 + MapTextBubbleView.markerPadding + grown / 2
-        let resting = CGAffineTransform(translationX: markerX - card.center.x, y: 0)
+        // Where the marker rides in the bubble: its top-left corner (#2330),
+        // the bubble still centred on the marker's place.
+        let inBubble = shown.markerCentre
+        let marker = CGPoint(x: centre.x - size.width / 2 + inBubble.x, y: centre.y - size.height / 2 + inBubble.y)
+        let resting = CGAffineTransform(translationX: marker.x - card.center.x, y: marker.y - card.center.y)
             .scaledBy(x: Self.scale, y: Self.scale)
         guard isNew, moves else {
             UIView.performWithoutAnimation {

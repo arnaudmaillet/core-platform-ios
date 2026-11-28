@@ -139,7 +139,7 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerD
             bounds = CGRect(x: 0, y: 0, width: face.side, height: face.side)
         }
         // ⚠️ BOUNDS AND CENTRE, NOT `frame`: a featured card wears a
-        // transform (grown, slid to its bubble's left end), and a frame set
+        // transform (grown, slid to its bubble's top-left), and a frame set
         // under a transform erases it — the marker jumped back to the middle
         // of its bubble when a fast zoom changed the group's face.
         card.bounds = CGRect(origin: .zero, size: bounds.size)
