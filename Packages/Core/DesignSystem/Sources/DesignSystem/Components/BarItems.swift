@@ -147,6 +147,34 @@ public enum BarItems {
         return (item, label)
     }
 
+    /// A word at a bar's corner that must never push its neighbours out
+    /// (#2475, the owner 2026-11-28): as wide as its word, up to
+    /// `maximumWidth`, the word truncated past it — a translation longer
+    /// than the English never sweeps the bar into a `•••`. The plain view
+    /// `labeled` uses, in an item whose bubble the BAR draws (R5), so the
+    /// width a bar budget reads (`BarSelectorBudget.width(of:)`) is the one
+    /// drawn, not a stock title item's estimate. `prominent`: the bar's
+    /// `.prominent` bubble, the word white; the caller tints the item.
+    ///
+    /// The item's `title` is the word too: what UIKit's overflow menu and
+    /// VoiceOver's item list read.
+    public static func word(
+        id: String, title: String, prominent: Bool = false, maximumWidth: CGFloat,
+        height: CGFloat = bubbleHeight, action: @escaping () -> Void
+    ) -> (item: UIBarButtonItem, label: StretchedBarLabel) {
+        let label = StretchedBarLabel(title: title, ink: prominent ? .white : .label, action: action)
+        label.maximumWidth = maximumWidth
+        label.setContentHuggingPriority(.required, for: .horizontal)
+        let tall = label.heightAnchor.constraint(equalToConstant: height)
+        tall.priority = .init(999)
+        tall.isActive = true
+        let item = UIBarButtonItem(customView: label)
+        item.identifier = id
+        item.title = title
+        if prominent { item.style = .prominent }
+        return (item, label)
+    }
+
     /// A complex container (R6): a view a stock item cannot draw, under its
     /// identifier. Not for an icon (`icon`) nor a wide word (`stretched`).
     ///
@@ -417,6 +445,15 @@ public final class StretchedBarLabel: UIView {
         return fill
     }()
 
+    /// The most it is ever wide, margins included; nil for no cap. Past it
+    /// the word is truncated at its tail (`BarItems.word`).
+    public var maximumWidth: CGFloat? {
+        didSet {
+            guard maximumWidth != oldValue else { return }
+            invalidateIntrinsicContentSize()
+        }
+    }
+
     /// Off: dimmed, and a tap does nothing — as a disabled control.
     public var isEnabled = true {
         didSet {
@@ -439,6 +476,9 @@ public final class StretchedBarLabel: UIView {
         label.textColor = ink
         label.font = UIFont.scaledFont(forTextStyle: textStyle, weight: weight)
         label.adjustsFontForContentSizeCategory = true
+        // Under a `maximumWidth`, the word gives way, not the margins.
+        label.lineBreakMode = .byTruncatingTail
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         glyph.image = image
         glyph.isHidden = image == nil
         glyph.tintColor = ink
@@ -503,7 +543,8 @@ public final class StretchedBarLabel: UIView {
     /// (a `stretched` one asks, at a higher priority than it hugs, for more).
     override public var intrinsicContentSize: CGSize {
         let fitted = content.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
-        return CGSize(width: ceil(fitted.width) + 2 * Spacing.md, height: UIView.noIntrinsicMetric)
+        let width = ceil(fitted.width) + 2 * Spacing.md
+        return CGSize(width: min(width, maximumWidth ?? width), height: UIView.noIntrinsicMetric)
     }
 
     override public func traitCollectionDidChange(_ previous: UITraitCollection?) {

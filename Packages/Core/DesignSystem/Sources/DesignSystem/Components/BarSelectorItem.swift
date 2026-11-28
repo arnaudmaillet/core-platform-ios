@@ -50,8 +50,12 @@ public final class BarSelectorItem {
     public private(set) var item: UIBarButtonItem
     /// Points taken off the budget's ceiling after the bar swept the group.
     public private(set) var trim: CGFloat = 0
-    /// How much each sweep takes off.
-    public static let trimStep: CGFloat = 24
+    /// How much each sweep takes off: fine, so a trailing item a few
+    /// points short of room (Select on the profile's bar, 81pt drawn in
+    /// 80) costs the strip 8pt, not 24, and the gap after it stays close
+    /// to the gap before it (#2475). `settle` allows enough rounds for the
+    /// largest text sizes.
+    public static let trimStep: CGFloat = 8
     /// What keeps the bell and the strip two platters rather than one shared
     /// pill — one instance, so an identical group compares identical.
     private let separator = BarItems.separator()
@@ -209,9 +213,16 @@ public final class BarSelectorItem {
     /// profile's bar, where the balance read its gaps wrong and widened the
     /// strip until the bar swept it (#2475, measured on the iOS 27.2
     /// simulator; see the composer's note).
+    ///
+    /// `trailing`: the trailing group's items, when the host can say — a
+    /// custom view among them that has no window was swept, whatever
+    /// UIKit's `•••` is called (`showsOverflow` reads "More", which the
+    /// iOS 27.2 simulator's did not say: Select swept, nothing narrowed,
+    /// #2475).
     public func settle(
         in bar: UINavigationBar,
         balances: Bool = true,
+        trailing: @escaping @MainActor () -> [UIBarButtonItem] = { [] },
         budget: @escaping @MainActor () -> BarSelectorBudget,
         isLive: @escaping @MainActor () -> Bool,
         rewriteLeading: @escaping @MainActor () -> Void,
@@ -219,12 +230,13 @@ public final class BarSelectorItem {
         trace: @escaping @MainActor (String) -> Void = { _ in },
         attempt: Int = 0
     ) {
-        guard attempt < 12, isLive(), bar.window != nil, !bar.isHidden else { return }
+        guard attempt < Self.settleRounds, isLive(), bar.window != nil, !bar.isHidden else { return }
         bar.layoutIfNeeded()
         trace("check \(attempt)")
         // The trailing group swept alone (#2411): the strip is hosted, the
         // trailing group is a `•••`.
         let trailingSwept = Self.showsOverflow(in: bar)
+            || trailing().contains { $0.customView.map { $0.window == nil } ?? false }
         if isHosted, !trailingSwept {
             // Nothing swept: the same gap on both sides of the selector, as
             // the bar drew them (#2577).
@@ -240,11 +252,16 @@ public final class BarSelectorItem {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self, weak bar] in
             guard let self, let bar else { return }
             settle(
-                in: bar, balances: balances, budget: budget, isLive: isLive, rewriteLeading: rewriteLeading,
+                in: bar, balances: balances, trailing: trailing, budget: budget, isLive: isLive,
+                rewriteLeading: rewriteLeading,
                 rewriteTrailing: rewriteTrailing, trace: trace, attempt: attempt + 1
             )
         }
     }
+
+    /// The most rounds `settle` runs, 0.1 s apart: 30 trims of `trimStep`
+    /// reach 240pt, past the largest text size's miss.
+    static let settleRounds = 30
 
     /// Whether `bar` shows UIKit's overflow control — the `•••` a group it
     /// cannot fit goes into, "More" to VoiceOver (as the selector's tests

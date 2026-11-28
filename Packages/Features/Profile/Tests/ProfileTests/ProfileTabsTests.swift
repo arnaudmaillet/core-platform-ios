@@ -574,7 +574,7 @@ struct ProfileHistoryDaysTests {
     }
 
     /// Select only on History (#2307): another tab past the threshold keeps
-    /// ✎, prominent (#2475); leaving History puts it back, and coming back
+    /// ✎, quiet (the owner, 2026-11-28); leaving History puts it back, and coming back
     /// brings Select.
     @Test func selectIsHistorysOnlyPastTheThreshold() async throws {
         let name = "history-tabs-\(UUID().uuidString)"
@@ -587,10 +587,15 @@ struct ProfileHistoryDaysTests {
         // the threshold is stated again after each, as a scroll would.
         screen.debugSetPastThreshold(true)
         #expect(own.bar == ["Edit Profile"], "Posts, past the threshold: \(own.bar)")
-        #expect(own.item(ProfileNavigationBarComposer.editItemID)?.style == .prominent, "✎ is not filled")
+        #expect(own.item(ProfileNavigationBarComposer.editItemID)?.style == .plain, "✎ is filled: the primary is Select's")
         screen.selectTab(at: own.history)
         screen.debugSetPastThreshold(true)
         #expect(own.bar == ["Select"], "History, past the threshold: \(own.bar)")
+        // In the primary, a capped word the selector's budget reads as drawn
+        // (the owner, 2026-11-28).
+        let select = try #require(own.item("profile.history.select"))
+        #expect(select.style == .prominent && select.customView is StretchedBarLabel)
+        #expect(BarSelectorBudget.width(of: select) <= 120)
         screen.selectTab(at: 0)
         screen.debugSetPastThreshold(true)
         #expect(own.bar == ["Edit Profile"], "left History, past the threshold: \(own.bar)")

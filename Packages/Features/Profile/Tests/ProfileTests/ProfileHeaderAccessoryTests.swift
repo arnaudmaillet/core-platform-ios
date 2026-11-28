@@ -81,9 +81,10 @@ struct ProfileHeaderAccessoryTests {
         #expect(screen.headerView.debugShowsTitleChevron)
     }
 
-    /// Past the threshold: `[✎]`, filled in the primary — the SAME item,
-    /// its style changed in place (#2331) — ⋯ and the gear gone; and back.
-    @Test func pastTheThresholdEditIsFilledAndAlone() throws {
+    /// Past the threshold: `[✎]`, quiet (the owner, 2026-11-28: the
+    /// primary is History's Select) — the SAME item (#2331) — ⋯ and the
+    /// gear gone; and back.
+    @Test func pastTheThresholdEditIsAlone() throws {
         let screen = ownProfile()
         screen.loadViewIfNeeded()
         let edit = try #require(screen.debugBarItem(ProfileNavigationBarComposer.editItemID))
@@ -91,7 +92,7 @@ struct ProfileHeaderAccessoryTests {
         screen.debugSetPastThreshold(true)
         #expect(screen.debugTrailingIDs == ["profile.edit"])
         #expect(screen.debugBarItem(ProfileNavigationBarComposer.editItemID) === edit, "✎ was minted anew")
-        #expect(edit.style == .prominent, "✎ is not filled past the threshold")
+        #expect(edit.style == .plain, "✎ is filled past the threshold")
 
         screen.debugSetPastThreshold(false)
         #expect(screen.debugTrailingIDs == ["profile.settings", "profile.more", "profile.edit"])

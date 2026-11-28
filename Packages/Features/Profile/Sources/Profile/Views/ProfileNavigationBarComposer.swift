@@ -36,7 +36,7 @@ protocol ProfileNavigationBarComposerHost: UIViewController {
 /// ```
 ///                      at rest                  past the threshold
 /// someone else's       [‹] … [⋯]                [‹][selector] … [⋯]
-/// the own profile      [🔔] … [✎][⋯ ⚙]           [🔔][selector] … [✎]   (✎ prominent)
+/// the own profile      [🔔] … [✎][⋯ ⚙]           [🔔][selector] … [✎]
 ///   on History                                  [🔔][selector] … [Select]
 ///   selecting          [🔔][Remove (n)] … [Done][⋯ ⚙]   [🔔][Remove (n)] … [Done]
 /// ```
@@ -97,7 +97,7 @@ final class ProfileNavigationBarComposer {
     /// its back button).
     private var leadingAccessoryItem: UIBarButtonItem?
     /// Whether the header's selector slot has gone under the bar (#2475):
-    /// the selector is in the bar, ✎ prominent, the own ⋯ and gear gone.
+    /// the selector is in the bar, the own ⋯ and gear gone.
     private(set) var isPastThreshold = false
     /// What the bar was last handed: a change mid-transition after the first
     /// write waits for rest.
@@ -131,19 +131,17 @@ final class ProfileNavigationBarComposer {
         host.isAccountRoot || host.hasEditor || host.identityStubIsSelf || host.viewModel.isOwnProfile
     }
 
-    /// ✎, Edit profile: quiet at rest, filled in the primary past the
-    /// threshold — one item, its style changed in place (#2331).
-    private func editItem(prominent: Bool) -> UIBarButtonItem {
+    /// ✎, Edit profile: quiet at rest and past the threshold alike (the
+    /// owner, 2026-11-28: the primary belongs to Select and Done, History's
+    /// corner word, not to ✎).
+    private var editItem: UIBarButtonItem {
         trailingStore.item(Self.editItemID) {
-            BarItems.icon(id: Self.editItemID, image: UIImage(systemName: "pencil"), label: "Edit Profile") {
+            let item = BarItems.icon(id: Self.editItemID, image: UIImage(systemName: "pencil"), label: "Edit Profile") {
                 [weak self] in self?.host.pushEditProfile()
             }
-        } update: { item in
-            let style: UIBarButtonItem.Style = prominent ? .prominent : .plain
-            if item.style != style { item.style = style }
-            // The primary under a prominent glyph (the inbox's compose
-            // item's tint); the page's ink otherwise, over the banner.
-            item.tintColor = prominent ? Palette.prominentGlassTint : .label
+            // The page's ink, over the banner or the page.
+            item.tintColor = .label
+            return item
         }
     }
 
@@ -179,13 +177,13 @@ final class ProfileNavigationBarComposer {
     /// - someone else's: `[⋯]` — nothing on a page for no one (#1406);
     /// - the own, at rest: `[✎][⋯ ⚙]` — ⋯ and the gear in one bubble, ✎ in
     ///   its own (Done in its place while selecting History);
-    /// - the own, past the threshold: `[✎]` prominent, `[Select]` on History,
+    /// - the own, past the threshold: `[✎]`, `[Select]` in the primary on History,
     ///   `[Done]` while selecting (#2307).
     private func trailingItems() -> [UIBarButtonItem] {
         guard isOwn else { return host.viewModel.namesNoOne ? [] : [moreItem] }
         // The own profile gone (#1406): the gear alone, its only way out.
         if host.viewModel.namesNoOne { return [settingsItem].compactMap { $0 } }
-        let lead = host.historySelectBarItem ?? editItem(prominent: isPastThreshold)
+        let lead = host.historySelectBarItem ?? editItem
         guard !isPastThreshold else { return [lead] }
         let pair = [settingsItem, moreItem].compactMap { $0 }
         let leadID = lead.identifier ?? Self.editItemID
@@ -383,6 +381,9 @@ final class ProfileNavigationBarComposer {
                 // until the bar swept the group into a `•••`. The budget's
                 // equal gaps (`interGroupGap` = `leadingGap` on iOS 27) stand.
                 balances: false,
+                // Select and Done are custom views (`BarItems.word`): one
+                // with no window was swept.
+                trailing: { [weak self] in self?.host.ownTrailingBarItems ?? [] },
                 budget: { [weak self] in
                     guard let self else { return BarSelectorBudget(barWidth: 0) }
                     return selectorBudget(trailing: host.ownTrailingBarItems)

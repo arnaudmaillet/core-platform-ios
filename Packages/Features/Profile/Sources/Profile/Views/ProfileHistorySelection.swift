@@ -49,10 +49,10 @@ final class ProfileHistorySelection {
     /// word: iOS's word for the mode (Photos, Files, Mail).
     var historySelectBarItem: UIBarButtonItem? {
         guard host.isAccountRoot, !host.viewModel.namesNoOne, host.shownTab == .history else { return nil }
-        if isSelectingHistory { return historyDoneItem }
+        if isSelectingHistory { return historyDoneItem.item }
         guard host.isPastThreshold else { return nil }
-        historySelectItem.isEnabled = host.viewModel.hasHistory
-        return historySelectItem
+        setSelectEnabled(host.viewModel.hasHistory)
+        return historySelectItem.item
     }
 
     /// "Remove from History (n)", while selecting: in the selector's place
@@ -83,12 +83,38 @@ final class ProfileHistorySelection {
     /// The Remove item, its view and the word it was made with.
     private var historyRemoveItem: (item: UIBarButtonItem, label: StretchedBarLabel, title: String)?
 
-    private lazy var historySelectItem = BarItems.title(id: "profile.history.select", title: "Select") { [weak self] in
-        self?.setSelectingHistory(true)
+    /// Select and Done: the corner's word, in the primary (the owner,
+    /// 2026-11-28), as wide as the word up to `cornerWordMaximumWidth` and
+    /// truncated past it, so a longer translation never sweeps the bar into
+    /// a `•••` — and the selector's budget reads the width drawn
+    /// (`BarItems.word`), not a stock title's estimate, which swept Select
+    /// on the owner's iPhone with four pages.
+    private lazy var historySelectItem = Self.cornerWord(id: "profile.history.select", title: "Select") {
+        [weak self] in self?.setSelectingHistory(true)
     }
 
-    private lazy var historyDoneItem = BarItems.title(id: "profile.history.done", title: "Done", prominent: true) {
+    private lazy var historyDoneItem = Self.cornerWord(id: "profile.history.done", title: "Done") {
         [weak self] in self?.setSelectingHistory(false)
+    }
+
+    /// The most Select or Done is ever wide, its margins included.
+    static let cornerWordMaximumWidth: CGFloat = 120
+
+    private static func cornerWord(
+        id: String, title: String, action: @escaping () -> Void
+    ) -> (item: UIBarButtonItem, label: StretchedBarLabel) {
+        let made = BarItems.word(
+            id: id, title: title, prominent: true, maximumWidth: cornerWordMaximumWidth, action: action
+        )
+        made.item.tintColor = Palette.prominentGlassTint
+        return made
+    }
+
+    /// Select offered, or dimmed with nothing to select: the item and the
+    /// word it draws.
+    private func setSelectEnabled(_ enabled: Bool) {
+        historySelectItem.item.isEnabled = enabled
+        historySelectItem.label.isEnabled = enabled
     }
 
     /// Into, or out of, History's select mode. `restoresFoot` false: the
@@ -110,7 +136,7 @@ final class ProfileHistorySelection {
     /// History changed: Select is offered while there is something to
     /// select, and the select mode ends with the last row.
     func historyChanged() {
-        historySelectItem.isEnabled = host.viewModel.hasHistory
+        setSelectEnabled(host.viewModel.hasHistory)
         if isSelectingHistory, !host.viewModel.hasHistory { setSelectingHistory(false) }
     }
 
