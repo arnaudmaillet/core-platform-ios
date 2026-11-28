@@ -65,7 +65,13 @@ public enum FlightActivity {
 
     /// A flight took off in `window`; release the lease when it lands. No
     /// window: a lease that stills nothing.
-    public static func begin(in window: UIWindow?) -> Lease {
+    ///
+    /// `maximumHold` is the self-release: the flights themselves keep the
+    /// default. ⚠️ A TEST'S FLIGHT PASSES `.infinity` (#2590): it lasts
+    /// until the test releases it. A wait counts looks, not time, and on a
+    /// starved runner ten real seconds passed between `begin` and the art
+    /// landing — the flight had ended by itself, and the label played.
+    public static func begin(in window: UIWindow?, maximumHold: TimeInterval = FlightActivity.maximumHold) -> Lease {
         let lease = Lease(window: window)
         guard let window else { return lease }
         entries.removeAll { $0.window == nil }
@@ -78,7 +84,9 @@ public enum FlightActivity {
         if entry.count == 1 { NotificationCenter.default.post(name: didChangeNotification, object: window) }
         // STRONG, as `FlightOrientationLock`'s: the timeout must still count
         // down a lease whose owner was freed without releasing it.
-        DispatchQueue.main.asyncAfter(deadline: .now() + maximumHold) { lease.release() }
+        if maximumHold.isFinite {
+            DispatchQueue.main.asyncAfter(deadline: .now() + maximumHold) { lease.release() }
+        }
         return lease
     }
 
