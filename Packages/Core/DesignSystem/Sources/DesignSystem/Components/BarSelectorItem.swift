@@ -20,8 +20,9 @@ import UIKit
 ///   the inbox's titles wore in the bar in August.
 /// - **The same gap on both sides** (#2577, the owner 2026-11-26): bell →
 ///   selector = selector → trailing item, measured on the drawn platters
-///   (`balanceGaps(in:budget:)`), the platter running to that gap whatever
-///   its titles need (`PagedTabBar.fillsCeiling`), the row centred in it.
+///   (`balanceGaps(in:budget:)`), when the titles fill the room.
+/// - **Never wider than its titles** (the owner, 2026-11-28): a strip whose
+///   titles need less than the room hugs them, and the slack goes after it.
 ///
 /// ⚠️ **ONE ITEM FOR THE STRIP'S LIFE, AS FOR YOU'S.** A width change (a
 /// count, the title size) is told IN PLACE: the strip re-states its
@@ -78,12 +79,19 @@ public final class BarSelectorItem {
         item = BarItems.container(id: id, view: strip)
     }
 
-    /// The strip as a bar item holds it: the platter is the bar's glass, it
-    /// hugs its titles, and it runs to its ceiling (#2577).
+    /// The strip as a bar item holds it: the platter is the bar's glass and
+    /// it hugs its titles, up to its ceiling and never past it.
+    ///
+    /// ⚠️ **NOT TO THE CEILING WHEN ITS TITLES NEED LESS** (the owner,
+    /// 2026-11-28, on device: two pages drew a platter running from the
+    /// chevron to ⋯): the width is the titles' own, the room the bar leaves
+    /// is the most it may take. This revises #2577's platter that ran to
+    /// the gap whatever its titles needed; the equal gaps hold where the
+    /// titles fill the room, and a short strip leaves the slack after it.
     private static func dressForBar(_ strip: PagedTabBar) {
         strip.hosting = .platter
         strip.fillsWidth = false
-        strip.fillsCeiling = true
+        strip.fillsCeiling = false
         // The bar sizes a custom view from its intrinsic size, as the inbox's.
         strip.translatesAutoresizingMaskIntoConstraints = true
     }

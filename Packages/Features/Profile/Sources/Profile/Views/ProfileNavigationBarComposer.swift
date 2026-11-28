@@ -261,7 +261,12 @@ final class ProfileNavigationBarComposer {
         // The strip leaves the header BEFORE its item goes into the bar, and
         // the bar lets go of it BEFORE it goes back: never in two places.
         if selectorInBar { host.selector.moveIntoBar() }
-        fitSelector(trailing: trailing)
+        // ⚠️ A NEW TRAILING ITEM RE-FITS A STRIP ALREADY IN THE BAR (the
+        // owner's device, 2026-11-28): Posts → History past the threshold
+        // swaps ✎ for the wider Select, the strip states a narrower width
+        // in place, and the bar must lay out again to read it — otherwise
+        // it keeps ✎'s width and sweeps Select into a `•••`.
+        if fitSelector(trailing: trailing) { host.navigationController?.navigationBar.setNeedsLayout() }
         #if DEBUG
         debugBarWrites.append(animated && UIView.areAnimationsEnabled)
         #endif
@@ -338,9 +343,11 @@ final class ProfileNavigationBarComposer {
         item.customView == nil && item.image == nil && item.title == nil && item.menu == nil && item.primaryAction == nil
     }
 
-    private func fitSelector(trailing: [UIBarButtonItem]) {
-        guard host.selector.isInBar, let selector = host.selector.barItem else { return }
-        selector.fit(selectorBudget(trailing: trailing), titleBudget: selectorTitleBudget)
+    /// True when the width the strip states moved.
+    @discardableResult
+    private func fitSelector(trailing: [UIBarButtonItem]) -> Bool {
+        guard host.selector.isInBar, let selector = host.selector.barItem else { return false }
+        return selector.fit(selectorBudget(trailing: trailing), titleBudget: selectorTitleBudget)
     }
 
     /// Re-fits the selector in the bar to the room it has — a page that

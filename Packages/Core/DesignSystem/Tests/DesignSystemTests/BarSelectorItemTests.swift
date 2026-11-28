@@ -91,12 +91,12 @@ struct BarSelectorItemTests {
         let first = selector.item
         bar.hosting = .container
         bar.fillsWidth = true
-        bar.fillsCeiling = false
+        bar.fillsCeiling = true
         let host = UIView()
         host.addSubview(bar)
         selector.enterBar()
         #expect(bar.superview == nil, "the strip stayed in its other home")
-        #expect(bar.hosting == .platter && !bar.fillsWidth && bar.fillsCeiling)
+        #expect(bar.hosting == .platter && !bar.fillsWidth && !bar.fillsCeiling)
         #expect(selector.item !== first && selector.item.identifier == "test.selector")
         #expect(selector.item.customView === bar)
     }
