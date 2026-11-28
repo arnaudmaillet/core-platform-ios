@@ -20,12 +20,18 @@ import UIKit
 /// - **The relationship's control** is the one rule the card always read
 ///   (`ProfileRelationControl`): Follow, Requested — the same item in two
 ///   states (#1668) — or the mute bell once followed (#2302).
+/// - **Message is our glyph beside Follow or Requested** (`core.chats`, #2475
+///   §5), Follow then the only word; the word again, across the free width,
+///   once followed or when there is nothing to follow.
 ///
 /// ⚠️ ONLY THE ITEM THAT CHANGED MOVES (#2331): every item is kept by
 /// identifier (`BarItemStore`) and dressed in place — Follow ↔ Requested is
 /// one item whose word and prominence change, the bell takes its new glyph,
 /// Message stretches or not — and the bar is handed the items only when the
-/// list changes. No animation of ours (#1672): the bar draws every bubble.
+/// list changes. Message's glyph and its word are two variants of ONE
+/// identifier: a glyph item cannot become a word item in place, so the bar
+/// morphs the one into the other (R3) when Follow becomes the bell. No
+/// animation of ours (#1672): the bar draws every bubble.
 @MainActor
 final class ProfileRelationToolbar {
     /// One place of the toolbar. Pure, for tests.
@@ -93,6 +99,12 @@ final class ProfileRelationToolbar {
         return nil
     }
 
+    /// Whether Message is the glyph (#2475 §5): beside Follow or Requested,
+    /// which is then the only word. The word otherwise.
+    nonisolated static func messageIsGlyph(in items: [Item]) -> Bool {
+        items.contains(.follow) || items.contains(.requested)
+    }
+
     /// The identity UIKit matches an item by across a rebuild: by what it
     /// DOES, so Follow and Requested are one item in two states, Message
     /// stays Message as a glyph or a word, and Follow is never taken for the
@@ -120,19 +132,20 @@ final class ProfileRelationToolbar {
         shownItems = items
         var bar: [UIBarButtonItem] = []
         let wide = Self.wideItem(in: items)
+        let glyph = Self.messageIsGlyph(in: items)
         for kind in items {
             // Each in its own bubble: the zero-width fixed space, kept with
             // the item it stands before.
             let id = Self.barIdentifier(for: kind)
             if !bar.isEmpty { bar.append(toolbarStore.separator(before: id)) }
-            bar.append(item(for: kind, wide: kind == wide, muteScopes: muteScopes, bellEnabled: bellEnabled))
+            bar.append(item(for: kind, wide: kind == wide, messageGlyph: glyph, muteScopes: muteScopes, bellEnabled: bellEnabled))
         }
         toolbarStore.apply(toolbar: bar, to: controller, animated: animated)
     }
 
     /// The kept item for `kind`, dressed for now.
     private func item(
-        for kind: Item, wide: Bool, muteScopes: MuteScopes, bellEnabled: Bool
+        for kind: Item, wide: Bool, messageGlyph: Bool, muteScopes: MuteScopes, bellEnabled: Bool
     ) -> UIBarButtonItem {
         let id = Self.barIdentifier(for: kind)
         switch kind {
@@ -149,10 +162,19 @@ final class ProfileRelationToolbar {
                 item.customView?.accessibilityHint = kind == .requested ? "Withdraws your follow request." : nil
             }
         case .message:
-            // The same item whether it takes the free width (followed, or
-            // not followable) or stands beside Follow: only its stretch
-            // changes (#2331). A plain view in the bar's bubble either way.
-            return toolbarStore.item(id) {
+            // Beside Follow or Requested: our glyph, a native icon (R1) in
+            // its own bubble. Otherwise the word, a plain view in the bar's
+            // bubble (`StretchedBarLabel`), taking the free width or not.
+            // Two variants of one identifier: the bar morphs one into the
+            // other (R3), and Follow ↔ Requested leaves it alone.
+            if messageGlyph {
+                return toolbarStore.item(id, variant: "glyph") {
+                    BarItems.icon(id: id, image: AppSymbol.chats.image(), label: "Message") { [actions] in
+                        actions.message()
+                    }
+                }
+            }
+            return toolbarStore.item(id, variant: "word") {
                 let made = BarItems.stretched(id: id, title: "Message") { [actions] in actions.message() }
                 made.label.accessibilityIdentifier = id
                 return made.item

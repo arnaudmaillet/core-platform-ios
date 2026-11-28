@@ -233,59 +233,38 @@ struct RelationshipFollowStatesTests {
         func fetchImageData(for url: URL) async throws -> Data { Data() }
     }
 
-    /// A profile the viewer can't follow shows no Follow (Message stays);
-    /// a change of follow state morphs the button — Follow into the bell
-    /// once followed (#2302).
-    @Test func theHeaderHidesAnImpossibleFollowAndMorphsAChange() throws {
-        let header = ProfileHeaderView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()))
-        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
-        window.isHidden = true
-        window.addSubview(header)
-        header.frame = window.bounds
+    /// The relationship's toolbar (#2475), as the card's: a profile the
+    /// viewer can't follow shows no Follow (Message stays, the word); Follow
+    /// becomes the bell once followed (#2302), Message's glyph its word.
+    @Test func theToolbarHidesAnImpossibleFollowAndChangesInPlace() {
+        let screen = UIViewController()
+        let toolbar = ProfileRelationToolbar(actions: .init(
+            follow: {}, message: {}, qrCode: {}, openProfile: {}, muteScopes: { .none }, toggleMute: { _ in }
+        ))
+        func apply(_ state: ProfileViewModel.FollowButton) {
+            toolbar.apply(ProfileRelationToolbar.items(for: state), muteScopes: .none, to: screen, animated: false)
+        }
+        apply(.unavailable)
+        #expect(screen.relationToolbarItem(.follow) == nil, "an impossible follow is still offered")
+        #expect((screen.relationToolbarItem(.message)?.customView as? StretchedBarLabel)?.title == "Message")
 
-        header.configureAction(.unavailable)
-        #expect(header.debugFollowTitle == nil, "an impossible follow is still offered")
-        let follow = header.debugFollowButton
-        follow.reducesMotion = { false }
-        #expect(follow.isHidden)
-        #expect(header.debugTrayButtons[1].isHidden == false, "Message went with Follow")
+        apply(.follow)
+        let follow = screen.relationToolbarItem(.follow)
+        #expect((follow?.customView as? StretchedBarLabel)?.title == "Follow")
+        #expect(follow?.style == .prominent, "Follow is not the call to action")
+        #expect(screen.relationToolbarItem(.message)?.customView == nil, "Message is not the glyph beside Follow")
 
-        header.configureAction(.follow)
-        header.layoutIfNeeded()
-        #expect(!follow.events.contains(.blurMorph), "a first answer morphed")
-        #expect(!follow.isHidden)
-        header.configureAction(.following, bell: ProfileHeaderView.Bell(scopes: .none))
-        #expect(follow.events.last == .blurMorph, "Follow → the bell did not morph")
-        #expect(follow.content.symbol == AppSymbol.bell.rawValue)
-        #expect(follow.content.title == nil)
+        apply(.following)
+        #expect(screen.relationToolbarItem(.follow) == nil, "Follow stayed once followed")
+        #expect(screen.relationToolbarItem(.bell) != nil, "no bell once followed")
+        #expect(screen.relationToolbarItem(.bell)?.accessibilityLabel == "Notifications")
     }
 
-    /// An unread relationship is the button's placeholder (#933): a bone,
-    /// inert, nothing visible or spoken — then the answer fades in.
-    @Test func anUnreadRelationshipIsThePlaceholder() {
-        let header = ProfileHeaderView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()))
-        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
-        window.isHidden = true
-        window.addSubview(header)
-        header.frame = window.bounds
-
-        header.configureAction(.hidden)
-        let follow = header.debugFollowButton
-        #expect(follow.phase == .placeholder)
-        #expect(follow.debugHasBone)
-        #expect(!follow.isHidden, "the slot is not held")
-        #expect(!follow.acceptsTaps)
-        #expect(!follow.isAccessibilityElement, "VoiceOver hears an answer the screen does not have")
-        #expect(follow.accessibilityLabel == nil)
-        #expect(header.debugFollowTitle == nil)
-        #expect(follow.configuration?.image == nil)
-
-        header.configureAction(.following, bell: ProfileHeaderView.Bell(scopes: .none))
-        #expect(follow.phase == .content)
-        #expect(!follow.debugHasBone)
-        #expect(header.debugBell === follow, "a followed read did not land as the bell")
-        #expect(follow.isAccessibilityElement)
-        #expect(follow.accessibilityLabel == "Notifications")
+    /// An unread relationship claims nothing (#933, #2475): no Follow, no
+    /// bell — Message and the QR alone until the read lands.
+    @Test func anUnreadRelationshipClaimsNoFollow() {
+        #expect(ProfileRelationToolbar.items(for: .hidden) == [.message, .qr])
+        #expect(!ProfileRelationToolbar.messageIsGlyph(in: ProfileRelationToolbar.items(for: .hidden)))
     }
 
     /// The touch-down handlers wired to a control: one per press effect.
@@ -297,29 +276,11 @@ struct RelationshipFollowStatesTests {
         return count
     }
 
-    /// ⚠️ ONE PRESS PER FOLLOW BUTTON (#866). The header used to attach the
-    /// shared press to a tray whose Follow carried it already: attached twice,
-    /// one finger drew two shrinks. The header's tray and the rows are the
-    /// app's button now (#932, #933): each its own press, attached once.
+    /// ⚠️ ONE PRESS PER FOLLOW BUTTON (#866): one finger drew two shrinks
+    /// when the shared press was attached twice. The rows are the app's
+    /// button (#932, #933): each its own press, attached once. (The
+    /// profile's Follow is a bar item since #2475: the bar draws its press.)
     @Test func everyFollowButtonHasExactlyOnePress() throws {
-        let header = ProfileHeaderView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()))
-        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
-        window.isHidden = true
-        defer { header.removeFromSuperview() }
-        window.addSubview(header)
-        header.frame = window.bounds
-        header.configureAction(.follow)
-
-        for button in header.debugTrayButtons {
-            let name = button.accessibilityLabel ?? "a tray button"
-            #expect(PressFeedback.attached(to: button) === button.pressFeedback, "\(name) carries a second press")
-            guard !button.isHidden else { continue }
-            button.sendActions(for: .touchDown)
-            button.sendActions(for: .touchCancel)
-            let presses = button.pressFeedback?.debugEvents.filter { if case .pressed = $0 { true } else { false } }
-            #expect(presses?.count == 1, "\(name) pressed \(presses?.count ?? 0) times")
-        }
-
         let cell = RelationshipListCell(frame: CGRect(x: 0, y: 0, width: 390, height: 64))
         cell.configure(with: row(.follow), imagePipeline: nil)
         let rowFollow = cell.debugActionButton
