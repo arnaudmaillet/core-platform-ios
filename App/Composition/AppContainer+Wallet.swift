@@ -116,10 +116,11 @@ extension AppContainer {
         StakeRefundNotifier(wallet: walletStore, window: window)
     }
 
-    /// The balance badge on a root screen's header: `apply` installs each bar
-    /// item it hands over, and the badge lasts as long as the caller holds
-    /// what this returns. Its tap presents `makeWalletSheet()` from
-    /// `presenter`.
+    /// A balance badge: `apply` installs each bar item it hands over, and the
+    /// badge lasts as long as the caller holds what this returns. Its tap
+    /// presents `makeWalletSheet()` from `presenter`. No root header wears
+    /// one since #2475 (the profiles left the list, revising #2336); the
+    /// Profile tab keeps one unshown in DEBUG for `-open-wallet`.
     func makeWalletBadge(
         presenter: UIViewController?, apply: @escaping (UIBarButtonItem) -> Void
     ) -> AnyObject {
@@ -130,10 +131,9 @@ extension AppContainer {
             apply: apply
         )
         #if DEBUG
-        // `-open-wallet` (QA, `WalletSheetUITests`): the Profile tab's badge
-        // is the one root badge left since For You left the bar (#2455), so
-        // it answers the hook. It presents only once its presenter is in the
-        // window: pair `-open-wallet` with `-select-tab 2`.
+        // `-open-wallet` (QA, `WalletSheetUITests`): the Profile tab's
+        // unshown badge answers the hook (#2475). It presents only once its
+        // presenter is in the window: pair `-open-wallet` with `-select-tab 2`.
         installer.presentSheetIfAskedAtLaunch()
         #endif
         return installer

@@ -19,8 +19,8 @@ final class WalletSheetUITests: XCTestCase {
 
     private func launch(_ extra: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
-        // `-select-tab 2`: the Profile tab's badge answers `-open-wallet`,
-        // the one root badge left since For You left the bar (#2455).
+        // `-select-tab 2`: the Profile tab answers `-open-wallet` with a badge
+        // it never shows — no profile wears the balance since #2475.
         app.launchArguments = ["-mock-auto-login", "-select-tab", "2", "-open-wallet", "-wallet-how-it-works-seen"]
             + extra
         app.launch()

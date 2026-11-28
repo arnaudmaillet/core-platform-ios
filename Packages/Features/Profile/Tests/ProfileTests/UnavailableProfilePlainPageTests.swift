@@ -178,8 +178,8 @@ struct UnavailableProfilePlainPageTests {
         withExtendedLifetime(navigation) {}
     }
 
-    /// AC3: a revisit opens on the cached profile — banner card and balance
-    /// up — and its revalidation answers not-found (#1403's eviction). The
+    /// AC3: a revisit opens on the cached profile — banner card up, and no
+    /// balance (no profile wears one since #2475) — and its revalidation answers not-found (#1403's eviction). The
     /// very render that says so takes the card away: no frame shows the
     /// card over the unavailable block. And a banner picture landing late
     /// cannot bring it back.
@@ -189,9 +189,9 @@ struct UnavailableProfilePlainPageTests {
         let chip = walletChip()
         let (navigation, screen) = pushedProfile(Profiles(person(), gone: true), cache: cache, chip: chip)
 
-        // Frame 0: the cached profile, its card and the balance.
+        // Frame 0: the cached profile and its card; never the balance.
         #expect(!screen.headerView.debugBannerIsHidden, "the cached revisit opened without its card")
-        #expect(screen.navigationItem.rightBarButtonItems?.contains { $0 === chip } == true)
+        #expect(screen.navigationItem.rightBarButtonItems?.contains { $0 === chip } != true, "a profile wore the balance")
 
         // Every render from here, as it lands: what it said, and whether the
         // card was up once it had said it.

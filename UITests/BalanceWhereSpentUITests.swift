@@ -1,9 +1,10 @@
 import XCTest
 
 /// The likes balance stands where likes are spent or earned, and leaves the
-/// screens where it never moves (#2336, the owner 2026-11-12): the own
-/// profile keeps it; Messages (no heart, no spend, no claim) and the
-/// map (a tap opens the post, which wears it) lose it.
+/// screens where it never moves (#2336, the owner 2026-11-12): Messages (no
+/// heart, no spend, no claim) and the map (a tap opens the post, which wears
+/// it) lose it — and since #2475 every profile, own or someone else's: the
+/// wallet is Settings' (Wallet and Purchases).
 ///
 /// ⚠️ **THE TAB COORDINATORS LIVE IN THE APP TARGET**, which has no unit-test
 /// bundle: what each root's header wears is asked here, of the running app,
@@ -12,7 +13,7 @@ final class BalanceWhereSpentUITests: XCTestCase {
 
     override func setUp() { continueAfterFailure = false }
 
-    func testTheBalanceStaysOnTheProfileAndLeavesMessagesAndTheMap() {
+    func testTheBalanceLeavesMessagesTheMapAndTheProfile() {
         let app = XCUIApplication()
         app.launchArguments = ["-mock-auto-login"]
         app.launch()
@@ -32,10 +33,11 @@ final class BalanceWhereSpentUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars.buttons["Notifications"].exists, "the map's header has no bell")
         XCTAssertTrue(balance(in: app).waitForNonExistence(timeout: 8), "the map's header wears the balance")
 
-        // The own profile: it lists posts with hearts, and it is the
-        // wallet's door.
+        // The own profile: `[bell] … [✎][⋯ ⚙]`, no balance (#2475).
         bar.buttons["Profile"].firstMatch.tap()
-        XCTAssertTrue(balance(in: app).waitForExistence(timeout: 15), "the own profile lost its balance")
+        XCTAssertTrue(app.navigationBars.buttons["Edit Profile"].waitForExistence(timeout: 15),
+                      "the own profile's bar has no Edit")
+        XCTAssertTrue(balance(in: app).waitForNonExistence(timeout: 8), "the own profile wears the balance")
         app.terminate()
     }
 

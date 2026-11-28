@@ -26,18 +26,6 @@ extension AppContainer {
             settingsFeature: { [unowned self] in self.settingsFeature },
             feedFeature: { [unowned self] in self.feedFeature },
             chatFeature: { [unowned self] in self.chatFeature },
-            // The pushed profile's balance: the same store and the same sheet as
-            // every root header's, on an installer that lives as long as the
-            // screen it is attached to.
-            attachBalance: { [unowned self] screen in
-                // No balance for a guest (#1146).
-                guard self.memberGate.isMember else { return }
-                WalletBadgeInstaller.attach(
-                    to: screen,
-                    wallet: self.walletStore,
-                    makeSheet: { [unowned self] in self.makeWalletSheet() }
-                )
-            },
             // A tapped `@handle`, a `core-platform.click/@handle` link (#524), a scanned QR
             // code and a `core-platform.click/s/<token>` link (#412).
             lookupProfile: { [weak self] reference in await self?.profileID(for: reference) ?? .unavailable },
