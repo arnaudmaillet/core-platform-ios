@@ -72,11 +72,35 @@ public final class BarSelectorItem {
     private var balanceMayWiden = true
 
     public init(strip: PagedTabBar, id: String) {
+        Self.dressForBar(strip)
+        self.strip = strip
+        self.id = id
+        item = BarItems.container(id: id, view: strip)
+    }
+
+    /// The strip as a bar item holds it: the platter is the bar's glass, it
+    /// hugs its titles, and it runs to its ceiling (#2577).
+    private static func dressForBar(_ strip: PagedTabBar) {
         strip.hosting = .platter
         strip.fillsWidth = false
         strip.fillsCeiling = true
-        self.strip = strip
-        self.id = id
+        // The bar sizes a custom view from its intrinsic size, as the inbox's.
+        strip.translatesAutoresizingMaskIntoConstraints = true
+    }
+
+    /// The strip comes (back) into the bar from another home — the
+    /// profile's header (#2475), which hosts the same strip at rest.
+    ///
+    /// ⚠️ **A FRESH ITEM, UNDER THE SAME IDENTIFIER.** An item that left its
+    /// group comes back new (`BarItemStore`), and here for a reason of its
+    /// own: UIKit keeps a custom view's wrapper with its item, and the strip
+    /// was taken out of that wrapper while it lived elsewhere. The strip is
+    /// dressed for the bar again and fitted afresh by the host's next `fit`.
+    /// The host writes its leading group with the new `item`.
+    public func enterBar() {
+        strip.removeFromSuperview()
+        Self.dressForBar(strip)
+        statedWidth = nil
         item = BarItems.container(id: id, view: strip)
     }
 
@@ -155,6 +179,72 @@ public final class BarSelectorItem {
     /// Whether the strip is on screen in its bar. A bar that swept the
     /// group into a `•••` hosts it nowhere: it has no window.
     public var isHosted: Bool { strip.window != nil }
+
+    /// Once the bar has laid the group out (#2337, #2577): the same gap on
+    /// both sides of the selector when nothing was swept, a narrower
+    /// selector when something was — then again a moment later, until the
+    /// bar settles. Bounded.
+    ///
+    /// ⚠️ **THE BAR'S ALLOWANCE IS UIKIT'S, NOT PUBLIC, AND A GROUP IT CANNOT
+    /// FIT IS SWEPT WHOLE INTO A `•••`** — the bell with the selector, as the
+    /// first cut of #2337 did on an iPhone 18 Pro (iOS 27.0) with the August
+    /// budget. The budget is conservative; this is the net under it. A swept
+    /// strip is in no window while the bar shows, so it is narrowed by a step
+    /// and handed back as a fresh item (a swept group is measured again only
+    /// for a new one), until it is hosted or down to one bubble.
+    ///
+    /// One loop for every bar selector — the inbox's (#2337) and the
+    /// profile's (#2475). The host says whether its bar is still the one to
+    /// settle (`isLive`: on show, on top, its bar shown), the budget it fits
+    /// to now, and how to hand its groups back after a re-mint.
+    /// `balances` false: only the overflow net, no equal-gap balance — the
+    /// profile's bar, where the balance read its gaps wrong and widened the
+    /// strip until the bar swept it (#2475, measured on the iOS 27.2
+    /// simulator; see the composer's note).
+    public func settle(
+        in bar: UINavigationBar,
+        balances: Bool = true,
+        budget: @escaping @MainActor () -> BarSelectorBudget,
+        isLive: @escaping @MainActor () -> Bool,
+        rewriteLeading: @escaping @MainActor () -> Void,
+        rewriteTrailing: @escaping @MainActor () -> Void,
+        trace: @escaping @MainActor (String) -> Void = { _ in },
+        attempt: Int = 0
+    ) {
+        guard attempt < 12, isLive(), bar.window != nil, !bar.isHidden else { return }
+        bar.layoutIfNeeded()
+        trace("check \(attempt)")
+        // The trailing group swept alone (#2411): the strip is hosted, the
+        // trailing group is a `•••`.
+        let trailingSwept = Self.showsOverflow(in: bar)
+        if isHosted, !trailingSwept {
+            // Nothing swept: the same gap on both sides of the selector, as
+            // the bar drew them (#2577).
+            guard balances, balanceGaps(in: bar, budget: budget()) else { return }
+            bar.setNeedsLayout()
+            trace("balance")
+        } else {
+            guard narrowAfterOverflow(budget()) else { return }
+            rewriteLeading()
+            // A swept group is measured again only when it is handed back.
+            if trailingSwept { rewriteTrailing() }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self, weak bar] in
+            guard let self, let bar else { return }
+            settle(
+                in: bar, balances: balances, budget: budget, isLive: isLive, rewriteLeading: rewriteLeading,
+                rewriteTrailing: rewriteTrailing, trace: trace, attempt: attempt + 1
+            )
+        }
+    }
+
+    /// Whether `bar` shows UIKit's overflow control — the `•••` a group it
+    /// cannot fit goes into, "More" to VoiceOver (as the selector's tests
+    /// look for it).
+    public static func showsOverflow(in bar: UIView) -> Bool {
+        if bar.window != nil, !bar.isHidden, bar.accessibilityLabel == "More" { return true }
+        return bar.subviews.contains { showsOverflow(in: $0) }
+    }
 
     /// The gaps `bar` drew before and after the strip's platter, platter to
     /// platter (`BarSelectorGaps`) — nil unless the strip is in `bar` with
@@ -325,8 +415,7 @@ public struct BarSelectorBudget: Equatable, Sendable {
 
     /// What an item takes in the bar: a custom view its width, a glyph its
     /// bubble — the glyph and `imageInset` each side, never less than a
-    /// platter. A titled item is charged a platter too — the inbox's
-    /// trailing corner holds none today (#2337 lists what could come).
+    /// platter; a titled item its word and `titleInset` each side (#2475).
     ///
     /// ⚠️ **A GLYPH SIZED BY A TEXT STYLE GROWS WITH THE TEXT SIZE** (#2411):
     /// the shell's bell (`textStyle: .body`, `.large`) is a bubble about
@@ -336,6 +425,13 @@ public struct BarSelectorBudget: Equatable, Sendable {
     @MainActor
     public static func width(of item: UIBarButtonItem) -> CGFloat {
         guard let custom = item.customView else {
+            // A titled item (the profile's Select / Done, #2475): its word
+            // at the bar's semibold body, and the bubble's inset each side.
+            if item.image == nil, let title = item.title, !title.isEmpty {
+                let font = UIFont.scaledFont(forTextStyle: .body, weight: .semibold)
+                let word = (title as NSString).size(withAttributes: [.font: font]).width
+                return max(platter, ceil(word) + titleInset * 2)
+            }
             guard let image = item.image else { return platter }
             return max(platter, ceil(image.size.width) + imageInset * 2)
         }
@@ -345,6 +441,9 @@ public struct BarSelectorBudget: Equatable, Sendable {
 
     /// The room a bubble keeps each side of its glyph.
     public static let imageInset: CGFloat = 12
+    /// The room a bubble keeps each side of its word — a little more than a
+    /// glyph's, on the safe side: the bar's own is not public.
+    public static let titleInset: CGFloat = 16
 }
 
 /// The gaps a bar DREW either side of its selector (#2577), platter to

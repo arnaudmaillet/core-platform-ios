@@ -954,12 +954,12 @@ open class HeroHeaderView: UIView {
     }
     #endif
 
-    /// The action row's foot in `view`'s space: once it has scrolled under
-    /// the navigation bar, the bar takes the relationship over (the owner,
-    /// 2026-10-15).
+    /// The action row's foot in `view`'s space — the identity block's when the
+    /// row is hidden (a profile with one page has no selector there, #2475).
     public func actionTrayMaxY(in view: UIView) -> CGFloat? {
         guard let row = actionRowView else { return nil }
-        return row.convert(row.bounds, to: view).maxY
+        let foot: UIView = row.isHidden ? (identityBlock ?? row) : row
+        return foot.convert(foot.bounds, to: view).maxY
     }
 
     /// The subtitle's line (a profile's @handle, under the name) in `view`'s

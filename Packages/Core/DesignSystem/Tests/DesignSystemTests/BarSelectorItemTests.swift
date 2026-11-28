@@ -69,6 +69,38 @@ struct BarSelectorItemTests {
             == BarSelectorBudget.trailingReserve)
     }
 
+    /// A titled trailing item (the profile's Select, #2475) is charged its
+    /// word and a bubble's inset each side, never less than a platter; a
+    /// glyph its bubble.
+    @Test func aTitledItemIsChargedItsWord() {
+        let select = UIBarButtonItem(title: "Select", primaryAction: nil)
+        let width = BarSelectorBudget.width(of: select)
+        #expect(width > BarSelectorBudget.platter, "Select charged \(width), a glyph's bubble")
+        let ok = UIBarButtonItem(title: "OK", primaryAction: nil)
+        #expect(BarSelectorBudget.width(of: ok) >= BarSelectorBudget.platter)
+        let glyph = UIBarButtonItem(image: UIImage(systemName: "pencil"), primaryAction: nil)
+        #expect(BarSelectorBudget.width(of: glyph) == BarSelectorBudget.platter)
+    }
+
+    /// A strip back from another home (the profile's header, #2475) comes
+    /// into the bar dressed for it again, in a fresh item under the same
+    /// identifier.
+    @Test func aStripEnteringTheBarIsDressedAgainInAFreshItem() {
+        let bar = strip()
+        let selector = BarSelectorItem(strip: bar, id: "test.selector")
+        let first = selector.item
+        bar.hosting = .container
+        bar.fillsWidth = true
+        bar.fillsCeiling = false
+        let host = UIView()
+        host.addSubview(bar)
+        selector.enterBar()
+        #expect(bar.superview == nil, "the strip stayed in its other home")
+        #expect(bar.hosting == .platter && !bar.fillsWidth && bar.fillsCeiling)
+        #expect(selector.item !== first && selector.item.identifier == "test.selector")
+        #expect(selector.item.customView === bar)
+    }
+
     /// The ceiling leaves the platter's ring out, and never falls below one
     /// bubble — demanding more than the bar has is how a group becomes `•••`.
     @Test func theCeilingNeverFallsBelowABubble() {

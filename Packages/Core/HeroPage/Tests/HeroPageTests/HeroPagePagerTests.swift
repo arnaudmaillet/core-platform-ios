@@ -154,19 +154,61 @@ struct HeroPageSelectorTests {
         selector.place(on: screen)
         let item = selector.item
         #expect(item != nil && screen.toolbarItems?.first === item)
-        #expect(selector.accessory == nil)
+        #expect(selector.barItem == nil && !selector.headerSlot.hostsStrip)
         selector.place(on: screen)
         #expect(selector.item === item, "placed twice")
         selector.remove(from: screen)
         #expect(!selector.isPlaced && (screen.toolbarItems ?? []).isEmpty)
     }
 
-    @Test func anAccessoryPlacementBuildsTheBand() {
+    /// `.header` (#2475): the strip in the header's slot at rest, out of it
+    /// and in a fresh bar item past the threshold, back in the slot after —
+    /// ONE strip, never in two places, the same page selected throughout.
+    @Test func aHeaderPlacementMovesOneStripBetweenTheHeaderAndTheBar() throws {
         let screen = UIViewController()
-        let selector = HeroPageSelector(bar: PagedTabBar(titles: ["Posts", "Saved"], style: .navigationTitle), placement: .accessory)
+        let bar = PagedTabBar(titles: ["Posts", "Saved", "History"], style: .navigationTitle)
+        let selector = HeroPageSelector(bar: bar, placement: .header, barItemID: "test.selector")
+        var placed: [Bool] = []
+        selector.onPlacedChange = { placed.append($0) }
         selector.place(on: screen)
-        #expect(selector.accessory != nil && selector.item == nil)
-        #expect(screen.toolbarItems == nil, "an accessory placement wrote the toolbar")
+        #expect(placed == [true])
+        #expect(screen.toolbarItems == nil, "a header placement wrote the toolbar")
+        #expect(bar.superview === selector.headerSlot && selector.headerSlot.hostsStrip)
+        #expect(bar.hosting == .container && bar.fadesCutEdges, "the header's strip draws no glass, its cut side fades")
+        bar.select(2)
+
+        let first = try #require(selector.moveIntoBar())
+        #expect(selector.isInBar && !selector.headerSlot.hostsStrip, "the strip stayed in the header")
+        #expect(first.item.customView === bar && first.item.identifier == "test.selector")
+        #expect(bar.hosting == .platter, "the bar's strip draws a second glass in the platter")
+        #expect(bar.selectedIndex == 2)
+
+        selector.moveIntoHeader()
+        #expect(!selector.isInBar && bar.superview === selector.headerSlot)
+        #expect(bar.hosting == .container && bar.selectedIndex == 2)
+
+        let again = try #require(selector.moveIntoBar())
+        #expect(again === first, "the bar selector is kept")
+        #expect(again.item.identifier == "test.selector", "a re-minted item lost its identifier")
+
+        selector.remove(from: screen)
+        #expect(placed == [true, false] && !selector.isInBar && selector.barItem == nil && bar.superview == nil)
+        #expect(selector.moveIntoBar() == nil, "a removed strip came into the bar")
+    }
+
+    /// A strip that comes back into the bar is a FRESH item under the same
+    /// identifier (#2475): UIKit keeps a custom view's wrapper with its
+    /// item, and the strip left that wrapper while it lived in the header.
+    @Test func aStripBackFromTheHeaderComesIntoTheBarAsAFreshItem() throws {
+        let screen = UIViewController()
+        let bar = PagedTabBar(titles: ["Posts", "Saved"], style: .navigationTitle)
+        let selector = HeroPageSelector(bar: bar, placement: .header)
+        selector.place(on: screen)
+        let first = try #require(selector.moveIntoBar()).item
+        selector.moveIntoHeader()
+        let second = try #require(selector.moveIntoBar()).item
+        #expect(second !== first)
+        #expect(second.identifier == first.identifier)
     }
 
     /// The lens follows the pages, a tap selects through `onSelect`, a

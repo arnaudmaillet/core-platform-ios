@@ -861,12 +861,11 @@ public final class PagedTabBar: UIControl {
     /// the one line every host's handler reads, so the mode lives here.
     public var animatesPageChanges: Bool { pagerMode == .scrolling }
 
-
     private var titles: [String]
     private let capsule = UIVisualEffectView(effect: nil)
     /// Scrolls the segments when they out-measure the capsule. Below that
     /// width it never scrolls and is invisible in every sense.
-    private let scroller = StripScrollView()
+    let scroller = StripScrollView()
     /// The scroll view's content: the lens and the row, in one coordinate
     /// space. The lens lives HERE rather than in the capsule so it travels with
     /// the segments for free — a lens pinned outside would need the content
@@ -2494,8 +2493,9 @@ extension PagedTabBar: UIGestureRecognizerDelegate {}
 /// Cancelling is what turns a press-then-drag into a scroll. A press that does
 /// not move is untouched by this and still arrives as a tap, which is what
 /// keeps "tap to choose" working alongside "drag to see the rest".
-private final class StripScrollView: UIScrollView {
+final class StripScrollView: UIScrollView {
     override func touchesShouldCancel(in view: UIView) -> Bool { true }
+    var fadesCutEdges = false
 
     /// ⚠️ **THE authoritative moment for "does this strip overflow".** The same
     /// lesson `SegmentRow.onLayout` records, one level out: the bar reads this
@@ -2505,7 +2505,6 @@ private final class StripScrollView: UIScrollView {
     /// pushed profile's docked selector: `capsule=149` while `scroller=198`, the
     /// strip therefore judged 198 ≤ 198 and never revealed the selected tab,
     /// which sat clipped outside a capsule showing the first two.
-    ///
     /// `layoutIfNeeded()` on the content does not fix it — the scroll view is
     /// this view's own business and it lays itself out later in the same pass.
     var onLayout: (() -> Void)?
@@ -2513,6 +2512,7 @@ private final class StripScrollView: UIScrollView {
     override func layoutSubviews() {
         super.layoutSubviews()
         onLayout?()
+        StripEdgeFade.apply(to: self)
     }
 }
 

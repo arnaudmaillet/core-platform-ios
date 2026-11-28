@@ -53,7 +53,7 @@ let package = Package(
         // tests: the haptics playground's.
         .testTarget(
             name: "DebugToolsTests",
-            dependencies: ["DebugTools", "DesignSystem"],
+            dependencies: ["DebugTools", "DesignSystem", "CoreNavigation"],
             swiftSettings: [
                 .defaultIsolation(MainActor.self),
                 .enableUpcomingFeature("NonisolatedNonsendingByDefault"),

@@ -22,20 +22,24 @@ struct HeroPageViewControllerTests {
         private(set) var refreshes = 0
         private(set) var travels: [CGFloat] = []
 
-        init(fetcher: ImageFetching) {
+        init(fetcher: ImageFetching, placement: HeroPageSelector.Placement = .toolbar) {
             let header = HeroHeaderView(
                 imagePipeline: ImagePipeline(fetcher: fetcher), counters: ["Ranking", "Likes"], avatar: .custom(UIView())
             )
-            header.setActions([
-                .capsule(AppButton(aspect: .pill(.quiet), size: .header, content: .title("Add Pin to Map"))),
-                .bubble(AppIconButton(style: .bubble(.quiet), content: .symbol("qrcode")))
-            ])
+            // A header selector takes the action row (#2475).
+            if placement == .toolbar {
+                header.setActions([
+                    .capsule(AppButton(aspect: .pill(.quiet), size: .header, content: .title("Add Pin to Map"))),
+                    .bubble(AppIconButton(style: .bubble(.quiet), content: .symbol("qrcode")))
+                ])
+            }
             header.configure(with: HeroHeaderContent(title: "Paris", subtitle: "France", counterValues: ["#3", "29.4K"]))
             let page = StubPage()
             self.page = page
             super.init(
                 header: header, pager: HeroPagePager(tabs: [FixtureTab.popular], pages: [page]),
-                selectorBar: PagedTabBar(titles: ["Popular"], style: .navigationTitle)
+                selectorBar: PagedTabBar(titles: ["Popular", "Recent"], style: .navigationTitle),
+                selectorPlacement: placement
             )
         }
 
@@ -48,8 +52,10 @@ struct HeroPageViewControllerTests {
 
     /// Hosts the page in a visible window for the length of `body`, then takes
     /// the window down (`visible-window-suite-release-crash`).
-    private func hosting(_ body: (FixtureHeroPage) throws -> Void) rethrows {
-        let screen = FixtureHeroPage(fetcher: SilentFetcher())
+    private func hosting(
+        placement: HeroPageSelector.Placement = .toolbar, _ body: (FixtureHeroPage) throws -> Void
+    ) rethrows {
+        let screen = FixtureHeroPage(fetcher: SilentFetcher(), placement: placement)
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 393, height: 852))
         window.rootViewController = UINavigationController(rootViewController: screen)
         window.isHidden = false
@@ -80,6 +86,29 @@ struct HeroPageViewControllerTests {
             let pager = subviews.firstIndex(of: screen.heroPager)
             let host = subviews.firstIndex(of: screen.headerHost)
             #expect(pager != nil && host != nil && pager! < host!, "the header is not over the page")
+        }
+    }
+
+    /// A header selector (#2475): its slot takes the action row's place
+    /// only while a strip is placed — no empty row on a page with one tab —
+    /// and the threshold falls back to the identity's foot without it.
+    @Test func aHeaderSelectorSlotShowsOnlyWhileAStripIsPlaced() throws {
+        try hosting(placement: .header) { screen in
+            let bare = screen.headerHeight
+            #expect(!screen.heroHeader.showsActionTray, "an empty selector row at rest")
+            let onPage = try #require(screen.page.onVerticalScroll)
+            onPage(screen.headerTravel + 300)
+            #expect(screen.isActionRowUnderBar(travelled: screen.headerTravel + 300), "no threshold without a selector")
+            onPage(0)
+            screen.selector.place(on: screen)
+            screen.view.layoutIfNeeded()
+            #expect(screen.heroHeader.showsActionTray)
+            #expect(screen.selector.headerSlot.window != nil && screen.selector.headerSlot.hostsStrip)
+            #expect(screen.headerHeight > bare + HeroHeaderView.bubbleSize - 1, "the slot took no room")
+            screen.selector.remove(from: screen)
+            screen.view.layoutIfNeeded()
+            #expect(!screen.heroHeader.showsActionTray)
+            #expect(abs(screen.headerHeight - bare) < 0.5, "the header kept the slot's room")
         }
     }
 
@@ -183,12 +212,12 @@ struct HeroPageViewControllerTests {
         #expect(screen.heroHeader.chromeTopInset == 116)
     }
 
-    /// One tab is no selector: nothing in the toolbar, nothing in an
-    /// accessory, the status block hidden.
+    /// One tab is no selector: nothing in the toolbar, nothing in the bar,
+    /// the status block hidden.
     @Test func oneTabShowsNoSelector() {
         hosting { screen in
             #expect(!screen.selector.isPlaced)
-            #expect(screen.selector.item == nil && screen.selector.accessory == nil)
+            #expect(screen.selector.item == nil && screen.selector.barItem == nil)
             #expect(screen.selectorBar.window == nil)
             #expect(screen.statusView.isHidden)
         }

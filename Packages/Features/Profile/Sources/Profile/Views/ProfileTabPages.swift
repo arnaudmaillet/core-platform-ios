@@ -15,7 +15,6 @@ protocol ProfileTabPagesHost: UIViewController {
     var galleryPager: ProfileGalleryPagerView { get }
     var selector: HeroPageSelector { get }
     var selectorBar: PagedTabBar { get }
-    var isShownOnScreen: Bool { get }
     var allTabs: [ProfileTab] { get }
     var channels: ProfileChannelsViewModel? { get }
     var makeChannelCreation: (@MainActor () -> UIViewController?)? { get }
@@ -93,9 +92,9 @@ final class ProfileTabPages {
             host.viewModel.releaseHistory()
             host.setSelectingHistory(false, restoresFoot: true)
         }
-        // History's Select stands in the gear's place, and only there (#2307):
-        // leaving History with the tray away puts the gear back, coming back
-        // brings Select.
+        // History's Select stands in ✎'s place, and only there (#2307):
+        // leaving History past the threshold puts ✎ back, coming back brings
+        // Select.
         if changed { host.applyNavigationState(animated: host.view.window != nil) }
     }
 
@@ -121,51 +120,27 @@ final class ProfileTabPages {
         host.selector.select(index)
     }
 
-    /// Puts the selector at the foot of the screen, in a `UITabAccessory` —
-    /// on BOTH profiles.
+    /// Gives the selector its home (#2475): the header at rest, where the
+    /// action row stood, and the bar's leading group past the threshold —
+    /// on every profile, the tab root as a pushed one
+    /// (`HeroPageSelector.Placement.header`).
     ///
-    /// ⚠️ **A PUSHED SCREEN CAN HOST ONE, AND THE COMMIT THAT SAID OTHERWISE
-    /// WAS WRONG.** "A pushed screen has no tab bar to hang an accessory from"
-    /// is the sentence that sent this branch to the toolbar; the search
-    /// results — which also sets `hidesBottomBarWhenPushed` — then measured the
-    /// opposite: `env=regular`, a 360x48 container at the foot, laid out
-    /// exactly as on a tab root. `UITabAccessory.h` says so too, defining
-    /// `.regular` as "above the bottom tab bar when it is visible; **or, at the
-    /// bottom of the UITabBarController's view**".
-    ///
-    /// ⚠️ **`trayPlacement` IS THE ONLY THING THAT CAN ANSWER THIS, and it is
-    /// injected for that reason.** Its own note says why: "the host knows, and
-    /// the screen cannot work it out for itself (a nav root inside a tab bar
-    /// and a pushed screen look identical from in here)". Two other questions
-    /// look like this one and are not it — `onLogout != nil` is whether this is
-    /// the canonical account entry point, and `viewModel.isOwnProfile` is
-    /// whether it is the viewer. A ROUTED self profile is own-profile, wears
-    /// five tabs and an Edit button, and is PUSHED: choosing by
-    /// `isOwnProfile` would hang a shell-lifetime accessory on a screen with
-    /// `hidesBottomBarWhenPushed = true`, which is the measured leak the
-    /// accessory's install/remove bracket exists to prevent.
-    ///
-    /// ⚠️ ONE PAGE, NO SELECTOR (#631). Anyone else's profile has only Posts,
-    /// and a strip with one segment is a label pretending to be a control.
-    ///
-    ///
-    /// ⚠️ **TWO HOMES, BY WHERE THE PROFILE IS (#728, the owner's call
-    /// 2026-10-09).** #718 floated the strip in this view at its intrinsic
-    /// width on both; that was not the ask.
-    /// - The Profile **tab root** keeps it in the tab bar's `UITabAccessory`,
-    ///   as it always had.
-    /// - A **pushed** profile hosts it as a toolbar item at the bottom leading
-    ///   corner, at its intrinsic width — the relations screen's arrangement:
-    ///   the item's platter is the glass, so the strip draws none
-    ///   (`.platter`).
+    /// ⚠️ ONE PAGE, NO SELECTOR (#631). A strip with one segment is a label
+    /// pretending to be a control: the header then has no selector row.
     private func placeSelectors() {
-        guard host.viewModel.hasGallery, tabs.count > 1 else { return }
+        guard host.viewModel.hasGallery, tabs.count > 1, !host.selector.isPlaced else { return }
         host.selector.place(on: host)
+        // Past the threshold already (a page that arrived late, #742): the
+        // bar takes it at once.
+        host.applyNavigationState(animated: host.view.window != nil)
     }
 
-    /// Takes the selector away when one tab is left (#742).
+    /// Takes the selector away when one tab is left (#742) — out of the bar
+    /// too, if it stood there.
     private func removeSelectors() {
+        guard host.selector.isPlaced else { return }
         host.selector.remove(from: host)
+        host.applyNavigationState(animated: host.view.window != nil)
     }
 
     /// The tabs whose source is still loading and which had posts the last
@@ -194,8 +169,8 @@ final class ProfileTabPages {
     /// A private profile the viewer does not follow thus shows Tagged alone
     /// when it has posts, plainly — no lock line (#1445) — and the lock alone
     /// when it has none; following it brings the tabs back as their sources
-    /// fill. One tab left is no selector at all, in the tab
-    /// bar's accessory as in a pushed profile's toolbar.
+    /// fill. One tab left is no selector at all, in the header as in the
+    /// bar.
     func showTabs(for snapshot: ProfileViewModel.GallerySnapshot) {
         var shown = Self.shownTabs(
             host.allTabs, in: snapshot, isOwnProfile: host.viewModel.isOwnProfile, hasChannels: showsChannelsTab
@@ -223,19 +198,10 @@ final class ProfileTabPages {
         // "View all" from the wrong corpus.
         if active != shown[index] { adoptTab(shown[index]) }
         if shown.count > 1 {
-            let wasPlaced = host.selector.isPlaced
             placeSelectors()
-            // ⚠️ ON SCREEN, NOT IN A WINDOW. A tab that arrives while a pushed
-            // screen (Settings) is covering this one found the view still in
-            // the window mid-push, installed the band, and nothing ever took
-            // it down: this screen's `viewWillDisappear` had already run with
-            // no band to remove. The next `viewWillAppear` puts it up.
-            guard !wasPlaced, host.isShownOnScreen else { return }
-            // Arrived while on screen: up now, not at the next appearance.
-            host.selector.install(on: host, alongside: nil)
-            if host.navigationController?.topViewController === host {
-                host.selector.showToolbar(for: host, animated: true)
-            }
+            // A strip in the bar re-fits to its new titles, the bell or the
+            // chevron left where they are.
+            host.applyNavigationState(animated: host.view.window != nil)
         } else {
             removeSelectors()
         }
