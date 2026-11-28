@@ -36,9 +36,9 @@ protocol ProfileNavigationBarComposerHost: UIViewController {
 /// ```
 ///                      at rest                  past the threshold
 /// someone else's       [‹] … [⋯]                [‹][selector] … [⋯]
-/// the own profile      [🔔] … [✎][⋯ ⚙]           [🔔][selector] …
+/// the own profile      [🔔] … [⋯ ⚙][✎]           [🔔][selector] …
 ///   on History, Saved                           [🔔][selector] … [Select]
-///   selecting          [🔔][Remove (n)] … [Done][⋯ ⚙]   [🔔][Remove (n)] … [Done]
+///   selecting          [🔔][Remove (n)] … [⋯ ⚙][Done]   [🔔][Remove (n)] … [Done]
 /// ```
 ///
 /// - **No title, no soft edge, no balance, no day, no Follow** in any
@@ -175,8 +175,8 @@ final class ProfileNavigationBarComposer {
     /// The trailing group, the first item at the bar's edge (#2475 §3, §4).
     ///
     /// - someone else's: `[⋯]` — nothing on a page for no one (#1406);
-    /// - the own, at rest: `[✎][⋯ ⚙]` — ⋯ and the gear in one bubble, ✎ in
-    ///   its own (Done in its place while selecting a pile);
+    /// - the own, at rest: `[⋯ ⚙][✎]` — ⋯ and the gear in one bubble, ✎ in
+    ///   its own at the edge (Done in its place while selecting a pile);
     /// - the own, past the threshold (the owner, 2026-11-28): no ✎ on any
     ///   tab — `[Select]` in the primary on History and Saved, `[Done]`
     ///   while selecting (#2307), and NOTHING on the other tabs, where the
@@ -186,10 +186,13 @@ final class ProfileNavigationBarComposer {
         // The own profile gone (#1406): the gear alone, its only way out.
         if host.viewModel.namesNoOne { return [settingsItem].compactMap { $0 } }
         guard !isPastThreshold else { return [host.pileSelectBarItem].compactMap { $0 } }
+        // ✎ (or Done) at the bar's edge, right of the ⋯ ⚙ bubble (the owner,
+        // 2026-11-28); a fixed space keeps the two bubbles apart. The
+        // trailing group reads from the edge inward.
         let lead = host.pileSelectBarItem ?? editItem
         let pair = [settingsItem, moreItem].compactMap { $0 }
-        let leadID = lead.identifier ?? Self.editItemID
-        return pair + [trailingStore.separator(before: leadID), lead]
+        guard let inner = pair.first?.identifier else { return [lead] }
+        return [lead, trailingStore.separator(before: inner)] + pair
     }
 
     /// Whether the selector belongs in the bar now: past the threshold, a

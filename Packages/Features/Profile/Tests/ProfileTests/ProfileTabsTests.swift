@@ -515,7 +515,7 @@ struct ProfileHistoryDaysTests {
         return OwnProfile(screen: screen, store: store, history: history)
     }
 
-    /// The own profile's bar per state (#2307, #2475): `[✎][⋯ ⚙]` at rest on
+    /// The own profile's bar per state (#2307, #2475): `[⋯ ⚙][✎]` at rest on
     /// every tab, History included; on History past the threshold, Select
     /// in ✎'s place; selecting, Done there, wherever the scroll is. No
     /// balance, ever.
@@ -527,9 +527,9 @@ struct ProfileHistoryDaysTests {
         let screen = own.screen
 
         // At rest, on Posts and on History alike.
-        #expect(own.bar == ["Settings", "More actions", "Edit Profile"], "Posts at rest: \(own.bar)")
+        #expect(own.bar == ["Edit Profile", "Settings", "More actions"], "Posts at rest: \(own.bar)")
         screen.selectTab(at: own.history)
-        #expect(own.bar == ["Settings", "More actions", "Edit Profile"], "History at rest wears Select: \(own.bar)")
+        #expect(own.bar == ["Edit Profile", "Settings", "More actions"], "History at rest wears Select: \(own.bar)")
 
         // Past the threshold: Select, in ✎'s place, under its own
         // identifier — the bar's morph, not a re-titled ✎ (R3).
@@ -540,7 +540,7 @@ struct ProfileHistoryDaysTests {
 
         // Back up: ✎ and ⋯ ⚙.
         screen.debugSetPastThreshold(false)
-        #expect(own.bar == ["Settings", "More actions", "Edit Profile"], "History, back up: \(own.bar)")
+        #expect(own.bar == ["Edit Profile", "Settings", "More actions"], "History, back up: \(own.bar)")
     }
 
     /// Done holds while selecting, whatever the scroll — without it there
@@ -561,13 +561,13 @@ struct ProfileHistoryDaysTests {
         // Back to the top: Done stays, in ✎'s place.
         screen.debugSetPastThreshold(false)
         #expect(screen.isSelectingPile)
-        #expect(own.bar == ["Settings", "More actions", "Done"], "selecting, at the top: \(own.bar)")
+        #expect(own.bar == ["Done", "Settings", "More actions"], "selecting, at the top: \(own.bar)")
 
         // Done at the top: ✎. Selecting again and Done scrolled: Select.
         screen.setSelectingPile(false)
-        #expect(own.bar == ["Settings", "More actions", "Edit Profile"], "after Done, at the top: \(own.bar)")
+        #expect(own.bar == ["Edit Profile", "Settings", "More actions"], "after Done, at the top: \(own.bar)")
         screen.setSelectingPile(true)
-        #expect(own.bar == ["Settings", "More actions", "Done"], "selecting from the top: \(own.bar)")
+        #expect(own.bar == ["Done", "Settings", "More actions"], "selecting from the top: \(own.bar)")
         screen.debugSetPastThreshold(true)
         screen.setSelectingPile(false)
         #expect(own.bar == ["Select"], "after Done, past the threshold: \(own.bar)")

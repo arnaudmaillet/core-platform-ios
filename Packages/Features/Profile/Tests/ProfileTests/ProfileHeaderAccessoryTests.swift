@@ -53,7 +53,7 @@ struct ProfileHeaderAccessoryTests {
 
     // MARK: - The own profile's bar (#2475 §4)
 
-    /// ⚠️ THE OWN PROFILE'S BAR AT REST: `[✎][⋯ ⚙]` — the gear in the corner,
+    /// ⚠️ THE OWN PROFILE'S BAR AT REST: `[⋯ ⚙][✎]` — the gear in the corner,
     /// ⋯ beside it in the same bubble, ✎ in its own; no switcher (its name
     /// wears the chevron), no title.
     @Test func theOwnProfileCarriesEditThenMoreAndSettings() throws {
@@ -70,11 +70,12 @@ struct ProfileHeaderAccessoryTests {
         screen.loadViewIfNeeded()
 
         let items = try #require(screen.navigationItem.rightBarButtonItems)
-        #expect(screen.debugTrailingIDs == ["profile.settings", "profile.more", "profile.edit"])
-        // ⋯ and the gear share a bubble; a space keeps ✎ in its own.
-        #expect(items.count == 4 && items[2].customView == nil && items[2].image == nil, "no space before ✎")
-        #expect(items[3].style == .plain, "✎ is filled at rest")
-        #expect(items[1].menu != nil, "⋯ opens no menu")
+        #expect(screen.debugTrailingIDs == ["profile.edit", "profile.settings", "profile.more"])
+        // ✎ at the edge (the owner, 2026-11-28); ⋯ and the gear share a
+        // bubble; a space keeps ✎ in its own. The group reads from the edge.
+        #expect(items.count == 4 && items[1].customView == nil && items[1].image == nil, "no space after ✎")
+        #expect(items[0].style == .plain, "✎ is filled at rest")
+        #expect(items[3].menu != nil, "⋯ opens no menu")
         #expect(!items.contains { $0.identifier == "profile.switcher" })
         #expect(screen.navigationItem.title == nil, "the own profile is titled")
         // The switcher is the name's.
@@ -83,7 +84,7 @@ struct ProfileHeaderAccessoryTests {
 
     /// Past the threshold (the owner, 2026-11-28): no ✎ on any tab — on
     /// Posts, nothing at the corner, ⋯ and the gear gone too; back at rest,
-    /// `[✎][⋯ ⚙]`, ✎ made afresh (an item that left its group comes back
+    /// `[⋯ ⚙][✎]`, ✎ made afresh (an item that left its group comes back
     /// new, `BarItemStore`) and quiet.
     @Test func pastTheThresholdTheCornerIsEmptyOffThePiles() throws {
         let screen = ownProfile()
@@ -94,7 +95,7 @@ struct ProfileHeaderAccessoryTests {
         #expect(screen.debugTrailingIDs.isEmpty, "past the threshold: \(screen.debugTrailingIDs)")
 
         screen.debugSetPastThreshold(false)
-        #expect(screen.debugTrailingIDs == ["profile.settings", "profile.more", "profile.edit"])
+        #expect(screen.debugTrailingIDs == ["profile.edit", "profile.settings", "profile.more"])
         let back = try #require(screen.debugBarItem(ProfileNavigationBarComposer.editItemID))
         #expect(back.style == .plain && edit.style == .plain, "✎ is filled")
     }
@@ -131,7 +132,7 @@ struct ProfileHeaderAccessoryTests {
     }
 
     /// A pushed own profile — built without `onLogout` — has no gear: its
-    /// bar is `[‹] … [✎][⋯]`, and no balance.
+    /// bar is `[‹] … [⋯][✎]`, and no balance.
     @Test func aPushedOwnProfileCarriesEditAndMoreWithoutTheGear() throws {
         let screen = ProfileViewController(
             viewModel: ProfileViewModel(repository: StubAccessoryProfiles()),
@@ -141,7 +142,7 @@ struct ProfileHeaderAccessoryTests {
         )
         screen.loadViewIfNeeded()
         screen.setTrailingAccessoryItem(accessory())
-        #expect(screen.debugTrailingIDs == ["profile.more", "profile.edit"])
+        #expect(screen.debugTrailingIDs == ["profile.edit", "profile.more"])
     }
 
     // MARK: - The leading item (the shell's bell)
