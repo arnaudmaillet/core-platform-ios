@@ -114,6 +114,7 @@ public final class AppButtonGalleryViewController: UIViewController {
     private func content(for size: AppButton.Size) -> AppButton.Content {
         switch size {
         case .row: .title("Follow")
+        case .compact: .title("Follow back")
         case .header: AppButton.Content(title: "Message", symbol: "paperplane")
         case .form: AppButton.Content(title: "Continue")
         }

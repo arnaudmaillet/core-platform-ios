@@ -131,6 +131,12 @@ public protocol PostGridPage: UIView {
     var showsTileInfo: Bool { get set }
     /// What a card's heart stakes, and how it is drawn once the viewer has.
     var staking: PostCardStaking? { get set }
+    /// Whether the rows' author bands offer the author's Follow (#2419), as
+    /// on every flat list by default. A HOST THAT CARRIES ITS OWN FOLLOW
+    /// turns it off for every row it lists: a profile, whose header's Follow
+    /// is the one (#2248, #2302; the owner, 2026-11-28). Set before the page
+    /// shows posts; a page that draws no bands offers none.
+    var offersAuthorFollow: Bool { get set }
 
     // MARK: Events
 
@@ -227,8 +233,14 @@ public protocol PostGridPage: UIView {
     func endPlaybackHandoff()
 }
 
-/// The Rows hooks are new (#2170): a page that draws no rows takes neither.
+/// The Rows hooks (#2170) and the bands' Follow (#2419): a page that draws no
+/// rows takes none of them.
 public extension PostGridPage {
+    var offersAuthorFollow: Bool {
+        get { false }
+        set {}
+    }
+
     var onAuthorCardTapped: ((GalleryPost) -> Void)? {
         get { nil }
         set {}

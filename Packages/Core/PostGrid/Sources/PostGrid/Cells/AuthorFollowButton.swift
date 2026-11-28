@@ -20,6 +20,12 @@ import UIKit
 /// - nothing (the viewer's own post, blocked, not known yet): no button. An
 ///   answer that lands later makes the button come in, never the name jump.
 /// A row filled afresh draws its offer at once (`animated: false`).
+///
+/// Two sizes, one button: `.row`, the band's, at its pill height; `.compact`,
+/// a text page's caption row's (#2419, the owner 2026-11-28), set in that
+/// row's footnote line, left of its ♥ count, as tall as the line: the host
+/// pins its height to the line's, so the line never grows while it shows,
+/// confirms or folds, and the caption under it never moves.
 public final class AuthorFollowButton: AppButton {
     /// How long "✓ Following" stays before the button folds (#2409's
     /// confirmation, the same here).
@@ -38,13 +44,17 @@ public final class AuthorFollowButton: AppButton {
 
     private var fold: LoadingTimer?
 
-    public init() {
-        super.init(aspect: .rowAction, size: .row, content: .title(Self.title(for: .follow)))
-        // The trailing edge stays put through every morph: the "…" is there.
+    /// - Parameter size: `.row` for a band, `.compact` for a line of words.
+    public init(size: AppButton.Size = .row) {
+        super.init(aspect: .rowAction, size: size, content: .title(Self.title(for: .follow)))
+        // The trailing edge stays put through every morph: the "…" (the
+        // band's) or the ♥ count (the caption row's) is there.
         morphAnchor = .trailing
         isHidden = true
         setContentCompressionResistancePriority(.required, for: .horizontal)
         setContentHuggingPriority(.required, for: .horizontal)
+        // In a line of words, the line's height wins over the words' own.
+        if size == .compact { setContentCompressionResistancePriority(.defaultLow, for: .vertical) }
         addAction(UIAction { [weak self] _ in self?.tapped() }, for: .primaryActionTriggered)
     }
 
@@ -88,10 +98,11 @@ public final class AuthorFollowButton: AppButton {
     }
 
     /// Folds away WHERE IT STANDS: a stand-in (its own pixels) scales out
-    /// and fades in the band, while the controls' stack closes and the name
-    /// takes the room back. ⚠️ Not `AppControl.disappear`: its stand-in rides
-    /// the stack, and a trailing-pinned stack that shrinks slid it right,
-    /// over the "…" (filmed, 2026-11-25).
+    /// and fades in the band (or the caption's text column), while the
+    /// controls' stack closes and the name takes the room back. ⚠️ Not
+    /// `AppControl.disappear`: its stand-in rides the stack, and a
+    /// trailing-pinned stack that shrinks slid it right, over the "…"
+    /// (filmed, 2026-11-25).
     private func foldAway(animated: Bool) {
         guard animated, window != nil, !isHidden, let stack = superview,
               let band = stack.superview, let ghost = snapshotView(afterScreenUpdates: false) else {

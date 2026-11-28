@@ -279,15 +279,31 @@ final class SnapAuthorBar {
     /// ahead included; the badge is passive (#2419); the face's tap is the
     /// card and its hold the profile, the author pill's routes (#2145).
     ///
+    /// Its Follow (#2419, option A of 2026-11-28) stands left of the ♥ count,
+    /// drawn from the same answer: the shared follow, Requested's
+    /// withdrawal. A text page opened from a profile is its own page and
+    /// shows it too; only the profile's own lists go without.
+    ///
     /// A media page's caption row is never bound: the bar's pill wears the
     /// mark.
     func bindCaptionAuthor(of content: UIViewController?, for id: PostID) {
         guard let detail = content as? PostDetailViewController else { return }
-        let author = host.isTextPage(id) ? host.modelsByID[id]?.authorID : nil
+        let model = host.isTextPage(id) ? host.modelsByID[id] : nil
+        let author = model?.authorID
         detail.bindCaptionAuthor = { [weak self] cell in
             guard let self else { return }
-            authorBadges.bind(cell, to: author)
+            authorBadges.bind(cell, to: author, offersFollow: true)
+            cell.onAuthorFollowTapped = nil
+            cell.onAuthorCancelFollowRequest = nil
             guard let author else { return }
+            cell.onAuthorFollowTapped = { [weak self, weak cell] in
+                guard let self, let cell else { return }
+                host.followStore.follow(author, handle: model?.authorHandle, name: model?.authorName, from: cell)
+            }
+            cell.onAuthorCancelFollowRequest = { [weak self, weak cell] in
+                guard let self, let cell else { return }
+                host.followStore.cancelRequest(to: author, handle: model?.authorHandle, from: cell)
+            }
             cell.onAvatarTap = { [weak self] in
                 guard let self else { return }
                 host.viewModel.didTapAuthorPill(author, isViewer: host.followStore.relation(for: author) == .viewer)

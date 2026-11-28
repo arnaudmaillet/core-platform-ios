@@ -15,10 +15,6 @@ import SettingsInterface
 import ShareSheet
 import UIKit
 
-/// Builds For You's grid page in a style — `savesPosts` offers the save
-/// control (#1273).
-typealias ProfileGridPageFactory = (_ style: PostGridPageStyle, _ savesPosts: Bool) -> any PostGridPage
-
 /// A person's hero page (`HeroPageViewController`, #1655): the container's
 /// layout, travel, dock and bar dress, with the profile's own data, tabs,
 /// bar items, menus and post opening.
@@ -171,7 +167,9 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         self.trayPlacement = trayPlacement
         self.channels = channels
         self.makeChannelCreation = makeChannelCreation
-        self.makeGridPage = makeGridPage
+        // Its lists offer no author Follow: the header's is the one (#2419).
+        let hostedPages = ProfilePostLists.withoutAuthorFollow(makeGridPage)
+        self.makeGridPage = hostedPages
         self.identityStubIsSelf = identityStub?.isSelf == true
         self.viewModel = viewModel
         self.onLogout = onLogout
@@ -213,7 +211,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         let pager = ProfileGalleryPagerView(
             tabs: allTabs, shown: shown, makeChannelsPage: makeChannelsPage, presence: presence
         ) { style in
-            makeGridPage(style, savesPosts)
+            hostedPages(style, savesPosts)
         }
         pager.presenceScreen = { [weak viewModel] in viewModel?.presenceScreen }
         galleryPager = pager

@@ -111,7 +111,7 @@ Look here before writing any of these. Add a row when you create a shared piece.
 | A person in a list | `PersonRowContent`, `PersonListCell` | DesignSystem | |
 | Opening a person (card or profile) | `PersonOpening` | MediaCore / `MediaUI` | `PersonOpeningGuardTests` |
 | A person's relation on their face (Following, Friends; passive) | `RelationMarkedAvatarView`, `RelationBadgeView`, `FaceCutout` | MediaCore / `MediaUI` | `TextPostAuthorMarkTests.noPostAuthorFaceWithoutTheMark` |
-| Follow beside a list row's "…" (Follow, Follow back, Requested, "✓ Following" then the fold) | `AuthorFollowButton`, through `PostAuthorBandView` and `AuthorFollowOffer` | PostGrid | |
+| Follow beside a list row's "…" or on a text page's caption line, left of the ♥ count (Follow, Follow back, Requested, "✓ Following" then the fold) | `AuthorFollowButton` (`.row` in `PostAuthorBandView`, `.compact` in `CommentRowView`), `AuthorFollowOffer`; a host with its own Follow turns the bands' off (`PostGridPage.offersAuthorFollow`) | PostGrid | |
 | A remote picture | `MediaSlot`, `CoverSlot`, `ImageContentView` | MediaCore / `MediaUI` | `BareImageLoadGuardTests`, `DirectPipelineReadGuardTests` |
 | A banner | `HeroBannerView` through `HeroHeaderView` | HeroPage | `HandMadeBannerGuardTests` |
 | A page with a hero header | HeroPage | HeroPage | `HeroPageArithmeticGuardTests` |
