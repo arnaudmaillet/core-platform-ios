@@ -15,6 +15,12 @@ import UIKit
 ///
 /// ⚠️ PER WINDOW, AND RELEASED IN EVERY TEST: `FlightActivity` is keyed by
 /// window, so a flight begun here stills nothing in another suite's windows.
+///
+/// ⚠️ THE TESTS' FLIGHT NEVER ENDS BY ITSELF (#2590): a real flight releases
+/// itself after `maximumHold`, 10 s of wall clock, and a starved runner spent
+/// longer than that waiting for the art — the flight had landed by itself,
+/// and the emotes played. Every expectation made during the flight first
+/// checks it is still up, so an early end fails as that.
 @MainActor
 @Suite(.serialized, .sharesMainThread)
 struct EmoteLabelFlightTests {
@@ -89,6 +95,18 @@ struct EmoteLabelFlightTests {
         return label
     }
 
+    /// A flight in `window` that lasts until the test releases it.
+    private func holdFlight(in window: UIWindow) -> FlightActivity.Lease {
+        FlightActivity.begin(in: window, maximumHold: .infinity)
+    }
+
+    /// Whether the test's flight is still up over `label`. Asked through the
+    /// label: a window has no `window` of its own, so asking the window
+    /// itself always answers no.
+    private func isInFlight(_ label: EmoteLabel) -> Bool {
+        FlightActivity.isActive(for: label)
+    }
+
     private func players(of label: EmoteLabel) -> [AnimatedIconView] {
         label.artViews.compactMap { $0 as? AnimatedIconView }
     }
@@ -100,9 +118,10 @@ struct EmoteLabelFlightTests {
         let engine = try warmEngine(["noto:1f525", "lol"])
         let window = makeWindow()
         defer { window.isHidden = true }
-        let flight = FlightActivity.begin(in: window)
+        let flight = holdFlight(in: window)
         defer { flight.release() }
         let label = arrivingLabel(in: window, engine: engine)
+        try #require(isInFlight(label), "the flight ended before the test released it")
 
         #expect(label.placedEmoteCount == 2, "the arriving label placed nothing: its squares stay empty")
         let views = players(of: label)
@@ -124,12 +143,13 @@ struct EmoteLabelFlightTests {
         defer { gate.open() }
         let window = makeWindow()
         defer { window.isHidden = true }
-        let flight = FlightActivity.begin(in: window)
+        let flight = holdFlight(in: window)
         defer { flight.release() }
         // Two Noto emoji: their art is a BAKE, whose skeleton shows at once (a
         // house `:code:` from the map catalogue is a read, shown after a grace,
         // #987).
         let label = arrivingLabel(in: window, engine: gatedEngine(gate), text: "so 🔥 good 😎")
+        try #require(isInFlight(label), "the flight ended before the test released it")
 
         #expect(label.placedEmoteCount == 2, "the arriving label placed nothing")
         #expect(label.skeletonCount == 2, "no skeleton while the art is on its way")
@@ -138,6 +158,7 @@ struct EmoteLabelFlightTests {
         gate.open()
         let landed = await settle { label.showingEmoteCount + label.posterEmoteCount == 2 }
         try #require(landed, "the art never came")
+        try #require(isInFlight(label), "the flight ended before the art landed")
         let views = players(of: label)
         #expect(views.allSatisfy { $0.isPaused }, "art landing mid-flight plays")
         #expect(views.allSatisfy { $0.displayedFrame == Self.posterIndex }, "not held on the poster frame")
@@ -149,8 +170,10 @@ struct EmoteLabelFlightTests {
         let engine = try warmEngine(["noto:1f525", "lol"])
         let window = makeWindow()
         defer { window.isHidden = true }
-        let flight = FlightActivity.begin(in: window)
+        let flight = holdFlight(in: window)
+        defer { flight.release() }
         let label = arrivingLabel(in: window, engine: engine)
+        try #require(isInFlight(label), "the flight ended before the test released it")
         let held = players(of: label)
         try #require(held.count == 2 && held.allSatisfy { $0.isPaused })
 
@@ -176,13 +199,14 @@ struct EmoteLabelFlightTests {
         let before = players(of: label)
         try #require(before.count == 2 && before.allSatisfy { !$0.isPaused })
 
-        let flight = FlightActivity.begin(in: window)
+        let flight = holdFlight(in: window)
         defer { flight.release() }
         label.setNeedsLayout()
         label.layoutIfNeeded()
         let held = before.map(\.displayedFrame)
         label.setNeedsLayout()
         label.layoutIfNeeded()
+        try #require(isInFlight(label), "the flight ended before the test released it")
 
         let during = players(of: label)
         #expect(zip(before, during).allSatisfy { $0 === $1 } && during.count == 2, "the flight placed the emotes again")
