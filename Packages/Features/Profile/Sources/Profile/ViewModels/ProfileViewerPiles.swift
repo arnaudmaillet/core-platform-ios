@@ -239,6 +239,24 @@ final class ProfileViewerPiles {
     /// Whether there is any history to clear.
     var hasHistory: Bool { !(viewHistory?.postIDs.isEmpty ?? true) }
 
+    // MARK: - Saved's select mode (the owner, 2026-11-28)
+
+    /// Whether the Saved page shows anything to select: its tiles, which may
+    /// come from the server's list on a device whose pile is empty.
+    var hasSaved: Bool {
+        if case .content(let tiles) = host.galleryStore.saved { return !tiles.isEmpty }
+        return false
+    }
+
+    /// Unsaves several posts at once — the Saved page's select mode: each
+    /// leaves the pile as the bookmark button's unsave does (the server told
+    /// too), then one reload.
+    func removeFromSaved(_ ids: [PostID]) {
+        guard let bookmarks, !ids.isEmpty else { return }
+        for id in ids where bookmarks.isSaved(id.rawValue) { bookmarks.toggle(id.rawValue) }
+        loadSavedPosts()
+    }
+
     /// The clock History's days are read against. Tests set it.
     var now: @Sendable () -> Date = Date.init
 

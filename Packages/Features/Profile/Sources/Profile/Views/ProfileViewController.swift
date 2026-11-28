@@ -324,7 +324,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         }
         viewModel.onGalleryChange = { [weak self] snapshot in
             self?.lastGallerySnapshot = snapshot
-            self?.historySelectMode.historyChanged()
+            self?.pileSelectMode.pilesChanged()
             self?.tabPages.showTabs(for: snapshot)
             HeroScreenCost.measure("landing.gallery") { self?.galleryPager.render(snapshot) }
             // The media gallery "View all" pushed, if it is up, grows with
@@ -498,7 +498,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         // Leaving the profile ends History's select mode.
-        setSelectingHistory(false, restoresFoot: false)
+        setSelectingPile(false, restoresFoot: false)
         // The toolbar is the stack's, put away unless the screen taking over
         // brings items of its own (the relations screen, the feed).
         if !relationActions.toolbarItems.isEmpty { ProfileRelationToolbar.hide(leaving: self, animated: animated) }
@@ -758,23 +758,23 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     var tabs: [ProfileTab] { tabPages.tabs }
     var shownTab: ProfileTab? { tabPages.shownTab }
 
-    // MARK: - History's select mode (the owner, 2026-11-08)
+    // MARK: - The piles' select mode (History 2026-11-08, Saved 2026-11-28)
 
-    /// History's select mode (`ProfileHistorySelection`, #2522).
-    private(set) lazy var historySelectMode = ProfileHistorySelection(host: self)
-    var isSelectingHistory: Bool { historySelectMode.isSelectingHistory }
-    var historySelectBarItem: UIBarButtonItem? { historySelectMode.historySelectBarItem }
-    var historyRemoveBarItem: UIBarButtonItem? { historySelectMode.historyRemoveBarItem }
-    func setSelectingHistory(_ selecting: Bool, restoresFoot: Bool = true) {
-        historySelectMode.setSelectingHistory(selecting, restoresFoot: restoresFoot)
+    /// History's and Saved's select mode (`ProfilePileSelection`, #2522).
+    private(set) lazy var pileSelectMode = ProfilePileSelection(host: self)
+    var isSelectingPile: Bool { pileSelectMode.isSelecting }
+    var pileSelectBarItem: UIBarButtonItem? { pileSelectMode.selectBarItem }
+    var pileRemoveBarItem: UIBarButtonItem? { pileSelectMode.removeBarItem }
+    func setSelectingPile(_ selecting: Bool, restoresFoot: Bool = true) {
+        pileSelectMode.setSelecting(selecting, restoresFoot: restoresFoot)
     }
 
     #if DEBUG
     var debugHistoryPage: (any PostGridPage)? { galleryPager.builtPage(for: .history) }
     var debugAllowsPaging: Bool { galleryPager.allowsPaging }
-    var debugHistoryRemoveTitle: String? { historySelectMode.debugHistoryRemoveTitle }
-    var debugHistoryRemoveEnabled: Bool { historySelectMode.debugHistoryRemoveEnabled }
-    func debugTapHistoryRemove() { historySelectMode.debugTapHistoryRemove() }
+    var debugPileRemoveTitle: String? { pileSelectMode.debugRemoveTitle }
+    var debugPileRemoveEnabled: Bool { pileSelectMode.debugRemoveEnabled }
+    func debugTapPileRemove() { pileSelectMode.debugTapRemove() }
     #endif
 
     /// A post opened from History is covering the screen: the screen is
@@ -1078,7 +1078,7 @@ extension ProfileViewController: ProfileRelationActionsHost {}
 
 extension ProfileViewController: ProfileTabPagesHost {}
 
-extension ProfileViewController: ProfileHistorySelectionHost {}
+extension ProfileViewController: ProfilePileSelectionHost {}
 
 extension ProfileViewController: ProfilePostOpeningHost {}
 

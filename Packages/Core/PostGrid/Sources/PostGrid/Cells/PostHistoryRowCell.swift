@@ -183,7 +183,7 @@ public final class PostHistoryRowCell: UICollectionViewListCell {
     /// The selection circle's side, and the room either side of it — from
     /// the row's leading edge, and to the square (the owner: the circle
     /// centred in its gap, not against the picture).
-    public static let selectionMarkSide: CGFloat = 24
+    public static let selectionMarkSide: CGFloat = RowSelectionMark.side
     public static let selectionMarkGap: CGFloat = 16
     /// How far the square, the title and the author slide to make room.
     public static var selectionShift: CGFloat { selectionMarkSide + selectionMarkGap }
@@ -191,7 +191,7 @@ public final class PostHistoryRowCell: UICollectionViewListCell {
     /// the likes, which stay where they are.
     static let selectionFade: CGFloat = 28
 
-    private let selectionMark = UIImageView()
+    private let selectionMark = RowSelectionMark()
     public private(set) var isSelecting = false
     private var isSelectedRow = false
 
@@ -225,16 +225,9 @@ public final class PostHistoryRowCell: UICollectionViewListCell {
         UIView.animate(springDuration: 0.4, bounce: 0.1, options: [.allowUserInteraction, .beginFromCurrentState], animations: place)
     }
 
-    /// The circle — empty, or the brand's check — swapped by the symbol's
-    /// own Replace.
+    /// The circle — empty, or the brand's check (`RowSelectionMark`).
     private func applySelectionMark(animated: Bool) {
-        let image = UIImage(systemName: isSelectedRow ? "checkmark.circle.fill" : "circle")
-        selectionMark.tintColor = isSelectedRow ? Palette.tint : .tertiaryLabel
-        if animated, !MotionPreference.reducesMotion, let image {
-            selectionMark.setSymbolImage(image, contentTransition: .replace)
-        } else {
-            selectionMark.image = image
-        }
+        selectionMark.setChecked(isSelectedRow, animated: animated)
     }
 
     /// Where the slid parts and the circle stand for the mode.
@@ -388,12 +381,8 @@ public final class PostHistoryRowCell: UICollectionViewListCell {
 
         square.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(square)
-        selectionMark.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: 22, weight: .regular)
-        selectionMark.contentMode = .center
         selectionMark.alpha = 0
-        selectionMark.isAccessibilityElement = false
         contentView.addSubview(selectionMark)
-        applySelectionMark(animated: false)
 
         titleLabel.textColor = .label
         titleLabel.numberOfLines = 1

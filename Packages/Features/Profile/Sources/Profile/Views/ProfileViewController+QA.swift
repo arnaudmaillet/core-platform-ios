@@ -233,8 +233,8 @@ extension ProfileViewController {
         selectTab(at: history)
         _ = galleryPager.debugSetVerticalOffset(headerTravel + 60)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
-            self?.setSelectingHistory(true)
-            print("[history-select] selecting=\(self?.isSelectingHistory ?? false)")
+            self?.setSelectingPile(true)
+            print("[history-select] selecting=\(self?.isSelectingPile ?? false)")
         }
     }
 
@@ -336,6 +336,8 @@ extension ProfileViewController {
     /// The bar's groups by identifier, the spaces left out: the leading
     /// group after the chevron, the trailing one from the bar's edge in.
     var debugLeadingIDs: [String] { Self.identifiers(navigationItem.leftBarButtonItems) }
+    /// Saved's page, once built (its select mode, the owner 2026-11-28). Tests.
+    var debugSavedPage: (any PostGridPage)? { galleryPager.builtPage(for: .saved) }
     var debugTrailingIDs: [String] { Self.identifiers(navigationItem.rightBarButtonItems) }
     private static func identifiers(_ items: [UIBarButtonItem]?) -> [String] {
         (items ?? []).compactMap { item in

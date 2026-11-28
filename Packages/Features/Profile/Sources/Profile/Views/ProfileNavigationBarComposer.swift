@@ -21,9 +21,9 @@ protocol ProfileNavigationBarComposerHost: UIViewController {
     /// shell's bell and wears the gear.
     var isAccountRoot: Bool { get }
     var selector: HeroPageSelector { get }
-    var isSelectingHistory: Bool { get }
-    var historySelectBarItem: UIBarButtonItem? { get }
-    var historyRemoveBarItem: UIBarButtonItem? { get }
+    var isSelectingPile: Bool { get }
+    var pileSelectBarItem: UIBarButtonItem? { get }
+    var pileRemoveBarItem: UIBarButtonItem? { get }
     func isActionRowUnderBar(travelled: CGFloat) -> Bool
     func makeMoreMenu() -> UIMenu
     func pushSettings()
@@ -36,8 +36,8 @@ protocol ProfileNavigationBarComposerHost: UIViewController {
 /// ```
 ///                      at rest                  past the threshold
 /// someone else's       [‹] … [⋯]                [‹][selector] … [⋯]
-/// the own profile      [🔔] … [✎][⋯ ⚙]           [🔔][selector] … [✎]
-///   on History                                  [🔔][selector] … [Select]
+/// the own profile      [🔔] … [✎][⋯ ⚙]           [🔔][selector] …
+///   on History, Saved                           [🔔][selector] … [Select]
 ///   selecting          [🔔][Remove (n)] … [Done][⋯ ⚙]   [🔔][Remove (n)] … [Done]
 /// ```
 ///
@@ -132,7 +132,7 @@ final class ProfileNavigationBarComposer {
     }
 
     /// ✎, Edit profile: quiet at rest and past the threshold alike (the
-    /// owner, 2026-11-28: the primary belongs to Select and Done, History's
+    /// owner, 2026-11-28: the primary belongs to Select and Done, the piles'
     /// corner word, not to ✎).
     private var editItem: UIBarButtonItem {
         trailingStore.item(Self.editItemID) {
@@ -176,34 +176,36 @@ final class ProfileNavigationBarComposer {
     ///
     /// - someone else's: `[⋯]` — nothing on a page for no one (#1406);
     /// - the own, at rest: `[✎][⋯ ⚙]` — ⋯ and the gear in one bubble, ✎ in
-    ///   its own (Done in its place while selecting History);
-    /// - the own, past the threshold: `[✎]`, `[Select]` in the primary on History,
-    ///   `[Done]` while selecting (#2307).
+    ///   its own (Done in its place while selecting a pile);
+    /// - the own, past the threshold (the owner, 2026-11-28): no ✎ on any
+    ///   tab — `[Select]` in the primary on History and Saved, `[Done]`
+    ///   while selecting (#2307), and NOTHING on the other tabs, where the
+    ///   selector has the bar's width after the bell to itself.
     private func trailingItems() -> [UIBarButtonItem] {
         guard isOwn else { return host.viewModel.namesNoOne ? [] : [moreItem] }
         // The own profile gone (#1406): the gear alone, its only way out.
         if host.viewModel.namesNoOne { return [settingsItem].compactMap { $0 } }
-        let lead = host.historySelectBarItem ?? editItem
-        guard !isPastThreshold else { return [lead] }
+        guard !isPastThreshold else { return [host.pileSelectBarItem].compactMap { $0 } }
+        let lead = host.pileSelectBarItem ?? editItem
         let pair = [settingsItem, moreItem].compactMap { $0 }
         let leadID = lead.identifier ?? Self.editItemID
         return pair + [trailingStore.separator(before: leadID), lead]
     }
 
     /// Whether the selector belongs in the bar now: past the threshold, a
-    /// strip placed (more than one page), and not while selecting History —
+    /// strip placed (more than one page), and not while selecting a pile —
     /// Remove stands in its place then, and the pages do not page.
     private var wantsSelectorInBar: Bool {
-        isPastThreshold && host.selector.isPlaced && !host.isSelectingHistory && !host.viewModel.namesNoOne
+        isPastThreshold && host.selector.isPlaced && !host.isSelectingPile && !host.viewModel.namesNoOne
     }
 
     /// The leading group: the bell on the tab root (a pushed profile's
     /// chevron is UIKit's), then the selector past the threshold, or
-    /// History's Remove while selecting — each in a platter of its own.
+    /// a pile's Remove while selecting — each in a platter of its own.
     private func leadingItems(selectorInBar: Bool) -> [UIBarButtonItem] {
         let lead = host.isAccountRoot ? leadingAccessoryItem : nil
-        if let remove = host.historyRemoveBarItem {
-            let separator = leadingStore.separator(before: remove.identifier ?? "profile.history.remove")
+        if let remove = host.pileRemoveBarItem {
+            let separator = leadingStore.separator(before: remove.identifier ?? ProfilePileSelection.removeItemID)
             return lead.map { [$0, separator, remove] } ?? [remove]
         }
         if selectorInBar, let selector = host.selector.barItem { return selector.leadingGroup(after: lead) }

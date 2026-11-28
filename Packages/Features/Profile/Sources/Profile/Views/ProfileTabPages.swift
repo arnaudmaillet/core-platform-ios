@@ -19,7 +19,8 @@ protocol ProfileTabPagesHost: UIViewController {
     var channels: ProfileChannelsViewModel? { get }
     var makeChannelCreation: (@MainActor () -> UIViewController?)? { get }
     var lastGallerySnapshot: ProfileViewModel.GallerySnapshot? { get }
-    func setSelectingHistory(_ selecting: Bool, restoresFoot: Bool)
+    var pileSelectMode: ProfilePileSelection { get }
+    func setSelectingPile(_ selecting: Bool, restoresFoot: Bool)
     func applyNavigationState(animated: Bool)
 }
 
@@ -86,15 +87,13 @@ final class ProfileTabPages {
         let changed = shownTab != tab
         shownTab = tab
         host.viewModel.setActiveTab(tab)
-        // Off the History page: it takes in what was viewed (#2170), and its
-        // select mode ends.
-        if tab != .history {
-            host.viewModel.releaseHistory()
-            host.setSelectingHistory(false, restoresFoot: true)
-        }
-        // History's Select stands in ✎'s place, and only there (#2307):
-        // leaving History past the threshold puts ✎ back, coming back brings
-        // Select.
+        // Off the History page: it takes in what was viewed (#2170).
+        if tab != .history { host.viewModel.releaseHistory() }
+        // Off the pile being selected: its select mode ends.
+        if host.pileSelectMode.selecting?.tab != tab { host.setSelectingPile(false, restoresFoot: true) }
+        // Past the threshold, Select stands at the bar's corner on History
+        // and Saved only (#2307, the owner 2026-11-28): leaving them empties
+        // the corner, coming back brings Select.
         if changed { host.applyNavigationState(animated: host.view.window != nil) }
     }
 

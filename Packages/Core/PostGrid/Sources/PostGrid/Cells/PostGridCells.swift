@@ -452,6 +452,9 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     var authorBandShowsPicture: Bool { authorBand.isShowingPicture }
 
     let card = UIView()
+    /// The select mode's circle, over the card's top-trailing corner (Saved,
+    /// the owner 2026-11-28) — `PostGridListRowCell+SelectMode.swift`.
+    let selectionMark = CardSelectionMark()
     /// The author band — shown only where the row's post actually carries an
     /// identity.
     ///
@@ -503,7 +506,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// The caption as the post carries it. The label shows a SHORTENED version
     /// while truncated, so the label's own text is not a copy of this and
     /// cannot be used in its place.
-    var fullCaption = ""
+    var fullCaption = "" { didSet { refreshSelectionLabel() } }
     /// The closing metric line.
     var metaRow: UIStackView!
     /// Where "Show more" sits inside the label's current attributed text, or
@@ -832,6 +835,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
             mediaHeight
         ]
         buildEmbedCard()
+        buildSelectionMark()
     }
 
     /// Whether the closing line shows anything at all, and the card's closer
@@ -1198,15 +1202,11 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         }
     }
 
-    /// The hairlines' frames in the row's space, nil when hidden. Tests.
-    public var debugRuleFrames: (top: CGRect?, bottom: CGRect?) {
-        layoutIfNeeded()
-        return (topRule.isHidden ? nil : topRule.frame, bottomRule.isHidden ? nil : bottomRule.frame)
-    }
-
-    /// The dress's ground, corner and edge as drawn. Tests.
-    public var debugDress: (fill: UIColor?, cornerRadius: CGFloat, borderWidth: CGFloat) {
-        (card.backgroundColor, card.layer.cornerRadius, card.layer.borderWidth)
+    /// The list's editing is the select mode: the card rests and wears its
+    /// circle (`applySelectMode`).
+    override public func updateConfiguration(using state: UICellConfigurationState) {
+        super.updateConfiguration(using: state)
+        applySelectMode(state)
     }
 
     // MARK: - Select Text — state here, behaviour in `PostGridListRowCell+SelectText.swift`

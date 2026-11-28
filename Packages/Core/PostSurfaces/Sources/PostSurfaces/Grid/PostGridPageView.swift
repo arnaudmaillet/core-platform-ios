@@ -2464,16 +2464,16 @@ final public class PostGridPageView: UIView {
         )
     }
 
-    // MARK: - The select mode (the profile's History, 2026-11-08)
+    // MARK: - The select mode (the profile's History 2026-11-08, Saved 2026-11-28)
 
     /// Whether the rows wear their selection circles now.
-    public var isSelectingRows: Bool { style == .rows && collectionView.isEditing }
+    public var isSelectingRows: Bool { [.rows, .list].contains(style) && collectionView.isEditing }
 
-    /// The rows' select mode: the list's own editing — each row draws its
-    /// circle and slides for it (`PostHistoryRowCell`); a tap selects, the
-    /// author and the menu rest. Leaving it drops the selection.
+    /// The select mode, a Rows or a List page's: the list's own editing — a
+    /// row slides for its circle (`PostHistoryRowCell`), a card rests under
+    /// one at its corner (`PostGridListRowCell`); a tap selects. Leaving drops the selection.
     public func setSelectingRows(_ selecting: Bool) {
-        guard style == .rows, selecting != collectionView.isEditing else { return }
+        guard [.rows, .list].contains(style), selecting != collectionView.isEditing else { return }
         collectionView.allowsMultipleSelectionDuringEditing = true
         if !selecting {
             for path in collectionView.indexPathsForSelectedItems ?? [] {
@@ -4585,9 +4585,9 @@ extension PostGridPageView: UICollectionViewDataSource, UICollectionViewDelegate
     }
 
     /// Whether a long press at `point` (in the collection view) lands on a
-    /// list card off its media and off any control.
+    /// list card off its media and off any control — never while selecting.
     func swallowsHold(at point: CGPoint) -> Bool {
-        guard let indexPath = collectionView.indexPathForItem(at: point),
+        guard !isSelectingRows, let indexPath = collectionView.indexPathForItem(at: point),
               let row = collectionView.cellForItem(at: indexPath) as? PostGridListRowCell else { return false }
         let local = collectionView.convert(point, to: row)
         // A text card has no media, and lifts whole (#1498).

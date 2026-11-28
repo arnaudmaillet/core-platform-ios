@@ -62,4 +62,15 @@ extension PostGridListRowCell {
         if !row { pressWash.alpha = 0 }
         setNeedsLayout()
     }
+
+    /// The hairlines' frames in the row's space, nil when hidden. Tests.
+    public var debugRuleFrames: (top: CGRect?, bottom: CGRect?) {
+        layoutIfNeeded()
+        return (topRule.isHidden ? nil : topRule.frame, bottomRule.isHidden ? nil : bottomRule.frame)
+    }
+
+    /// The dress's ground, corner and edge as drawn. Tests.
+    public var debugDress: (fill: UIColor?, cornerRadius: CGFloat, borderWidth: CGFloat) {
+        (card.backgroundColor, card.layer.cornerRadius, card.layer.borderWidth)
+    }
 }

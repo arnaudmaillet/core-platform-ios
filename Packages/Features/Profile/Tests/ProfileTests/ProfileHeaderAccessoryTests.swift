@@ -81,23 +81,22 @@ struct ProfileHeaderAccessoryTests {
         #expect(screen.headerView.debugShowsTitleChevron)
     }
 
-    /// Past the threshold: `[✎]`, quiet (the owner, 2026-11-28: the
-    /// primary is History's Select) — the SAME item (#2331) — ⋯ and the
-    /// gear gone; and back.
-    @Test func pastTheThresholdEditIsAlone() throws {
+    /// Past the threshold (the owner, 2026-11-28): no ✎ on any tab — on
+    /// Posts, nothing at the corner, ⋯ and the gear gone too; back at rest,
+    /// `[✎][⋯ ⚙]`, ✎ made afresh (an item that left its group comes back
+    /// new, `BarItemStore`) and quiet.
+    @Test func pastTheThresholdTheCornerIsEmptyOffThePiles() throws {
         let screen = ownProfile()
         screen.loadViewIfNeeded()
         let edit = try #require(screen.debugBarItem(ProfileNavigationBarComposer.editItemID))
 
         screen.debugSetPastThreshold(true)
-        #expect(screen.debugTrailingIDs == ["profile.edit"])
-        #expect(screen.debugBarItem(ProfileNavigationBarComposer.editItemID) === edit, "✎ was minted anew")
-        #expect(edit.style == .plain, "✎ is filled past the threshold")
+        #expect(screen.debugTrailingIDs.isEmpty, "past the threshold: \(screen.debugTrailingIDs)")
 
         screen.debugSetPastThreshold(false)
         #expect(screen.debugTrailingIDs == ["profile.settings", "profile.more", "profile.edit"])
-        #expect(screen.debugBarItem(ProfileNavigationBarComposer.editItemID) === edit)
-        #expect(edit.style == .plain)
+        let back = try #require(screen.debugBarItem(ProfileNavigationBarComposer.editItemID))
+        #expect(back.style == .plain && edit.style == .plain, "✎ is filled")
     }
 
     /// QR code is a row of the own ⋯ menu (#2475 §4): the header's QR

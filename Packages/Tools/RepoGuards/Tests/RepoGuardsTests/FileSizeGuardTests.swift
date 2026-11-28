@@ -42,7 +42,7 @@ struct FileSizeGuardTests {
         "Packages/Core/MediaPlayback/Sources/MediaPlayback/VideoRenderView.swift": 1246,
         "Packages/Core/PostGrid/Sources/PostGrid/Cells/MediaCarouselView.swift": 1625,
         "Packages/Core/PostGrid/Sources/PostGrid/Cells/PostGridCells.swift": 1341,
-        "Packages/Core/PostGrid/Sources/PostGrid/Cells/PostHistoryRowCell.swift": 1116,
+        "Packages/Core/PostGrid/Sources/PostGrid/Cells/PostHistoryRowCell.swift": 1105,
         "Packages/Core/PostGrid/Sources/PostGrid/Playback/GridVideoPlaybackCoordinator.swift": 1650,
         "Packages/Core/PostSurfaces/Sources/PostSurfaces/Grid/PostGridFlightCard.swift": 1084,
         "Packages/Core/PostSurfaces/Sources/PostSurfaces/Grid/PostGridPageView.swift": 4698,
