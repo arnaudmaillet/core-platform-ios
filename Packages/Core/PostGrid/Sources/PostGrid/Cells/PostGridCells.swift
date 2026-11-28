@@ -452,7 +452,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     var authorBandShowsPicture: Bool { authorBand.isShowingPicture }
 
     let card = UIView()
-    /// The select mode's circle, over the card's top-trailing corner (Saved,
+    /// The select mode's circle, at the row's leading edge, the card slid (Saved,
     /// the owner 2026-11-28) — `PostGridListRowCell+SelectMode.swift`.
     let selectionMark = CardSelectionMark()
     /// The author band — shown only where the row's post actually carries an

@@ -8,9 +8,10 @@ import UIKit
 @testable import PostGrid
 
 /// A list card's select mode (the profile's Saved, the owner 2026-11-28):
-/// History's circle over the card's top-trailing corner, shown only while
-/// the list edits and checked once the card is selected; the card rests
-/// whole meanwhile, so a tap anywhere on it reaches the list.
+/// History's behaviour — the whole card slides toward the trailing edge and
+/// the circle comes in at the leading edge, shown only while the list edits
+/// and checked once the card is selected; the card rests whole meanwhile,
+/// so a tap anywhere on it reaches the list.
 @MainActor
 struct ListCardSelectModeTests {
     private static let width: CGFloat = 394
@@ -47,12 +48,14 @@ struct ListCardSelectModeTests {
         cell.updateConfiguration(using: Self.state(of: cell, editing: false, selected: false))
         #expect(cell.debugSelectionMark == (shown: false, checked: false))
         #expect(cell.debugCardTakesTouches)
+        #expect(cell.debugCardSlide == 0)
         #expect(!cell.isAccessibilityElement, "the card is one element at rest")
     }
 
-    /// Selecting: the circle shows at the card's top-trailing corner, 12 pt
-    /// in, empty until the card is selected, then checked; the card rests
-    /// and speaks as one selectable element.
+    /// Selecting: the card slides by History's shift, the circle shows at
+    /// the row's leading edge on the card's middle, empty until the card is
+    /// selected, then checked; the card rests and speaks as one selectable
+    /// element.
     @Test func theSelectModeShowsTheCircleAndChecksItOnSelection() {
         let cell = Self.cell()
         cell.updateConfiguration(using: Self.state(of: cell, editing: true, selected: false))
@@ -63,10 +66,10 @@ struct ListCardSelectModeTests {
         #expect(!cell.accessibilityTraits.contains(.selected))
 
         let frame = cell.debugSelectionMarkFrame
-        let inset = PostGridListRowCell.selectionMarkInset
         #expect(abs(frame.width - RowSelectionMark.side) < 0.5, "the circle's side: \(frame)")
-        #expect(abs(frame.minY - inset) < 0.5, "the circle is not \(inset) pt under the card's top: \(frame)")
-        #expect(abs(cell.bounds.width - frame.maxX - inset) < 0.5, "the circle is not \(inset) pt in from the trailing edge: \(frame)")
+        #expect(abs(frame.minX) < 0.5, "the circle is not at the row's leading edge: \(frame)")
+        #expect(abs(cell.debugCardSlide - PostGridListRowCell.selectionShift) < 0.5, "the card is not slid: \(cell.debugCardSlide)")
+        #expect(PostGridListRowCell.selectionShift == PostHistoryRowCell.selectionShift, "not History's shift")
 
         cell.updateConfiguration(using: Self.state(of: cell, editing: true, selected: true))
         #expect(cell.debugSelectionMark == (shown: true, checked: true))
@@ -81,6 +84,7 @@ struct ListCardSelectModeTests {
         cell.updateConfiguration(using: Self.state(of: cell, editing: false, selected: false))
         #expect(cell.debugSelectionMark == (shown: false, checked: false))
         #expect(cell.debugCardTakesTouches)
+        #expect(cell.debugCardSlide == 0, "the card did not slide back")
         #expect(!cell.isAccessibilityElement)
         #expect(cell.accessibilityLabel == nil)
         #expect(!cell.accessibilityTraits.contains(.selected))
@@ -97,12 +101,12 @@ struct ListCardSelectModeTests {
         #expect(cell.debugSelectionMark.shown, "the mode is the list's: a recycled card keeps its circle")
     }
 
-    /// A text card wears the same circle at the same corner.
+    /// A text card slides and wears the same circle at the same edge.
     @Test func aTextCardWearsTheSameCircle() {
         let cell = Self.cell(Self.post(kind: .text))
         cell.updateConfiguration(using: Self.state(of: cell, editing: true, selected: true))
         #expect(cell.debugSelectionMark == (shown: true, checked: true))
         let frame = cell.debugSelectionMarkFrame
-        #expect(abs(cell.bounds.width - frame.maxX - PostGridListRowCell.selectionMarkInset) < 0.5)
+        #expect(abs(frame.minX) < 0.5 && abs(cell.debugCardSlide - PostGridListRowCell.selectionShift) < 0.5)
     }
 }

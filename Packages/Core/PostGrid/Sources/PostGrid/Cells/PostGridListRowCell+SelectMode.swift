@@ -5,29 +5,36 @@ import UIKit
 extension PostGridListRowCell {
     // MARK: - The select mode (the profile's Saved, 2026-11-28)
 
-    /// How far the circle stands in from the card's top and trailing edges.
-    public static let selectionMarkInset: CGFloat = 12
+    /// The circle's place and the card's slide, as on History's rows
+    /// (`PostHistoryRowCell.selectionMarkSide` / `selectionMarkGap`, the
+    /// owner 2026-11-28: "the same behaviour as History"): the circle at the
+    /// row's leading edge, the gap after it, and the whole card slid by both.
+    public static var selectionShift: CGFloat {
+        PostHistoryRowCell.selectionMarkSide + PostHistoryRowCell.selectionMarkGap
+    }
 
-    /// The circle over the card's top-trailing corner, above everything the
-    /// card draws, its media included.
+    /// The circle at the row's leading edge, centred on the card's height —
+    /// where the slid card leaves room for it.
     func buildSelectionMark() {
         selectionMark.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(selectionMark)
         NSLayoutConstraint.activate([
-            selectionMark.topAnchor.constraint(equalTo: contentView.topAnchor, constant: Self.selectionMarkInset),
-            selectionMark.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -Self.selectionMarkInset),
+            selectionMark.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            selectionMark.centerYAnchor.constraint(equalTo: card.centerYAnchor),
             selectionMark.widthAnchor.constraint(equalToConstant: RowSelectionMark.side),
             selectionMark.heightAnchor.constraint(equalToConstant: RowSelectionMark.side)
         ])
     }
 
     /// The select mode is the list's editing, as on History's rows
-    /// (`PostHistoryRowCell`): the card does not slide — the circle comes
-    /// over its corner — and the WHOLE CARD RESTS. Its media (the carousel's
-    /// tap, pan and hold), the author, the "...", the caption's links and
-    /// Show more, the voice, the showcase and every action on the closing
-    /// line stop taking touches, so a tap anywhere on the card reaches the
-    /// list, which selects the row. Leaving gives them back.
+    /// (`PostHistoryRowCell`, the owner 2026-11-28): the WHOLE CARD slides
+    /// toward the trailing edge by `selectionShift` and the circle comes in
+    /// at the leading edge, with History's spring; its far edge runs past
+    /// the row, as a Mail row's does. The card also RESTS: its media, the
+    /// author, the "...", the caption's links and Show more, the voice, the
+    /// showcase and every action on the closing line stop taking touches,
+    /// so a tap anywhere on the card reaches the list, which selects the
+    /// row. Leaving slides it back and gives them back.
     func applySelectMode(_ state: UICellConfigurationState) {
         let selecting = state.isEditing
         card.isUserInteractionEnabled = !selecting
@@ -46,7 +53,12 @@ extension PostGridListRowCell {
         // belongs before it fades and grows in — never grown from the
         // corner by a pass inside the list's own transition.
         UIView.performWithoutAnimation { contentView.layoutIfNeeded() }
-        selectionMark.setShown(selecting, animated: window != nil)
+        let sign: CGFloat = effectiveUserInterfaceLayoutDirection == .rightToLeft ? -1 : 1
+        let slide = { [card] in
+            card.transform = selecting ? CGAffineTransform(translationX: Self.selectionShift * sign, y: 0) : .identity
+        }
+        let animated = window != nil && !MotionPreference.reducesMotion
+        selectionMark.setShown(selecting, animated: animated, alongside: slide)
     }
 
     /// The card's words for VoiceOver while selecting, nil otherwise —
@@ -69,20 +81,16 @@ extension PostGridListRowCell {
 
     /// Whether the card takes touches now. Tests.
     public var debugCardTakesTouches: Bool { card.isUserInteractionEnabled }
+
+    /// How far the card is slid toward the trailing edge now. Tests.
+    public var debugCardSlide: CGFloat { card.transform.tx }
 }
 
-/// A list card's selection circle: History's (`RowSelectionMark`) on a soft
-/// ground and a light shadow, since it stands over the media as often as
-/// over the page — the empty circle in `.tertiaryLabel` alone vanished on a
-/// bright photograph. The ground sits inside the ring, so on a row's page
-/// it is the page; under the check it is the tick's ink.
+/// A list card's selection circle: History's (`RowSelectionMark`), at the
+/// row's leading edge on the page, where the slid card left room — nothing
+/// under it, as on History's rows (the owner, 2026-11-28).
 final class CardSelectionMark: UIView {
-    /// The ground's side: inside the ring's stroke, so its edge never shows
-    /// past the circle.
-    static let groundSide: CGFloat = 18
-
     let mark = RowSelectionMark()
-    private let ground = UIView()
     /// Whether it stands shown — the mode — whatever its fade is doing.
     private(set) var isShown = false
 
@@ -90,15 +98,7 @@ final class CardSelectionMark: UIView {
         super.init(frame: CGRect(x: 0, y: 0, width: RowSelectionMark.side, height: RowSelectionMark.side))
         isUserInteractionEnabled = false
         isAccessibilityElement = false
-        ground.backgroundColor = .systemBackground.withAlphaComponent(0.85)
-        ground.layer.cornerRadius = Self.groundSide / 2
-        ground.isUserInteractionEnabled = false
-        addSubview(ground)
         addSubview(mark)
-        layer.shadowColor = UIColor.black.cgColor
-        layer.shadowOpacity = 0.2
-        layer.shadowRadius = 3
-        layer.shadowOffset = CGSize(width: 0, height: 1)
         applyPlacement()
     }
 
@@ -107,26 +107,20 @@ final class CardSelectionMark: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        let middle = CGPoint(x: bounds.midX, y: bounds.midY)
         mark.bounds = bounds
-        mark.center = middle
-        ground.bounds = CGRect(x: 0, y: 0, width: Self.groundSide, height: Self.groundSide)
-        ground.center = middle
-        // The shadow of the circle, not of the layer's content: no
-        // offscreen pass per card.
-        let ring = bounds.insetBy(dx: 2, dy: 2)
-        layer.shadowPath = UIBezierPath(ovalIn: ring).cgPath
+        mark.center = CGPoint(x: bounds.midX, y: bounds.midY)
     }
 
-    /// Fades and grows in (or out) with History's spring, unless the viewer
-    /// reduces motion.
-    func setShown(_ shown: Bool, animated: Bool) {
+    /// Fades and grows in (or out) with History's spring, `alongside` (the
+    /// card's slide) in the same animation; at once when not `animated`.
+    func setShown(_ shown: Bool, animated: Bool, alongside: @escaping () -> Void = {}) {
         guard shown != isShown else { return }
         isShown = shown
-        guard animated, !MotionPreference.reducesMotion else { return applyPlacement() }
+        let change = { self.applyPlacement(); alongside() }
+        guard animated else { return change() }
         UIView.animate(
             springDuration: 0.4, bounce: 0.1, options: [.allowUserInteraction, .beginFromCurrentState],
-            animations: applyPlacement
+            animations: change
         )
     }
 

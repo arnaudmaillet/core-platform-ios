@@ -2470,8 +2470,8 @@ final public class PostGridPageView: UIView {
     public var isSelectingRows: Bool { [.rows, .list].contains(style) && collectionView.isEditing }
 
     /// The select mode, a Rows or a List page's: the list's own editing — a
-    /// row slides for its circle (`PostHistoryRowCell`), a card rests under
-    /// one at its corner (`PostGridListRowCell`); a tap selects. Leaving drops the selection.
+    /// row slides for its circle (`PostHistoryRowCell`), and so does a list
+    /// card, whole (`PostGridListRowCell`); a tap selects. Leaving drops the selection.
     public func setSelectingRows(_ selecting: Bool) {
         guard [.rows, .list].contains(style), selecting != collectionView.isEditing else { return }
         collectionView.allowsMultipleSelectionDuringEditing = true
