@@ -160,6 +160,68 @@ struct MapTextBubbleTests {
         #expect(view.card.bounds.size == view.bounds.size, "the re-faced picture is not the marker's size")
     }
 
+    private enum Kind: CaseIterable { case oneLine, threeLines, voice, showcase }
+
+    /// A bubble's content of each kind: one line, three, a voice, a showcase.
+    private static func content(_ kind: Kind) -> MapTextBubbleView.Content {
+        var post = GalleryPost(
+            id: PostID("p-\(kind)"), kind: .text, isRepost: false, thumbnailURL: nil,
+            caption: kind == .oneLine ? "Hi" : "Golden hour at the pier, the light hit the water and everyone stopped talking",
+            publishedAtMS: 1_800_000_000_000,
+            authorID: ProfileID("ava"), authorName: "Ava Moreau", authorHandle: "ava"
+        )
+        switch kind {
+        case .voice:
+            post.voice = PostVoice(assetID: "voice-post-hike", url: URL(fileURLWithPath: "/tmp/hike.m4a"),
+                                   duration: 12.6, waveform: Array(repeating: 14, count: 100))
+        case .showcase:
+            post.embed = .channel(ChannelEmbed(
+                conversationID: ConversationID("ch-printroom"), name: "Print room", description: "Darkroom hours.",
+                subscriberCount: 820, visibility: .public, viewerState: .none
+            ))
+        default: break
+        }
+        return .of(post, now: Date(timeIntervalSince1970: 1_800_007_200), showsVoice: kind == .voice,
+                   showsEmbed: kind == .showcase)
+    }
+
+    /// Every kind of bubble: one radius at its four corners, concentric with
+    /// the marker and half the height at most; the column centred; the
+    /// marker in the middle of its left end, the bubble centred on the
+    /// marker's place.
+    @Test func everyBubbleIsRoundAboutItsMarkerCentredOnIt() throws {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        window.isHidden = false
+        defer { window.isHidden = true }
+        let side = 44 * MapFeaturedHalo.scale
+        let padding = MapTextBubbleView.markerPadding
+        let corners: [UIRectCorner] = [.topLeft, .topRight, .bottomLeft, .bottomRight]
+        for kind in Kind.allCases {
+            let bubble = MapTextBubbleView()
+            bubble.markerSide = side
+            bubble.setContent(Self.content(kind))
+            window.addSubview(bubble)
+            bubble.frame = CGRect(origin: CGPoint(x: 20, y: 300), size: bubble.sizeThatFits(.zero))
+            bubble.layoutIfNeeded()
+            let radius = min(side / 2 + padding, bubble.bounds.height / 2)
+            let drawn = corners.map { bubble.debugGlass.effectiveRadius(corner: $0) }
+            for corner in drawn {
+                #expect(abs(corner - radius) < 0.5, "\(kind): \(drawn), not \(radius)")
+            }
+            #expect(abs(bubble.debugColumnFrame.midY - bubble.bounds.midY) < 0.5, "\(kind): the column is not centred")
+
+            let (host, card) = marker(at: 179, in: window)
+            let halo = MapFeaturedHalo()
+            halo.set(true, card: card, in: host, animated: false)
+            halo.setBubble(Self.content(kind), card: card, in: host, animated: false)
+            let shown = try #require(halo.debugBubble, "\(kind): no bubble")
+            #expect(abs(card.frame.midY - shown.frame.midY) < 0.5, "\(kind): the marker left the middle")
+            #expect(abs(card.frame.minX - shown.frame.minX - padding) < 0.5, "\(kind): the marker left the left end")
+            #expect(abs(shown.center.x - card.center.x) < 0.5 && abs(shown.center.y - card.center.y) < 0.5,
+                    "\(kind): the bubble is not centred on the marker's place")
+        }
+    }
+
     /// The featured marker wears no ring: the bubble says which it is (the
     /// owner, 2026-11-09). Only the marker itself and its bubble are drawn.
     @Test func theFeaturedMarkerWearsNoRing() {
@@ -174,9 +236,13 @@ struct MapTextBubbleTests {
     }
 
     /// The bubble ships in every build (#2299): its flag is gone, as the
-    /// other text cards' flags are.
+    /// other text cards' flags are, and the rounded variant's (#2330).
     @Test func noFlagIsLeft() {
-        let retired: Set<String> = ["-map-text" + "-bubble", "-map-text-card", "-map-text" + "-bubble-around"]
+        let retired: Set<String> = [
+            "-map-text" + "-bubble", "-map-text-card", "-map-text" + "-bubble-around",
+            // The rounded bubble (#2330): the owner kept the round one.
+            "-map-bubble" + "-rounded",
+        ]
         #expect(!DebugFlags.all.contains { retired.contains($0.argument) })
     }
 
