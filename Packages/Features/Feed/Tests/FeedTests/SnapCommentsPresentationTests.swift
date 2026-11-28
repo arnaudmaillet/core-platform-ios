@@ -1372,7 +1372,13 @@ struct SnapCommentsPresentationTests {
             let avatar = try #require(Self.firstView(MonogramAvatarView.self, in: cell))
             #expect(!Self.isEffectivelyHidden(avatar))
             // And no material anywhere: a bubble is what this stopped being.
-            #expect(Self.allViews(UIVisualEffectView.self, in: cell).isEmpty)
+            // The caption row's Follow (#2419) is a control of its own, with
+            // its own platter, hidden while nothing is offered: it is not
+            // the caption's ground, so it is left out of the sweep.
+            let follow = try #require(Self.firstView(AuthorFollowButton.self, in: cell))
+            #expect(Self.isEffectivelyHidden(follow))
+            let materials = Self.allViews(UIVisualEffectView.self, in: cell).filter { !$0.isDescendant(of: follow) }
+            #expect(materials.isEmpty)
         }
     }
 
