@@ -82,22 +82,6 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     let channels: ProfileChannelsViewModel?
     /// The new channel's sheet, for the own tab's "Create a Channel" (#2232).
     let makeChannelCreation: (@MainActor () -> UIViewController?)?
-    /// The strip's home when the tab bar is under this screen. Nil on a pushed
-    /// profile, where the bottom toolbar carries it instead.
-    ///
-    /// ⚠️ INSTALLED ON APPEAR, REMOVED ON DISAPPEAR. `bottomAccessory` belongs
-    /// to the tab bar controller with no per-tab scope, so a band left up
-    /// floats over whatever is pushed on top and over the next tab.
-    /// Internal, not private, so the tests can assert what is IN the band —
-    /// the arrangement moved out of `toolbarItems`, which a test could read,
-    /// into a content view UIKit owns.
-    ///
-    /// THE TAB ROOT ONLY (#728): a pushed profile hosts the strip as a
-    /// bottom-leading toolbar item instead (`selectorItem`).
-    var selectorAccessory: SelectorAccessory? { selector.accessory }
-    /// The strip's toolbar item, on a pushed profile (#728) — the search
-    /// results' too (#881). Internal for tests.
-    var selectorItem: UIBarButtonItem? { selector.item }
     private var didSubordinatePagerToPop = false
     #if DEBUG
     /// The launch-argument hooks (`ProfileDebugHooks`, #2522), armed once
@@ -108,16 +92,9 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     var hasEditor: Bool { makeEditViewController != nil }
     var hasSettings: Bool { makeSettingsViewController != nil }
 
-    /// The loaded profile's @handle — the bar's title once known (#2248).
-    /// Stashed so `viewWillAppear` can bind the bar from current state before
-    /// the push animation starts, whenever the data beat the transition; a
-    /// change once the view is up rides the transition it lands in.
-    private(set) var currentHandle: String? {
-        didSet {
-            guard currentHandle != oldValue, isViewLoaded else { return }
-            alongsideTransition { screen, _ in screen.applyBarTitle() }
-        }
-    }
+    /// The loaded profile's @handle — the media gallery's title. Never the
+    /// bar's (#2475): the header carries the name and the handle.
+    private(set) var currentHandle: String?
 
     /// Internal (not private) only for the +QA hooks.
     private(set) var followButtonState: ProfileViewModel.FollowButton = .hidden
@@ -182,8 +159,8 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         self.shareTargeting = shareTargeting
         let header = ProfileHeaderView(imagePipeline: imagePipeline)
         header.bannerVideoPool = videoPlayback
-        // The header closes with the posts' hairline (#2289), over every tab.
-        header.drawsFootHairline = true
+        // No hairline under the header's selector (the owner, 2026-11-28,
+        // revising #2289 for the profile): the glass selector closes it.
         headerView = header
         // Every profile can carry Saved and Liked (#411, #837): someone
         // else's only when its owner shows them — the server answers empty
@@ -215,25 +192,19 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         }
         pager.presenceScreen = { [weak viewModel] in viewModel?.presenceScreen }
         galleryPager = pager
-        // The gallery's format selector — the SAME `PagedTabBar` For You and
-        // Messages wear, built `.navigationTitle` and told to FILL — at the
-        // foot of the screen in the home `trayPlacement` says.
+        // The pages' selector — the SAME `PagedTabBar` Messages wears — in the
+        // header at rest and in the bar's leading group past the threshold,
+        // on every profile (#2475): no tab bar accessory, no toolbar strip.
         super.init(
             header: header, pager: pager,
             selectorBar: PagedTabBar(titles: shown.map(\.title), style: .navigationTitle),
-            selectorPlacement: trayPlacement == .aboveBottomSafeArea ? .accessory : .toolbar
+            selectorPlacement: .header, selectorBarItemID: ProfileNavigationBarComposer.selectorItemID
         )
 
-        // Only for the toolbar-hosted tray, which owns the bottom of the screen
-        // and would otherwise stack with the tab bar. Safe with the standard pop
-        // gesture (chat thread precedent); the feed-pushed contexts hide the bar
-        // manually anyway, where this flag is a no-op.
-        //
-        // A tab root asks for `.aboveBottomSafeArea` instead, and must NOT hide
-        // the bar — that bar is how the viewer leaves. Deciding it from the same
-        // value that decides the tray keeps the two facts from drifting apart:
-        // hiding the bar and hosting the tray in the toolbar are the same
-        // statement about what owns the bottom of the screen.
+        // A pushed profile owns the bottom of the screen: someone else's
+        // relationship toolbar (#2475). A tab root asks for
+        // `.aboveBottomSafeArea` instead, and must NOT hide the bar — that bar
+        // is how the viewer leaves.
         hidesBottomBarWhenPushed = trayPlacement == .navigationToolbar
 
         // Seed the navigation chrome from the origin's synchronous identity
@@ -281,7 +252,6 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         // finished toolbar (the title and action slot fill in when the data
         // resolves, riding the same transition if one is still running).
         applyNavigationState()
-        heroPager.onPinnedSectionChanged = { [weak self] section in self?.navigationBarComposer.applyPinnedSection(section) }
         galleryPager.onNearEnd = { [weak self] in self?.viewModel.loadMoreGallery() }
         galleryPager.onRetry = { [weak self] in self?.viewModel.retryGallery() }
 
@@ -292,72 +262,41 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
             guard let self else { return }
             HeroScreenCost.measure("landing.relationship") {
                 self.followButtonState = state
-                // Follow ⇄ the bell is the tray's morph (#2302): the
-                // optimistic flip and its rollback both animate it.
+                // Follow ⇄ the bell in the toolbar (#2302, #2475): the
+                // optimistic flip and its rollback, by the bar's own morph.
                 self.applyHeaderAction()
                 self.applyRelationMark()
                 // Whose posts these are just changed: on the viewer's own
                 // profile the rows gain Edit and Delete, drawn now rather
                 // than once each row is configured again.
                 self.galleryPager.refreshAuthorMenus()
-                // The relationship usually resolves while the push/present
-                // is still animating; bind the bar inside the transition so
-                // the toolbar composes during the animation, not after it.
-                self.alongsideTransition { $0.applyNavigationState(animated: $1) }
                 self.noteLandingMilestone()
             }
         }
         viewModel.onRelationshipSettled = { [weak self] in
             guard let self else { return }
             // The button moves before the read counts as settled, so the
-            // tray could still presume someone else: a bell the answer rules
-            // out (the viewer's own handle, #800) goes now, and one a lookup
-            // has just resolved becomes usable.
+            // toolbar could still presume someone else: a bell the answer
+            // rules out (the viewer's own handle, #800) goes now, and one a
+            // lookup has just resolved becomes usable.
             self.applyHeaderAction()
             self.noteLandingMilestone()
         }
         headerView.onPicturesSettled = { [weak self] in self?.noteLandingMilestone() }
         viewModel.onMapPinButtonChange = { [weak self] _ in
-            HeroScreenCost.measure("landing.mapPin") {
-                // The rails' rows keep the menu open (`.keepsMenuPresented`):
-                // their checkmarks follow in place.
-                self?.relationActions.refreshVisibleMapRows()
-                self?.noteLandingMilestone()
-            }
+            HeroScreenCost.measure("landing.mapPin") { self?.noteLandingMilestone() }
         }
         viewModel.onMuteScopesChange = { [weak self] _ in
             // The bell changes at once — on the tap, and back on a refusal or
             // an Undo — beside its toast, never under it (#2143).
             self?.applyHeaderAction()
         }
-        // The tray's bell opens the scoped Mute menu (#689, #2302).
-        headerView.setBellMenu(relationActions.makeMuteMenu())
-        headerView.onFollowTapped = { [weak self] in
-            guard let self else { return }
-            MemberGates.perform(.follow(handle: viewModel.profile?.handle), from: self) { [weak self] in
-                // On at the optimistic flip; off is silent (#1886).
-                if self?.viewModel.toggleFollow() == true { Haptics.play(.toggleOn) }
-            }
-        }
-        headerView.onMessageTapped = { [weak self] in
-            guard let self else { return }
-            MemberGates.perform(.message(handle: viewModel.profile?.handle), from: self) { [weak self] in
-                self?.viewModel.messageTapped()
-            }
-        }
-        headerView.onEditTapped = { [weak self] in
-            self?.pushEditProfile()
-        }
         headerView.onWebsiteTapped = { url in
             UIApplication.shared.open(url)
-        }
-        headerView.onQRCodeTapped = { [weak self] in
-            self?.presentShareSheet()
         }
         headerView.onRelationshipsTapped = { [weak self] direction in
             self?.pushRelationships(direction)
         }
-        relationActions.configureMoreMenu()
         viewModel.onActionResult = { [weak self] result in
             self?.relationActions.render(result)
         }
@@ -385,7 +324,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         }
         viewModel.onGalleryChange = { [weak self] snapshot in
             self?.lastGallerySnapshot = snapshot
-            self?.historySelectMode.historyChanged()
+            self?.pileSelectMode.pilesChanged()
             self?.tabPages.showTabs(for: snapshot)
             HeroScreenCost.measure("landing.gallery") { self?.galleryPager.render(snapshot) }
             // The media gallery "View all" pushed, if it is up, grows with
@@ -442,8 +381,8 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
             }
         }
         tabPages.configureFilterTray()
-        // Mirror the (possibly stub-seeded) relationship into the header's
-        // tray, so Message visibility agrees with the toolbar from the start.
+        // The (possibly stub-seeded) relationship in the toolbar from the
+        // first frame, so the push carries it.
         applyHeaderAction()
         applyRelationMark()
         render(.loading)
@@ -459,36 +398,27 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         galleryPager.leadingPullTarget = isTabRoot ? DrawerPull.shared : nil
         galleryPager.reservesLeadingEdge = !isTabRoot
         // A guest is known only once a gate is up the chain (#2014): their
-        // tray has no bell (#2302).
+        // toolbar has no bell (#2302).
         applyRelationMark()
         applyHeaderAction()
+        // Someone else's relationship rides the stack's toolbar (#2475), in
+        // with the push or pop that brings the screen.
+        if relationActions.toolbarItems.isEmpty {
+            navigationController?.setToolbarHidden(true, animated: animated)
+        } else {
+            ProfileRelationToolbar.show(for: self, animated: animated)
+        }
         Task { [weak self] in await self?.viewModel.refreshShareToken() }
         // Back from a channel's thread or the new channel's sheet (#2232):
         // a join there, or a channel just created, shows on the rows. Only
         // once they were read — the first read waits for the profile.
         if channels?.phase == .loaded { channels?.reload() }
-        // ⚠️ **AS EARLY AS THE TRANSITION ALLOWS, AND `viewDidAppear` IS NOT
-        // EARLY.** Measured on a tab switch, headless: `viewWillAppear` at
-        // +36ms, `viewDidAppear` at +947ms — nine hundred milliseconds of empty
-        // band under a screen already fully on display. The call below is
-        // idempotent with the one in `viewDidAppear`, which stays as the
-        // backstop for the paths the policy declines (a scrub that has not
-        // committed, a flight that owns the chrome).
-        installBottomChromeWhenAppearing(hasActiveFlight: false,
-                                         handsOver: tabBarController?.bottomAccessory != nil) { [weak self] in
-            guard let self else { return }
-            // Minimizes with the scroll on the tab root only — see
-            // `HeroPageSelector.install`.
-            selector.install(on: self, alongside: transitionCoordinator)
-        }
-        // A pushed profile's strip rides the stack's toolbar (#728).
-        selector.showToolbar(for: self, animated: animated)
         // Pushed in, or a plain screen popping off this one (#1914): the
         // gallery's clips start once half of the screen is on display, on the
         // transition's own frames. Every other appearance starts them from
         // `viewDidAppear`, as before.
         _ = viewportShare.screenWillAppear(self)
-        // The accessory's collapse rides the active page: name it again on
+        // The tab bar's collapse rides the active page: name it again on
         // every appearance, as the inbox's pager does (#1191).
         galleryPager.republishActiveScrollView()
 
@@ -528,8 +458,8 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         // Re-bind the bar synchronously BEFORE the transition animates: any
         // state that resolved since viewDidLoad (fast mock loads, cached
         // profiles, returning from a pushed child) is fully populated here,
-        // so the title and Follow item ride the push natively instead of
-        // popping in after it.
+        // so the bar's items ride the push natively instead of popping in
+        // after it.
         applyNavigationState()
         #if DEBUG
         // `-profile-first-frame-log`: what the slide's first frame carries —
@@ -568,11 +498,10 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         // Leaving the profile ends History's select mode.
-        setSelectingHistory(false, restoresFoot: false)
-        // The band comes down; the toolbar is the stack's, put away unless the
-        // screen taking over brings items of its own (the relations screen,
-        // the feed).
-        selector.hide(leaving: self, animated: animated, alongside: transitionCoordinator)
+        setSelectingPile(false, restoresFoot: false)
+        // The toolbar is the stack's, put away unless the screen taking over
+        // brings items of its own (the relations screen, the feed).
+        if !relationActions.toolbarItems.isEmpty { ProfileRelationToolbar.hide(leaving: self, animated: animated) }
         // The banner too (#1399): the hero page plays it on while the screen
         // leaves, up to half (`viewportAllowsBanner`).
         //
@@ -627,11 +556,6 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         isShowingHistoryPost = false
         // A tab root always shows the bar (#769).
         ensureAppTabBarAsTabRoot()
-        // The BACKSTOP, on UIKit's own animation like every other install
-        // (native chrome is UIKit's — see `TabBarRevealPolicy`). A tab switch
-        // and a committed close install from `viewWillAppear` and find nothing
-        // to do here.
-        selector.install(on: self, alongside: transitionCoordinator)
         #if DEBUG
         verifyRevealClearsSelector()
         #endif
@@ -693,12 +617,28 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
 
     // MARK: - Relation actions
 
-    /// The header's relation row, the menus and the actions' outcomes
-    /// (`ProfileRelationActions`, #2522).
+    /// The relationship's toolbar, the menus and the actions' outcomes
+    /// (`ProfileRelationActions`, #2522, #2475).
     private(set) lazy var relationActions = ProfileRelationActions(host: self)
-    var actionAnchor: UIView { headerView.moreButtonAnchor }
+    var actionAnchor: UIView { view }
     var blockToastSource: UIViewController { navigationController ?? self }
-    private func applyHeaderAction() { relationActions.applyHeaderAction() }
+    private func applyHeaderAction() { relationActions.applyToolbar(animated: view.window != nil) }
+    func makeMoreMenu() -> UIMenu { relationActions.makeMoreMenu() }
+
+    /// Follow, Requested's withdrawal and Unfollow (#2475: the toolbar's and
+    /// the ⋯ menu's): the member gate, then the optimistic flip.
+    func followTapped() {
+        MemberGates.perform(.follow(handle: viewModel.profile?.handle), from: self) { [weak self] in
+            // On at the optimistic flip; off is silent (#1886).
+            if self?.viewModel.toggleFollow() == true { Haptics.play(.toggleOn) }
+        }
+    }
+
+    func messageTapped() {
+        MemberGates.perform(.message(handle: viewModel.profile?.handle), from: self) { [weak self] in
+            self?.viewModel.messageTapped()
+        }
+    }
     private func applyRelationMark() { relationActions.applyRelationMark() }
     func presentShareSheet() { relationActions.presentShareSheet() }
     func copyProfileLink() { relationActions.copyProfileLink() }
@@ -718,23 +658,18 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     /// writer of the navigation items (`ProfileNavigationBarComposer`, #2522).
     /// Made once, never rebuilt: its items keep their instances (R3).
     private(set) lazy var navigationBarComposer = ProfileNavigationBarComposer(host: self)
-    static let followItemID = ProfileNavigationBarComposer.followItemID
-    static let requestedItemID = ProfileNavigationBarComposer.requestedItemID
-    var isTrayScrolledAway: Bool { navigationBarComposer.isTrayScrolledAway }
+    var isPastThreshold: Bool { navigationBarComposer.isPastThreshold }
     func applyNavigationState(animated: Bool = false) { navigationBarComposer.applyNavigationState(animated: animated) }
 
     #if DEBUG
-    /// Stands in for the scroll: the tray out of sight, or back.
-    /// The scroll's own path: the header placed for `travelled`, the tray's
-    /// visibility decided from it.
+    /// The scroll's own path: the header placed for `travelled`, the
+    /// threshold decided from it.
     func debugApplyHeaderOffset(_ travelled: CGFloat) { applyHeaderOffsetNow(travelled) }
-    func debugSetTrayScrolledAway(_ away: Bool) { navigationBarComposer.debugSetTrayScrolledAway(away) }
-    func debugSetHandlePassage(_ passage: CGFloat) { barTitle.debugSetHandlePassage(passage) }
-    var debugBarTitleOpacity: CGFloat { barTitle.debugBarTitleOpacity }
-    var debugBarRelationshipItem: UIBarButtonItem? { navigationBarComposer.debugBarRelationshipItem }
+    /// Stands in for the scroll: past the threshold, or back (#2475).
+    func debugSetPastThreshold(_ past: Bool) { navigationBarComposer.debugSetPastThreshold(past) }
     var debugBarWrites: [Bool] { navigationBarComposer.debugBarWrites }
-    /// The bell, if the header's row shows it (#2302).
-    var debugMuteBell: AppButton? { headerView.debugBell }
+    /// The toolbar's bell, if it shows one (#2302, #2475).
+    var debugMuteBell: UIBarButtonItem? { relationToolbarItem(.bell) }
     /// What picking the bell menu's `scope` does. Tests.
     func debugToggleMute(_ scope: MuteScope) { viewModel.toggleMute(scope) }
     func debugMuteMenuElements() -> [UIMenuElement] { relationActions.muteMenuElements() }
@@ -751,8 +686,9 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
 
     // MARK: - Setup
 
-    /// The viewer's own bar items: the gear and the switcher. The bar's
-    /// dress — transparent, white ink over the banner — is the hero page's.
+    /// The viewer's own bar items: the gear and the switcher on the name.
+    /// The bar's dress — transparent, white ink over the banner — is the
+    /// hero page's.
     private func configureNavigationBar() {
         // Account actions only exist for the viewer's own profile. (`onLogout`
         // is retained for the Account Settings screen, which will host Log Out.)
@@ -762,23 +698,17 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         accountSwitcher.configureNameSwitcher()
     }
 
-    /// The shell's accessories (`HeaderAccessoryHosting`): safe before the view
+    /// The shell's bell (`HeaderAccessoryHosting`): safe before the view
     /// loads (`ProfileNavigationBarComposer`).
-    func setTrailingAccessoryItem(_ item: UIBarButtonItem?) { navigationBarComposer.setTrailingAccessoryItem(item) }
     func setLeadingAccessoryItem(_ item: UIBarButtonItem?) { navigationBarComposer.setLeadingAccessoryItem(item) }
+    /// No balance on any profile, own or someone else's (#2475, revising
+    /// #2336): the wallet is Settings' (Wallet and Purchases). Nothing is
+    /// shown, whatever a shell hands in.
+    func setTrailingAccessoryItem(_ item: UIBarButtonItem?) {}
 
-    // MARK: - History's day in the bar (#1344)
-
-    /// The viewer's own profile — the tab root, the only one with account
-    /// actions — names its day leading (#1642).
-    var dayLeads: Bool { onLogout != nil }
-
-    #if DEBUG
-    var debugSectionItem: UIBarButtonItem? { navigationBarComposer.debugSectionItem }
-    /// History publishing the day it scrolled into. Tests.
-    func debugApplyPinnedSection(_ section: PostGridPinnedSection?) { navigationBarComposer.applyPinnedSection(section) }
-    func debugTapSectionItem() { navigationBarComposer.debugTapSectionItem() }
-    #endif
+    /// The account's own profile — the tab root, the only one with account
+    /// actions: the bell leads its bar, the gear trails it.
+    var isAccountRoot: Bool { onLogout != nil }
 
     #if DEBUG
     /// Recomposes the trailing run, so a test can put the screen through the
@@ -798,14 +728,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         navigationController?.pushViewController(settingsViewController, animated: true)
     }
 
-    // MARK: - The @handle in the bar (#2248)
-
-    /// The bar's @handle title, scrubbed on the scroll (`ProfileBarTitle`,
-    /// #2522).
-    private(set) lazy var barTitle = ProfileBarTitle(host: self)
     var namesNoOne: Bool { viewModel.namesNoOne }
-    func setSoftTopEdge(_ soft: Bool) { heroPager.setSoftTopEdge(soft) }
-    private func applyBarTitle() { barTitle.applyBarTitle() }
 
     /// Runs a navigation-bar mutation eagerly during an active transition:
     /// applied inside the transition coordinator's animation block it tracks
@@ -835,23 +758,23 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     var tabs: [ProfileTab] { tabPages.tabs }
     var shownTab: ProfileTab? { tabPages.shownTab }
 
-    // MARK: - History's select mode (the owner, 2026-11-08)
+    // MARK: - The piles' select mode (History 2026-11-08, Saved 2026-11-28)
 
-    /// History's select mode (`ProfileHistorySelection`, #2522).
-    private(set) lazy var historySelectMode = ProfileHistorySelection(host: self)
-    var isSelectingHistory: Bool { historySelectMode.isSelectingHistory }
-    var historySelectBarItem: UIBarButtonItem? { historySelectMode.historySelectBarItem }
-    var shownHistoryBarItem: UIBarButtonItem? { historySelectMode.shownHistoryBarItem }
-    func setSelectingHistory(_ selecting: Bool, restoresFoot: Bool = true) {
-        historySelectMode.setSelectingHistory(selecting, restoresFoot: restoresFoot)
+    /// History's and Saved's select mode (`ProfilePileSelection`, #2522).
+    private(set) lazy var pileSelectMode = ProfilePileSelection(host: self)
+    var isSelectingPile: Bool { pileSelectMode.isSelecting }
+    var pileSelectBarItem: UIBarButtonItem? { pileSelectMode.selectBarItem }
+    var pileRemoveBarItem: UIBarButtonItem? { pileSelectMode.removeBarItem }
+    func setSelectingPile(_ selecting: Bool, restoresFoot: Bool = true) {
+        pileSelectMode.setSelecting(selecting, restoresFoot: restoresFoot)
     }
 
     #if DEBUG
     var debugHistoryPage: (any PostGridPage)? { galleryPager.builtPage(for: .history) }
     var debugAllowsPaging: Bool { galleryPager.allowsPaging }
-    var debugHistoryRemoveTitle: String? { historySelectMode.debugHistoryRemoveTitle }
-    var debugHistoryRemoveEnabled: Bool { historySelectMode.debugHistoryRemoveEnabled }
-    func debugTapHistoryRemove() { historySelectMode.debugTapHistoryRemove() }
+    var debugPileRemoveTitle: String? { pileSelectMode.debugRemoveTitle }
+    var debugPileRemoveEnabled: Bool { pileSelectMode.debugRemoveEnabled }
+    func debugTapPileRemove() { pileSelectMode.debugTapRemove() }
     #endif
 
     /// A post opened from History is covering the screen: the screen is
@@ -891,7 +814,8 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     /// A profile with no gallery (a page for no one) needs no air under it.
     override var heroPageBottomBreathingRoom: CGFloat { viewModel.hasGallery ? 8 : 0 }
 
-    /// The header moved: the bar follows it (`ProfileNavigationBarComposer`).
+    /// The header moved: the bar follows it past the threshold and back
+    /// (`ProfileNavigationBarComposer`, #2475).
     override func heroPageHeaderDidMove(travelled: CGFloat) { navigationBarComposer.headerDidMove(travelled: travelled) }
 
     #if DEBUG
@@ -950,20 +874,17 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
             pullIndicator.endRefreshing()
             statusView.isHidden = true
             galleryPager.isHidden = false
-            // Instagram-style: the @handle is the screen's title (the header
-            // shows the bold display name). "Profile" only until first load.
-            // Content usually lands mid-push; rebind inside the transition
-            // so the bar text doesn't snap in after the animation settles.
             currentHandle = model.handle
             // Whose channels to list, once the profile is known (#2232) —
             // again after an account switch, never on a mere re-render.
             if let channels, channels.owner != model.id { channels.load(owner: model.id) }
-            // ⚠️ Once. The bar's state does not follow the model, and a
-            // refresh re-rendering content cross-dissolved the whole bar —
-            // a snapshot of it — for nothing.
+            // ⚠️ Once: the bar's state does not follow the model (#2475: no
+            // title), a refresh leaves it alone.
             if case .content = previous {} else {
                 alongsideTransition { $0.applyNavigationState(animated: $1) }
             }
+            // The QR comes with the share card: said only when it changed.
+            applyHeaderAction()
             // Content first — the labels adopt their text while still
             // invisible under the bones — then the alpha-only reveal.
             // Granular on a switch: each header group dissolves on its own,
@@ -1010,11 +931,11 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
                 symbolName: "person.crop.circle.badge.questionmark", title: message, subtitle: detail
             )
             statusView.isHidden = false
-            // The bell worn since frame 0, the shell's balance and a day's
-            // name have no one to act on: the bar recomposes once no
-            // transition runs (an item leaving mid-push pops unanimated). It
-            // says nothing when nothing changed.
+            // The ⋯ and the toolbar have no one to act on: the bars
+            // recompose once no transition runs (an item leaving mid-push
+            // pops unanimated). They say nothing when nothing changed.
             navigationBarComposer.applyNavigationStateAtRest()
+            navigationController?.whenAtRest { [weak self] in self?.relationActions.applyToolbar(animated: false) }
         }
     }
 }
@@ -1157,12 +1078,10 @@ extension ProfileViewController: ProfileRelationActionsHost {}
 
 extension ProfileViewController: ProfileTabPagesHost {}
 
-extension ProfileViewController: ProfileHistorySelectionHost {}
+extension ProfileViewController: ProfilePileSelectionHost {}
 
 extension ProfileViewController: ProfilePostOpeningHost {}
 
 extension ProfileViewController: ProfileAccountSwitcherHost {}
-
-extension ProfileViewController: ProfileBarTitleHost {}
 
 extension ProfileViewController: ProfileNavigationBarComposerHost {}

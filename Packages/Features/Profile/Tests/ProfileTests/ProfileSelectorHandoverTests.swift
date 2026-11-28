@@ -9,15 +9,14 @@ import UIKit
 @testable import Profile
 @testable import ProfileData
 
-/// Where a pushed profile's selector ends up, and what else is in the bar
-/// with it.
+/// Where a profile's selector is, and what else is in the bar with it.
 ///
-/// ⚠️ **THERE IS ONE SELECTOR NOW.** This file was about the hand-over between
-/// two — one filling the page's column, one hugging the navigation bar's title
-/// slot, cross-fading as the identity block scrolled away. The strip sits in
-/// the navigation controller's bottom toolbar for this screen's whole life, so
-/// what is left to get wrong is not which copy is visible but whether the one
-/// copy is in the bar at all.
+/// ⚠️ **ONE SELECTOR THAT MOVES (#2475, the owner 2026-11-28).** It sits in
+/// the header at rest, where the action row stood, and moves into the bar's
+/// leading group past the threshold — right after the bell on the tab root,
+/// right after the chevron on a pushed profile — and back. Never the tab
+/// bar's accessory, never the bottom toolbar (someone else's relationship
+/// toolbar is there).
 @MainActor
 struct ProfileSelectorHandoverTests {
     private struct SilentFetcher: ImageFetching {
@@ -87,7 +86,8 @@ struct ProfileSelectorHandoverTests {
     private func loadedScreen(
         source: ProfileViewModel.Source = .currentUser,
         trayPlacement: ProfileTrayPlacement = .navigationToolbar,
-        gallery: any ProfileGalleryProviding = StockedGallery()
+        gallery: any ProfileGalleryProviding = StockedGallery(),
+        accountRoot: Bool = false
     ) async -> ProfileViewController? {
         let viewModel = ProfileViewModel(repository: GalleryProvider(), gallery: gallery, source: source)
         viewModel.viewDidLoad()
@@ -103,7 +103,7 @@ struct ProfileSelectorHandoverTests {
             viewModel: viewModel,
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
             makeGridPage: TestGridPages.factory(), presence: SectionPresenceStore(scope: StorageScope()),
-            onLogout: nil,
+            onLogout: accountRoot ? {} : nil,
             trayPlacement: trayPlacement
         )
         screen.loadViewIfNeeded()
@@ -112,35 +112,108 @@ struct ProfileSelectorHandoverTests {
         return screen
     }
 
-    /// ⚠️ **A PUSHED PROFILE'S STRIP IS A BOTTOM-LEADING TOOLBAR ITEM
-    /// (#728).** The owner's call: the tab root keeps its `UITabAccessory`, a
-    /// pushed profile carries the strip in the stack's toolbar at the leading
-    /// corner, at its intrinsic width, on the item's own platter — the
-    /// relations screen's arrangement. The source filter still leads the
-    /// navigation bar.
-    ///
-    /// The non-empty `toolbarItems` is load-bearing:
-    /// `SnapFeedViewController.successorUsesToolbar` reads it to leave the
-    /// shared toolbar up when a post pushed from here is popped.
-    @Test func aPushedProfileHostsTheSelectorBottomLeading() async {
-        guard let screen = await loadedScreen(source: .profile(ProfileID("prof-2"))) else { return }
-        let items = screen.toolbarItems ?? []
-        #expect(items.count == 2)
-        #expect(items.first === screen.selectorItem, "the strip does not lead the toolbar")
-        #expect(items.first?.customView is PagedTabBar, "the leading item is not the format selector")
-        #expect((items.first?.customView as? PagedTabBar)?.hosting == .platter,
-                "the strip draws a capsule inside the item's platter")
-        #expect(screen.selectorAccessory == nil, "a pushed profile hung a tab accessory")
+    /// The screen in a stack in a visible window: pushed over a root, or the
+    /// stack's root with the shell's bell.
+    private func hosted(
+        _ screen: ProfileViewController, pushed: Bool
+    ) -> (UINavigationController, UIWindow) {
+        let navigation = UINavigationController(rootViewController: pushed ? UIViewController() : screen)
+        if pushed { navigation.pushViewController(screen, animated: false) }
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        window.rootViewController = navigation
+        window.isHidden = false
+        window.layoutIfNeeded()
+        return (navigation, window)
     }
 
-    /// ⚠️ **A TAB THAT ARRIVES WHILE ANOTHER SCREEN COVERS THIS ONE PUTS NO
-    /// BAND UP.** The tab root's band is shell-wide (the tab bar controller's
-    /// `bottomAccessory`). Pushing Settings while the gallery was still
-    /// loading found this screen's view still in the window mid-push: the
-    /// Saved tab landed, the band went up over Settings, and nothing ever took
-    /// it down — `viewWillDisappear` had already run with no band to remove.
-    /// It goes up when this screen shows again.
-    @Test func aTabArrivingWhileCoveredWaitsForTheScreenToShow() async throws {
+    /// ⚠️ AT REST THE SELECTOR IS IN THE HEADER (#2475): in the slot where the
+    /// action row stood, drawn on the header's own capsule — no toolbar strip,
+    /// no tab accessory, nothing in the bar's leading group but the bell.
+    @Test(arguments: [false, true])
+    func atRestTheSelectorIsInTheHeader(pushed: Bool) async throws {
+        guard let screen = await loadedScreen(
+            trayPlacement: pushed ? .navigationToolbar : .aboveBottomSafeArea, accountRoot: !pushed
+        ) else { return }
+        let bell = UIBarButtonItem(image: UIImage(systemName: "bell"))
+        bell.identifier = "shell.notifications-bell"
+        if !pushed { screen.setLeadingAccessoryItem(bell) }
+        let (_, window) = hosted(screen, pushed: pushed)
+        defer { window.isHidden = true }
+        #expect(screen.selector.isPlaced && !screen.selector.isInBar)
+        #expect(screen.selectorBar.superview === screen.selector.headerSlot, "the strip is not in the header")
+        #expect(screen.selectorBar.hosting == .standalone, "the header's strip draws no glass of its own")
+        #expect(screen.selector.headerSlot.window != nil, "the header's slot is not on screen")
+        #expect(!(screen.toolbarItems ?? []).contains { $0.customView is PagedTabBar }, "a toolbar strip")
+        #expect(screen.debugLeadingIDs == (pushed ? [] : ["shell.notifications-bell"]))
+    }
+
+    /// ⚠️ PAST THE THRESHOLD THE SELECTOR IS IN THE BAR'S LEADING GROUP, right
+    /// after the bell (the tab root) or the chevron (a pushed profile) — the
+    /// same strip, the same page selected — and back in the header after.
+    /// The chevron stays: `leftItemsSupplementBackButton`.
+    @Test(arguments: [false, true])
+    func pastTheThresholdTheSelectorMovesIntoTheBarAndBack(pushed: Bool) async throws {
+        guard let screen = await loadedScreen(
+            trayPlacement: pushed ? .navigationToolbar : .aboveBottomSafeArea, accountRoot: !pushed
+        ) else { return }
+        let bell = UIBarButtonItem(image: UIImage(systemName: "bell"))
+        bell.identifier = "shell.notifications-bell"
+        if !pushed { screen.setLeadingAccessoryItem(bell) }
+        let (_, window) = hosted(screen, pushed: pushed)
+        defer { window.isHidden = true }
+        screen.selectTab(at: 1)
+
+        screen.debugSetPastThreshold(true)
+        #expect(screen.selector.isInBar)
+        let leading = screen.navigationItem.leftBarButtonItems ?? []
+        let strip = try #require(leading.last?.customView as? PagedTabBar, "the selector is not the last leading item")
+        #expect(strip === screen.selectorBar, "a second strip")
+        #expect(leading.last?.identifier == ProfileNavigationBarComposer.selectorItemID)
+        #expect(screen.debugLeadingIDs == (pushed
+            ? [ProfileNavigationBarComposer.selectorItemID]
+            : ["shell.notifications-bell", ProfileNavigationBarComposer.selectorItemID]),
+            "not right after the bell or the chevron: \(screen.debugLeadingIDs)")
+        #expect(strip.hosting == .platter, "the bar's strip draws a glass inside the platter")
+        #expect(strip.selectedIndex == 1, "the page changed with the hand-off")
+        #expect(!screen.selector.headerSlot.hostsStrip, "the strip is in two places")
+        #expect(screen.navigationItem.leftItemsSupplementBackButton, "the selector replaced the back button")
+        #expect(screen.navigationItem.hidesBackButton == false)
+
+        screen.debugSetPastThreshold(false)
+        #expect(!screen.selector.isInBar)
+        #expect(screen.selectorBar.superview === screen.selector.headerSlot, "the strip did not come back")
+        #expect(screen.selectorBar.selectedIndex == 1)
+        #expect(screen.debugLeadingIDs == (pushed ? [] : ["shell.notifications-bell"]))
+    }
+
+    /// ⚠️ NOTHING ELSE IN A PROFILE'S BAR (#2475 §1): no title, no balance, no
+    /// day, no Follow — at rest or past the threshold, own or someone else's.
+    @Test(arguments: [false, true])
+    func aProfilesBarCarriesNoTitleBalanceDayOrFollow(pushed: Bool) async throws {
+        guard let screen = await loadedScreen(
+            source: pushed ? .profile(ProfileID("prof-2")) : .currentUser,
+            trayPlacement: pushed ? .navigationToolbar : .aboveBottomSafeArea
+        ) else { return }
+        let balance = UIBarButtonItem(title: "250")
+        balance.accessibilityLabel = "Balance"
+        screen.setTrailingAccessoryItem(balance)
+        let (_, window) = hosted(screen, pushed: pushed)
+        defer { window.isHidden = true }
+        for past in [false, true] {
+            screen.debugSetPastThreshold(past)
+            let all = (screen.navigationItem.leftBarButtonItems ?? []) + (screen.navigationItem.rightBarButtonItems ?? [])
+            #expect(screen.navigationItem.title == nil && screen.navigationItem.titleView == nil, "a title")
+            #expect(!all.contains { $0 === balance || $0.accessibilityLabel == "Balance" }, "a balance")
+            #expect(!all.contains { ($0.identifier ?? "").contains("section") || ($0.identifier ?? "").contains("day") },
+                    "a day item")
+            #expect(!all.contains { $0.title == "Follow" || $0.title == "Requested"
+                || ($0.identifier ?? "").contains("follow") }, "a Follow in the bar")
+        }
+    }
+
+    /// ⚠️ **A TAB THAT ARRIVES LATE (#742) PUTS THE SELECTOR IN THE HEADER**,
+    /// once there are two pages — never a tab bar accessory, covered or not.
+    @Test func aTabArrivingLatePlacesTheSelectorInTheHeader() async throws {
         guard let screen = await loadedScreen(trayPlacement: .aboveBottomSafeArea, gallery: EmptyGallery())
         else { return }
         let tabs = UITabBarController()
@@ -151,35 +224,37 @@ struct ProfileSelectorHandoverTests {
         window.isHidden = false
         defer { window.isHidden = true }
         window.layoutIfNeeded()
-        #expect(screen.selectorAccessory == nil, "one tab is no selector")
+        #expect(!screen.selector.isPlaced, "one tab is no selector")
+        #expect(!screen.heroHeader.showsActionTray, "an empty selector row with one tab")
 
-        // Covered — Settings pushed over it — while the view is still around.
-        screen.beginAppearanceTransition(false, animated: false)
-        screen.endAppearanceTransition()
         var snapshot = try #require(screen.viewModel.publishedGallery)
         snapshot.reposts = .content([GalleryPost(
             id: PostID("r1"), kind: .photo, isRepost: true, thumbnailURL: nil, caption: "r1", publishedAtMS: 1
         )])
         screen.viewModel.onGalleryChange?(snapshot)
-        #expect(screen.selectorAccessory != nil, "the second tab built no selector")
-        #expect(tabs.bottomAccessory == nil, "the band went up over the screen covering this one")
-
-        // Shown again: up now.
-        screen.beginAppearanceTransition(true, animated: false)
-        screen.endAppearanceTransition()
-        #expect(tabs.bottomAccessory?.contentView === screen.selectorAccessory?.hostView)
+        #expect(screen.selector.isPlaced, "the second tab built no selector")
+        #expect(screen.heroHeader.showsActionTray && screen.selector.headerSlot.hostsStrip)
+        #expect(tabs.bottomAccessory == nil, "a tab bar accessory")
     }
 
-    /// The Profile tab's root keeps the strip in the tab bar's accessory, as
-    /// it always had (#728) — no toolbar.
-    @Test func theTabRootHostsTheSelectorInTheTabAccessory() async {
-        guard let screen = await loadedScreen(source: .profile(ProfileID("prof-2")), trayPlacement: .aboveBottomSafeArea)
-        else { return }
-        let band = try? #require(screen.selectorAccessory?.hostView)
-        #expect(band?.subviews.compactMap { $0 as? PagedTabBar }.count == 1,
-                "the format selector is not in the band")
-        #expect(screen.toolbarItems?.isEmpty != false, "the tab root raised a toolbar")
-        #expect(screen.selectorItem == nil)
+    /// ⚠️ THE SELECTED PAGE STAYS IN VIEW (#2361's rule, #2475): in a bar too
+    /// narrow for every title, after `setActivePage`, the selected title's
+    /// pill is inside the strip's viewport.
+    @Test func theSelectedPageStaysInViewAfterSetActivePage() async throws {
+        guard let screen = await loadedScreen(trayPlacement: .navigationToolbar) else { return }
+        let (_, window) = hosted(screen, pushed: true)
+        defer { window.isHidden = true }
+        screen.debugSetPastThreshold(true)
+        let strip = screen.selectorBar
+        for index in screen.debugTabTitles.indices.reversed() {
+            screen.selectTab(at: index)
+            window.layoutIfNeeded()
+            strip.layoutIfNeeded()
+            let pill = strip.debugPillInViewport
+            #expect(strip.selectedIndex == index)
+            #expect(pill.minX >= -0.5 && pill.maxX <= strip.debugViewportWidth + 0.5,
+                    "page \(index)'s pill \(pill) is out of the \(strip.debugViewportWidth)pt viewport")
+        }
     }
 
     /// ⚠️ **WITHOUT THIS THE FILTER REPLACES THE BACK BUTTON**, and UIKit
@@ -207,15 +282,15 @@ struct ProfileSelectorHandoverTests {
         }
     }
 
-    /// ⚠️ **POSTS · REPOSTS · TAGGED IN THE TAB ROOT'S ACCESSORY (#772)**, each
+    /// ⚠️ **POSTS · REPOSTS · TAGGED IN THE TAB ROOT'S SELECTOR (#772)**, each
     /// with something in it — Saved and Liked join only once they hold
     /// something (#742).
-    @Test func yourOwnProfileListsRepostsAndTaggedInTheAccessory() async {
+    @Test func yourOwnProfileListsRepostsAndTaggedInTheSelector() async {
         guard let screen = await loadedScreen(trayPlacement: .aboveBottomSafeArea) else { return }
         #expect(screen.debugTabTitles == ["Posts", "Reposts", "Tagged"])
         #expect(screen.debugSelectorTitles == ["Posts", "Reposts", "Tagged"])
         #expect(screen.debugPageCount == 3)
-        #expect(screen.selectorAccessory != nil, "no selector in the accessory")
+        #expect(screen.selector.isPlaced, "no selector")
         #expect(screen.debugActivePageIndex == 0, "it does not open on Posts")
     }
 
@@ -230,12 +305,12 @@ struct ProfileSelectorHandoverTests {
 
     // MARK: - Someone else's profile (#696)
 
-    /// ⚠️ POSTS · REPOSTS · TAGGED AT THE FOOT, NO FILTER UP TOP (#696).
+    /// ⚠️ POSTS · REPOSTS · TAGGED IN THE SELECTOR, NO FILTER UP TOP (#696).
     /// Someone else's sources are pages now, switched by the selector or a
     /// swipe, so the bar's source filter is gone. It opens on Posts.
-    @Test func someoneElsesProfileHasPostsRepostsTaggedAtTheFoot() async {
+    @Test func someoneElsesProfileHasPostsRepostsTaggedInTheSelector() async {
         guard let screen = await loadedScreen(source: .profile(ProfileID("prof-2"))) else { return }
-        #expect(screen.selectorItem?.customView is PagedTabBar, "no selector at the foot")
+        #expect(screen.selector.isPlaced, "no selector")
         #expect(screen.debugTabTitles == ["Posts", "Reposts", "Tagged"])
         #expect(screen.debugPageCount == 3)
         #expect(screen.debugActivePageIndex == 0, "it does not open on Posts")
@@ -254,9 +329,8 @@ struct ProfileSelectorHandoverTests {
         ) else { return }
         #expect(screen.debugTabTitles == ["Posts"])
         #expect(screen.debugPageCount == 1)
-        #expect(screen.selectorItem == nil, "a selector with one tab")
-        #expect(screen.selectorAccessory == nil, "an accessory with one tab")
-        #expect(screen.toolbarItems?.isEmpty != false)
+        #expect(!screen.selector.isPlaced, "a selector with one tab")
+        #expect(!screen.heroHeader.showsActionTray, "an empty selector row with one tab")
     }
 
     // MARK: - Empty sources (#742)
@@ -270,11 +344,10 @@ struct ProfileSelectorHandoverTests {
         #expect(screen.debugTabTitles == ["Posts", "Tagged"])
         #expect(screen.debugSelectorTitles == ["Posts", "Tagged"])
         #expect(screen.debugPageCount == 2)
-        #expect(screen.selectorItem != nil)
+        #expect(screen.selector.isPlaced)
     }
 
-    /// Posts alone is no selector: no toolbar item on a pushed profile, no
-    /// accessory on the tab root.
+    /// Posts alone is no selector, on a pushed profile as on the tab root.
     @Test(arguments: [ProfileTrayPlacement.navigationToolbar, .aboveBottomSafeArea])
     func postsAloneIsNoSelector(placement: ProfileTrayPlacement) async {
         guard let screen = await loadedScreen(
@@ -283,8 +356,7 @@ struct ProfileSelectorHandoverTests {
         ) else { return }
         #expect(screen.debugTabTitles == ["Posts"])
         #expect(screen.debugPageCount == 1)
-        #expect(screen.selectorItem == nil, "a toolbar selector with one tab")
-        #expect(screen.selectorAccessory == nil, "a tab accessory with one tab")
+        #expect(!screen.selector.isPlaced, "a selector with one tab")
     }
 
     /// On Posts, with no page to its left, a drag anywhere dismisses a

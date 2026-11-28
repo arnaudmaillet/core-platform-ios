@@ -34,7 +34,6 @@ struct HeroBannerFormatTests {
             followingCount: .exact(4),
             reactionCount: .exact(1_000)
         )))
-        header.configureAction(.following, bell: ProfileHeaderView.Bell(scopes: .none))
         if picture { header.setBannerFormat(format) }
         header.frame = CGRect(x: 0, y: 0, width: width, height: 1)
         header.frame.size.height = header.systemLayoutSizeFitting(
@@ -190,43 +189,6 @@ struct HeroBannerFormatTests {
         #expect(header.bannerFormat == .none)
         #expect(header.debugBannerIsHidden)
         #expect(abs(header.debugAvatarFrame.minY - (header.chromeTopInset + 12)) < 0.5)
-    }
-
-    /// ⚠️ THE TRAY IS FLAT AND OPAQUE. Glass is for chrome over content;
-    /// these buttons sit on the page, and glass there is a blur of nothing.
-    /// One prominent filled capsule for Follow, grey capsules and bubbles for
-    /// the rest — an opaque grey (user, 30 September 2026: the translucent
-    /// one let a poster's picture through), the tone the translucent one
-    /// made on the page.
-    @Test func theTrayWearsNoGlassAndLetsNothingThrough() {
-        let header = header(format: .band)
-        for button in header.debugTrayButtons {
-            #expect(button.configuration?.background.visualEffect == nil)
-        }
-        header.configureAction(.follow)
-        let follow = header.debugTrayButtons[0]
-        let message = header.debugTrayButtons[1]
-        #expect(follow.configuration?.title == "Follow")
-        #expect(follow.configuration?.background.visualEffect == nil)
-        // Follow is the one prominent capsule: a solid fill, white words
-        // (#1178; solid since #1664).
-        #expect(follow.usesProminentFill)
-        #expect(follow.configuration?.baseForegroundColor == .white)
-        for style in [UIUserInterfaceStyle.light, .dark] {
-            let traits = UITraitCollection(userInterfaceStyle: style)
-            for button in header.debugTrayButtons where button !== follow {
-                let fill = button.configuration?.baseBackgroundColor?.resolvedColor(with: traits)
-                #expect(fill?.cgColor.alpha == 1, "\(button.configuration?.title ?? "bubble") \(style.rawValue)")
-            }
-            // The grey the page showed through the platform's translucent
-            // fill: darker than a light page, lighter than a dark one.
-            var fill = (r: CGFloat(0), g: CGFloat(0), b: CGFloat(0), a: CGFloat(0))
-            var page = fill
-            message.configuration?.baseBackgroundColor?.resolvedColor(with: traits)
-                .getRed(&fill.r, green: &fill.g, blue: &fill.b, alpha: &fill.a)
-            Surface.page.resolvedColor(with: traits).getRed(&page.r, green: &page.g, blue: &page.b, alpha: &page.a)
-            #expect(style == .light ? fill.g < page.g : fill.g > page.g)
-        }
     }
 
     /// The opaque grey IS the tone the platform's translucent gray button

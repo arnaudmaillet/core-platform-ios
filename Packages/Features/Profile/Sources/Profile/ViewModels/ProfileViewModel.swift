@@ -601,6 +601,8 @@ public final class ProfileViewModel {
     func removeFromHistory(_ ids: [PostID]) { viewerPiles.removeFromHistory(ids) }
     func clearHistory() { viewerPiles.clearHistory() }
     var hasHistory: Bool { viewerPiles.hasHistory }
+    var hasSaved: Bool { viewerPiles.hasSaved }
+    func removeFromSaved(_ ids: [PostID]) { viewerPiles.removeFromSaved(ids) }
     /// The clock History's days are read against (`ProfileViewerPiles.now`). Tests set it.
     var now: @Sendable () -> Date {
         get { viewerPiles.now }

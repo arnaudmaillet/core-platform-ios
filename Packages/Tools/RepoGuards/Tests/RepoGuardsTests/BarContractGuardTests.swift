@@ -36,15 +36,12 @@ struct BarContractGuardTests {
     static let barMorphDebt: [String: Int] = [:]
 
     /// The only screens that hang a selector in the tab bar's accessory
-    /// (#2337, the owner 2026-11-12). The paged TAB ROOTS wear theirs in the
-    /// navigation bar, right of the bell (`BarSelectorItem`; For You's
-    /// Feed | Shots, Messages' Chats | Requests | Suggestions), so the
-    /// accessory is the profile's alone — its tabs are sections of one page
-    /// under a hero header, and its bar's centre carries the @handle on
-    /// scroll — plus the DEBUG lens bench. Not a debt to pay down: a new
-    /// screen putting its selector in the band fails here.
+    /// (#2337, the owner 2026-11-12): the DEBUG lens bench alone. The paged
+    /// TAB ROOTS wear theirs in the navigation bar, right of the bell
+    /// (`BarSelectorItem`; Messages' Chats | Requests | Suggestions), and the
+    /// profile's is in its header, then in its bar (#2475). Not a debt to pay
+    /// down: a new screen putting its selector in the band fails here.
     static let selectorAccessoryHosts: [String: Int] = [
-        "Packages/Core/HeroPage/Sources/HeroPage/HeroPageSelector.swift": 1,
         "Packages/Core/DebugTools/Sources/DebugTools/LensLab.swift": 1,
     ]
 
@@ -58,6 +55,8 @@ struct BarContractGuardTests {
         "Packages/Features/Notifications/Sources/Notifications/Views/NotificationsViewController+Mute.swift",
         // The profile page's bar (#2531), and the conversation info page's.
         "Packages/Features/Profile/Sources/Profile/Views/ProfileNavigationBarComposer.swift",
+        // Someone else's toolbar, shared by the card and the profile (#2475).
+        "Packages/Features/Profile/Sources/Profile/Views/ProfileRelationToolbar.swift",
         "Packages/Features/Chat/Sources/Chat/Info/ConversationInfoPageViewController.swift",
     ]
 
@@ -82,8 +81,8 @@ struct BarContractGuardTests {
         try expectWithinDebt(#"morphNavigationBar\("#, debt: Self.barMorphDebt)
     }
 
-    /// The paged tab roots' selector is in the navigation bar (#2337): no
-    /// new `SelectorAccessory` outside the profile's hero page.
+    /// The paged tab roots' selector is in the navigation bar (#2337), the
+    /// profile's in its header (#2475): no new `SelectorAccessory`.
     @Test func theSelectorAccessoryStaysTheProfiles() throws {
         try expectWithinDebt(#"SelectorAccessory\(strip:"#, debt: Self.selectorAccessoryHosts)
     }

@@ -2,48 +2,75 @@ import DesignSystem
 import UIKit
 
 /// The hero page's tab selector (#1651, slice #1653): ONE `PagedTabBar` — the
-/// strip Messages wears (and For You did, until #2453) — kept in step with the page's pager both
-/// ways, and hosted at the foot of the screen for the screen's whole life.
+/// strip Messages wears (and For You did, until #2453) — kept in step with
+/// the page's pager both ways, for the screen's whole life.
 ///
 /// **Optional.** A page with one tab shows none: a strip with one segment is a
 /// label pretending to be a control (the profile's rule, #631). The page kind
 /// places it when it has more than one tab and removes it when one is left.
 ///
-/// **Two homes**, by where the screen is — and only its host can answer that
-/// (a navigation root inside a tab bar and a pushed screen look the same from
-/// inside, the profile's `ProfileTrayPlacement`):
-/// - `.accessory`: the tab bar's `UITabAccessory` (`SelectorAccessory`), which
-///   minimizes with the scroll — a tab root;
+/// **Its home** (`Placement`):
+/// - `.header` (#2475, the owner 2026-11-28): in the header at rest, where a
+///   profile's action row stood (`headerSlot`), and in the navigation bar's
+///   leading group once that slot has gone under the bar — right after the
+///   back chevron or the bell, as the Messages inbox's (#2337). ONE strip
+///   that moves (`moveIntoBar()`, `moveIntoHeader()`): the same page
+///   selected, its own scroll kept, its scrub and its menus with it;
 /// - `.toolbar`: the stack's toolbar, at the bottom leading corner
-///   (`SelectorToolbarItem`) — a pushed screen.
+///   (`SelectorToolbarItem`) — a pushed screen's.
 ///
-/// ⚠️ THE ACCESSORY IS SHELL-WIDE: installed on appear, removed on disappear
-/// (`install(on:)`, `hide(leaving:)`), or it floats over whatever is pushed on
-/// top and over the next tab.
+/// ⚠️ **THE BAR'S GROUPS ARE THE PAGE KIND'S TO WRITE**: this object moves
+/// the strip and hands out its bar item (`barItem`); the page kind's bar
+/// composer writes the leading group — after `moveIntoBar()`, before
+/// `moveIntoHeader()`, so the strip is never in two places at once.
 @MainActor
 public final class HeroPageSelector {
     public enum Placement: Equatable, Sendable {
-        case accessory
+        /// The header at rest, the navigation bar's leading group past the
+        /// threshold (#2475): one strip that moves.
+        case header
+        /// The stack's toolbar, at the bottom leading corner.
         case toolbar
     }
 
     public let bar: PagedTabBar
     public let placement: Placement
-    /// The band, once placed as an accessory.
-    public private(set) var accessory: SelectorAccessory?
+    /// The header's home for the strip (`.header`): the page kind's header
+    /// holds it where its action row stood (`HeroPageViewController`).
+    public let headerSlot = HeroSelectorSlot()
+    /// The strip's bar item while it is in the navigation bar (`.header`,
+    /// past the threshold) — a fresh item each time the strip comes into the
+    /// bar (`BarSelectorItem.enterBar`), nil before the first time.
+    public private(set) var barItem: BarSelectorItem?
+    /// Whether the strip is in the navigation bar now (`.header`).
+    public private(set) var isInBar = false
     /// The toolbar's item, once placed in the toolbar.
     public private(set) var toolbar: SelectorToolbarItem?
     public var item: UIBarButtonItem? { toolbar?.item }
     /// Whether the strip has a home.
-    public var isPlaced: Bool { accessory != nil || toolbar != nil }
+    public private(set) var isPlaced = false
+    /// Told when the strip gains or loses its home — the header shows its
+    /// slot only while there is a strip to hold (`.header`).
+    public var onPlacedChange: ((Bool) -> Void)?
+    private let barItemID: String
     private let touchProbe: SelectorTouchProbe?
 
-    /// - Parameter touchProbe: told when a finger is on the strip — the
-    ///   profile holds its header's fade while one is.
-    public init(bar: PagedTabBar, placement: Placement, touchProbe: SelectorTouchProbe? = nil) {
+    /// - Parameters:
+    ///   - barItemID: the strip's bar item's identifier, in the navigation
+    ///     bar (`.header`).
+    ///   - touchProbe: told when a finger is on the strip — the hero page
+    ///     holds the stack's pans while one is.
+    public init(
+        bar: PagedTabBar, placement: Placement, barItemID: String = "heroPage.selector",
+        touchProbe: SelectorTouchProbe? = nil
+    ) {
         self.bar = bar
         self.placement = placement
+        self.barItemID = barItemID
         self.touchProbe = touchProbe
+        // Seven pages in a bar (the own profile's) are cut off: the cut side
+        // fades (#2475), in the header as in the bar.
+        if placement == .header { bar.fadesCutEdges = true }
     }
 
     /// Keeps the strip and `pager` in step, both ways: the lens tracks the
@@ -77,25 +104,33 @@ public final class HeroPageSelector {
         bar.select(index)
     }
 
-    /// Gives the strip its home on `screen`, once.
+    /// Gives the strip its home on `screen`, once: the header's slot
+    /// (`.header`), or the stack's toolbar.
     public func place(on screen: UIViewController) {
         guard !isPlaced else { return }
+        isPlaced = true
         touchProbe?.attach(to: bar)
         switch placement {
-        case .accessory:
-            accessory = SelectorAccessory(strip: bar)
+        case .header:
+            headerSlot.host(bar)
         case .toolbar:
             let item = SelectorToolbarItem(strip: bar)
             toolbar = item
             screen.toolbarItems = item.toolbarItems
         }
+        onPlacedChange?(true)
     }
 
-    /// Takes the strip away — one tab left.
+    /// Takes the strip away — one tab left. A strip in the navigation bar
+    /// leaves it with the page kind's next composition (`isInBar` is false
+    /// from here).
     public func remove(from screen: UIViewController) {
-        if let accessory {
-            accessory.remove(from: screen.tabBarController, alongside: nil)
-            self.accessory = nil
+        guard isPlaced else { return }
+        isPlaced = false
+        if placement == .header {
+            isInBar = false
+            barItem = nil
+            bar.removeFromSuperview()
         }
         if toolbar != nil {
             toolbar = nil
@@ -104,17 +139,36 @@ public final class HeroPageSelector {
                 screen.navigationController?.setToolbarHidden(true, animated: true)
             }
         }
+        onPlacedChange?(false)
     }
 
-    /// Puts the band up as `screen` comes on — riding `coordinator` when a
-    /// transition is running. It minimizes with the scroll as an accessory
-    /// only: a pushed screen has no tab bar under it to collapse, and the
-    /// behaviour is shell-wide.
-    public func install(on screen: UIViewController, alongside coordinator: UIViewControllerTransitionCoordinator?) {
-        accessory?.install(
-            into: screen.tabBarController, owner: screen,
-            minimizesOnScroll: placement == .accessory, alongside: coordinator
-        )
+    /// Takes the strip out of the header for the navigation bar (`.header`,
+    /// past the threshold): its bar item, fresh, for the page kind to put in
+    /// its leading group — which it writes NEXT. Nil without a strip placed.
+    @discardableResult
+    public func moveIntoBar() -> BarSelectorItem? {
+        guard placement == .header, isPlaced else { return nil }
+        if isInBar, let barItem { return barItem }
+        isInBar = true
+        let item: BarSelectorItem
+        if let barItem {
+            barItem.enterBar()
+            item = barItem
+        } else {
+            bar.removeFromSuperview()
+            item = BarSelectorItem(strip: bar, id: barItemID)
+            barItem = item
+        }
+        return item
+    }
+
+    /// Puts the strip back in the header (`.header`, back above the
+    /// threshold) — once the page kind has taken its item out of the bar.
+    public func moveIntoHeader() {
+        guard placement == .header, isInBar else { return }
+        isInBar = false
+        guard isPlaced else { return }
+        headerSlot.host(bar)
     }
 
     /// Shows the stack's toolbar for `screen` — a pushed screen's strip rides
@@ -123,10 +177,58 @@ public final class HeroPageSelector {
         toolbar?.show(for: screen, animated: animated)
     }
 
-    /// Takes the band down and puts the toolbar away as `screen` leaves.
-    public func hide(leaving screen: UIViewController, animated: Bool,
-                     alongside coordinator: UIViewControllerTransitionCoordinator?) {
-        accessory?.remove(from: screen.tabBarController, alongside: coordinator)
+    /// Puts the toolbar away as `screen` leaves.
+    public func hide(leaving screen: UIViewController, animated: Bool) {
         toolbar?.hide(leaving: screen, animated: animated)
+    }
+}
+
+/// The header's home for a hero page's selector (#2475): where a profile's
+/// action row stood, the strip on Liquid Glass of its own (`.standalone`),
+/// the same material it wears in the bar (the owner, 2026-11-28: the flat
+/// grey tray read as another control than the bar's).
+///
+/// ⚠️ The slot itself draws nothing: glass inside a ground loses its edge
+/// (`SelectorHosting.drawsBackdrop`).
+///
+/// The strip spans it and scrolls inside when its titles need more room
+/// (the cut side fading, `PagedTabBar.fadesCutEdges`). It keeps its height
+/// when the strip leaves for the bar, so the header never moves under the
+/// hand-off.
+public final class HeroSelectorSlot: UIView {
+    public override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear
+        layer.cornerCurve = .continuous
+        accessibilityIdentifier = "heroPage.selectorSlot"
+    }
+
+    @available(*, unavailable)
+    public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    public override func layoutSubviews() {
+        super.layoutSubviews()
+        layer.cornerRadius = bounds.height / 2
+    }
+
+    /// Whether the strip is in the header now.
+    public var hostsStrip: Bool { subviews.contains { $0 is PagedTabBar } }
+
+    /// Takes `strip` in: on its own glass (`.standalone`), spanning the
+    /// slot, at its full width — no ceiling.
+    func host(_ strip: PagedTabBar) {
+        strip.removeFromSuperview()
+        strip.hosting = .standalone
+        strip.fillsCeiling = false
+        strip.widthCeiling = nil
+        strip.fillsWidth = true
+        strip.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(strip)
+        NSLayoutConstraint.activate([
+            strip.leadingAnchor.constraint(equalTo: leadingAnchor),
+            strip.trailingAnchor.constraint(equalTo: trailingAnchor),
+            strip.topAnchor.constraint(equalTo: topAnchor),
+            strip.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
     }
 }

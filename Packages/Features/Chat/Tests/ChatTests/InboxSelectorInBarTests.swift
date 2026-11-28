@@ -72,7 +72,7 @@ struct InboxSelectorInBarTests {
     }
 
     /// ⚠️ ONE ITEM, ONE IDENTIFIER, WHATEVER THE COUNTS. A count widens its
-    /// segment, not the platter, which fills the room (#2577); the selector
+    /// segment, and the platter with it up to the room; the selector
     /// re-fits in place — the same item, around the
     /// same strip, under the same identifier (a re-minted item lost its strip
     /// on the simulator, `BarSelectorItem`).
@@ -92,8 +92,11 @@ struct InboxSelectorInBarTests {
         #expect(after.identifier == before.identifier)
         #expect(after.customView === strip, "a new strip where the same one belongs")
         #expect(strip.preferredWidth(at: .regular) > wanted, "the count did not widen the titles")
-        // The platter fills the room whatever its titles ask (#2577).
-        #expect(abs(strip.intrinsicContentSize.width - width) < 0.5, "the count moved a platter that fills the room")
+        // The platter hugs its titles, never past the room the bar leaves
+        // (the owner, 2026-11-28).
+        let ceiling = try #require(strip.widthCeiling)
+        #expect(strip.intrinsicContentSize.width <= ceiling + 0.5, "the count pushed the platter past the room")
+        #expect(strip.intrinsicContentSize.width >= width - 0.5, "the count narrowed the platter")
         #expect(screen.navigationItem.leftBarButtonItems?.count == 3)
     }
 

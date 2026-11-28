@@ -35,6 +35,10 @@ enum ProfileMenuBuilder {
         /// Someone else's profile the viewer follows: Unfollow leads the
         /// menu (#2302), as on the card (#1562) — Following has left the row.
         var isFollowing = false
+        /// The viewer's own profile: its QR code is a row here (#2475) — the
+        /// header's QR bubble went with the action row. Someone else's QR
+        /// stays in their bottom toolbar.
+        var showsQRCode = false
     }
 
     /// What the see-more menu's rows do.
@@ -48,6 +52,7 @@ enum ProfileMenuBuilder {
         var confirmBlock: () -> Void
         var clearHistory: () -> Void = {}
         var unfollow: () -> Void = {}
+        var qrCode: () -> Void = {}
     }
 
     static func moreMenuElements(_ state: MoreMenuState, handlers: MoreMenuHandlers) -> [UIMenuElement] {
@@ -66,14 +71,20 @@ enum ProfileMenuBuilder {
         // Sharing needs a loaded handle; until then the menu is honestly empty
         // rather than offering an action that would no-op.
         if state.canShare {
-            groups.append(UIMenu(options: .displayInline, children: [
+            var rows = [
                 UIAction(title: "Share", image: UIImage.symbol(named: PostActionSymbol.share)) { _ in
                     handlers.share()
                 },
                 UIAction(title: "Copy Link", image: UIImage(systemName: "link")) { _ in
                     handlers.copyLink()
                 }
-            ]))
+            ]
+            // The own profile's QR code (#2475): the header's bubble went
+            // with its action row; the sheet is the share sheet's card.
+            if state.showsQRCode {
+                rows.append(UIAction(title: "QR Code", image: UIImage(systemName: "qrcode")) { _ in handlers.qrCode() })
+            }
+            groups.append(UIMenu(options: .displayInline, children: rows))
         }
         // The History tab's "clear all" (#1344, the owner 2026-10-17): the
         // page has no header of its own, and the profile's menu is the
@@ -153,9 +164,9 @@ enum ProfileMenuBuilder {
     /// does not have.
     ///
     /// `.keepsMenuPresented` because a checklist that closes after one tick
-    /// makes setting both rails a two-open chore. The marks are updated in
-    /// the open menu as the state changes (`refreshVisibleMapRows`), so they
-    /// track what was just chosen.
+    /// makes setting both rails a two-open chore. The marks are read when
+    /// the menu opens: the ⋯ is a bar item since #2475 (as on the card), and
+    /// a bar item's open menu cannot be edited in place.
     ///
     /// ⚠️ A SUBMENU OF SEE-MORE, NOT A HEADER BUTTON (#689, the owner's call
     /// 2026-10-08): the star left the header's row. Same rows, same rule —
@@ -290,7 +301,7 @@ enum ProfileMenuBuilder {
     /// only, when the screen can file one.
     ///
     /// Unfollow is deliberately absent: this screen already centralises the
-    /// relationship on the header's one control, and a second way to change it
+    /// relationship on the toolbar's one control, and a second way to change it
     /// — sitting on a row, worded differently, reachable while the header says
     /// the opposite — is how two truths about one relationship end up on screen
     /// at once.

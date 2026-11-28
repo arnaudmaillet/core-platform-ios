@@ -37,10 +37,10 @@ struct ProfileListRowsTests {
         #expect(HeroPageGround.color == Surface.plainPage)
     }
 
-    /// ⚠️ THE HEADER CLOSES WITH THE POSTS' HAIRLINE (#2289): the profile's
-    /// header draws it, over every tab, where a header built for another
-    /// screen (the profile card's sheet) draws none.
-    @Test func theProfilesHeaderClosesWithTheHairline() {
+    /// ⚠️ NO HAIRLINE UNDER THE PROFILE'S HEADER (the owner, 2026-11-28,
+    /// revising #2289 for the profile): the selector, on glass, closes the
+    /// header; nothing draws a line under it.
+    @Test func theProfilesHeaderDrawsNoHairline() {
         let pipeline = ImagePipeline(fetcher: PlaceholderImageFetcher())
         let screen = ProfileViewController(
             viewModel: ProfileViewModel(repository: NoProfiles()),
@@ -49,8 +49,7 @@ struct ProfileListRowsTests {
             onLogout: nil
         )
         screen.loadViewIfNeeded()
-        #expect(screen.headerView.drawsFootHairline)
-        #expect(!ProfileHeaderView(imagePipeline: pipeline).drawsFootHairline, "on by default")
+        #expect(!screen.headerView.drawsFootHairline, "a line under the profile's selector")
     }
 
     /// ⚠️ NO FOLLOW ON A PROFILE'S POST LISTS (#2419, the owner 2026-11-28):

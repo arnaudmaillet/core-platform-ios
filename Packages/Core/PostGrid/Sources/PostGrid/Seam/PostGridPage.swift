@@ -152,9 +152,13 @@ public protocol PostGridPage: UIView {
     var onAuthorCardTapped: ((GalleryPost) -> Void)? { get set }
     /// A Rows page's row action for VoiceOver (#2170); nil for none.
     var rowAccessibilityAction: PostGridRowAction? { get set }
-    /// A Rows page in its select mode (the profile's History, the owner
-    /// 2026-11-08): each row wears a selection circle and a tap selects it
-    /// instead of opening the post; the author and the menu rest.
+    /// A Rows or a List page in its select mode (the profile's History, the
+    /// owner 2026-11-08; its Saved, 2026-11-28): each row wears a selection
+    /// circle and a tap selects it instead of opening the post. A Rows
+    /// page's row slides for its circle; a List page's card stays put under
+    /// one at its top-trailing corner, and rests whole — media, author,
+    /// menu and actions — so a tap anywhere on it selects. Other styles
+    /// ignore it.
     var isSelectingRows: Bool { get }
     func setSelectingRows(_ selecting: Bool)
     /// The rows selected now, in the page's order.

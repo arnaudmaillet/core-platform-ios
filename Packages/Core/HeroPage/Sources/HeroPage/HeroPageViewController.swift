@@ -99,14 +99,17 @@ open class HeroPageViewController<Tab: Equatable>: UIViewController {
     public let pullIndicator = HeroPullToRefreshView()
     /// A failed load with its way out, or a page for no one.
     public let statusView = EmptyStateView()
-    /// The pages' selector strip — the SAME `PagedTabBar` For You and
-    /// Messages wear. It never moves once placed.
+    /// The pages' selector strip — the SAME `PagedTabBar` Messages wears.
     public let selectorBar: PagedTabBar
     private let selectorPlacement: HeroPageSelector.Placement
-    /// The strip, kept in step with the pager and placed at the foot of the
-    /// screen (`HeroPageSelector`) — by the page kind, when it has tabs.
+    private let selectorBarItemID: String
+    /// The strip, kept in step with the pager and given its home
+    /// (`HeroPageSelector`) — by the page kind, when it has tabs: the header,
+    /// then the navigation bar past the threshold (`.header`, #2475), or the
+    /// stack's toolbar.
     public private(set) lazy var selector = HeroPageSelector(
-        bar: selectorBar, placement: selectorPlacement, touchProbe: selectorTouchProbe
+        bar: selectorBar, placement: selectorPlacement, barItemID: selectorBarItemID,
+        touchProbe: selectorTouchProbe
     )
     /// The docked selector's slot under the bar.
     private let dockedSlot: CGFloat
@@ -129,18 +132,21 @@ open class HeroPageViewController<Tab: Equatable>: UIViewController {
 
     /// - Parameters:
     ///   - selectorBar: the strip the page kind's tabs are titled in.
-    ///   - selectorPlacement: its home once placed — the tab bar's
-    ///     accessory on a tab root, the toolbar on a pushed page.
+    ///   - selectorPlacement: its home once placed — the header, then the
+    ///     navigation bar (`.header`, #2475), or the stack's toolbar.
+    ///   - selectorBarItemID: the strip's identifier in the navigation bar.
     ///   - dockedSlot: the room the docked selector holds under the bar.
     public init(
         header: HeroHeaderView, pager: HeroPagePager<Tab>,
         selectorBar: PagedTabBar, selectorPlacement: HeroPageSelector.Placement = .toolbar,
+        selectorBarItemID: String = "heroPage.selector",
         dockedSlot: CGFloat = HeroPageMetrics.dockedSlot
     ) {
         heroHeader = header
         heroPager = pager
         self.selectorBar = selectorBar
         self.selectorPlacement = selectorPlacement
+        self.selectorBarItemID = selectorBarItemID
         self.dockedSlot = dockedSlot
         super.init(nibName: nil, bundle: nil)
         // Its tabs list posts: their authors' motion is the table's
@@ -302,6 +308,7 @@ open class HeroPageViewController<Tab: Equatable>: UIViewController {
         // Without it `headerHeight` goes ambiguous, taking the pages' inset,
         // the dock line and the content floor with it.
         heroHeader.bottomAnchor.constraint(equalTo: headerHost.bottomAnchor).isActive = true
+        installHeaderSelectorSlot()
 
         // ⚠️ Stretchy banner. The host is moved by its TOP CONSTRAINT rather
         // than by a transform precisely so this works: constraints cannot see
@@ -353,6 +360,20 @@ open class HeroPageViewController<Tab: Equatable>: UIViewController {
             statusView.bottomAnchor.constraint(equalTo: parent.safeAreaLayoutGuide.bottomAnchor)
             statusView.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
             statusView.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
+        }
+    }
+
+    /// The selector's home at rest (`.header`, #2475): the header's action
+    /// row holds the strip's slot, shown only while a strip is placed — a
+    /// page with one tab has no selector and no empty row.
+    private func installHeaderSelectorSlot() {
+        guard selectorPlacement == .header else { return }
+        heroHeader.setActions([.capsule(selector.headerSlot)])
+        heroHeader.showsActionTray = selector.isPlaced
+        selector.onPlacedChange = { [weak self] placed in
+            guard let self, heroHeader.showsActionTray != placed else { return }
+            heroHeader.showsActionTray = placed
+            view.setNeedsLayout()
         }
     }
 
@@ -507,8 +528,9 @@ open class HeroPageViewController<Tab: Equatable>: UIViewController {
         heroPageHeaderDidMove(travelled: travelled)
     }
 
-    /// Whether the header's action row has scrolled under the bar at
-    /// `travelled` — or faded with the identity.
+    /// Whether the header's action row — a profile's selector at rest
+    /// (#2475) — has scrolled under the bar at `travelled`, or faded with the
+    /// identity: the threshold past which the selector is in the bar.
     ///
     /// ⚠️ AT REST THE ROW IS ON SCREEN, whatever the frames say: a push reads
     /// them before the header has laid out (a row foot at 0, an identity not

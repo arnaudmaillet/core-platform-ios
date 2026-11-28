@@ -1,59 +1,75 @@
 import CoreNavigation
 import DesignSystem
+import HeroPage
 import LaunchArguments
-import PostGrid
 import UIKit
 
-/// What the profile's navigation bar asks of its screen (#2522): the view
-/// model and the relation the header shows, whether the profile is the
-/// viewer's own (the origin's word, an editor, the tab root), the header
-/// whose Follow the bar's Follow taps, the bar's @handle title, History's
-/// Select / Done, the pager a day's tap scrolls, where the header's tray
-/// stands, and the Settings push.
+/// What the profile's navigation bar asks of its screen (#2522, #2475): the
+/// view model, whether the profile is the viewer's own (the account's tab
+/// root, an editor), the selector it moves into the bar, History's Select /
+/// Done and its Remove, where the header's selector slot stands, the ⋯ menu,
+/// and the Edit and Settings pushes.
 ///
-/// A view controller: the bar is its navigation item's, the section
-/// contract is bound to it, and a push is told apart by its own
-/// `transitionCoordinator`.
+/// A view controller: the bar is its navigation item's, and a push is told
+/// apart by its own `transitionCoordinator`.
 @MainActor
 protocol ProfileNavigationBarComposerHost: UIViewController {
     var viewModel: ProfileViewModel { get }
-    var followButtonState: ProfileViewModel.FollowButton { get }
     var identityStubIsSelf: Bool { get }
     var hasEditor: Bool { get }
-    var dayLeads: Bool { get }
-    var headerView: ProfileHeaderView { get }
-    var barTitle: ProfileBarTitle { get }
-    var historySelectBarItem: UIBarButtonItem? { get }
-    var shownHistoryBarItem: UIBarButtonItem? { get }
-    var galleryPager: ProfileGalleryPagerView { get }
+    /// The account's own profile, the Profile tab's root: it leads with the
+    /// shell's bell and wears the gear.
+    var isAccountRoot: Bool { get }
+    var selector: HeroPageSelector { get }
+    var isSelectingPile: Bool { get }
+    var pileSelectBarItem: UIBarButtonItem? { get }
+    var pileRemoveBarItem: UIBarButtonItem? { get }
     func isActionRowUnderBar(travelled: CGFloat) -> Bool
+    func makeMoreMenu() -> UIMenu
     func pushSettings()
+    func pushEditProfile()
 }
 
-/// The profile's navigation bar, out of `ProfileViewController` (#2522):
-/// the own profile's gear (History's Select or Done in its place), Follow or
-/// Requested in the corner once the header's tray has scrolled away, the
-/// shell's bell and balance, History's day, and the rules for writing them
-/// at rest or mid-push.
+/// The profile's navigation bar, out of `ProfileViewController` (#2522),
+/// light since #2475 (the owner, 2026-11-28):
+///
+/// ```
+///                      at rest                  past the threshold
+/// someone else's       [‹] … [⋯]                [‹][selector] … [⋯]
+/// the own profile      [🔔] … [⋯ ⚙][✎]           [🔔][selector] …
+///   on History, Saved                           [🔔][selector] … [Select]
+///   selecting          [🔔][Remove (n)] … [⋯ ⚙][Done]   [🔔][Remove (n)] … [Done]
+/// ```
+///
+/// - **No title, no soft edge, no balance, no day, no Follow** in any
+///   profile's bar (#2475 §1): the header keeps the name and the @handle,
+///   Follow is someone else's toolbar (`ProfileRelationToolbar`), the wallet
+///   is Settings' (Wallet and Purchases), and the History day's headings
+///   stay in its list.
+/// - **The threshold** is the header's selector slot going under the bar
+///   (`isActionRowUnderBar`, the trigger the tray used): past it the
+///   selector moves into the leading group, right after the chevron or the
+///   bell (#2337's arrangement), the own ⋯ and gear leave, and ✎ fills in
+///   the primary — the same item, its style changed in place (#2331).
+/// - **The selector's width** is #2361 / #2411's rule: it takes what the
+///   other items leave (`BarSelectorBudget`), scrolls past it with the
+///   selected page in view and its cut side fading, keeps its titles' size
+///   (15pt, else 13pt, decided without the trailing items), never a `•••`,
+///   and the same gap on both sides (#2577, `BarSelectorItem.settle`).
 ///
 /// ⚠️ THE ONLY WRITER OF THE SCREEN'S NAVIGATION ITEMS: the leading group,
-/// the trailing group (directly, or through the section contract), the back
-/// button's mode and the large title's. The @handle title is
-/// `ProfileBarTitle`'s, which this composer asks to draw.
+/// the trailing group, the back button's mode and the large title's.
 ///
-/// ⚠️ MADE ONCE, NEVER REBUILT (the bar contract, R3, #2331): the three
-/// spaces and the day's binding keep their instances, and every
-/// identical-group guard compares them by reference.
-///
-/// ⚠️ ITS GROUPS ARE KEPT BY A `BarItemStore` (#2531): Follow, Requested and
-/// the gear are the trailing store's, the same instance while they stay in
-/// the group, and every group is handed to the bar through its store
+/// ⚠️ ITS GROUPS ARE KEPT BY A `BarItemStore` (#2531): ✎, ⋯, the gear and
+/// their separators are the trailing store's, the same instance while they
+/// stay in the group, and every group is handed to the bar through its store
 /// (`apply(leading:/trailing:)`), never by a `set…Items` of this file's own.
 ///
 /// ⚠️ SYNCHRONOUS WITH ITS SCREEN: `applyNavigationState` runs in the
 /// caller's turn — `viewDidLoad` before the first layout, `viewWillAppear`
-/// before the transition animates, and inside the screen's
-/// `alongsideTransition` while one runs.
+/// before the transition animates. A change mid-transition, once the bar was
+/// written, waits for rest: an item set during a push lands unanimated at
+/// its end (#756).
 @MainActor
 final class ProfileNavigationBarComposer {
     private unowned let host: any ProfileNavigationBarComposerHost
@@ -62,183 +78,41 @@ final class ProfileNavigationBarComposer {
         self.host = host
     }
 
+    static let editItemID = "profile.edit"
+    static let moreItemID = "profile.more"
+    static let settingsItemID = "profile.settings"
+    static let selectorItemID = "profile.selector"
+
     /// Whether the own profile wears the settings gear, which pushes
-    /// Settings (`SettingsFeatureBuilding`). The item is the trailing
-    /// store's (`settingsItem`).
+    /// Settings (`SettingsFeatureBuilding`).
     private var hasSettingsItem = false
-    /// The trailing group's own items — Follow, Requested, the gear — kept by
-    /// identifier (#2331, #2531): the same instance while it stays in the
-    /// group, dropped when it leaves. The group goes to the bar through it.
+    /// The trailing group's own items — ✎, ⋯, the gear — kept by identifier
+    /// (#2331, #2531).
     private let trailingStore = BarItemStore()
-    /// The leading group — the shell's bell — handed to the bar through its
-    /// own store (#2531): a store drops what left the group it applies, so
-    /// each group has one.
+    /// The leading group's own separator before History's Remove, through
+    /// its own store: a store drops what left the group it applies.
     private let leadingStore = BarItemStore()
-    /// Keeps the corner item — Follow or Requested (#2248) — and the shell's
-    /// balance two bubbles: iOS 26 groups adjacent bar items into one platter
-    /// (the feed's note on `setEngagedChrome`). One space for both, since
-    /// only one of them stands at a time, and none with the corner empty.
-    /// Kept: the trailing run is compared by reference (the bar's
-    /// identical-group guard), so a fresh item is a rebuild.
-    private let cornerSpacer = UIBarButtonItem.fixedSpace(Spacing.sm)
-    /// Keeps History's Select / Done — standing in the gear's place (#2307)
-    /// — its own bubble, apart from the balance.
-    private let historySelectSpacer = UIBarButtonItem.fixedSpace(Spacing.sm)
     /// An item the SHELL owns at the head of the leading group — the
     /// notifications bell, on the tab root only (a pushed profile leads with
-    /// its back button). Kept as state for the same reason as the trailing
-    /// one: the leading run is rewritten in `applyNavigationState`.
+    /// its back button).
     private var leadingAccessoryItem: UIBarButtonItem?
-    /// An item the SHELL owns, standing inboard of this screen's own — the
-    /// viewer's point balance today, the same badge the Explore header and the
-    /// post screen wear.
-    ///
-    /// Injected rather than built here, and that is the design: three screens
-    /// show one number, so one object owns the wallet, the claim countdown and
-    /// the sheet, and each screen promises only to keep the item in its
-    /// trailing run. Kept as state because that run is REBUILT — see
-    /// `applyNavigationState`.
-    private var trailingAccessoryItem: UIBarButtonItem?
-    /// Whether the header's action tray has scrolled under the bar: the bar
-    /// then carries the profile's Follow (or Requested) in its corner — at
-    /// exactly the point the identity pill used to come in (#1451, #2248),
-    /// so the page never shows two Follows at once. On the viewer's own
-    /// profile, History's Select takes the gear's place then (#2307).
-    private(set) var isTrayScrolledAway = false
-    /// Keeps History's day in its own bubble, inboard of the trailing group.
-    private let sectionSpacer = UIBarButtonItem.fixedSpace(Spacing.sm)
-    /// The bar's Follow, in the corner where the bell stands once the
-    /// profile is followed (#2248, the owner 2026-11-10) — replacing the
-    /// identity pill whose "+" was the bar's only Follow (#1451).
-    /// Requested, on a private profile the viewer asked to follow: its own
-    /// item under its own identifier, so the bar morphs Follow into it
-    /// (#1679, R3). A tap withdraws the request, as the tray's does.
-    ///
-    /// **A stock titled item (`BarItems.title`) — deliberately not a
-    /// custom-view item, and not a `UIButton` of any kind.** Two independent
-    /// reasons, and both have bitten this screen:
-    ///
-    /// 1. *Rendering.* The iOS 26 bar wraps every item in its own Liquid Glass
-    ///    capsule. A glass-configured button hosted as a custom view stacks a
-    ///    second material inside that capsule — a visible double-background
-    ///    bleed. Handing UIKit a title and letting it draw the chrome is the
-    ///    only way to get exactly one capsule.
-    /// 2. *Transitions.* A custom view is opaque to the bar's push/pop
-    ///    choreography: UIKit can cross-fade and slide items it owns, but a
-    ///    hosted view is just a subview it has to carry, which is what makes
-    ///    custom bar items snap while native ones interpolate.
-    ///
-    /// Kept by the trailing store while it stays in the group: the trailing
-    /// run is compared by reference (the bar's identical-group guard), so a
-    /// fresh item would be a rebuild.
-    private func relationshipBarItem(requested: Bool) -> UIBarButtonItem {
-        trailingStore.item(requested ? Self.requestedItemID : Self.followItemID) {
-            makeRelationshipBarItem(requested: requested)
-        }
-    }
+    /// Whether the header's selector slot has gone under the bar (#2475):
+    /// the selector is in the bar, the own ⋯ and gear gone.
+    private(set) var isPastThreshold = false
+    /// What the bar was last handed: a change mid-transition after the first
+    /// write waits for rest.
+    private var applied: AppliedKey?
 
-    // MARK: - Follow in the corner (#2248)
-
-    static let followItemID = "profile.follow"
-    static let requestedItemID = "profile.follow-requested"
-
-    /// The item the bar's corner wears for the relation, or nil: Follow or
-    /// Requested only once the tray has scrolled away (the owner,
-    /// 2026-11-10), where the identity pill came in before (#1451) — so the
-    /// page never shows the tray's Follow and the bar's at once.
-    ///
-    /// | Relation        | Corner      |
-    /// |-----------------|-------------|
-    /// | not followed    | Follow      |
-    /// | requested       | Requested   |
-    /// | followed        | nothing     |
-    /// | blocked, nobody, the viewer's own, not read yet | nothing |
-    ///
-    /// ⚠️ NEVER THE BELL (#2302, the owner 2026-11-11): once followed, the
-    /// header's Follow becomes the bell, and the corner stays empty, scrolled
-    /// or not. A follow from the bar's Follow takes it out, animated
-    /// (`updateActionBarItem`).
-    ///
-    /// A guest reads as not followed, so Follow — behind the member gate,
-    /// as the tray's Follow is (`headerView.onFollowTapped`).
-    private var cornerItem: UIBarButtonItem? {
-        guard showsRelationshipItem else { return nil }
-        switch host.followButtonState {
-        case .follow: return relationshipBarItem(requested: false)
-        case .requested: return relationshipBarItem(requested: true)
-        default: return nil
-        }
-    }
-
-    /// Whether Follow / Requested may stand in the corner now: someone
-    /// else's profile, read, not blocked, its tray out of sight.
-    private var showsRelationshipItem: Bool {
-        guard isTrayScrolledAway, !host.viewModel.namesNoOne, !host.viewModel.isBlocked else { return false }
-        guard !host.viewModel.isOwnProfile, !host.identityStubIsSelf, !host.hasEditor else { return false }
-        return host.followButtonState == .follow || host.followButtonState == .requested
-    }
-
-    /// Whether the bar wears Follow or Requested right now.
-    private var isShowingRelationshipItem: Bool {
-        host.ownTrailingBarItems.contains { Self.isRelationshipItem($0) }
-    }
-
-    /// Whether `item` is Follow or Requested: by identifier, the store's
-    /// key — only this composer makes an item under either.
-    private static func isRelationshipItem(_ item: UIBarButtonItem?) -> Bool {
-        item?.identifier == followItemID || item?.identifier == requestedItemID
-    }
-
-    /// Follow, or Requested: a titled native item (the bar contract, #1679)
-    /// whose tap is the tray's own — `headerView.onFollowTapped`: the member
-    /// gate for a guest, the optimistic flip, its haptic, a request on a
-    /// private profile and its withdrawal on Requested. One path, so the bar
-    /// and the tray can never disagree on what a tap did.
-    ///
-    /// Follow wears the bar's `.prominent` style, in the brand's primary;
-    /// Requested stays plain (#2268, the owner 2026-11-10 — the colour only
-    /// while it reads "Follow").
-    private func makeRelationshipBarItem(requested: Bool) -> UIBarButtonItem {
-        let item = BarItems.title(
-            id: requested ? Self.requestedItemID : Self.followItemID,
-            title: requested ? "Requested" : "Follow",
-            prominent: !requested
-        ) { [weak self] in self?.host.headerView.onFollowTapped?() }
-        if requested { item.accessibilityHint = "Withdraws your follow request." }
-        return item
+    private struct AppliedKey: Equatable {
+        var selectorInBar: Bool
+        var leading: [ObjectIdentifier]
+        var trailing: [ObjectIdentifier]
     }
 
     /// The own profile's settings gear, from the screen's
     /// `configureNavigationBar`.
     func configureSettingsItem() {
         hasSettingsItem = true
-    }
-
-    static let settingsItemID = "profile.settings"
-
-    /// The gear, kept by the trailing store while it stays in the group.
-    private var settingsItem: UIBarButtonItem? {
-        guard hasSettingsItem else { return nil }
-        return trailingStore.item(Self.settingsItemID) {
-            // Settings gear (the owner's, #2433) — the viewer's account entry point. A plain
-            // trailing item (no leading item, so it never disturbs the
-            // edge-swipe pop), tinted `.label` to read as primary dark chrome
-            // over the banner.
-            let settings = BarItems.icon(
-                id: Self.settingsItemID, image: AppSymbol.settings.image(), label: "Settings"
-            ) { [weak self] in self?.host.pushSettings() }
-            settings.tintColor = .label
-            return settings
-        }
-    }
-
-    /// Installs (or clears) the shell's trailing accessory. Safe before the
-    /// view loads: the run is composed in `applyNavigationState`, which reads
-    /// this every time it runs.
-    func setTrailingAccessoryItem(_ item: UIBarButtonItem?) {
-        trailingAccessoryItem = item
-        guard host.isViewLoaded else { return }
-        applyNavigationState()
     }
 
     /// Installs (or clears) the shell's leading accessory — the bell. Safe
@@ -249,100 +123,167 @@ final class ProfileNavigationBarComposer {
         applyNavigationState()
     }
 
-    // MARK: - History's day in the bar (#1344)
+    // MARK: - The items
 
-    /// The leading group: the tab root's bell. A pushed profile leads with
-    /// its back button and its @handle, a native title (#2248) — the
-    /// identity pill that came in beside the chevron is gone (#1590's
-    /// leading placement with it).
-    private var leadingItems: [UIBarButtonItem] {
-        [leadingAccessoryItem].compactMap { $0 }
+    /// Whether the bar is the viewer's own: ✎ and ⋯ (and the gear on the
+    /// tab root) in place of someone else's ⋯.
+    private var isOwn: Bool {
+        host.isAccountRoot || host.hasEditor || host.identityStubIsSelf || host.viewModel.isOwnProfile
     }
 
-    /// History's day in the bar (#1344): the app's one section contract
-    /// (#1573) — it mints the item (one per day, each with its own
-    /// identifier, so UIKit morphs between them), places it, and never
-    /// mid-push. A tap: the day's first post under the bar.
-    ///
-    /// - Someone else's profile: innermost of the TRAILING group (#1590) —
-    ///   the leading side is the chevron and the @handle (#2248) — through
-    ///   `setOwnTrailingBarItems`.
-    /// - The viewer's own (`dayLeads`): LEADING, after the bell (the owner,
-    ///   2026-10-23, #1642) — the Messages inbox's arrangement. The leading
-    ///   group is then the contract's to write.
-    private lazy var sectionBinding: PinnedSectionBarBinding = {
-        let binding = PinnedSectionBarBinding(
-            viewController: host, placement: host.dayLeads ? .leading : .trailing, scope: "profile.history",
-            separator: host.dayLeads ? nil : sectionSpacer
-        )
-        binding.onSelect = { [weak self] index in self?.host.galleryPager.scrollActivePageToSection(index) }
-        return binding
-    }()
-
-    /// The day the page in front has scrolled into, as last published.
-    private var pinnedSection: PostGridPinnedSection?
-
-    /// Names `section` innermost of the trailing group, or takes the name
-    /// away. No day over a page for no one (#1406): its gallery is gone.
-    func applyPinnedSection(_ section: PostGridPinnedSection?) {
-        pinnedSection = section
-        let shown = host.viewModel.namesNoOne ? nil : section
-        sectionBinding.show(pinned: shown.map { ($0.index, .init(id: $0.title, title: $0.title, count: $0.count)) })
-    }
-
-    /// The single application point for everything the navigation bar shows —
-    /// the @handle as a leading title on a pushed profile (#2248), the shell's
-    /// items, the bell or Follow in the corner. Idempotent, driven from three
-    /// places: viewDidLoad (initial composition), viewWillAppear (synchronous
-    /// pre-transition bind), and the async data callbacks (via
-    /// `alongsideTransition`).
-    func applyNavigationState(animated: Bool = false) {
-        // ⚠️ **AND THE CHEVRON KEEPS ITS SILENCE.** A titled root gives every
-        // screen pushed from it a WORDED back button, and two pushed bars were
-        // budgeted against a bare 44pt chevron: `SearchResultsViewController`
-        // says in as many words that its field would then be "44pt too
-        // generous", and the chat thread's identity view is capped at 240pt on
-        // the same assumption — 32 margins + 44 chevron + 24 gap + 8 padding +
-        // 240 = 348 fits 375, while a "Messages" label (~98pt with its platter)
-        // makes it ~402 and does not. `.minimal` keeps the title for this
-        // screen and the chevron bare for the next one.
-        host.navigationItem.backButtonDisplayMode = .minimal
-        // ⚠️ **`.never`, OR THE TITLE IS NOT DRAWN AT ALL.** With the mode left
-        // `.automatic` the bar rendered three platters and NO title label —
-        // read straight off `-header-bar-tree`, which is how this was told from
-        // a width problem: the string was set (`navItem=Demo Viewer`) and
-        // simply had no label anywhere in the bar. For You and Messages both
-        // state `.never` for their own reasons; this screen needs it because a
-        // large title has nowhere to go under an immersive banner.
-        host.navigationItem.largeTitleDisplayMode = .never
-
-        // No content-source filter on any profile (#772): its sources are
-        // pages at the foot, your own as anyone else's (#696).
-        //   tab root  [bell][day] … [coins][gear | Select | Done]
-        //             (History only: Select once the tray has scrolled away,
-        //             Done while selecting, wherever the scroll — #2307)
-        //   pushed    [‹ @handle] … [day][coins][Follow | Requested | bell]
-        //             (Follow / Requested once the tray has scrolled away,
-        //             the bell whenever followed, the day on History — #2248)
-        // Written only when it changed — the same "say nothing" rule as the
-        // trailing run below, for the same torn-capsule reason.
-        let leading = leadingItems
-        if host.dayLeads {
-            // The contract writes the group, the day after the bell (#1642):
-            // at once, as below, and only if it changed.
-            sectionBinding.leadingPrefix = leading
-            sectionBinding.placeNow()
-        } else {
-            // Through the store, which writes only if the group changed.
-            leadingStore.apply(leading: leading, to: host.navigationItem, animated: false)
+    /// ✎, Edit profile: quiet at rest and past the threshold alike (the
+    /// owner, 2026-11-28: the primary belongs to Select and Done, the piles'
+    /// corner word, not to ✎).
+    private var editItem: UIBarButtonItem {
+        trailingStore.item(Self.editItemID) {
+            let item = BarItems.icon(id: Self.editItemID, image: UIImage(systemName: "pencil"), label: "Edit Profile") {
+                [weak self] in self?.host.pushEditProfile()
+            }
+            // The page's ink, over the banner or the page.
+            item.tintColor = .label
+            return item
         }
-        // ⚠️ **WITHOUT THIS THE ITEM REPLACES THE BACK BUTTON**, and UIKit
-        // disables the interactive pop along with it, silently. Harmless on the
-        // tab root, which has no back button to supplement.
-        host.navigationItem.leftItemsSupplementBackButton = true
+    }
 
-        host.barTitle.applyBarTitle()
-        updateActionBarItem(host.followButtonState, animated: animated)
+    /// ⋯: the profile's menu — someone else's (Unfollow first once
+    /// followed, Share, Copy Link, Map, Restrict, Block, Report), or the
+    /// own (Share, Copy Link, QR Code, Map, Clear History on History).
+    private var moreItem: UIBarButtonItem {
+        trailingStore.item(Self.moreItemID) {
+            let item = BarItems.icon(
+                id: Self.moreItemID, image: UIImage(systemName: "ellipsis"), label: "More actions", menu: host.makeMoreMenu()
+            )
+            item.tintColor = .label
+            return item
+        }
+    }
+
+    /// The gear, the own tab root's door to Settings.
+    private var settingsItem: UIBarButtonItem? {
+        guard hasSettingsItem else { return nil }
+        return trailingStore.item(Self.settingsItemID) {
+            // The owner's gear (#2433), tinted `.label` to read as primary
+            // dark chrome over the banner.
+            let settings = BarItems.icon(
+                id: Self.settingsItemID, image: AppSymbol.settings.image(), label: "Settings"
+            ) { [weak self] in self?.host.pushSettings() }
+            settings.tintColor = .label
+            return settings
+        }
+    }
+
+    /// The trailing group, the first item at the bar's edge (#2475 §3, §4).
+    ///
+    /// - someone else's: `[⋯]` — nothing on a page for no one (#1406);
+    /// - the own, at rest: `[⋯ ⚙][✎]` — ⋯ and the gear in one bubble, ✎ in
+    ///   its own at the edge (Done in its place while selecting a pile);
+    /// - the own, past the threshold (the owner, 2026-11-28): no ✎ on any
+    ///   tab — `[Select]` in the primary on History and Saved, `[Done]`
+    ///   while selecting (#2307), and NOTHING on the other tabs, where the
+    ///   selector has the bar's width after the bell to itself.
+    private func trailingItems() -> [UIBarButtonItem] {
+        guard isOwn else { return host.viewModel.namesNoOne ? [] : [moreItem] }
+        // The own profile gone (#1406): the gear alone, its only way out.
+        if host.viewModel.namesNoOne { return [settingsItem].compactMap { $0 } }
+        guard !isPastThreshold else { return [host.pileSelectBarItem].compactMap { $0 } }
+        // ✎ (or Done) at the bar's edge, right of the ⋯ ⚙ bubble (the owner,
+        // 2026-11-28); a fixed space keeps the two bubbles apart. The
+        // trailing group reads from the edge inward.
+        let lead = host.pileSelectBarItem ?? editItem
+        let pair = [settingsItem, moreItem].compactMap { $0 }
+        guard let inner = pair.first?.identifier else { return [lead] }
+        return [lead, trailingStore.separator(before: inner)] + pair
+    }
+
+    /// Whether the selector belongs in the bar now: past the threshold, a
+    /// strip placed (more than one page), and not while selecting a pile —
+    /// Remove stands in its place then, and the pages do not page.
+    private var wantsSelectorInBar: Bool {
+        isPastThreshold && host.selector.isPlaced && !host.isSelectingPile && !host.viewModel.namesNoOne
+    }
+
+    /// The leading group: the bell on the tab root (a pushed profile's
+    /// chevron is UIKit's), then the selector past the threshold, or
+    /// a pile's Remove while selecting — each in a platter of its own.
+    private func leadingItems(selectorInBar: Bool) -> [UIBarButtonItem] {
+        let lead = host.isAccountRoot ? leadingAccessoryItem : nil
+        if let remove = host.pileRemoveBarItem {
+            let separator = leadingStore.separator(before: remove.identifier ?? ProfilePileSelection.removeItemID)
+            return lead.map { [$0, separator, remove] } ?? [remove]
+        }
+        if selectorInBar, let selector = host.selector.barItem { return selector.leadingGroup(after: lead) }
+        return [lead].compactMap { $0 }
+    }
+
+    // MARK: - Applying
+
+    /// The single application point for everything the navigation bar
+    /// shows. Idempotent, driven from viewDidLoad (the first composition),
+    /// viewWillAppear (bound before the transition animates), the threshold
+    /// (`headerDidMove`), the tabs, History's select mode and a page for no
+    /// one.
+    func applyNavigationState(animated: Bool = false) {
+        let navigationItem = host.navigationItem
+        // ⚠️ THE CHEVRON KEEPS ITS SILENCE: `.minimal` keeps the back button
+        // bare for the next screen (two pushed bars are budgeted against a
+        // bare 44pt chevron).
+        navigationItem.backButtonDisplayMode = .minimal
+        // A large title has nowhere to go under an immersive banner.
+        navigationItem.largeTitleDisplayMode = .never
+        // No @handle in the bar, at rest or on scroll (#2475): the header
+        // carries the name and the handle.
+        if navigationItem.title != nil { navigationItem.title = nil }
+        // ⚠️ WITHOUT THIS THE SELECTOR REPLACES THE BACK BUTTON, and UIKit
+        // disables the interactive pop along with it, silently.
+        navigationItem.leftItemsSupplementBackButton = true
+
+        let selectorInBar = wantsSelectorInBar
+        let trailing = trailingItems()
+        let key = AppliedKey(
+            selectorInBar: selectorInBar,
+            leading: leadingItems(selectorInBar: false).map(ObjectIdentifier.init),
+            trailing: trailing.map(ObjectIdentifier.init)
+        )
+        guard key != applied else {
+            refitSelector()
+            return
+        }
+        // ⚠️ A CHANGE MID-TRANSITION WAITS FOR REST once the bar has been
+        // written (#756): items set during a push land unanimated at its end.
+        if applied != nil, host.transitionCoordinator != nil, host.view.window != nil {
+            #if DEBUG
+            if LaunchArgument.profileNavbarAudit.isPassed() { print("PROFILE-NAVBAR-AUDIT deferred to rest") }
+            #endif
+            host.navigationController?.whenAtRest { [weak self] in
+                guard let self else { return }
+                applyNavigationState(animated: host.view.window != nil)
+            }
+            return
+        }
+        applied = key
+        // The strip leaves the header BEFORE its item goes into the bar, and
+        // the bar lets go of it BEFORE it goes back: never in two places.
+        if selectorInBar { host.selector.moveIntoBar() }
+        // ⚠️ A NEW TRAILING ITEM RE-FITS A STRIP ALREADY IN THE BAR (the
+        // owner's device, 2026-11-28): Posts → History past the threshold
+        // swaps ✎ for the wider Select, the strip states a narrower width
+        // in place, and the bar must lay out again to read it — otherwise
+        // it keeps ✎'s width and sweeps Select into a `•••`.
+        if fitSelector(trailing: trailing) { host.navigationController?.navigationBar.setNeedsLayout() }
+        #if DEBUG
+        debugBarWrites.append(animated && UIView.areAnimationsEnabled)
+        #endif
+        leadingStore.apply(leading: leadingItems(selectorInBar: selectorInBar), to: navigationItem, animated: animated)
+        trailingStore.apply(trailing: trailing, to: host, animated: animated)
+        if !selectorInBar { host.selector.moveIntoHeader() }
+        if selectorInBar { settleSelector(afterAnimation: animated) }
+        #if DEBUG
+        if LaunchArgument.profileNavbarAudit.isPassed() {
+            let phase = host.transitionCoordinator != nil ? "DURING-TRANSITION" : "idle"
+            print("PROFILE-NAVBAR-AUDIT rebuild leading=\(navigationItem.leftBarButtonItems?.count ?? 0) "
+                + "trailing=\(trailing.count) selectorInBar=\(selectorInBar) past=\(isPastThreshold) \(phase)")
+        }
+        #endif
     }
 
     /// Recomposes the bar once no transition runs, without animation — for an
@@ -354,239 +295,149 @@ final class ProfileNavigationBarComposer {
         if let navigationController = host.navigationController { navigationController.whenAtRest(apply) } else { apply() }
     }
 
-    /// Composes the trailing group per the current state: the own profile's
-    /// gear (History's Select or Done in its place, #2307), the corner item
-    /// (`cornerItem` — Follow / Requested once the tray has scrolled away,
-    /// #2248; never the bell, #2302), the shell's balance, and
-    /// History's day. Nothing relational until the relationship is known.
-    /// Native items only (the bar contract, #1679): iOS 26 wraps each in the
-    /// bar's own Liquid Glass capsule, and a glass-configured custom button
-    /// would stack a second material on top of it.
-    private func updateActionBarItem(_ state: ProfileViewModel.FollowButton, animated: Bool = false) {
-        // Edit is no longer a bar item — it lives in the header tray beside the
-        // avatar (see `ProfileHeaderView.configureAction`), so own-profile keeps
-        // only its account overflow menu here.
-        // `.hidden` yields no item at all. It used to install a bare custom
-        // view as a placeholder pill, which was both unreachable — every path
-        // into `followButtonState` sets a concrete state, the view model never
-        // assigns `.hidden`, and the audit only ever logs `follow`/`following`
-        // — and the one thing in this slot that UIKit could not animate across
-        // a transition. An absent item is the honest native answer for "no
-        // relationship applies".
-        // Follow / the bell lives in the header's tray beside Message — see
-        // `ProfileHeaderView.configureAction`. The bar takes Follow (or
-        // Requested) over only once that tray has scrolled out of sight
-        // (#2248), and never the bell (#2302): once followed, the corner is
-        // empty. `state` still arrives, because a rebuild is keyed on it and
-        // the guard below decides whether anything actually changed.
-        _ = state
-        // The switcher sits in the LEADING slot, opposite the gear.
-        //
-        // Safe here and only here: the item exists solely on the canonical own
-        // profile, which is a tab ROOT — so there is no back button to displace
-        // and no interactive pop for a leading item to interfere with. A pushed
-        // profile never has one (see `ProfileFeatureBuilding.onLogout`).
-        //
-        // Written through the same "say nothing unless it changed" guard as the
-        // trailing items: handing UIKit the identical item mid-transition is
-        // what tears a capsule down and rebuilds it empty.
-        // ⚠️ **The switcher rides TRAILING, beside the gear, and the leading
-        // group belongs to the docked selector alone.**
-        //
-        // Measured, docked own profile: with the switcher in the leading group
-        // BOTH leading platters came out 0x44 at the same x while the trailing
-        // gear sat at 46x44 — and with the switcher absent, the selector hosted
-        // correctly. Neither its empty menu (seeded with a placeholder child) nor
-        // the group being rewritten (single write, `isHidden` for visibility)
-        // accounted for it; two leading items are fine elsewhere, since For You
-        // carries a compose glyph beside its selector.
-        //
-        // So the chrome moved rather than the selector: this screen's actions all
-        // live at the trailing end now, which is also the layout every other
-        // surface wears — leading is the selector, trailing is what you can do.
-        // ⚠️ THE LEADING GROUP IS NOBODY'S NOW, and the guard that used to
-        // claim it for the docked selector had to be DELETED rather than left
-        // to evaluate: with no selector item it reduced to
-        // `leftBarButtonItems = []` on every appearance and every follow-state
-        // change — a silent eraser of any leading item an owner installs, which
-        // `configureNavigationBar` explicitly contemplates.
-
-        // Relationship action for other users; the gear for own profile (where
-        // `action` is nil).
-        var items: [UIBarButtonItem] = []
-        // A page for no one (#800, #1406) acts on no one: no relationship,
-        // no balance. A pushed one keeps only its back button;
-        // the viewer's own tab root keeps the gear and the switcher, its only
-        // way to settings and to another profile.
-        let namesNoOne = host.viewModel.namesNoOne
-        // The own profile's corner: the gear — or, on History once the tray
-        // has scrolled away, Select in its place, and Done while selecting
-        // wherever the scroll is (#2307, the owner 2026-11-11). Each its own
-        // item under its own identifier, so UIKit morphs the gear into Select
-        // and back (R3), on the trigger the handle and the blur use (#2268).
-        let historyItem = host.historySelectBarItem
-        if let historyItem {
-            items.append(historyItem)
-        } else if let settingsItem {
-            items.append(settingsItem)
-        }
-        // The corner, someone else's profile only: `[0]`, as the gear is on
-        // your own. Follow or Requested, once the tray has scrolled away
-        // (#2248, where the identity pill came in before, #1451) —
-        // `[coins][Follow]`, then `[coins]` once followed: the bell is the
-        // header's now (#2302). Each its own item under its own identifier,
-        // so UIKit morphs one into the other (R3).
-        let corner = namesNoOne ? nil : cornerItem
-        if let corner { items.append(corner) }
-        // The shell's accessory next: the gear keeps the corner and the
-        // balance sits inboard — the Explore header's arrangement ([coins]
-        // [search]). On a pushed profile, which has neither the gear nor the
-        // switcher, the balance is the corner. Fixed spaces keep each its own
-        // bubble — adjacent items share one glass capsule.
-        // ⚠️ THE BALANCE IS NEVER REPLACED (#2307): History's Select / Done
-        // took its place until then (#2188); it stands in the gear's now, and
-        // the balance keeps its own on every tab.
-        if let trailingAccessoryItem, !namesNoOne {
-            if corner != nil {
-                items.append(cornerSpacer)
-            } else if historyItem != nil {
-                items.append(historySelectSpacer)
-            }
-            items.append(trailingAccessoryItem)
-        }
-        // History's day, innermost (#1590), is the section contract's
-        // (`sectionBinding`): it composes the group, the day after these. No
-        // day over a page for no one (#1406): its gallery is gone.
-        if namesNoOne, sectionBinding.item != nil { sectionBinding.show(pinned: nil) }
-        // The load-bearing guard. A pop's `viewWillAppear` resolves to exactly
-        // the item set already on the bar, and handing that same set back is
-        // what used to tear the capsule down and rebuild it mid-transition.
-        // Nothing changed, so nothing is said.
-        let group = sectionBinding.placedTrailing(items)
-        guard !host.ownTrailingBarItems.elementsEqual(group, by: ===) else {
-            if !host.dayLeads { sectionBinding.trailingItems = items }
-            return
-        }
-        // ⚠️ THE CORNER CHANGING waits for rest, then comes in animated
-        // (#2248): Follow added mid-push would pop in unanimated at the end
-        // (#756) — and so would Follow taken away.
-        let cornerArrives = corner.map { item in !host.ownTrailingBarItems.contains { $0 === item } } ?? false
-        let relationshipLeaves = isShowingRelationshipItem && !Self.isRelationshipItem(corner)
-        // So does the own profile's corner changing hands (#2307) — Done
-        // leaving as the screen does (`viewWillDisappear`), Select or the gear
-        // coming back: a write mid-push lands unanimated at its end (#756).
-        // On this screen's own coordinator, one turn after its completion; a
-        // coordinator already past its animations takes the write now.
-        let historySlotChanges = host.dayLeads && host.shownHistoryBarItem !== historyItem
-        if historySlotChanges, let coordinator = host.transitionCoordinator,
-           coordinator.animate(alongsideTransition: nil, completion: { [weak self] _ in
-               DispatchQueue.main.async { [weak self] in
-                   guard let self else { return }
-                   updateActionBarItem(host.followButtonState, animated: host.view.window != nil)
-               }
-           }) {
-            return
-        }
-        if cornerArrives || relationshipLeaves, host.transitionCoordinator != nil {
-            host.navigationController?.whenAtRest { [weak self] in
-                guard let self else { return }
-                updateActionBarItem(host.followButtonState, animated: host.view.window != nil)
-            }
-            return
-        }
-        // ⚠️ Items leaving a page for no one wait for rest: one removed
-        // mid-push pops unanimated at its end (#756) — whichever call got
-        // here first (a late relationship, the shell re-sending its balance).
-        if namesNoOne, host.transitionCoordinator != nil {
-            applyNavigationStateAtRest()
-            return
-        }
-        #if DEBUG
-        // Dev convenience: `-profile-navbar-audit` prints every *actual* bar
-        // rebuild with the transition state it happened in. A rebuild logged
-        // during a pop is the bug this guard exists to prevent, so the audit
-        // is the regression test a recording can't be.
-        if LaunchArgument.profileNavbarAudit.isPassed() {
-            let phase = host.transitionCoordinator != nil ? "DURING-TRANSITION" : "idle"
-            // `custom=` is the audit's other job: it counts items in this slot
-            // that are HOSTED VIEWS rather than ones UIKit draws itself — the
-            // shape that cannot interpolate across a bar transition.
-            //
-            // ⚠️ The floor is no longer zero. The shell's accessory (the wallet
-            // badge) is a hosted view by necessity: a bar item cannot carry a
-            // count beside a glyph. What the audit is still for is this
-            // screen's OWN items — the follow capsule above all, which was
-            // converted off a custom view for exactly this reason — so read it
-            // as "one, and only the injected one".
-            let custom = group.count(where: { $0.customView != nil })
-            print("PROFILE-NAVBAR-AUDIT rebuild items=\(group.count) custom=\(custom) "
-                + "state=\(host.followButtonState) \(phase)")
-        }
-        #endif
-        // Written now, so they ride a push they arrive in; the contract
-        // composes the group with the day and writes it.
-        #if DEBUG
-        debugBarWrites.append(animated && UIView.areAnimationsEnabled)
-        #endif
-        if host.dayLeads {
-            // The day is leading here (#1642): the trailing group is all ours.
-            trailingStore.apply(trailing: items, to: host, animated: animated)
-        } else {
-            // The contract keeps our items around the day it places on its
-            // own; the group, the day after them, goes through the store.
-            sectionBinding.trailingItems = items
-            trailingStore.apply(trailing: group, to: host, animated: animated)
-        }
-    }
-
-    /// The header moved (the screen's `heroPageHeaderDidMove`).
-    ///
-    /// Once the tray has scrolled under the bar, the bar's corner carries the
-    /// profile's Follow or Requested (#2248) — and gives it back to the tray
-    /// on the way down. On the viewer's own History, the gear becomes Select
-    /// on the same frame (#2307).
-    ///
-    /// The bar's @handle follows the header's @handle line, step by step
-    /// (#2334): a slow scroll brings it slowly, and a stop half way leaves
-    /// it half way.
+    /// The header moved (the screen's `heroPageHeaderDidMove`): past the
+    /// threshold, or back, the bar changes — its items in place, the
+    /// selector between the header and the bar (#2475).
     func headerDidMove(travelled: CGFloat) {
-        let passageChanged = host.barTitle.headerDidMove(travelled: travelled)
-        let trayGone = host.isActionRowUnderBar(travelled: travelled)
-        guard trayGone != isTrayScrolledAway else {
-            // Only the title moves: no item, no blur.
-            if passageChanged { host.barTitle.applyBarTitle() }
-            return
+        let past = host.isActionRowUnderBar(travelled: travelled)
+        guard past != isPastThreshold else { return }
+        isPastThreshold = past
+        #if DEBUG
+        if LaunchArgument.profileNavbarAudit.isPassed() {
+            print(String(format: "PROFILE-NAVBAR-AUDIT threshold past=%@ travelled=%.0f placed=%@ inBar=%@",
+                         past ? "yes" : "no", travelled, host.selector.isPlaced ? "yes" : "no",
+                         host.selector.isInBar ? "yes" : "no"))
         }
-        isTrayScrolledAway = trayGone
-        // The corner item and the blur on the same frame (#2268); the
-        // handle, already whole by now, stays so.
-        updateActionBarItem(host.followButtonState, animated: host.view.window != nil && host.transitionCoordinator == nil)
-        host.barTitle.applyBarTitle()
+        #endif
+        applyNavigationState(animated: host.view.window != nil && host.transitionCoordinator == nil)
     }
+
+    // MARK: - The selector's width (#2361, #2411, #2577)
+
+    /// The room the bar leaves the selector: the bell (or the back chevron)
+    /// before it, the trailing group after it.
+    private func selectorBudget(trailing: [UIBarButtonItem]) -> BarSelectorBudget {
+        var budget = selectorTitleBudget
+        budget.trailingWidths = trailing.filter { !Self.isSpace($0) }.map(BarSelectorBudget.width(of:))
+        return budget
+    }
+
+    /// The room without the trailing items: what decides the titles' size,
+    /// so ✎ or Select narrows the container and never shrinks a title
+    /// (#2411's rule).
+    private var selectorTitleBudget: BarSelectorBudget {
+        let navigationBarWidth = host.navigationController?.navigationBar.bounds.width ?? 0
+        let barWidth = navigationBarWidth > 1
+            ? navigationBarWidth : (host.view.window?.bounds.width ?? host.view.bounds.width)
+        let leading: [CGFloat]
+        if host.isAccountRoot, let bell = leadingAccessoryItem {
+            leading = [BarSelectorBudget.width(of: bell)]
+        } else if host.navigationController.map({ $0.viewControllers.first !== host }) ?? false {
+            // The back chevron, a glyph's bubble.
+            leading = [BarSelectorBudget.platter]
+        } else {
+            leading = []
+        }
+        return BarSelectorBudget(barWidth: barWidth, leadingWidths: leading)
+    }
+
+    /// A separator (a fixed space) takes no room of its own.
+    private static func isSpace(_ item: UIBarButtonItem) -> Bool {
+        item.customView == nil && item.image == nil && item.title == nil && item.menu == nil && item.primaryAction == nil
+    }
+
+    /// True when the width the strip states moved.
+    @discardableResult
+    private func fitSelector(trailing: [UIBarButtonItem]) -> Bool {
+        guard host.selector.isInBar, let selector = host.selector.barItem else { return false }
+        return selector.fit(selectorBudget(trailing: trailing), titleBudget: selectorTitleBudget)
+    }
+
+    /// Re-fits the selector in the bar to the room it has — a page that
+    /// arrived late (#742), a new bar width — and lays the bar out again
+    /// when the width it states moved. The item stays the same.
+    private func refitSelector() {
+        guard host.selector.isInBar, let selector = host.selector.barItem,
+              selector.fit(selectorBudget(trailing: host.ownTrailingBarItems), titleBudget: selectorTitleBudget)
+        else { return }
+        host.navigationController?.navigationBar.setNeedsLayout()
+        settleSelector(afterAnimation: false)
+    }
+
+    /// Equal gaps either side of the selector, or a narrower one after a
+    /// sweep, once the bar has laid it out (`BarSelectorItem.settle`, the
+    /// inbox's loop).
+    ///
+    /// ⚠️ AFTER THE BAR'S OWN ANIMATION, when the group was written animated:
+    /// measured mid-insertion, the strip had no window yet (read as a sweep,
+    /// narrowed to a bubble) and the items leaving still stood beside it
+    /// (a gap of −142pt "balanced" the strip to 99pt).
+    private func settleSelector(afterAnimation: Bool) {
+        guard host.view.window != nil, let selector = host.selector.barItem,
+              let navigation = host.navigationController else { return }
+        let delay: TimeInterval = afterAnimation ? Self.barAnimationAllowance : 0
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self, weak navigation] in
+            guard let self, let navigation else { return }
+            selector.settle(
+                in: navigation.navigationBar,
+                // ⚠️ NO GAP BALANCE HERE (#2475): on this bar the drawn gaps
+                // read wrong — the strip's platter did not follow its stated
+                // width — so each balance widened it again (+16, +22, +40…)
+                // until the bar swept the group into a `•••`. The budget's
+                // equal gaps (`interGroupGap` = `leadingGap` on iOS 27) stand.
+                balances: false,
+                // Select and Done are custom views (`BarItems.word`): one
+                // with no window was swept.
+                trailing: { [weak self] in self?.host.ownTrailingBarItems ?? [] },
+                budget: { [weak self] in
+                    guard let self else { return BarSelectorBudget(barWidth: 0) }
+                    return selectorBudget(trailing: host.ownTrailingBarItems)
+                },
+                isLive: { [weak self, weak navigation] in
+                    guard let self, let navigation else { return false }
+                    return host.view.window != nil && host.selector.isInBar && host.selector.barItem === selector
+                        && navigation.topViewController === host && !navigation.isNavigationBarHidden
+                },
+                rewriteLeading: { [weak self] in
+                    guard let self else { return }
+                    leadingStore.apply(
+                        leading: leadingItems(selectorInBar: true), to: host.navigationItem, animated: false
+                    )
+                },
+                rewriteTrailing: { [weak self] in
+                    guard let self else { return }
+                    // A swept group is measured again only when it is handed
+                    // back: emptied, then its items, made afresh.
+                    trailingStore.apply(trailing: [], to: host, animated: false)
+                    let items = trailingItems()
+                    trailingStore.apply(trailing: items, to: host, animated: false)
+                    applied?.trailing = items.map(ObjectIdentifier.init)
+                },
+                trace: { moment in
+                    #if DEBUG
+                    guard LaunchArgument.profileNavbarAudit.isPassed() else { return }
+                    print(String(format: "PROFILE-SELECTOR %@ hosted=%@ stated=%.0f trim=%.0f balance=%.0f",
+                                 moment, selector.isHosted ? "yes" : "NO", selector.strip.intrinsicContentSize.width,
+                                 selector.trim, selector.balance))
+                    #endif
+                }
+            )
+        }
+    }
+
+    /// How long the bar's own item animation runs (UIKit's, ~0.35 s), with
+    /// a margin: the settle loop starts after it.
+    static let barAnimationAllowance: TimeInterval = 0.5
 
     #if DEBUG
-    func debugSetTrayScrolledAway(_ away: Bool) {
-        isTrayScrolledAway = away
-        updateActionBarItem(host.followButtonState)
-        host.barTitle.applyBarTitle()
+    /// Stands in for the scroll: past the threshold, or back.
+    func debugSetPastThreshold(_ past: Bool) {
+        isPastThreshold = past
+        applyNavigationState()
     }
-    /// The bar's Follow or Requested, if it shows one (#2248).
-    var debugBarRelationshipItem: UIBarButtonItem? {
-        host.ownTrailingBarItems.first { Self.isRelationshipItem($0) }
-    }
-    /// Every write of the bar's trailing group, in order: whether it was
-    /// animated, so UIKit could morph it (#1903). A test reads how Follow
-    /// left.
+
+    /// Every write of the bar's groups, in order: whether it was animated,
+    /// so UIKit could morph it (#1903).
     private(set) var debugBarWrites: [Bool] = []
-    /// The bar's day item while it is shown — what a test reads.
-    var debugSectionItem: UIBarButtonItem? {
-        let shown = host.ownTrailingBarItems + (host.navigationItem.leftBarButtonItems ?? [])
-        guard let item = sectionBinding.item, shown.contains(where: { $0 === item }) else { return nil }
-        return item
-    }
-    /// What a tap on the day item does. Tests.
-    func debugTapSectionItem() {
-        if let index = pinnedSection?.index { host.galleryPager.scrollActivePageToSection(index) }
-    }
     #endif
 }

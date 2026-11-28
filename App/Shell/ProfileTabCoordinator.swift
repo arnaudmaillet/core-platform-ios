@@ -89,7 +89,9 @@ final class ProfileTabCoordinator: TabCoordinator {
     /// profile for a member, the guest Settings for a guest (#626).
     func show(member: Bool) {
         guard member else {
-            walletBadge = nil
+            #if DEBUG
+            walletSheetHook = nil
+            #endif
             // ⚠️ A GUEST'S TAB IS SETTINGS ITSELF (#626), not a sign-up page with
             // Settings behind a gear: a guest has no profile, and the Sign in
             // beside Explore's search is the way in (#2489). The settings a guest can use —
@@ -116,43 +118,31 @@ final class ProfileTabCoordinator: TabCoordinator {
         avatar = nil
         applyAvatar()
         // `.aboveBottomSafeArea` is the whole difference between a tab root and
-        // a pushed profile, and it settles both halves at once: the tray is
-        // hosted in the screen's own view above the bottom safe area (the top of
-        // the tab bar), and `hidesBottomBarWhenPushed` is left off so the bar
-        // that gets you out of this tab stays. The navigation toolbar cannot be
-        // made to clear a tab bar from out here — measured three ways: it
-        // positions against the window's bottom safe area, reports a zeroed safe
-        // area of its own, and ignores both `additionalSafeAreaInsets` on the
-        // navigation controller and its own layout margins.
+        // a pushed profile: `hidesBottomBarWhenPushed` is left off so the bar
+        // that gets you out of this tab stays — alone, with no accessory
+        // (#2475: the selector is in the header, then in the bar).
         let profile = container.profileFeature.makeCurrentUserProfileViewController(
             onLogout: onLogout,
             identityStub: nil,
             trayPlacement: .aboveBottomSafeArea
         )
         navigationController.viewControllers = [profile]
-        // The header reads `[bell][filter] … [coins][switcher settings]`. The bell
-        // leads, ahead of the source filter the screen composes itself.
+        // The bar reads `[🔔] … [✎][⋯ ⚙]` (#2475): the bell leads, the screen
+        // composes the rest. No balance on a profile (#2475, revising #2336):
+        // the wallet is Settings' (Wallet and Purchases).
         (profile as? any HeaderAccessoryHosting)?
             .setLeadingAccessoryItem(notificationsBell.makeItem())
-        // The balance, inboard of the switcher + settings pair — the same
-        // installer For You's root uses. It stays here (#2336): the profile
-        // lists posts with hearts, and it is the wallet's door.
-        //
-        // ⚠️ A PUSHED PROFILE WEARS ONE TOO NOW, and did not before: the rule
-        // was "a pushed profile is someone else's, and a viewer's balance has
-        // no business on it". The balance is the viewer's wherever they stand
-        // — the post screen and the search results already said so — and the
-        // header was asked to carry it everywhere. A pushed profile has no
-        // coordinator, so its installer hangs on the screen itself; see
-        // `RouteResolver`'s `.profile` case and `WalletBadgeInstaller.attach`.
-        walletBadge = container.makeWalletBadge(presenter: navigationController) { [weak profile] item in
-            (profile as? (any HeaderAccessoryHosting))?.setTrailingAccessoryItem(item)
-        }
+        #if DEBUG
+        // `-open-wallet` (QA, `WalletSheetUITests`): no root wears a badge any
+        // more, so a badge nobody shows answers the hook from this tab.
+        walletSheetHook = container.makeWalletBadge(presenter: navigationController) { _ in }
+        #endif
     }
 
-    /// The header's balance badge. Held for the coordinator's life, which is
-    /// the process's.
-    private var walletBadge: AnyObject?
+    #if DEBUG
+    /// `-open-wallet`'s installer: its badge is never shown (#2475).
+    private var walletSheetHook: AnyObject?
+    #endif
 
     /// Shows the viewer's own avatar as the tab's icon, falling back to the
     /// glyph when there isn't one.

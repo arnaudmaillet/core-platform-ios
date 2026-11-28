@@ -557,51 +557,27 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
 
     /// Once the bar has laid the group out: equal gaps either side of the
     /// selector when nothing was swept (#2577), a narrower selector when
-    /// something was.
-    ///
-    /// ⚠️ **THE BAR'S ALLOWANCE IS UIKIT'S, NOT PUBLIC, AND A GROUP IT CANNOT
-    /// FIT IS SWEPT WHOLE INTO A `•••`** — the bell with the selector, as the
-    /// first cut of #2337 did on an iPhone 18 Pro (iOS 27.0) with the August
-    /// budget. The budget is conservative now; this is the net under it. A
-    /// swept strip is in no window while the bar shows, so it is narrowed by
-    /// a step and handed back as a fresh item (a swept group is measured again
-    /// only for a new one), until it is hosted or down to one bubble. Bounded.
-    private func recoverSelectorFromOverflow(attempt: Int = 0) {
-        guard attempt < 12, isViewLoaded, view.window != nil, !isSearching,
-              let navigation = navigationController, navigation.topViewController === self,
-              !navigation.isNavigationBarHidden
-        else { return }
-        navigation.navigationBar.layoutIfNeeded()
-        traceSelector("check \(attempt)")
-        // The compose item swept alone (#2411): the strip is hosted, the
-        // trailing group is a `•••`.
-        let trailingSwept = Self.showsOverflow(in: navigation.navigationBar)
-        if selector.isHosted, !trailingSwept {
-            // Nothing swept: the same gap on both sides of the selector, as
-            // the bar drew them (#2577).
-            guard selector.balanceGaps(in: navigation.navigationBar, budget: selectorBudget) else { return }
-            navigation.navigationBar.setNeedsLayout()
-            traceSelector("balance")
-        } else {
-            guard selector.narrowAfterOverflow(selectorBudget) else { return }
-            applyLeadingGroup()
-            if trailingSwept {
+    /// something was — the bar selectors' one loop (`BarSelectorItem.settle`),
+    /// while this screen's bar is the one on show and its search is closed.
+    private func recoverSelectorFromOverflow() {
+        guard isViewLoaded, let navigation = navigationController else { return }
+        selector.settle(
+            in: navigation.navigationBar,
+            budget: { [weak self] in self?.selectorBudget ?? BarSelectorBudget(barWidth: 0) },
+            isLive: { [weak self, weak navigation] in
+                guard let self, let navigation else { return false }
+                return isViewLoaded && view.window != nil && !isSearching
+                    && navigation.topViewController === self && !navigation.isNavigationBarHidden
+            },
+            rewriteLeading: { [weak self] in self?.applyLeadingGroup() },
+            rewriteTrailing: { [weak self] in
+                guard let self else { return }
                 // A swept group is measured again only when it is handed back.
                 setOwnTrailingBarItems([], animated: false)
                 setOwnTrailingBarItems(trailingItems, animated: false)
-            }
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-            self?.recoverSelectorFromOverflow(attempt: attempt + 1)
-        }
-    }
-
-    /// Whether `bar` shows UIKit's overflow control — the `•••` a group it
-    /// cannot fit goes into, "More" to VoiceOver (as the selector's tests
-    /// look for it).
-    private static func showsOverflow(in bar: UIView) -> Bool {
-        if bar.window != nil, !bar.isHidden, bar.accessibilityLabel == "More" { return true }
-        return bar.subviews.contains { showsOverflow(in: $0) }
+            },
+            trace: { [weak self] moment in self?.traceSelector(moment) }
+        )
     }
 
     /// `-inbox-selector-trace`: the numbers behind the selector's width —

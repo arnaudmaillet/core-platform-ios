@@ -45,10 +45,9 @@ public final class HeaderSelectorAudit {
     /// capsule reads as "nothing to audit here" and the run passes — which is
     /// exactly what happened when the inbox's selector was clobbered off the bar.
     ///
-    /// ⚠️ `.profile` IS ON THIS LIST NOW. The viewer's own profile carries a
-    /// selector too, and it was left off while the strip lived in the scroll
-    /// view — where this audit could never have found it anyway. It is in the
-    /// bottom accessory now, which is somewhere the audit looks.
+    /// ⚠️ `.profile` IS ON THIS LIST. The viewer's own profile carries a
+    /// selector too: in its header at rest, in the bar past the threshold
+    /// (#2475) — both places the audit looks.
     ///
     /// For You was too, with its Feed | Shots sector, until it left the bar
     /// (#2453).
@@ -57,12 +56,13 @@ public final class HeaderSelectorAudit {
     /// Where each surface's selector belongs (#2337, the owner 2026-11-12).
     /// The paged TAB ROOTS wear theirs in the navigation bar, right of the
     /// bell (`BarSelectorItem`): Messages' Chats | Requests | Suggestions
-    /// since #2337 (and For You's Feed | Shots until #2453) — it hung in the
-    /// bottom accessory from PR #154 until then. The profile keeps the
-    /// accessory: its tabs are sections of one page under a hero header.
-    private let expectedHost: [AppTab: SelectorHost] = [
-        .messages: .navigationBar,
-        .profile: .bottomAccessory,
+    /// since #2337 (and For You's Feed | Shots until #2453). The profile's is
+    /// in its HEADER at rest and in the bar, right of the bell, past the
+    /// threshold (#2475): never the bottom accessory any more. The first host
+    /// listed is where the audit's settled, unscrolled frame finds it.
+    static let expectedHost: [AppTab: [SelectorHost]] = [
+        .messages: [.navigationBar],
+        .profile: [.header, .navigationBar],
     ]
 
     public func run(tabs: [AppTab]) async {
@@ -149,8 +149,10 @@ public final class HeaderSelectorAudit {
     /// SELECTOR on a surface that must have one" for a screen working exactly
     /// as designed — and, worse, the settle loops below wait out their whole
     /// timeout for a capsule that arrived somewhere else.
-    private enum SelectorHost: String {
+    enum SelectorHost: String {
         case navigationBar = "navigation bar"
+        /// A hero page's header, where its action row stood (#2475).
+        case header = "header"
         case bottomAccessory = "bottom accessory"
         case bottomToolbar = "bottom toolbar"
         case elsewhere = "somewhere else"
@@ -194,6 +196,9 @@ public final class HeaderSelectorAudit {
         var node: UIView? = found
         while let current = node {
             if current === nav?.navigationBar { return (found, .navigationBar) }
+            // The hero page's header slot (`HeroSelectorSlot`), by its
+            // identifier: this module does not import HeroPage.
+            if current.accessibilityIdentifier == "heroPage.selectorSlot" { return (found, .header) }
             if current === tabBarController.bottomAccessory?.contentView {
                 return (found, .bottomAccessory)
             }
@@ -331,10 +336,11 @@ public final class HeaderSelectorAudit {
         // 1b. In the host it belongs in (#2337) — and, on a paged tab root,
         // RIGHT AFTER THE BELL: `[bell][selector]`, the separator between
         // them being a space (no view, no glyph, no word).
-        if let tab = AppTab(rawValue: surface), let expected = expectedHost[tab], let located {
-            if located.host != expected {
-                finding.problems.append("selector in the \(located.host.rawValue), expected in the \(expected.rawValue)")
-            } else if expected == .navigationBar, nav.viewControllers.count == 1 {
+        if let tab = AppTab(rawValue: surface), let expected = Self.expectedHost[tab], let located {
+            if !expected.contains(located.host) {
+                let names = expected.map(\.rawValue).joined(separator: " or the ")
+                finding.problems.append("selector in the \(located.host.rawValue), expected in the \(names)")
+            } else if located.host == .navigationBar, nav.viewControllers.count == 1 {
                 let shown = (item?.leftBarButtonItems ?? [])
                     .filter { $0.customView != nil || $0.image != nil || $0.title != nil }
                 let bellFirst = shown.first?.identifier == BarItems.SharedID.notificationsBell

@@ -8,10 +8,11 @@ import ShareSheet
 import UIKit
 
 /// What the relation actions ask of their screen (#2522): the view model,
-/// the header and the relationship it shows, and what the share sheet is
-/// built with. The screen itself presents, anchors the toasts and walks
-/// the responder chain (`Feedback`, `present`, `MemberGates.gate(from:)`,
-/// `ReportReasonSheet`, `closeScreen()`), never this object.
+/// the header and the relationship it shows, what the share sheet is built
+/// with, and the relationship's own path (`followTapped`). The screen itself
+/// presents, anchors the toasts and walks the responder chain (`Feedback`,
+/// `present`, `MemberGates.gate(from:)`, `ReportReasonSheet`,
+/// `closeScreen()`), never this object.
 @MainActor
 protocol ProfileRelationActionsHost: UIViewController {
     var viewModel: ProfileViewModel { get }
@@ -19,21 +20,27 @@ protocol ProfileRelationActionsHost: UIViewController {
     var followButtonState: ProfileViewModel.FollowButton { get }
     var imagePipeline: ImagePipeline { get }
     var shareTargeting: (any ProfileShareTargeting)? { get }
-    /// What the sheets and popovers anchor on: the header's "…" on the
-    /// page, the card's view on the card.
+    /// What the sheets and popovers anchor on: the page's view on the page
+    /// (its ⋯ is a bar item, #2475), the card's view on the card.
     var actionAnchor: UIView { get }
     /// Where a block's toast is shown from — the screen that stays once
     /// the blocked profile has left: the page's stack, the card's
     /// presenter.
     var blockToastSource: UIViewController { get }
+    /// Follow, Requested's withdrawal, and Unfollow: the member gate, the
+    /// optimistic flip, its haptic — one path for every control.
+    func followTapped()
+    /// Message: the member gate, then the conversation.
+    func messageTapped()
 }
 
-/// The profile's relation row and what it does, out of
-/// `ProfileViewController` (#2522): the header's bell and its Mute menu, the
-/// "…" menu and the map rails' rows, share, copy link, block, report, the
-/// gallery rows' menus, the outcome of each command, the Undo toast, and
-/// leaving after a block. The profile card uses it too, for share, copy
-/// link, report, block, the outcomes and the Undo toast.
+/// The profile's relation actions and what they do, out of
+/// `ProfileViewController` (#2522): the relationship's bottom toolbar
+/// (`ProfileRelationToolbar`, one source with the card's, #2475) and its
+/// bell's Mute menu, the "…" menu and the map rails' rows, share, copy link,
+/// block, report, the gallery rows' menus, the outcome of each command, the
+/// Undo toast, and leaving after a block. The profile card uses it too, for
+/// share, copy link, report, block, the outcomes and the Undo toast.
 @MainActor
 final class ProfileRelationActions {
     private unowned let host: any ProfileRelationActionsHost
@@ -41,6 +48,16 @@ final class ProfileRelationActions {
     init(host: any ProfileRelationActionsHost) {
         self.host = host
     }
+
+    /// Someone else's toolbar (#2475): the card's own items and rules.
+    private(set) lazy var toolbar = ProfileRelationToolbar(actions: .init(
+        follow: { [weak self] in self?.host.followTapped() },
+        message: { [weak self] in self?.host.messageTapped() },
+        qrCode: { [weak self] in self?.presentShareSheet() },
+        openProfile: {},
+        muteScopes: { [weak self] in self?.host.viewModel.muteScopes ?? .none },
+        toggleMute: { [weak self] scope in self?.host.viewModel.toggleMute(scope) }
+    ))
 
     #if DEBUG
     /// Mute-change toasts shown (#1951): their ARRIVAL, which a test cannot
@@ -53,16 +70,6 @@ final class ProfileRelationActions {
     private(set) weak var debugLastUndoToast: ToastView?
     #endif
 
-    /// Ticks the rail rows of the open see-more menu to the current state:
-    /// a row keeps the menu open, and its mark must follow
-    /// (`ProfileMenuBuilder.retickingMapRows`).
-    func refreshVisibleMapRows() {
-        let current = host.viewModel.mapPinButton.categories
-        host.headerView.updateVisibleMoreMenu { menu in
-            ProfileMenuBuilder.retickingMapRows(in: menu, to: current)
-        }
-    }
-
     /// The map rails' rows for the current state (`ProfileMenuBuilder`).
     func mapFavoriteMenuActions() -> [UIAction] {
         ProfileMenuBuilder.mapFavoriteMenuActions(host.viewModel.mapPinButton) { [weak self] category in
@@ -70,19 +77,15 @@ final class ProfileRelationActions {
         }
     }
 
-    /// Whether the bell stands — in the header's row, where Follow was, since
-    /// #2302 (the owner, 2026-11-11; it stood in the bar's corner before):
-    /// a profile the viewer FOLLOWS, in a composition that can mute, for a
-    /// member — the card's rule (`ProfileRelationControl.showsMuteBell`). The
-    /// same rule the see-more menu's Mute submenu had (#689): a guest has no
-    /// account to mute from.
+    /// Whether the bell stands — in the toolbar, where Follow was, since
+    /// #2302 (the owner, 2026-11-11): a profile the viewer FOLLOWS, in a
+    /// composition that can mute, for a member (`ProfileRelationControl.showsMuteBell`).
+    /// The same rule the see-more menu's Mute submenu had (#689): a guest has
+    /// no account to mute from.
     ///
     /// ⚠️ NO BELL UNTIL THE READ SAYS FOLLOWING (the owner, 2026-10-18,
-    /// #1398). It used to be presumed from frame 0 on someone else's profile
-    /// (#778) and taken away once the read said "not followed" — so every
-    /// profile the viewer does not follow showed a bell for the whole push,
-    /// then lost it. There is nothing of theirs to mute until they are
-    /// followed (2026-10-15), and an unknown relationship is not "followed".
+    /// #1398): there is nothing of theirs to mute until they are followed,
+    /// and an unknown relationship is not "followed".
     private var showsMuteBell: Bool {
         guard !host.viewModel.namesNoOne else { return false }
         return ProfileRelationControl.showsMuteBell(
@@ -91,28 +94,42 @@ final class ProfileRelationActions {
         )
     }
 
-    /// The header's row for the relationship (#2302): Follow or Requested,
-    /// the bell once followed — its glyph, its enabling — or Message alone.
-    /// On every change of the relationship, the scopes (on the tap, a
-    /// refusal, an Undo, #2143), and the lookup's answer.
-    func applyHeaderAction() {
-        let bell = showsMuteBell
-            ? ProfileHeaderView.Bell(scopes: host.viewModel.muteScopes, isEnabled: isMuteBellEnabled)
-            : nil
-        host.headerView.configureAction(host.followButtonState, bell: bell)
+    /// The toolbar's items for the profile now: someone else's relationship
+    /// (`ProfileRelationToolbar.items`), nothing for the viewer's own (its
+    /// actions are its bar's, #2475) nor for a page for no one.
+    var toolbarItems: [ProfileRelationToolbar.Item] {
+        guard !host.viewModel.namesNoOne, host.followButtonState != .edit,
+              !host.viewModel.isOwnProfile else { return [] }
+        return ProfileRelationToolbar.items(
+            for: host.followButtonState, showsBell: showsMuteBell,
+            showsQR: host.viewModel.shareCard != nil || host.viewModel.profile == nil
+        )
+    }
+
+    /// Someone else's bottom toolbar for the relationship (#2475): Follow or
+    /// Requested beside Message's glyph, the bell once followed beside
+    /// Message's word, the QR. On every change of the relationship, the
+    /// scopes (on the tap, a refusal, an Undo, #2143), and the lookup's
+    /// answer. Nothing changed, nothing is handed to the bar.
+    func applyToolbar(animated: Bool) {
+        let items = toolbarItems
+        toolbar.apply(
+            items, muteScopes: host.viewModel.muteScopes, bellEnabled: isMuteBellEnabled,
+            to: host, animated: animated
+        )
+        // A toolbar that emptied (a page for no one) or filled on a screen
+        // at rest on top goes away or comes up with it; appearances are the
+        // screen's own (`viewWillAppear`, `viewWillDisappear`).
+        guard let navigation = host.navigationController, navigation.topViewController === host,
+              host.view.window != nil, host.transitionCoordinator == nil,
+              navigation.isToolbarHidden != items.isEmpty else { return }
+        navigation.setToolbarHidden(items.isEmpty, animated: animated)
     }
 
     /// Whether the bell can be used yet: a handle or link route has no one to
     /// mute until the relationship read says the lookup found someone else.
     private var isMuteBellEnabled: Bool {
         !host.viewModel.wasOpenedByReference || host.viewModel.canModerate
-    }
-
-    /// Resolved when it opens, so the checkmarks are the current scopes.
-    func makeMuteMenu() -> UIMenu {
-        UIMenu(children: [UIDeferredMenuElement.uncached { [weak self] completion in
-            completion(self?.muteMenuElements() ?? [])
-        }])
     }
 
     /// The scoped Mute menu for the current scopes (`ProfileMenuBuilder`).
@@ -146,17 +163,17 @@ final class ProfileRelationActions {
 
     // MARK: - Overflow menu
 
-    /// Installs the see-more bubble's menu. The children are built at OPEN
-    /// time through an uncached deferred element (the feed's "..." precedent),
-    /// not at wiring time: whether the moderation group belongs, and whether it
-    /// reads Block or Unblock, depends on a relationship that usually resolves
-    /// after this runs and can change while the screen is up.
-    func configureMoreMenu() {
-        host.headerView.setMoreMenu(UIMenu(children: [
+    /// The ⋯ menu, its children built at OPEN time through an uncached
+    /// deferred element (the feed's "..." precedent), not at wiring time:
+    /// whether the moderation group belongs, and whether it reads Block or
+    /// Unblock, depends on a relationship that usually resolves after this
+    /// runs and can change while the screen is up.
+    func makeMoreMenu() -> UIMenu {
+        UIMenu(children: [
             UIDeferredMenuElement.uncached { [weak self] completion in
                 completion(self?.moreMenuElements() ?? [])
             }
-        ]))
+        ])
     }
 
     func moreMenuElements() -> [UIMenuElement] {
@@ -170,7 +187,10 @@ final class ProfileRelationActions {
                 isRestricted: host.viewModel.isRestricted,
                 isBlocked: host.viewModel.isBlocked,
                 canClearHistory: host.viewModel.isOwnProfile && host.viewModel.hasHistory,
-                isFollowing: host.followButtonState == .following && !host.viewModel.namesNoOne
+                isFollowing: host.followButtonState == .following && !host.viewModel.namesNoOne,
+                // The own profile's QR code is a row of its ⋯ (#2475);
+                // someone else's is their toolbar's.
+                showsQRCode: host.viewModel.isOwnProfile || host.followButtonState == .edit
             ),
             handlers: ProfileMenuBuilder.MoreMenuHandlers(
                 share: { [weak self] in self?.presentShareSheet() },
@@ -181,18 +201,19 @@ final class ProfileRelationActions {
                 unblock: { [weak self] in self?.host.viewModel.unblock() },
                 confirmBlock: { [weak self] in self?.confirmBlock() },
                 clearHistory: { [weak self] in self?.confirmClearHistory() },
-                unfollow: { [weak self] in self?.unfollowTapped() }
+                unfollow: { [weak self] in self?.unfollowTapped() },
+                qrCode: { [weak self] in self?.presentShareSheet() }
             )
         )
     }
 
-    /// The "…" menu's Unfollow (#2302): the tray's own path — the member
+    /// The "…" menu's Unfollow (#2302): the toolbar's own path — the member
     /// gate, the optimistic flip, the silent off (#1886) — only while the
     /// viewer still follows: a menu opened before a change must not follow
     /// back.
     private func unfollowTapped() {
         guard host.followButtonState == .following else { return }
-        host.headerView.onFollowTapped?()
+        host.followTapped()
     }
 
     /// "Clear History" asks once (#1344): the list cannot be brought back.
@@ -210,8 +231,8 @@ final class ProfileRelationActions {
     }
 
     /// Opens the unified share surface — the QR sheet — rather than jumping
-    /// straight to the system share sheet. Both the header's QR bubble and the
-    /// menu's Share land here, so there is exactly one answer to "share this
+    /// straight to the system share sheet. The toolbar's QR, the own ⋯'s QR
+    /// Code and the menu's Share land here, so there is exactly one answer to "share this
     /// profile"; the system sheet is reachable from inside it.
     func presentShareSheet() {
         guard let card = host.viewModel.shareCard else { return }

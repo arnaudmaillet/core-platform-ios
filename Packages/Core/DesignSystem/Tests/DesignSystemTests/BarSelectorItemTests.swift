@@ -69,6 +69,38 @@ struct BarSelectorItemTests {
             == BarSelectorBudget.trailingReserve)
     }
 
+    /// A titled trailing item (the profile's Select, #2475) is charged its
+    /// word and a bubble's inset each side, never less than a platter; a
+    /// glyph its bubble.
+    @Test func aTitledItemIsChargedItsWord() {
+        let select = UIBarButtonItem(title: "Select", primaryAction: nil)
+        let width = BarSelectorBudget.width(of: select)
+        #expect(width > BarSelectorBudget.platter, "Select charged \(width), a glyph's bubble")
+        let ok = UIBarButtonItem(title: "OK", primaryAction: nil)
+        #expect(BarSelectorBudget.width(of: ok) >= BarSelectorBudget.platter)
+        let glyph = UIBarButtonItem(image: UIImage(systemName: "pencil"), primaryAction: nil)
+        #expect(BarSelectorBudget.width(of: glyph) == BarSelectorBudget.platter)
+    }
+
+    /// A strip back from another home (the profile's header, #2475) comes
+    /// into the bar dressed for it again, in a fresh item under the same
+    /// identifier.
+    @Test func aStripEnteringTheBarIsDressedAgainInAFreshItem() {
+        let bar = strip()
+        let selector = BarSelectorItem(strip: bar, id: "test.selector")
+        let first = selector.item
+        bar.hosting = .container
+        bar.fillsWidth = true
+        bar.fillsCeiling = true
+        let host = UIView()
+        host.addSubview(bar)
+        selector.enterBar()
+        #expect(bar.superview == nil, "the strip stayed in its other home")
+        #expect(bar.hosting == .platter && !bar.fillsWidth && !bar.fillsCeiling)
+        #expect(selector.item !== first && selector.item.identifier == "test.selector")
+        #expect(selector.item.customView === bar)
+    }
+
     /// The ceiling leaves the platter's ring out, and never falls below one
     /// bubble — demanding more than the bar has is how a group becomes `•••`.
     @Test func theCeilingNeverFallsBelowABubble() {
@@ -126,20 +158,21 @@ struct BarSelectorItemTests {
         let regular = bar.preferredWidth(at: .regular)
         let compact = bar.preferredWidth(at: .compact)
 
-        // Room for 15pt: the platter still runs to the room (#2577).
+        // Room for 15pt: the platter hugs its titles, the room its most
+        // (the owner, 2026-11-28).
         let fixed = BarSelectorBudget.barMargin * 2 + BarSelectorBudget.trailingReserve
         let roomy = BarSelectorBudget(barWidth: regular + ring * 2 + fixed + 10)
         selector.fit(roomy)
         #expect(bar.titleSize == .regular)
-        #expect(abs(bar.intrinsicContentSize.width - selector.ceiling(for: roomy)) < 0.5)
-        #expect(bar.intrinsicContentSize.width >= regular)
+        #expect(bar.intrinsicContentSize.width <= selector.ceiling(for: roomy) + 0.5)
+        #expect(abs(bar.intrinsicContentSize.width - regular) < 0.5)
 
         // Room for 13pt only.
         let tight = BarSelectorBudget(barWidth: compact + ring * 2 + fixed + 1)
         selector.fit(tight)
         #expect(bar.titleSize == .compact)
-        #expect(abs(bar.intrinsicContentSize.width - selector.ceiling(for: tight)) < 0.5)
-        #expect(bar.intrinsicContentSize.width >= compact)
+        #expect(bar.intrinsicContentSize.width <= selector.ceiling(for: tight) + 0.5)
+        #expect(abs(bar.intrinsicContentSize.width - compact) < 0.5)
 
         // Not even that: capped, never below a bubble.
         selector.fit(BarSelectorBudget(barWidth: 120))
@@ -160,12 +193,12 @@ struct BarSelectorItemTests {
         #expect(selector.fit(budget), "the first fit states a width")
         #expect(!selector.fit(budget), "the same room moved the width")
 
-        // The platter fills the room (#2577): a count no longer moves it, a
-        // narrower bar does.
+        // The platter hugs its titles (the owner, 2026-11-28): a count
+        // widens it, a bar too narrow for it caps it — in place, both.
         bar.setBadge(43, at: 0)
-        #expect(!selector.fit(budget), "a count moved a platter that fills the room")
-        let narrower = BarSelectorBudget(barWidth: 375, leadingWidths: [44])
-        #expect(selector.fit(narrower), "a narrower bar did not move the width")
+        #expect(selector.fit(budget), "a count did not move a platter that hugs its titles")
+        let narrower = BarSelectorBudget(barWidth: 220, leadingWidths: [44])
+        #expect(selector.fit(narrower), "a narrower bar did not cap the width")
         #expect(selector.item === first, "the item was re-minted")
         #expect(selector.item.identifier == "test.selector")
         #expect(selector.item.customView === bar)
@@ -193,18 +226,17 @@ struct BarSelectorItemTests {
         #expect(bar.intrinsicContentSize.width >= bar.intrinsicContentSize.height - 0.5)
     }
 
-    /// #2577: titles that need less than the room — the platter still runs
-    /// to it, the segments keep the widths they ask for, and the row is
-    /// centred: the slack lands as equal end margins inside the capsule,
-    /// never as a stretched segment.
-    @Test func thePlatterFillsTheRoomWhenItsTitlesNeedLess() {
+    /// Titles that need less than the room (the owner, 2026-11-28, revising
+    /// #2577): the platter hugs them — never stretched to the room — and the
+    /// segments keep the widths they ask for.
+    @Test func thePlatterHugsTitlesThatNeedLessThanTheRoom() {
         let bar = PagedTabBar(titles: ["Chats", "Requests"], style: .navigationTitle)
         let selector = BarSelectorItem(strip: bar, id: "test.selector")
         let budget = BarSelectorBudget(barWidth: 402, leadingWidths: [44])
         selector.fit(budget)
         let width = bar.intrinsicContentSize.width
-        #expect(abs(width - selector.ceiling(for: budget)) < 0.5)
-        #expect(bar.preferredWidth(at: bar.titleSize) < width - 40, "the titles fill the room already")
+        #expect(abs(width - bar.preferredWidth(at: bar.titleSize)) < 0.5, "the platter is not its titles' width")
+        #expect(width < selector.ceiling(for: budget) - 40, "the titles fill the room already")
 
         bar.frame = CGRect(x: 0, y: 0, width: width, height: bar.intrinsicContentSize.height)
         bar.layoutIfNeeded()
@@ -214,16 +246,14 @@ struct BarSelectorItemTests {
         for (frame, natural) in zip(frames, naturals) {
             #expect(abs(frame.width - natural) < 0.5, "a stretched segment: \(frame.width) for \(natural)")
         }
-        let start = frames[0].minX, end = width - frames[1].maxX
-        #expect(start > 10 && abs(start - end) < 0.5, "end margins \(start) and \(end)")
     }
 
-    /// The overflow net is unchanged (#2577): a sweep still narrows the
-    /// strip, and the platter follows the narrower ceiling.
-    @Test func aSweepStillNarrowsAPlatterThatFillsTheRoom() {
-        let bar = PagedTabBar(titles: ["Chats", "Requests"], style: .navigationTitle)
+    /// The overflow net is unchanged (#2577): a sweep still narrows a strip
+    /// held at its ceiling, and the platter follows the narrower ceiling.
+    @Test func aSweepStillNarrowsAPlatterAtItsCeiling() {
+        let bar = strip()
         let selector = BarSelectorItem(strip: bar, id: "test.selector")
-        let budget = BarSelectorBudget(barWidth: 402, leadingWidths: [44], trailingWidths: [44])
+        let budget = BarSelectorBudget(barWidth: 260, leadingWidths: [44], trailingWidths: [44])
         selector.fit(budget)
         let before = bar.intrinsicContentSize.width
         #expect(selector.narrowAfterOverflow(budget))

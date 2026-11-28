@@ -46,10 +46,6 @@ struct ProfileHeaderFitTests {
             followingCount: .exact(4),
             reactionCount: .exact(1_000)
         )))
-        // ⚠️ The FULL tray, because the tray's width is what squeezes the
-        // avatar and the avatar is what squeezed the name. (The map star that
-        // used to widen it is a menu now, #689.)
-        header.configureAction(.following, bell: ProfileHeaderView.Bell(scopes: .none))
         header.frame = CGRect(x: 0, y: 0, width: width, height: 1)
         header.frame.size.height = header.systemLayoutSizeFitting(
             CGSize(width: width, height: UIView.layoutFittingCompressedSize.height),

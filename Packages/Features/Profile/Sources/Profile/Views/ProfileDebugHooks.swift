@@ -27,6 +27,8 @@ protocol ProfileDebugHooksHost: UIViewController {
     func moreMenuElements() -> [UIMenuElement]
     func qaOpenPrivacy()
     func qaTapFollowItem()
+    func qaRunBarDemo()
+    func qaSelectHistory()
     func qaRunShareChain(_ chained: String?)
     func pollForMapPinButton(attempt: Int)
     func debugSweepStep(began: CFTimeInterval, probe: HeroScrollFrameProbe)
@@ -112,6 +114,16 @@ final class ProfileDebugHooks {
                     }
                 }
             }
+        }
+        // `-profile-bar-demo` (#2475): past the threshold and back, the
+        // pages tapped between — the selector's hand-off, filmable.
+        if LaunchArgument.profileBarDemo.isPassed(in: arguments) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.host.qaRunBarDemo() }
+        }
+        // `-profile-history-select` (#2475): History, past the threshold, in
+        // its select mode — the bar's Done and Remove.
+        if LaunchArgument.profileHistorySelect.isPassed(in: arguments) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.host.qaSelectHistory() }
         }
         if LaunchArgument.profileFollowTap.isPassed(in: arguments) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in

@@ -36,11 +36,6 @@ final class RouteResolver: Router {
     private let settingsFeature: () -> any SettingsFeatureBuilding
     private let feedFeature: () -> any FeedFeatureBuilding
     private let chatFeature: () -> any ChatFeatureBuilding
-    /// Puts the viewer's balance in a pushed screen's header — today, every
-    /// routed profile. A closure for the same reason the features are: the
-    /// wallet and its sheet belong to the container, which builds this
-    /// resolver before it has built either.
-    private let attachBalance: (UIViewController) -> Void
     /// The profile a handle (`GetProfileByHandle`) or a share token
     /// (`ResolveShareToken`) names — handed to the profile pushed for
     /// `.profileHandle` / `.profileShareToken`, which asks it once on screen.
@@ -65,7 +60,6 @@ final class RouteResolver: Router {
         settingsFeature: @escaping () -> any SettingsFeatureBuilding,
         feedFeature: @escaping () -> any FeedFeatureBuilding,
         chatFeature: @escaping () -> any ChatFeatureBuilding,
-        attachBalance: @escaping (UIViewController) -> Void,
         lookupProfile: @escaping ProfileLookingUp = { _ in .unavailable },
         makePlacePage: @escaping (PlaceLink) -> UIViewController? = { _ in nil },
         makeShowcaseComposer: @escaping (PostEmbed) -> UIViewController? = { _ in nil }
@@ -78,7 +72,6 @@ final class RouteResolver: Router {
         self.settingsFeature = settingsFeature
         self.feedFeature = feedFeature
         self.chatFeature = chatFeature
-        self.attachBalance = attachBalance
     }
 
     /// Pushes a destination, dropping any picker it is arriving *from*.
@@ -391,21 +384,17 @@ extension RouteResolver {
         _ reference: ProfileReference, for route: AppRoute, using navigator: AppNavigating
     ) {
         let profile = profileFeature().makeProfileViewController(resolving: reference, lookup: lookupProfile)
-        // The balance rides the push, as on an author's profile.
-        attachBalance(profile)
         pushProfile(profile, for: route, using: navigator)
     }
 
     /// The profile a `.profile` route pushes — the viewer's own when the
-    /// stub says so — with the balance on its bar, attached BEFORE any push so
-    /// the item rides it instead of popping in after.
+    /// stub says so. No balance on its bar (#2475, revising #2336).
     private func makeProfile(_ profileID: ProfileID, stub: ProfileIdentityStub?) -> UIViewController {
         let profile: UIViewController = if stub?.isSelf == true {
             profileFeature().makeCurrentUserProfileViewController(onLogout: nil, identityStub: stub)
         } else {
             profileFeature().makeProfileViewController(for: profileID, identityStub: stub)
         }
-        attachBalance(profile)
         return profile
     }
 

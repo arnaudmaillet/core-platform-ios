@@ -128,6 +128,23 @@ struct BarItemsTests {
         #expect(tapped == 1)
     }
 
+    /// A corner word (#2475): as wide as its word, never past its cap —
+    /// a longer translation is truncated, not given more of the bar.
+    @Test func aWordIsAsWideAsItsWordUpToItsCap() {
+        let short = BarItems.word(id: "test.select", title: "Select", prominent: true, maximumWidth: 120) {}
+        #expect(short.item.identifier == "test.select" && short.item.title == "Select")
+        #expect(short.item.style == .prominent && short.item.customView === short.label)
+        #expect(!(short.item.customView is UIControl), "a control in the bar item")
+        let width = short.label.intrinsicContentSize.width
+        #expect(width > 44 && width < 120, "Select is \(width)pt")
+        // The bar's glass runs 4pt past the view on each side (probed).
+        #expect(BarSelectorBudget.width(of: short.item) == width + 2 * SelectorCapsuleMetrics.platterOverhang,
+                "the budget reads another width than drawn")
+
+        let long = BarItems.word(id: "test.select", title: "Sélectionner plusieurs éléments", maximumWidth: 120) {}
+        #expect(long.label.intrinsicContentSize.width == 120, "the cap did not hold")
+    }
+
     @Test func aContainerKeepsItsViewAndIdentity() {
         let view = UIView()
         let item = BarItems.container(id: BarItems.SharedID.walletBalance, view: view)
