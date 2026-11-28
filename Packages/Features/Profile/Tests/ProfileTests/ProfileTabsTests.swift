@@ -654,9 +654,12 @@ struct ProfileHistoryDaysTests {
         #expect(!screen.debugLeadingIDs.contains("profile.history.remove"), "Remove outlived the mode")
         #expect(screen.debugAllowsPaging)
 
-        // Off History: ✎, and no select mode.
+        // Off History: ✎, and no select mode. The page landed on brings
+        // its own scroll, so the threshold is set again, as above
+        // (the hosted lane read the header back at rest, 2026-11-28).
         screen.setSelectingHistory(true)
         screen.selectTab(at: 0)
+        screen.debugSetPastThreshold(true)
         #expect(!screen.isSelectingHistory)
         #expect(own.bar == ["Edit Profile"], "\(own.bar)")
     }
